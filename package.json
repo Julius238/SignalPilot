@@ -12,6 +12,7 @@
     "test": "pnpm -r --if-present test",
     "format": "prettier --write .",
     "db:seed": "pnpm --filter @signalpilot/database seed",
+    "db:studio": "pnpm --filter @signalpilot/database prisma:studio",
     "worker:analyze-crypto-indicators": "pnpm --filter @signalpilot/worker analyze:crypto-indicators",
     "worker:fetch-crypto-candles": "pnpm --filter @signalpilot/worker fetch:crypto-candles",
     "prisma:generate": "pnpm --filter @signalpilot/database prisma:generate"

@@ -38,6 +38,12 @@ pnpm db:seed
 
 The seed is idempotent. Running it multiple times updates the existing watchlist assets and keeps them active without creating duplicates.
 
+Open Prisma Studio:
+
+```bash
+pnpm db:studio
+```
+
 ## Market Data
 
 Fetch public Binance OHLCV candles for active crypto assets:

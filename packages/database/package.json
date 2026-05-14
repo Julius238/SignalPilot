@@ -17,7 +17,8 @@
     "lint": "eslint .",
     "seed": "tsx src/seed.ts",
     "prisma:migrate": "prisma migrate dev",
-    "prisma:generate": "prisma generate"
+    "prisma:generate": "prisma generate",
+    "prisma:studio": "prisma studio"
   },
   "dependencies": {
     "@prisma/client": "^6.2.1",
