@@ -20,3 +20,40 @@ export interface IndicatorSnapshot {
   lastVolume: number | null;
   candleCount: number;
 }
+
+export type SignalDecisionType =
+  | "MOMENTUM_ALERT"
+  | "TREND_ALERT"
+  | "VOLUME_SPIKE"
+  | "VOLATILITY_SPIKE"
+  | "BREAKOUT_ALERT"
+  | "NO_SIGNAL";
+
+export type SignalDecisionStatus = "STRONG_WATCH" | "WATCH" | "WAIT" | "AVOID" | "NO_EDGE";
+
+export type SignalDecisionDirection = "BULLISH" | "BEARISH" | "NEUTRAL" | "MIXED";
+
+export type SignalDecisionRiskLevel = "LOW" | "MEDIUM" | "HIGH";
+
+export interface SignalDecision {
+  symbol: string;
+  assetType: AssetClass;
+  timeframe: string;
+  signalType: SignalDecisionType;
+  status: SignalDecisionStatus;
+  direction: SignalDecisionDirection;
+  score: number;
+  riskLevel: SignalDecisionRiskLevel;
+  trendScore: number;
+  momentumScore: number;
+  volumeScore: number;
+  volatilityScore: number;
+  rsiScore: number;
+  newsScore: number;
+  socialScore: number;
+  eventScore: number;
+  riskScore: number;
+  reasons: string[];
+  counterArguments: string[];
+  nextTrigger: string;
+}
