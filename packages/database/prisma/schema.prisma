@@ -1,0 +1,291 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum AssetType {
+  STOCK
+  ETF
+  CRYPTO
+}
+
+enum SignalType {
+  MOMENTUM_ALERT
+  TREND_ALERT
+  VOLUME_SPIKE
+  VOLATILITY_SPIKE
+  BREAKOUT_ALERT
+  NEWS_REACTION
+  EVENT_IMPACT
+  NO_SIGNAL
+}
+
+enum SignalStatus {
+  STRONG_WATCH
+  WATCH
+  WAIT
+  AVOID
+  NO_EDGE
+}
+
+enum SignalDirection {
+  BULLISH
+  BEARISH
+  NEUTRAL
+  MIXED
+}
+
+enum RiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum BotRunStatus {
+  SUCCESS
+  FAILED
+  RUNNING
+}
+
+enum AlertChannel {
+  TELEGRAM
+  EMAIL
+  DISCORD
+  WEBHOOK
+}
+
+enum AlertStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+enum PaperOrderSide {
+  BUY
+  SELL
+}
+
+enum PaperOrderStatus {
+  PENDING
+  FILLED
+  CANCELLED
+  REJECTED
+}
+
+enum PaperPositionStatus {
+  OPEN
+  CLOSED
+}
+
+model Asset {
+  id            String          @id @default(cuid())
+  symbol        String
+  name          String
+  assetType     AssetType
+  exchange      String
+  baseCurrency  String?
+  quoteCurrency String?
+  isActive      Boolean         @default(true)
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  candles       Candle[]
+  signals       Signal[]
+  paperOrders   PaperOrder[]
+  positions     PaperPosition[]
+
+  @@unique([symbol, exchange, assetType])
+  @@index([symbol])
+  @@index([assetType, isActive])
+}
+
+model Candle {
+  id        String   @id @default(cuid())
+  assetId   String
+  symbol    String
+  timeframe String
+  openTime  DateTime
+  closeTime DateTime
+  open      Decimal  @db.Decimal(30, 12)
+  high      Decimal  @db.Decimal(30, 12)
+  low       Decimal  @db.Decimal(30, 12)
+  close     Decimal  @db.Decimal(30, 12)
+  volume    Decimal  @db.Decimal(30, 12)
+  source    String
+  createdAt DateTime @default(now())
+  asset     Asset    @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@unique([assetId, timeframe, openTime])
+  @@index([symbol, timeframe, openTime])
+  @@index([source])
+}
+
+model Signal {
+  id              String          @id @default(cuid())
+  assetId         String
+  symbol          String
+  timeframe       String
+  signalType      SignalType
+  status          SignalStatus
+  direction       SignalDirection
+  score           Float
+  riskLevel       RiskLevel
+  trendScore      Float
+  momentumScore   Float
+  volumeScore     Float
+  volatilityScore Float
+  rsiScore        Float
+  newsScore       Float
+  socialScore     Float
+  eventScore      Float
+  riskScore       Float
+  createdAt       DateTime        @default(now())
+  asset           Asset           @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  output          SignalOutput?
+  alerts          Alert[]
+  paperOrders     PaperOrder[]
+
+  @@index([assetId, timeframe, createdAt])
+  @@index([symbol, createdAt])
+  @@index([signalType, status])
+}
+
+model SignalOutput {
+  id                     String   @id @default(cuid())
+  signalId               String   @unique
+  shortConclusion        String
+  technicalJson          Json
+  intelligenceJson       Json
+  marketConfirmationJson Json
+  counterArgument        String
+  nextTrigger            String
+  telegramText           String
+  dashboardJson          Json
+  createdAt              DateTime @default(now())
+  signal                 Signal   @relation(fields: [signalId], references: [id], onDelete: Cascade)
+}
+
+model NewsItem {
+  id          String   @id @default(cuid())
+  source      String
+  title       String
+  summary     String?
+  url         String?
+  publishedAt DateTime
+  rawJson     Json
+  createdAt   DateTime @default(now())
+
+  @@index([source, publishedAt])
+  @@index([publishedAt])
+}
+
+model Event {
+  id               String   @id @default(cuid())
+  eventType        String
+  title            String
+  summary          String?
+  source           String
+  sourceUrl        String?
+  publishedAt      DateTime
+  credibilityScore Float?
+  rawJson          Json
+  createdAt        DateTime @default(now())
+
+  @@index([eventType, publishedAt])
+  @@index([source, publishedAt])
+}
+
+model BotRun {
+  id           String       @id @default(cuid())
+  jobName      String
+  status       BotRunStatus
+  startedAt    DateTime     @default(now())
+  finishedAt   DateTime?
+  metadataJson Json?
+
+  @@index([jobName, startedAt])
+  @@index([status])
+}
+
+model BotLog {
+  id           String   @id @default(cuid())
+  level        String
+  service      String
+  message      String
+  metadataJson Json?
+  createdAt    DateTime @default(now())
+
+  @@index([service, createdAt])
+  @@index([level])
+}
+
+model Alert {
+  id          String       @id @default(cuid())
+  signalId    String?
+  channel     AlertChannel
+  status      AlertStatus  @default(PENDING)
+  payloadJson Json
+  sentAt      DateTime?
+  error       String?
+  createdAt   DateTime     @default(now())
+  signal      Signal?      @relation(fields: [signalId], references: [id], onDelete: SetNull)
+
+  @@index([signalId])
+  @@index([channel, status])
+  @@index([createdAt])
+}
+
+model PaperAccount {
+  id              String          @id @default(cuid())
+  name            String
+  startingBalance Decimal         @db.Decimal(30, 12)
+  currentBalance  Decimal         @db.Decimal(30, 12)
+  currency        String
+  isActive        Boolean         @default(true)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  orders          PaperOrder[]
+  positions       PaperPosition[]
+
+  @@index([isActive])
+}
+
+model PaperOrder {
+  id             String           @id @default(cuid())
+  paperAccountId String
+  assetId        String
+  signalId       String?
+  side           PaperOrderSide
+  quantity       Decimal          @db.Decimal(30, 12)
+  price          Decimal          @db.Decimal(30, 12)
+  status         PaperOrderStatus @default(PENDING)
+  createdAt      DateTime         @default(now())
+  filledAt       DateTime?
+  paperAccount   PaperAccount     @relation(fields: [paperAccountId], references: [id], onDelete: Cascade)
+  asset          Asset            @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  signal         Signal?          @relation(fields: [signalId], references: [id], onDelete: SetNull)
+
+  @@index([paperAccountId, createdAt])
+  @@index([assetId])
+  @@index([signalId])
+  @@index([status])
+}
+
+model PaperPosition {
+  id                String              @id @default(cuid())
+  paperAccountId    String
+  assetId           String
+  quantity          Decimal             @db.Decimal(30, 12)
+  averageEntryPrice Decimal             @db.Decimal(30, 12)
+  status            PaperPositionStatus @default(OPEN)
+  openedAt          DateTime            @default(now())
+  closedAt          DateTime?
+  paperAccount      PaperAccount        @relation(fields: [paperAccountId], references: [id], onDelete: Cascade)
+  asset             Asset               @relation(fields: [assetId], references: [id], onDelete: Restrict)
+
+  @@index([paperAccountId, status])
+  @@index([assetId])
+}

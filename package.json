@@ -1,0 +1,22 @@
+{
+  "name": "signalpilot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Multi-asset market intelligence platform for stocks, ETFs, and crypto.",
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "build": "pnpm -r --filter './packages/**' build && pnpm -r --filter './apps/**' build",
+    "dev": "pnpm --parallel --filter './apps/**' dev",
+    "lint": "pnpm -r lint",
+    "format": "prettier --write .",
+    "prisma:generate": "pnpm --filter @signalpilot/database prisma:generate"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.18.0",
+    "@types/node": "^22.10.7",
+    "eslint": "^9.18.0",
+    "prettier": "^3.4.2",
+    "typescript": "^5.7.3",
+    "typescript-eslint": "^8.20.0"
+  }
+}

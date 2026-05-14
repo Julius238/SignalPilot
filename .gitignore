@@ -1,0 +1,14 @@
+.env
+.env.*
+!.env.example
+
+node_modules/
+dist/
+
+coverage/
+.DS_Store
+
+packages/database/generated/
+packages/database/prisma/generated/
+**/generated/prisma/
+**/.prisma/
