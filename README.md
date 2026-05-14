@@ -28,6 +28,26 @@ cp .env.example .env
 - Database: Prisma package prepared for PostgreSQL
 - Infrastructure: PostgreSQL and Redis via Docker Compose
 
+## Database Seed
+
+After PostgreSQL is running and migrations have been applied, seed the initial v1 watchlist:
+
+```bash
+pnpm db:seed
+```
+
+The seed is idempotent. Running it multiple times updates the existing watchlist assets and keeps them active without creating duplicates.
+
+## Market Data
+
+Fetch public Binance OHLCV candles for active crypto assets:
+
+```bash
+pnpm worker:fetch-crypto-candles
+```
+
+The job fetches `1h`, `4h`, and `1d` klines, stores them with idempotent upserts, and writes `BotRun` and `BotLog` records. It uses the public Binance API only and does not require API keys.
+
 ## API Health Check
 
 When the API is running:

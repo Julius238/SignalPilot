@@ -6,10 +6,13 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsx watch src/index.ts",
+    "fetch:crypto-candles": "tsx src/jobs/fetchCryptoCandles.ts",
     "start": "node dist/index.js",
     "lint": "eslint ."
   },
   "dependencies": {
+    "@signalpilot/database": "workspace:*",
+    "@signalpilot/market-data": "workspace:*",
     "dotenv": "^16.4.7",
     "pino": "^9.6.0"
   },
