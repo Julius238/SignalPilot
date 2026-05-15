@@ -57,3 +57,22 @@ export interface SignalDecision {
   counterArguments: string[];
   nextTrigger: string;
 }
+
+export interface IntelligenceContext {
+  newsSummary?: string;
+  socialSummary?: string;
+  eventSummary?: string;
+  impactSummary?: string;
+  sources: string[];
+}
+
+export interface SignalOutputDraft {
+  shortConclusion: string;
+  technicalJson: Record<string, unknown>;
+  intelligenceJson: Record<string, unknown>;
+  marketConfirmationJson: Record<string, unknown>;
+  counterArgument: string;
+  nextTrigger: string;
+  telegramText: string;
+  dashboardJson: Record<string, unknown>;
+}

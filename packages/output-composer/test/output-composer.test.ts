@@ -1,0 +1,151 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+
+import type { SignalDecision } from "@signalpilot/shared";
+
+import { composeSignalOutput } from "../src/index.js";
+
+const baseDecision: SignalDecision = {
+  symbol: "BTCUSDT",
+  assetType: "crypto",
+  timeframe: "4h",
+  signalType: "MOMENTUM_ALERT",
+  status: "WATCH",
+  direction: "BULLISH",
+  score: 72.4,
+  riskLevel: "MEDIUM",
+  trendScore: 82,
+  momentumScore: 78,
+  volumeScore: 68,
+  volatilityScore: 55,
+  rsiScore: 66,
+  newsScore: 50,
+  socialScore: 50,
+  eventScore: 50,
+  riskScore: 48,
+  reasons: [
+    "Price is above sma20 and sma20 is above sma50.",
+    "Price is in the upper part of the 20-period range.",
+    "Relative volume is above 1.5, showing strong participation."
+  ],
+  counterArguments: ["sma200 is missing, so long-term trend confirmation is unavailable."],
+  nextTrigger: "Watch for price to hold above sma20 with relativeVolume above 1.5."
+};
+
+describe("composeSignalOutput", () => {
+  it("composes a bullish STRONG_WATCH signal", () => {
+    const output = composeSignalOutput({
+      decision: {
+        ...baseDecision,
+        status: "STRONG_WATCH",
+        score: 84.2,
+        riskLevel: "LOW",
+        signalType: "BREAKOUT_ALERT"
+      }
+    });
+
+    assert.match(output.shortConclusion, /starkes bullish Setup/i);
+    assert.match(output.telegramText, /🚀 BTCUSDT · CRYPTO · 4h/);
+    assert.equal(output.marketConfirmationJson.signalType, "BREAKOUT_ALERT");
+  });
+
+  it("composes a WATCH signal", () => {
+    const output = composeSignalOutput({ decision: baseDecision });
+
+    assert.match(output.shortConclusion, /beobachtenswert/i);
+    assert.match(output.telegramText, /Status: WATCH/);
+    assert.match(output.telegramText, /Richtung: BULLISH/);
+  });
+
+  it("composes an AVOID bearish signal", () => {
+    const output = composeSignalOutput({
+      decision: {
+        ...baseDecision,
+        signalType: "NO_SIGNAL",
+        status: "AVOID",
+        direction: "BEARISH",
+        score: 32,
+        riskLevel: "HIGH",
+        trendScore: 20,
+        momentumScore: 25,
+        volumeScore: 35,
+        rsiScore: 30,
+        riskScore: 78
+      }
+    });
+
+    assert.match(output.shortConclusion, /zu schwach oder zu riskant/i);
+    assert.match(output.telegramText, /Risiko: HIGH/);
+    assert.match(output.telegramText, /▫️ BTCUSDT/);
+  });
+
+  it("composes a NO_EDGE signal", () => {
+    const output = composeSignalOutput({
+      decision: {
+        ...baseDecision,
+        signalType: "NO_SIGNAL",
+        status: "NO_EDGE",
+        direction: "NEUTRAL",
+        score: 44,
+        riskLevel: "LOW"
+      }
+    });
+
+    assert.match(output.shortConclusion, /keinen belastbaren technischen Edge/i);
+    assert.match(output.telegramText, /Status: NO_EDGE/);
+  });
+
+  it("uses the required fallback when news is missing", () => {
+    const output = composeSignalOutput({ decision: baseDecision });
+
+    assert.equal(
+      output.intelligenceJson.newsSummary,
+      "Keine relevante neue Meldung im Scan-Fenster gefunden."
+    );
+    assert.match(output.telegramText, /News: Keine relevante neue Meldung im Scan-Fenster gefunden\./);
+  });
+
+  it("states that social is not connected", () => {
+    const output = composeSignalOutput({
+      decision: baseDecision,
+      intelligence: {
+        newsSummary: "ETF flows are stable.",
+        sources: ["internal-test"]
+      }
+    });
+
+    assert.equal(output.intelligenceJson.socialSummary, "X/Social: noch nicht aktiv verbunden.");
+    assert.match(output.telegramText, /X\/Social: X\/Social: noch nicht aktiv verbunden\./);
+  });
+
+  it("keeps high risk language direct", () => {
+    const output = composeSignalOutput({
+      decision: {
+        ...baseDecision,
+        signalType: "VOLATILITY_SPIKE",
+        riskLevel: "HIGH",
+        riskScore: 86,
+        volatilityScore: 82,
+        rsiScore: 84
+      }
+    });
+
+    assert.match(output.telegramText, /Risiko: HIGH/);
+    assert.match(output.telegramText, /RSI stark, aber überhitztes Risiko/);
+  });
+
+  it("telegram text contains every required block", () => {
+    const output = composeSignalOutput({ decision: baseDecision });
+
+    for (const block of [
+      "Kurzfazit:",
+      "Technik:",
+      "News/X/Event:",
+      "Marktbestätigung:",
+      "Gegenargument:",
+      "Nächster Trigger:"
+    ]) {
+      assert.match(output.telegramText, new RegExp(block));
+    }
+  });
+});
