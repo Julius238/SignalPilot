@@ -23,7 +23,7 @@ type TechnicalSummary = {
 };
 
 const defaultNewsSummary = "Keine relevante neue Meldung im Scan-Fenster gefunden.";
-const defaultSocialSummary = "X/Social: noch nicht aktiv verbunden.";
+const defaultSocialSummary = "noch nicht aktiv verbunden.";
 const defaultEventSummary = "Keine Event-Daten in diesem Scan.";
 const defaultImpactSummary = "Signal basiert primär auf technischen Daten.";
 

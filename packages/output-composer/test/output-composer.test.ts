@@ -114,8 +114,8 @@ describe("composeSignalOutput", () => {
       }
     });
 
-    assert.equal(output.intelligenceJson.socialSummary, "X/Social: noch nicht aktiv verbunden.");
-    assert.match(output.telegramText, /X\/Social: X\/Social: noch nicht aktiv verbunden\./);
+    assert.equal(output.intelligenceJson.socialSummary, "noch nicht aktiv verbunden.");
+    assert.match(output.telegramText, /X\/Social: noch nicht aktiv verbunden\./);
   });
 
   it("keeps high risk language direct", () => {

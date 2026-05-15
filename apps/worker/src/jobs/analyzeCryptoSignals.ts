@@ -30,7 +30,7 @@ const minimumUsefulCandles = 20;
 
 const neutralIntelligenceContext: IntelligenceContext = {
   newsSummary: "Keine relevante neue Meldung im Scan-Fenster gefunden.",
-  socialSummary: "X/Social: noch nicht aktiv verbunden.",
+  socialSummary: "noch nicht aktiv verbunden.",
   eventSummary: "Keine Event-Daten in diesem Scan.",
   impactSummary: "Signal basiert primär auf technischen Daten.",
   sources: []
