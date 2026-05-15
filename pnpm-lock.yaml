@@ -57,6 +57,12 @@ importers:
       '@signalpilot/market-data':
         specifier: workspace:*
         version: link:../../packages/market-data
+      '@signalpilot/scoring-engine':
+        specifier: workspace:*
+        version: link:../../packages/scoring-engine
+      '@signalpilot/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       dotenv:
         specifier: ^16.4.7
         version: 16.6.1

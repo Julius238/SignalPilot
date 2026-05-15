@@ -14,6 +14,7 @@
     "db:seed": "pnpm --filter @signalpilot/database seed",
     "db:studio": "pnpm --filter @signalpilot/database prisma:studio",
     "worker:analyze-crypto-indicators": "pnpm --filter @signalpilot/worker analyze:crypto-indicators",
+    "worker:analyze-crypto-signals": "pnpm --filter @signalpilot/worker analyze:crypto-signals",
     "worker:fetch-crypto-candles": "pnpm --filter @signalpilot/worker fetch:crypto-candles",
     "prisma:generate": "pnpm --filter @signalpilot/database prisma:generate"
   },
