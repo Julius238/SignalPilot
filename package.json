@@ -11,6 +11,7 @@
     "lint": "pnpm -r lint",
     "test": "pnpm -r --if-present test",
     "format": "prettier --write .",
+    "alert:test-latest-signal": "pnpm --filter @signalpilot/alerts test:latest-signal",
     "db:seed": "pnpm --filter @signalpilot/database seed",
     "db:studio": "pnpm --filter @signalpilot/database prisma:studio",
     "worker:analyze-crypto-indicators": "pnpm --filter @signalpilot/worker analyze:crypto-indicators",

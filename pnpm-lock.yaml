@@ -77,6 +77,19 @@ importers:
         specifier: ^4.19.2
         version: 4.21.0
 
+  packages/alerts:
+    dependencies:
+      '@signalpilot/database':
+        specifier: workspace:*
+        version: link:../database
+      dotenv:
+        specifier: ^16.4.7
+        version: 16.6.1
+    devDependencies:
+      tsx:
+        specifier: ^4.19.2
+        version: 4.21.0
+
   packages/database:
     dependencies:
       '@prisma/client':
