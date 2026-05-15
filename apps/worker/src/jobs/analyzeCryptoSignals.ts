@@ -10,8 +10,9 @@ import {
 } from "@signalpilot/database";
 import { buildIndicatorSnapshot, type IndicatorCandle } from "@signalpilot/indicators";
 import { supportedBinanceIntervals } from "@signalpilot/market-data";
+import { composeSignalOutput } from "@signalpilot/output-composer";
 import { scoreSignal } from "@signalpilot/scoring-engine";
-import type { AssetClass, SignalDecision } from "@signalpilot/shared";
+import type { AssetClass, IntelligenceContext, SignalDecision } from "@signalpilot/shared";
 import { config } from "dotenv";
 import pino from "pino";
 
@@ -27,11 +28,12 @@ config();
 const candleLimit = 250;
 const minimumUsefulCandles = 20;
 
-const intelligencePlaceholder = {
-  newsSummary: "News/Event-Kontext ist in dieser Version noch nicht angebunden.",
-  socialSummary: "X/Social ist noch nicht aktiv verbunden.",
+const neutralIntelligenceContext: IntelligenceContext = {
+  newsSummary: "Keine relevante neue Meldung im Scan-Fenster gefunden.",
+  socialSummary: "X/Social: noch nicht aktiv verbunden.",
   eventSummary: "Keine Event-Daten in diesem Scan.",
-  impactSummary: "Signal basiert primär auf technischen Daten."
+  impactSummary: "Signal basiert primär auf technischen Daten.",
+  sources: []
 };
 
 export async function analyzeCryptoSignals(database: PrismaClient = prisma) {
@@ -115,6 +117,15 @@ export async function analyzeCryptoSignals(database: PrismaClient = prisma) {
             indicators: snapshot
           });
 
+          const outputDraft = composeSignalOutput({
+            decision,
+            asset: {
+              symbol: asset.symbol,
+              assetType: mapAssetType(asset.assetType)
+            },
+            intelligence: neutralIntelligenceContext
+          });
+
           const signal = await database.signal.create({
             data: {
               assetId: asset.id,
@@ -135,7 +146,17 @@ export async function analyzeCryptoSignals(database: PrismaClient = prisma) {
               eventScore: decision.eventScore,
               riskScore: decision.riskScore,
               output: {
-                create: buildSignalOutput(decision)
+                create: {
+                  shortConclusion: outputDraft.shortConclusion,
+                  technicalJson: outputDraft.technicalJson as Prisma.InputJsonObject,
+                  intelligenceJson: outputDraft.intelligenceJson as Prisma.InputJsonObject,
+                  marketConfirmationJson:
+                    outputDraft.marketConfirmationJson as Prisma.InputJsonObject,
+                  counterArgument: outputDraft.counterArgument,
+                  nextTrigger: outputDraft.nextTrigger,
+                  telegramText: outputDraft.telegramText,
+                  dashboardJson: outputDraft.dashboardJson as Prisma.InputJsonObject
+                }
               }
             }
           });
@@ -152,7 +173,9 @@ export async function analyzeCryptoSignals(database: PrismaClient = prisma) {
               status: decision.status,
               direction: decision.direction,
               score: decision.score,
-              signalType: decision.signalType
+              signalType: decision.signalType,
+              shortConclusion: outputDraft.shortConclusion,
+              nextTrigger: outputDraft.nextTrigger
             });
           }
         } catch (error) {
@@ -234,39 +257,6 @@ export async function analyzeCryptoSignals(database: PrismaClient = prisma) {
 
     throw error;
   }
-}
-
-function buildSignalOutput(decision: SignalDecision): Prisma.SignalOutputCreateWithoutSignalInput {
-  const counterArgument =
-    decision.counterArguments[0] ?? "Keine wesentlichen Gegenargumente im technischen Scan.";
-
-  return {
-    shortConclusion: buildShortConclusion(decision),
-    technicalJson: {
-      reasons: decision.reasons,
-      scores: {
-        trendScore: decision.trendScore,
-        momentumScore: decision.momentumScore,
-        volumeScore: decision.volumeScore,
-        volatilityScore: decision.volatilityScore,
-        rsiScore: decision.rsiScore,
-        riskScore: decision.riskScore
-      }
-    },
-    intelligenceJson: intelligencePlaceholder,
-    marketConfirmationJson: {
-      reasons: decision.reasons,
-      counterArguments: decision.counterArguments
-    },
-    counterArgument,
-    nextTrigger: decision.nextTrigger,
-    telegramText: "",
-    dashboardJson: decision as unknown as Prisma.InputJsonObject
-  };
-}
-
-function buildShortConclusion(decision: SignalDecision): string {
-  return `${decision.symbol} ${decision.timeframe}: ${decision.status} ${decision.direction} technical setup, score ${decision.score}.`;
 }
 
 function isRelevantSignal(decision: SignalDecision): boolean {

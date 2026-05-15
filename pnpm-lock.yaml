@@ -57,6 +57,9 @@ importers:
       '@signalpilot/market-data':
         specifier: workspace:*
         version: link:../../packages/market-data
+      '@signalpilot/output-composer':
+        specifier: workspace:*
+        version: link:../../packages/output-composer
       '@signalpilot/scoring-engine':
         specifier: workspace:*
         version: link:../../packages/scoring-engine

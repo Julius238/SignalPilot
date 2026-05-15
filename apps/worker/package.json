@@ -16,6 +16,7 @@
     "@signalpilot/database": "workspace:*",
     "@signalpilot/indicators": "workspace:*",
     "@signalpilot/market-data": "workspace:*",
+    "@signalpilot/output-composer": "workspace:*",
     "@signalpilot/scoring-engine": "workspace:*",
     "@signalpilot/shared": "workspace:*",
     "dotenv": "^16.4.7",
