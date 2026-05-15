@@ -56,6 +56,12 @@ The job fetches `1h`, `4h`, and `1d` klines, stores them with idempotent upserts
 
 ## API Health Check
 
+Start the API locally:
+
+```bash
+pnpm --filter @signalpilot/api dev
+```
+
 When the API is running:
 
 ```bash
@@ -66,4 +72,11 @@ Expected response:
 
 ```json
 { "status": "ok", "service": "signalpilot-api" }
+```
+
+Dashboard API examples:
+
+```bash
+curl "http://localhost:3000/signals?limit=10"
+curl http://localhost:3000/assets/BTCUSDT
 ```
