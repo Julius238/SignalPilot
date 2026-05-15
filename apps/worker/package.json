@@ -14,6 +14,7 @@
     "test": "tsx --test test/analyzeCryptoSignals.test.ts"
   },
   "dependencies": {
+    "@signalpilot/alerts": "workspace:*",
     "@signalpilot/database": "workspace:*",
     "@signalpilot/indicators": "workspace:*",
     "@signalpilot/market-data": "workspace:*",

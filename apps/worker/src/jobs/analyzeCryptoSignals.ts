@@ -1,7 +1,9 @@
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { sendSignalAlertToN8n } from "@signalpilot/alerts";
 import {
+  AlertStatus,
   AssetType,
   BotRunStatus,
   Prisma,
@@ -51,6 +53,9 @@ export async function analyzeCryptoSignals(database: PrismaClient = prisma) {
 
   let analyzedCount = 0;
   let savedSignalCount = 0;
+  let sentAlertCount = 0;
+  let skippedAlertCount = 0;
+  let alertErrorCount = 0;
   let insufficientDataCount = 0;
   let errorCount = 0;
 
@@ -158,25 +163,74 @@ export async function analyzeCryptoSignals(database: PrismaClient = prisma) {
                   dashboardJson: outputDraft.dashboardJson as Prisma.InputJsonObject
                 }
               }
+            },
+            include: {
+              asset: true,
+              output: true
             }
           });
 
           savedSignalCount += 1;
 
-          if (isRelevantSignal(decision)) {
-            await writeBotLog(database, "info", "Saved crypto technical signal", {
-              botRunId: botRun.id,
-              signalId: signal.id,
-              assetId: asset.id,
-              symbol: asset.symbol,
-              timeframe,
-              status: decision.status,
-              direction: decision.direction,
-              score: decision.score,
-              signalType: decision.signalType,
-              shortConclusion: outputDraft.shortConclusion,
-              nextTrigger: outputDraft.nextTrigger
-            });
+          const signalOutput = signal.output;
+
+          if (!signalOutput || !shouldSendSignalAlert(decision, signalOutput.telegramText)) {
+            skippedAlertCount += 1;
+          } else {
+            try {
+              const alertResult = await sendSignalAlertToN8n({
+                signal,
+                signalOutput,
+                dashboardUrl: undefined
+              }, {
+                database
+              });
+
+              if (alertResult.status === AlertStatus.SENT) {
+                sentAlertCount += 1;
+                await writeBotLog(database, "info", "Signal alert sent to n8n", {
+                  botRunId: botRun.id,
+                  signalId: signal.id,
+                  alertId: alertResult.alertId,
+                  assetId: asset.id,
+                  symbol: asset.symbol,
+                  timeframe,
+                  status: decision.status,
+                  score: decision.score,
+                  signalType: decision.signalType
+                });
+              } else {
+                alertErrorCount += 1;
+                await writeBotLog(database, "error", "Failed to send signal alert to n8n", {
+                  botRunId: botRun.id,
+                  signalId: signal.id,
+                  alertId: alertResult.alertId,
+                  assetId: asset.id,
+                  symbol: asset.symbol,
+                  timeframe,
+                  status: decision.status,
+                  score: decision.score,
+                  signalType: decision.signalType,
+                  error: alertResult.error ?? "unknown alert dispatch error"
+                });
+              }
+            } catch (error) {
+              alertErrorCount += 1;
+              const message =
+                error instanceof Error ? error.message : "unknown alert dispatch error";
+
+              await writeBotLog(database, "error", "Failed to send signal alert to n8n", {
+                botRunId: botRun.id,
+                signalId: signal.id,
+                assetId: asset.id,
+                symbol: asset.symbol,
+                timeframe,
+                status: decision.status,
+                score: decision.score,
+                signalType: decision.signalType,
+                error: message
+              });
+            }
           }
         } catch (error) {
           errorCount += 1;
@@ -209,6 +263,9 @@ export async function analyzeCryptoSignals(database: PrismaClient = prisma) {
           assetCount: assets.length,
           analyzedCount,
           savedSignalCount,
+          sentAlertCount,
+          skippedAlertCount,
+          alertErrorCount,
           insufficientDataCount,
           errorCount
         }
@@ -224,6 +281,9 @@ export async function analyzeCryptoSignals(database: PrismaClient = prisma) {
         assetCount: assets.length,
         analyzedCount,
         savedSignalCount,
+        sentAlertCount,
+        skippedAlertCount,
+        alertErrorCount,
         insufficientDataCount,
         errorCount
       }
@@ -243,6 +303,9 @@ export async function analyzeCryptoSignals(database: PrismaClient = prisma) {
           candleLimit,
           analyzedCount,
           savedSignalCount,
+          sentAlertCount,
+          skippedAlertCount,
+          alertErrorCount,
           insufficientDataCount,
           errorCount,
           fatalError: message
@@ -259,8 +322,33 @@ export async function analyzeCryptoSignals(database: PrismaClient = prisma) {
   }
 }
 
-function isRelevantSignal(decision: SignalDecision): boolean {
-  return decision.signalType !== "NO_SIGNAL" || decision.status === "WATCH" || decision.status === "STRONG_WATCH";
+export function shouldSendSignalAlert(decision: SignalDecision, telegramText?: string | null): boolean {
+  if (!telegramText?.trim()) {
+    return false;
+  }
+
+  if (decision.status === "NO_EDGE" || decision.signalType === "NO_SIGNAL") {
+    return false;
+  }
+
+  const hasAlertSignalType =
+    decision.signalType === "VOLUME_SPIKE" ||
+    decision.signalType === "VOLATILITY_SPIKE" ||
+    decision.signalType === "BREAKOUT_ALERT";
+
+  if (hasAlertSignalType) {
+    return true;
+  }
+
+  if (decision.status === "WAIT" && decision.score < 70) {
+    return false;
+  }
+
+  return (
+    decision.status === "STRONG_WATCH" ||
+    (decision.status === "WATCH" && decision.score >= 70) ||
+    (decision.status === "AVOID" && decision.riskLevel === "HIGH")
+  );
 }
 
 function mapAssetType(assetType: AssetType): AssetClass {
