@@ -9,9 +9,10 @@
     "analyze:crypto-indicators": "tsx src/jobs/analyzeCryptoIndicators.ts",
     "analyze:crypto-signals": "tsx src/jobs/analyzeCryptoSignals.ts",
     "fetch:crypto-candles": "tsx src/jobs/fetchCryptoCandles.ts",
+    "run:crypto-pipeline": "tsx src/jobs/runCryptoSignalPipeline.ts",
     "start": "node dist/index.js",
     "lint": "eslint .",
-    "test": "tsx --test test/analyzeCryptoSignals.test.ts"
+    "test": "tsx --test test/*.test.ts"
   },
   "dependencies": {
     "@signalpilot/alerts": "workspace:*",

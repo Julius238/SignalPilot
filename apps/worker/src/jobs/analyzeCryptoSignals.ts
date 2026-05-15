@@ -38,7 +38,19 @@ const neutralIntelligenceContext: IntelligenceContext = {
   sources: []
 };
 
-export async function analyzeCryptoSignals(database: PrismaClient = prisma) {
+export type AnalyzeCryptoSignalsSummary = {
+  status: BotRunStatus;
+  analyzedCount: number;
+  savedSignalCount: number;
+  sentAlertCount: number;
+  skippedAlertCount: number;
+  alertErrorCount: number;
+  errorCount: number;
+};
+
+export async function analyzeCryptoSignals(
+  database: PrismaClient = prisma
+): Promise<AnalyzeCryptoSignalsSummary> {
   const botRun = await database.botRun.create({
     data: {
       jobName: "analyzeCryptoSignals",
@@ -288,6 +300,16 @@ export async function analyzeCryptoSignals(database: PrismaClient = prisma) {
         errorCount
       }
     );
+
+    return {
+      status,
+      analyzedCount,
+      savedSignalCount,
+      sentAlertCount,
+      skippedAlertCount,
+      alertErrorCount,
+      errorCount
+    };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown analyzeCryptoSignals error";
 

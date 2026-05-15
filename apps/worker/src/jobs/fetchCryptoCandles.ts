@@ -28,7 +28,17 @@ config();
 const candleLimit = 300;
 const requestDelayMs = Number(process.env.MARKET_DATA_REQUEST_DELAY_MS ?? 250);
 
-export async function fetchCryptoCandles(database: PrismaClient = prisma) {
+export type FetchCryptoCandlesSummary = {
+  status: BotRunStatus;
+  assetCount: number;
+  timeframeCount: number;
+  savedCandleCount: number;
+  errorCount: number;
+};
+
+export async function fetchCryptoCandles(
+  database: PrismaClient = prisma
+): Promise<FetchCryptoCandlesSummary> {
   const adapter = new BinanceMarketDataAdapter();
   const startedAt = new Date();
   const botRun = await database.botRun.create({
@@ -46,6 +56,7 @@ export async function fetchCryptoCandles(database: PrismaClient = prisma) {
 
   let savedCandles = 0;
   let errorCount = 0;
+  let assetCount = 0;
 
   await writeBotLog(database, "info", "fetchCryptoCandles started", {
     botRunId: botRun.id
@@ -61,6 +72,7 @@ export async function fetchCryptoCandles(database: PrismaClient = prisma) {
         symbol: "asc"
       }
     });
+    assetCount = assets.length;
 
     for (const asset of assets) {
       for (const interval of supportedBinanceIntervals) {
@@ -108,6 +120,7 @@ export async function fetchCryptoCandles(database: PrismaClient = prisma) {
           intervals: [...supportedBinanceIntervals],
           limit: candleLimit,
           savedCandles,
+          savedCandleCount: savedCandles,
           errorCount,
           assetCount: assets.length
         }
@@ -117,9 +130,18 @@ export async function fetchCryptoCandles(database: PrismaClient = prisma) {
     await writeBotLog(database, status === BotRunStatus.SUCCESS ? "info" : "warn", "fetchCryptoCandles finished", {
       botRunId: botRun.id,
       savedCandles,
+      savedCandleCount: savedCandles,
       errorCount,
       assetCount: assets.length
     });
+
+    return {
+      status,
+      assetCount,
+      timeframeCount: supportedBinanceIntervals.length,
+      savedCandleCount: savedCandles,
+      errorCount
+    };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown fetchCryptoCandles error";
 
@@ -135,6 +157,7 @@ export async function fetchCryptoCandles(database: PrismaClient = prisma) {
           intervals: [...supportedBinanceIntervals],
           limit: candleLimit,
           savedCandles,
+          savedCandleCount: savedCandles,
           errorCount,
           fatalError: message
         }
