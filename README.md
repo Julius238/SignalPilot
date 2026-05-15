@@ -65,7 +65,7 @@ pnpm --filter @signalpilot/api dev
 When the API is running:
 
 ```bash
-curl http://localhost:3000/health
+curl http://localhost:3100/health
 ```
 
 Expected response:
@@ -77,6 +77,21 @@ Expected response:
 Dashboard API examples:
 
 ```bash
-curl "http://localhost:3000/signals?limit=10"
-curl http://localhost:3000/assets/BTCUSDT
+curl "http://localhost:3100/signals?limit=10"
+curl http://localhost:3100/assets/BTCUSDT
+```
+
+## Dashboard
+
+Run the API and the Next.js dashboard:
+
+```bash
+pnpm --filter @signalpilot/api dev
+NEXT_PUBLIC_SIGNALPILOT_API_URL=http://localhost:3100 pnpm dashboard:dev
+```
+
+Open:
+
+```bash
+http://localhost:3000/dashboard
 ```
