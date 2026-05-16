@@ -54,6 +54,23 @@ pnpm worker:fetch-crypto-candles
 
 The job fetches `1h`, `4h`, and `1d` klines, stores them with idempotent upserts, and writes `BotRun` and `BotLog` records. It uses the public Binance API only and does not require API keys.
 
+## Worker Scheduler
+
+Run the crypto signal pipeline scheduler:
+
+```bash
+pnpm worker:scheduler
+```
+
+Scheduler environment:
+
+```bash
+CRYPTO_PIPELINE_CRON="0 * * * *"
+RUN_PIPELINE_ON_START=false
+```
+
+The default cron runs hourly at the top of the hour. Set `RUN_PIPELINE_ON_START=true` to run the pipeline once immediately when the scheduler starts, then continue on the cron schedule.
+
 ## API Health Check
 
 Start the API locally:
