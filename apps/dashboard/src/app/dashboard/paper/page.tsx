@@ -25,6 +25,9 @@ export default async function PaperPage() {
       <div className="page-header">
         <h1>Paper Evaluation</h1>
         <p>Hypothetical outcome tracking for signal quality measurement.</p>
+        <Link className="primary-link" href="/dashboard/performance">
+          Performance Intelligence
+        </Link>
       </div>
 
       {stats.error ? <ErrorState title="Could not load paper stats" message={stats.error} /> : null}

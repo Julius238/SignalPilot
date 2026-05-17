@@ -18,6 +18,11 @@ import {
   type MultiTimeframeSignalInput,
   type MultiTimeframeSummary
 } from "@signalpilot/multi-timeframe";
+import {
+  buildPerformanceBuckets,
+  buildPerformanceReport,
+  type PerformanceGroupBy
+} from "@signalpilot/performance-intelligence";
 import type { FastifyInstance, FastifyReply } from "fastify";
 
 type QueryValue = string | string[] | undefined;
@@ -33,6 +38,14 @@ const alertStatuses = Object.values(AlertStatus);
 const alertChannels = Object.values(AlertChannel);
 const paperEvaluationStatuses = Object.values(PaperEvaluationStatus);
 const paperEvaluationOutcomes = Object.values(PaperEvaluationOutcome);
+const performanceGroupBys = [
+  "signalType",
+  "timeframe",
+  "symbol",
+  "status",
+  "riskLevel",
+  "scoreBucket"
+] as const;
 const publicAlertModes = ["ALL_ASSETS", "WATCHLIST_ONLY", "HIGH_PRIORITY_ONLY"] as const;
 const multiTimeframes = ["1h", "4h", "1d"] as const;
 const multiTimeframeAlignments = [
@@ -724,6 +737,52 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
     };
   });
 
+  server.get("/performance/report", async (request, reply) => {
+    const query = asQueryRecord(request.query);
+    const assetType = parseEnum(query.assetType, assetTypes as AssetType[], "assetType", reply);
+    const from = parseOptionalDate(query.from, "from", reply);
+    const to = parseOptionalDate(query.to, "to", reply);
+    const minEvaluated = parseOptionalInteger(query.minEvaluated, "minEvaluated", reply) ?? 0;
+    const includeSkipped = parseBoolean(query.includeSkipped, "includeSkipped", reply) ?? true;
+
+    if (reply.sent) {
+      return reply;
+    }
+
+    const evaluations = await loadPerformanceEvaluations({
+      symbol: parseOptionalString(query.symbol)?.toUpperCase(),
+      assetType,
+      timeframe: parseOptionalString(query.timeframe),
+      from,
+      to
+    });
+
+    return buildPerformanceReport(evaluations, {
+      minEvaluated,
+      includeSkipped
+    });
+  });
+
+  server.get("/performance/buckets", async (request, reply) => {
+    const query = asQueryRecord(request.query);
+    const groupBy = parseEnum(
+      query.groupBy,
+      performanceGroupBys,
+      "groupBy",
+      reply
+    ) as PerformanceGroupBy | undefined;
+    const limit = parseLimit(query.limit, 100, 500, reply);
+
+    if (reply.sent || !groupBy) {
+      return reply;
+    }
+
+    const evaluations = await loadPerformanceEvaluations({});
+    const report = buildPerformanceReport(evaluations);
+
+    return buildPerformanceBuckets(evaluations, groupBy, report.overallWinRate).slice(0, limit);
+  });
+
   server.get("/assets/:symbol/signals", async (request, reply) => {
     const { symbol } = request.params as { symbol: string };
     const query = asQueryRecord(request.query);
@@ -1399,6 +1458,52 @@ function groupCount<T>(items: T[], getKey: (item: T) => string) {
   }, {});
 }
 
+async function loadPerformanceEvaluations(input: {
+  symbol?: string;
+  assetType?: AssetType;
+  timeframe?: string;
+  from?: Date;
+  to?: Date;
+}) {
+  const evaluations = await database.paperSignalEvaluation.findMany({
+    where: {
+      symbol: input.symbol,
+      timeframe: input.timeframe,
+      openedAt:
+        input.from || input.to
+          ? {
+              gte: input.from,
+              lte: input.to
+            }
+          : undefined,
+      signal: input.assetType
+        ? {
+            asset: {
+              assetType: input.assetType
+            }
+          }
+        : undefined
+    }
+  });
+
+  return evaluations.map((evaluation) => ({
+    symbol: evaluation.symbol,
+    timeframe: evaluation.timeframe,
+    status: evaluation.status,
+    signalType: evaluation.signalType,
+    score: evaluation.score,
+    riskLevel: evaluation.riskLevel,
+    evaluationStatus: evaluation.evaluationStatus,
+    outcome: evaluation.outcome,
+    returnAfter1h: evaluation.returnAfter1h,
+    returnAfter4h: evaluation.returnAfter4h,
+    returnAfter1d: evaluation.returnAfter1d,
+    returnAfter3d: evaluation.returnAfter3d,
+    maxFavorableMove: evaluation.maxFavorableMove,
+    maxAdverseMove: evaluation.maxAdverseMove
+  }));
+}
+
 function asQueryRecord(query: unknown): QueryRecord {
   return (query ?? {}) as QueryRecord;
 }
@@ -1486,6 +1591,44 @@ function parseOptionalNumber(
 
   if (!Number.isFinite(parsed) || parsed < 0) {
     badRequest(reply, `${name} must be a non-negative number`);
+    return undefined;
+  }
+
+  return parsed;
+}
+
+function parseOptionalInteger(
+  value: QueryValue,
+  name: string,
+  reply: FastifyReply
+): number | undefined {
+  const raw = firstQueryValue(value);
+
+  if (raw === undefined || raw === "") {
+    return undefined;
+  }
+
+  const parsed = Number(raw);
+
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    badRequest(reply, `${name} must be a non-negative integer`);
+    return undefined;
+  }
+
+  return parsed;
+}
+
+function parseOptionalDate(value: QueryValue, name: string, reply: FastifyReply): Date | undefined {
+  const raw = firstQueryValue(value);
+
+  if (raw === undefined || raw === "") {
+    return undefined;
+  }
+
+  const parsed = new Date(raw);
+
+  if (Number.isNaN(parsed.getTime())) {
+    badRequest(reply, `${name} must be a valid ISO date`);
     return undefined;
   }
 

@@ -216,6 +216,25 @@ td a {
   min-width: 260px;
 }
 
+.progress-cell {
+  display: grid;
+  gap: 6px;
+  min-width: 120px;
+}
+
+.progress-track {
+  background: var(--panel-soft);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  height: 8px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  background: var(--accent);
+  height: 100%;
+}
+
 .badge {
   border: 1px solid var(--line);
   border-radius: 999px;

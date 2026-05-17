@@ -207,6 +207,56 @@ describe("watchlist routes", () => {
 
     await server.close();
   });
+
+  it("returns an empty performance report", async () => {
+    const server = await createServer();
+    const response = await server.inject("/performance/report");
+
+    assert.equal(response.statusCode, 200);
+    const body = response.json();
+    assert.equal(body.totalEvaluations, 0);
+    assert.equal(body.evaluatedCount, 0);
+    assert.equal(body.overallWinRate, 0);
+    assert.ok(body.warnings.includes("Keine Paper Evaluations vorhanden."));
+
+    await server.close();
+  });
+
+  it("returns a performance report with test data", async () => {
+    const { server, state } = await createServerWithState();
+    state.paperEvaluations.push(
+      createPaperEvaluation({
+        signalType: SignalType.BREAKOUT_ALERT,
+        outcome: PaperEvaluationOutcome.POSITIVE,
+        returnAfter1d: 1.2
+      }),
+      createPaperEvaluation({
+        id: "paper-evaluation-2",
+        signalType: SignalType.VOLUME_SPIKE,
+        outcome: PaperEvaluationOutcome.NEGATIVE,
+        returnAfter1d: -1
+      }),
+      createPaperEvaluation({
+        id: "paper-evaluation-3",
+        signalType: SignalType.BREAKOUT_ALERT,
+        outcome: PaperEvaluationOutcome.TARGET_REACHED,
+        returnAfter1d: 2
+      })
+    );
+
+    const response = await server.inject("/performance/report");
+    const bucketsResponse = await server.inject("/performance/buckets?groupBy=signalType");
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(bucketsResponse.statusCode, 200);
+    const body = response.json();
+    assert.equal(body.totalEvaluations, 3);
+    assert.equal(Math.round(body.overallWinRate * 10) / 10, 66.7);
+    assert.equal(body.bestSignalTypes[0].key, SignalType.BREAKOUT_ALERT);
+    assert.equal(bucketsResponse.json()[0].key, SignalType.BREAKOUT_ALERT);
+
+    await server.close();
+  });
 });
 
 async function createServer() {

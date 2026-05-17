@@ -20,6 +20,9 @@ importers:
       prettier:
         specifier: ^3.4.2
         version: 3.8.3
+      tsx:
+        specifier: ^4.19.2
+        version: 4.21.0
       typescript:
         specifier: ^5.7.3
         version: 5.9.3
@@ -38,6 +41,9 @@ importers:
       '@signalpilot/multi-timeframe':
         specifier: workspace:*
         version: link:../../packages/multi-timeframe
+      '@signalpilot/performance-intelligence':
+        specifier: workspace:*
+        version: link:../../packages/performance-intelligence
       '@signalpilot/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -184,6 +190,12 @@ importers:
       '@signalpilot/shared':
         specifier: workspace:*
         version: link:../shared
+    devDependencies:
+      tsx:
+        specifier: ^4.19.2
+        version: 4.21.0
+
+  packages/performance-intelligence:
     devDependencies:
       tsx:
         specifier: ^4.19.2

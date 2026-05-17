@@ -240,6 +240,51 @@ export type PaperStats = {
   groupedByTimeframe: Record<string, number>;
 };
 
+export type ConfidenceLevel = "LOW" | "MEDIUM" | "HIGH";
+
+export type PerformanceBucket = {
+  key: string;
+  label: string;
+  total: number;
+  evaluatedCount: number;
+  skippedCount: number;
+  positiveCount: number;
+  negativeCount: number;
+  neutralCount: number;
+  targetReachedCount: number;
+  invalidatedCount: number;
+  winRate: number;
+  avgReturnAfter1h: number;
+  avgReturnAfter4h: number;
+  avgReturnAfter1d: number;
+  avgReturnAfter3d: number;
+  avgMaxFavorableMove: number;
+  avgMaxAdverseMove: number;
+  confidenceLevel: ConfidenceLevel;
+  insight: string;
+  recommendation: string;
+};
+
+export type PerformanceIntelligenceReport = {
+  generatedAt: string;
+  totalEvaluations: number;
+  evaluatedCount: number;
+  skippedCount: number;
+  overallWinRate: number;
+  overallAvgReturnAfter1d: number;
+  bestSignalTypes: PerformanceBucket[];
+  worstSignalTypes: PerformanceBucket[];
+  bestTimeframes: PerformanceBucket[];
+  worstTimeframes: PerformanceBucket[];
+  bestAssets: PerformanceBucket[];
+  worstAssets: PerformanceBucket[];
+  scoreBuckets: PerformanceBucket[];
+  riskBuckets: PerformanceBucket[];
+  statusBuckets: PerformanceBucket[];
+  summary: string;
+  warnings: string[];
+};
+
 export type PublicConfig = {
   alertMode: "ALL_ASSETS" | "WATCHLIST_ONLY" | "HIGH_PRIORITY_ONLY";
   alertCooldownMinutes: number;
