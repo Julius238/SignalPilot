@@ -1,3 +1,4 @@
+import type { MultiTimeframeSummary } from "@signalpilot/multi-timeframe";
 import type {
   AssetClass,
   IntelligenceContext,
@@ -12,6 +13,7 @@ export type ComposeSignalOutputInput = {
     assetType: AssetClass;
   };
   intelligence?: Partial<IntelligenceContext>;
+  multiTimeframeSummary?: MultiTimeframeSummary | null;
 };
 
 type TechnicalSummary = {
@@ -34,6 +36,7 @@ export function composeSignalOutput(input: ComposeSignalOutputInput): SignalOutp
   const intelligence = normalizeIntelligence(input.intelligence);
   const technical = buildTechnicalSummary(decision);
   const confirmations = buildConfirmations(decision);
+  const multiTimeframeLines = buildMultiTimeframeLines(input.multiTimeframeSummary);
   const counterArgument =
     decision.counterArguments[0] ?? "Kein dominantes Gegenargument im aktuellen technischen Scan.";
   const shortConclusion = buildShortConclusion(decision);
@@ -66,6 +69,9 @@ export function composeSignalOutput(input: ComposeSignalOutputInput): SignalOutp
     "Marktbestätigung:",
     ...confirmations.map((confirmation) => `• ${confirmation}`),
     "",
+    "Multi-Timeframe:",
+    ...multiTimeframeLines,
+    "",
     "Gegenargument:",
     counterArgument,
     "",
@@ -97,6 +103,7 @@ export function composeSignalOutput(input: ComposeSignalOutputInput): SignalOutp
     },
     counterArgument,
     nextTrigger: decision.nextTrigger,
+    multiTimeframeSummary: input.multiTimeframeSummary ?? null,
     telegramText,
     dashboardJson: {
       symbol,
@@ -105,6 +112,7 @@ export function composeSignalOutput(input: ComposeSignalOutputInput): SignalOutp
       technical,
       intelligence,
       confirmations,
+      multiTimeframeSummary: input.multiTimeframeSummary ?? null,
       counterArgument,
       nextTrigger: decision.nextTrigger,
       generatedSections: [
@@ -112,6 +120,7 @@ export function composeSignalOutput(input: ComposeSignalOutputInput): SignalOutp
         "Technik",
         "News/X/Event",
         "Marktbestätigung",
+        "Multi-Timeframe",
         "Gegenargument",
         "Nächster Trigger"
       ]
@@ -163,6 +172,24 @@ function buildConfirmations(decision: SignalDecision): string[] {
   }
 
   return confirmations;
+}
+
+function buildMultiTimeframeLines(summary?: MultiTimeframeSummary | null): string[] {
+  if (!summary) {
+    return ["• Noch nicht berechnet."];
+  }
+
+  return [
+    `• Alignment: ${summary.alignment}`,
+    `• Score: ${formatScore(summary.alignmentScore)}/100`,
+    `• Bestätigung: ${formatTimeframes(summary.confirmingTimeframes)}`,
+    `• Konflikt: ${formatTimeframes(summary.conflictingTimeframes)}`,
+    `• Fokus: ${summary.nextFocus}`
+  ];
+}
+
+function formatTimeframes(timeframes: string[]): string {
+  return timeframes.length > 0 ? timeframes.join(", ") : "-";
 }
 
 function normalizeIntelligence(

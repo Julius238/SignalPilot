@@ -18,6 +18,7 @@
     "test": "tsx --test test/output-composer.test.ts"
   },
   "dependencies": {
+    "@signalpilot/multi-timeframe": "workspace:*",
     "@signalpilot/shared": "workspace:*"
   },
   "devDependencies": {

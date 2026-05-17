@@ -73,6 +73,7 @@ export interface SignalOutputDraft {
   marketConfirmationJson: Record<string, unknown>;
   counterArgument: string;
   nextTrigger: string;
+  multiTimeframeSummary?: unknown;
   telegramText: string;
   dashboardJson: Record<string, unknown>;
 }

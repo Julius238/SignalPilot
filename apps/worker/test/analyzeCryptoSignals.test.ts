@@ -70,6 +70,7 @@ describe("analyzeCryptoSignals", () => {
         findMany: async () => [...candles].reverse()
       },
       signal: {
+        findFirst: async () => null,
         create: async (operation: {
           data: {
             symbol: string;
@@ -110,8 +111,10 @@ describe("analyzeCryptoSignals", () => {
       const output = signal.data.output.create;
       assert.ok(output.telegramText.length > 0);
       assert.match(output.telegramText, /News\/X\/Event:/);
+      assert.match(output.telegramText, /Multi-Timeframe:/);
       assert.match(output.telegramText, /Nächster Trigger:/);
       assert.ok(output.dashboardJson);
+      assertDashboardJsonHasMultiTimeframeSummary(output.dashboardJson);
     }
 
     assert.ok(
@@ -125,7 +128,9 @@ describe("analyzeCryptoSignals", () => {
           typeof metadata === "object" &&
           metadata !== null &&
           "signalId" in metadata &&
-          "signalType" in metadata
+          "signalType" in metadata &&
+          "alignment" in metadata &&
+          "alignmentScore" in metadata
         );
       })
     );
@@ -192,8 +197,73 @@ describe("analyzeCryptoSignals", () => {
       ),
       true
     );
+    assert.equal(
+      shouldSendSignalAlert(
+        {
+          ...baseDecision,
+          signalType: "NO_SIGNAL",
+          status: "NO_EDGE",
+          score: 45
+        },
+        "telegram text",
+        {
+          symbol: "BTCUSDT",
+          alignment: "BULLISH_ALIGNED",
+          alignmentScore: 72,
+          primaryTimeframe: "1d",
+          confirmingTimeframes: ["4h"],
+          conflictingTimeframes: [],
+          strongestSignal: null,
+          weakestSignal: null,
+          riskLevel: "MEDIUM",
+          summary: "Aligned.",
+          riskNote: "Risk medium.",
+          nextFocus: "Watch 4h."
+        }
+      ),
+      true
+    );
+    assert.equal(
+      shouldSendSignalAlert(
+        {
+          ...baseDecision,
+          signalType: "NO_SIGNAL",
+          status: "NO_EDGE",
+          riskLevel: "HIGH",
+          score: 45
+        },
+        "telegram text",
+        {
+          symbol: "BTCUSDT",
+          alignment: "CONFLICT",
+          alignmentScore: 40,
+          primaryTimeframe: "1d",
+          confirmingTimeframes: [],
+          conflictingTimeframes: ["1h"],
+          strongestSignal: null,
+          weakestSignal: null,
+          riskLevel: "HIGH",
+          summary: "Conflict.",
+          riskNote: "Risk high.",
+          nextFocus: "Watch higher timeframes."
+        }
+      ),
+      true
+    );
   });
 });
+
+function assertDashboardJsonHasMultiTimeframeSummary(dashboardJson: unknown) {
+  assert.equal(typeof dashboardJson, "object");
+  assert.notEqual(dashboardJson, null);
+  assert.ok("multiTimeframeSummary" in dashboardJson);
+
+  const summary = (dashboardJson as { multiTimeframeSummary?: unknown }).multiTimeframeSummary;
+  assert.equal(typeof summary, "object");
+  assert.notEqual(summary, null);
+  assert.ok("alignment" in summary);
+  assert.ok("alignmentScore" in summary);
+}
 
 function createCandles(count: number) {
   return Array.from({ length: count }, (_, index) => {

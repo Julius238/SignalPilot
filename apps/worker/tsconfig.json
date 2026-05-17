@@ -10,6 +10,7 @@
     { "path": "../../packages/alerts" },
     { "path": "../../packages/market-data" },
     { "path": "../../packages/indicators" },
+    { "path": "../../packages/multi-timeframe" },
     { "path": "../../packages/output-composer" },
     { "path": "../../packages/scoring-engine" },
     { "path": "../../packages/shared" }

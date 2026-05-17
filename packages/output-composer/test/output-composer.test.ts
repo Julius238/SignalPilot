@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import type { SignalDecision } from "@signalpilot/shared";
+import type { MultiTimeframeSummary } from "@signalpilot/multi-timeframe";
 
 import { composeSignalOutput } from "../src/index.js";
 
@@ -30,6 +31,21 @@ const baseDecision: SignalDecision = {
   ],
   counterArguments: ["sma200 is missing, so long-term trend confirmation is unavailable."],
   nextTrigger: "Watch for price to hold above sma20 with relativeVolume above 1.5."
+};
+
+const baseMultiTimeframeSummary: MultiTimeframeSummary = {
+  symbol: "BTCUSDT",
+  alignment: "BULLISH_ALIGNED",
+  alignmentScore: 78,
+  primaryTimeframe: "1d",
+  confirmingTimeframes: ["4h", "1h"],
+  conflictingTimeframes: [],
+  strongestSignal: null,
+  weakestSignal: null,
+  riskLevel: "MEDIUM",
+  summary: "BTCUSDT: aligned.",
+  riskNote: "Gesamt-Risiko ist MEDIUM.",
+  nextFocus: "Als naechstes 4h beobachten."
 };
 
 describe("composeSignalOutput", () => {
@@ -142,10 +158,32 @@ describe("composeSignalOutput", () => {
       "Technik:",
       "News/X/Event:",
       "Marktbestätigung:",
+      "Multi-Timeframe:",
       "Gegenargument:",
       "Nächster Trigger:"
     ]) {
       assert.match(output.telegramText, new RegExp(block));
     }
+  });
+
+  it("contains a multi-timeframe block when summary is provided", () => {
+    const output = composeSignalOutput({
+      decision: baseDecision,
+      multiTimeframeSummary: baseMultiTimeframeSummary
+    });
+
+    assert.match(output.telegramText, /Multi-Timeframe:/);
+    assert.match(output.telegramText, /Alignment: BULLISH_ALIGNED/);
+    assert.match(output.telegramText, /Score: 78\/100/);
+    assert.match(output.telegramText, /Bestätigung: 4h, 1h/);
+    assert.equal(output.dashboardJson.multiTimeframeSummary, baseMultiTimeframeSummary);
+    assert.equal(output.multiTimeframeSummary, baseMultiTimeframeSummary);
+  });
+
+  it("states when multi-timeframe summary is missing", () => {
+    const output = composeSignalOutput({ decision: baseDecision });
+
+    assert.match(output.telegramText, /Multi-Timeframe:\n• Noch nicht berechnet\./);
+    assert.equal(output.dashboardJson.multiTimeframeSummary, null);
   });
 });

@@ -26,6 +26,7 @@ export type AlertSignalOutput = {
   shortConclusion: string;
   telegramText: string;
   dashboardJson: unknown;
+  multiTimeframeSummary?: unknown;
 };
 
 export type SendSignalAlertToN8nInput = {
@@ -62,6 +63,9 @@ type AlertPayload = {
   shortConclusion: string;
   telegramText: string;
   dashboardJson: unknown;
+  multiTimeframeSummary?: unknown;
+  alignment?: string;
+  alignmentScore?: number;
   dashboardUrl?: string;
   createdAt: string;
 };
@@ -136,6 +140,8 @@ export async function sendSignalAlertToN8n(
         alertId: alert.id,
         signalId: input.signal.id,
         symbol: input.signal.symbol,
+        alignment: payload.alignment,
+        alignmentScore: payload.alignmentScore,
         attempts: attempt
       });
 
@@ -171,6 +177,10 @@ export async function sendSignalAlertToN8n(
 }
 
 function buildPayload(input: SendSignalAlertToN8nInput): AlertPayload {
+  const multiTimeframeSummary = extractMultiTimeframeSummary(input.signalOutput);
+  const alignment = extractStringField(multiTimeframeSummary, "alignment");
+  const alignmentScore = extractNumberField(multiTimeframeSummary, "alignmentScore");
+
   return {
     signalId: input.signal.id,
     symbol: input.signal.symbol,
@@ -184,12 +194,49 @@ function buildPayload(input: SendSignalAlertToN8nInput): AlertPayload {
     shortConclusion: input.signalOutput.shortConclusion,
     telegramText: input.signalOutput.telegramText,
     dashboardJson: input.signalOutput.dashboardJson,
+    multiTimeframeSummary,
+    alignment,
+    alignmentScore,
     dashboardUrl: input.dashboardUrl,
     createdAt:
       input.signal.createdAt instanceof Date
         ? input.signal.createdAt.toISOString()
         : input.signal.createdAt
   };
+}
+
+function extractMultiTimeframeSummary(signalOutput: AlertSignalOutput): unknown {
+  if (signalOutput.multiTimeframeSummary) {
+    return signalOutput.multiTimeframeSummary;
+  }
+
+  if (isRecord(signalOutput.dashboardJson)) {
+    return signalOutput.dashboardJson.multiTimeframeSummary;
+  }
+
+  return undefined;
+}
+
+function extractStringField(source: unknown, field: string): string | undefined {
+  if (!isRecord(source)) {
+    return undefined;
+  }
+
+  const value = source[field];
+  return typeof value === "string" ? value : undefined;
+}
+
+function extractNumberField(source: unknown, field: string): number | undefined {
+  if (!isRecord(source)) {
+    return undefined;
+  }
+
+  const value = source[field];
+  return typeof value === "number" ? value : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 async function markAlertFailed(database: PrismaClient, alertId: string, error: string) {

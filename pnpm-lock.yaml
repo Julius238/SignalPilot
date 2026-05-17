@@ -91,6 +91,9 @@ importers:
       '@signalpilot/market-data':
         specifier: workspace:*
         version: link:../../packages/market-data
+      '@signalpilot/multi-timeframe':
+        specifier: workspace:*
+        version: link:../../packages/multi-timeframe
       '@signalpilot/output-composer':
         specifier: workspace:*
         version: link:../../packages/output-composer
@@ -175,6 +178,9 @@ importers:
 
   packages/output-composer:
     dependencies:
+      '@signalpilot/multi-timeframe':
+        specifier: workspace:*
+        version: link:../multi-timeframe
       '@signalpilot/shared':
         specifier: workspace:*
         version: link:../shared

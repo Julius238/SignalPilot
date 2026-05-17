@@ -56,6 +56,13 @@ describe("sendSignalAlertToN8n", () => {
     const payload = JSON.parse(String(requests[0].init?.body));
     assert.equal(payload.signalId, "signal-1");
     assert.equal(payload.telegramText, "Telegram text");
+    assert.equal(payload.alignment, "BULLISH_ALIGNED");
+    assert.equal(payload.alignmentScore, 78);
+    assert.deepEqual(payload.multiTimeframeSummary, {
+      alignment: "BULLISH_ALIGNED",
+      alignmentScore: 78,
+      nextFocus: "Als naechstes 4h beobachten."
+    });
     assert.equal(payload.dashboardUrl, "https://dashboard.example/signals/signal-1");
     assert.equal(database.alertUpdates[0].data.status, AlertStatus.SENT);
     assert.ok(database.alertUpdates[0].data.sentAt instanceof Date);
@@ -109,7 +116,12 @@ function createInput() {
       shortConclusion: "BTCUSDT is watchable.",
       telegramText: "Telegram text",
       dashboardJson: {
-        ok: true
+        ok: true,
+        multiTimeframeSummary: {
+          alignment: "BULLISH_ALIGNED",
+          alignmentScore: 78,
+          nextFocus: "Als naechstes 4h beobachten."
+        }
       }
     },
     dashboardUrl: "https://dashboard.example/signals/signal-1"

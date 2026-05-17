@@ -12,6 +12,11 @@ import {
 } from "@signalpilot/database";
 import { buildIndicatorSnapshot, type IndicatorCandle } from "@signalpilot/indicators";
 import { supportedBinanceIntervals } from "@signalpilot/market-data";
+import {
+  calculateMultiTimeframeSummary,
+  type MultiTimeframeSignalInput,
+  type MultiTimeframeSummary
+} from "@signalpilot/multi-timeframe";
 import { composeSignalOutput } from "@signalpilot/output-composer";
 import { scoreSignal } from "@signalpilot/scoring-engine";
 import type { AssetClass, IntelligenceContext, SignalDecision } from "@signalpilot/shared";
@@ -29,6 +34,7 @@ config();
 
 const candleLimit = 250;
 const minimumUsefulCandles = 20;
+const multiTimeframeIntervals = ["1h", "4h", "1d"] as const;
 
 const neutralIntelligenceContext: IntelligenceContext = {
   newsSummary: "Keine relevante neue Meldung im Scan-Fenster gefunden.",
@@ -87,6 +93,8 @@ export async function analyzeCryptoSignals(
     });
 
     for (const asset of assets) {
+      const latestSignalsByTimeframe = await loadLatestSignalsByTimeframe(database, asset.id);
+
       for (const timeframe of supportedBinanceIntervals) {
         try {
           const candles = await database.candle.findMany({
@@ -134,13 +142,20 @@ export async function analyzeCryptoSignals(
             indicators: snapshot
           });
 
+          const currentSignalInput = toMultiTimeframeSignalInput(decision, new Date());
+          const multiTimeframeSummary = calculateSummaryWithCurrentSignal(
+            latestSignalsByTimeframe,
+            currentSignalInput
+          );
+
           const outputDraft = composeSignalOutput({
             decision,
             asset: {
               symbol: asset.symbol,
               assetType: mapAssetType(asset.assetType)
             },
-            intelligence: neutralIntelligenceContext
+            intelligence: neutralIntelligenceContext,
+            multiTimeframeSummary
           });
 
           const signal = await database.signal.create({
@@ -183,10 +198,14 @@ export async function analyzeCryptoSignals(
           });
 
           savedSignalCount += 1;
+          latestSignalsByTimeframe.set(
+            timeframe,
+            toMultiTimeframeSignalInput(decision, signal.createdAt)
+          );
 
           const signalOutput = signal.output;
 
-          if (!signalOutput || !shouldSendSignalAlert(decision, signalOutput.telegramText)) {
+          if (!signalOutput || !shouldSendSignalAlert(decision, signalOutput.telegramText, multiTimeframeSummary)) {
             skippedAlertCount += 1;
           } else {
             try {
@@ -209,7 +228,9 @@ export async function analyzeCryptoSignals(
                   timeframe,
                   status: decision.status,
                   score: decision.score,
-                  signalType: decision.signalType
+                  signalType: decision.signalType,
+                  alignment: multiTimeframeSummary.alignment,
+                  alignmentScore: multiTimeframeSummary.alignmentScore
                 });
               } else {
                 alertErrorCount += 1;
@@ -223,6 +244,8 @@ export async function analyzeCryptoSignals(
                   status: decision.status,
                   score: decision.score,
                   signalType: decision.signalType,
+                  alignment: multiTimeframeSummary.alignment,
+                  alignmentScore: multiTimeframeSummary.alignmentScore,
                   error: alertResult.error ?? "unknown alert dispatch error"
                 });
               }
@@ -240,6 +263,8 @@ export async function analyzeCryptoSignals(
                 status: decision.status,
                 score: decision.score,
                 signalType: decision.signalType,
+                alignment: multiTimeframeSummary.alignment,
+                alignmentScore: multiTimeframeSummary.alignmentScore,
                 error: message
               });
             }
@@ -344,9 +369,17 @@ export async function analyzeCryptoSignals(
   }
 }
 
-export function shouldSendSignalAlert(decision: SignalDecision, telegramText?: string | null): boolean {
+export function shouldSendSignalAlert(
+  decision: SignalDecision,
+  telegramText?: string | null,
+  multiTimeframeSummary?: MultiTimeframeSummary | null
+): boolean {
   if (!telegramText?.trim()) {
     return false;
+  }
+
+  if (isMultiTimeframeAlertWorthy(decision, multiTimeframeSummary)) {
+    return true;
   }
 
   if (decision.status === "NO_EDGE" || decision.signalType === "NO_SIGNAL") {
@@ -371,6 +404,97 @@ export function shouldSendSignalAlert(decision: SignalDecision, telegramText?: s
     (decision.status === "WATCH" && decision.score >= 70) ||
     (decision.status === "AVOID" && decision.riskLevel === "HIGH")
   );
+}
+
+async function loadLatestSignalsByTimeframe(
+  database: PrismaClient,
+  assetId: string
+): Promise<Map<string, MultiTimeframeSignalInput>> {
+  const latestSignals = await Promise.all(
+    multiTimeframeIntervals.map((timeframe) =>
+      database.signal.findFirst({
+        where: {
+          assetId,
+          timeframe
+        },
+        orderBy: {
+          createdAt: "desc"
+        },
+        select: {
+          symbol: true,
+          timeframe: true,
+          status: true,
+          direction: true,
+          signalType: true,
+          score: true,
+          riskLevel: true,
+          riskScore: true,
+          createdAt: true
+        }
+      })
+    )
+  );
+
+  const latestSignalsByTimeframe = new Map<string, MultiTimeframeSignalInput>();
+
+  for (const signal of latestSignals) {
+    if (!signal) {
+      continue;
+    }
+
+    if (!latestSignalsByTimeframe.has(signal.timeframe)) {
+      latestSignalsByTimeframe.set(signal.timeframe, signal);
+    }
+  }
+
+  return latestSignalsByTimeframe;
+}
+
+function calculateSummaryWithCurrentSignal(
+  latestSignalsByTimeframe: Map<string, MultiTimeframeSignalInput>,
+  currentSignal: MultiTimeframeSignalInput
+): MultiTimeframeSummary {
+  return calculateMultiTimeframeSummary([...latestSignalsByTimeframe.values(), currentSignal]);
+}
+
+function toMultiTimeframeSignalInput(
+  decision: SignalDecision,
+  createdAt: Date | string
+): MultiTimeframeSignalInput {
+  return {
+    symbol: decision.symbol,
+    timeframe: decision.timeframe,
+    status: decision.status,
+    direction: decision.direction,
+    signalType: decision.signalType,
+    score: decision.score,
+    riskLevel: decision.riskLevel,
+    riskScore: decision.riskScore,
+    createdAt
+  };
+}
+
+function isMultiTimeframeAlertWorthy(
+  decision: SignalDecision,
+  summary?: MultiTimeframeSummary | null
+): boolean {
+  if (!summary) {
+    return false;
+  }
+
+  if (summary.alignment === "BULLISH_ALIGNED" && summary.alignmentScore >= 70) {
+    return true;
+  }
+
+  if (summary.alignment === "HIGHER_TIMEFRAME_CONFIRMATION" && summary.alignmentScore >= 65) {
+    return true;
+  }
+
+  if (summary.alignment === "CONFLICT" && decision.riskLevel === "HIGH") {
+    return true;
+  }
+
+  return summary.alignment === "BEARISH_ALIGNED" && decision.riskLevel === "HIGH";
 }
 
 function mapAssetType(assetType: AssetType): AssetClass {
