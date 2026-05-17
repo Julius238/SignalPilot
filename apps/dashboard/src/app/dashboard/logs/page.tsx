@@ -1,13 +1,21 @@
+import { AlertStatesTable } from "../../../components/alert-states-table";
 import { AlertsList } from "../../../components/alerts-list";
 import { ErrorState, EmptyState } from "../../../components/empty-state";
 import { formatDateTime, formatJson } from "../../../lib/format";
-import { fetchApi, type Alert, type BotLog, type BotRun } from "../../../lib/signalpilot-api";
+import {
+  fetchApi,
+  type Alert,
+  type AlertState,
+  type BotLog,
+  type BotRun
+} from "../../../lib/signalpilot-api";
 
 export default async function LogsPage() {
-  const [botRuns, botLogs, alerts] = await Promise.all([
+  const [botRuns, botLogs, alerts, alertStates] = await Promise.all([
     fetchApi<BotRun[]>("/bot-runs?limit=50"),
     fetchApi<BotLog[]>("/logs?limit=100"),
-    fetchApi<Alert[]>("/alerts?limit=50")
+    fetchApi<Alert[]>("/alerts?limit=50"),
+    fetchApi<AlertState[]>("/alerts/states?limit=100")
   ]);
 
   return (
@@ -20,6 +28,9 @@ export default async function LogsPage() {
       {botRuns.error ? <ErrorState title="Could not load bot runs" message={botRuns.error} /> : null}
       {botLogs.error ? <ErrorState title="Could not load logs" message={botLogs.error} /> : null}
       {alerts.error ? <ErrorState title="Could not load alerts" message={alerts.error} /> : null}
+      {alertStates.error ? (
+        <ErrorState title="Could not load alert states" message={alertStates.error} />
+      ) : null}
 
       <section className="grid two">
         <div className="card">
@@ -56,6 +67,11 @@ export default async function LogsPage() {
           <h2>Alerts</h2>
           <AlertsList alerts={alerts.data ?? []} />
         </div>
+      </section>
+
+      <section className="card" style={{ marginTop: 16 }}>
+        <h2>Alert States</h2>
+        <AlertStatesTable alertStates={alertStates.data ?? []} />
       </section>
 
       <section className="card" style={{ marginTop: 16 }}>

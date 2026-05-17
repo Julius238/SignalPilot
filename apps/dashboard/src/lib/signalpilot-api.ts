@@ -159,8 +159,30 @@ export type Alert = {
   } | null;
 };
 
+export type AlertState = {
+  id: string;
+  symbol: string;
+  assetId: string;
+  timeframe: string;
+  signalType: string;
+  status: SignalStatus;
+  direction: SignalDirection;
+  lastSignalId: string | null;
+  lastAlertId: string | null;
+  lastScore: number;
+  lastRiskLevel: RiskLevel;
+  lastAlignment: string | null;
+  lastAlignmentScore: number | null;
+  lastSentAt: string;
+  sendCount: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type PublicConfig = {
   alertMode: "ALL_ASSETS" | "WATCHLIST_ONLY" | "HIGH_PRIORITY_ONLY";
+  alertCooldownMinutes: number;
+  alertScoreImprovementThreshold: number;
   dashboardOrigin?: string;
   liveTradingEnabled: boolean;
   paperTradingOnly: boolean;

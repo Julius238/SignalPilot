@@ -6,6 +6,7 @@ import { AlertStatus, AssetType, BotRunStatus, WatchlistPriority } from "@signal
 import {
   analyzeCryptoSignals,
   shouldRouteAlertForAsset,
+  shouldSendAfterCooldown,
   shouldSendSignalAlert
 } from "../src/jobs/analyzeCryptoSignals.js";
 
@@ -38,6 +39,7 @@ describe("analyzeCryptoSignals", () => {
       data: { output: { create: { telegramText: string; dashboardJson: unknown } } };
     }> = [];
     const alertUpdates: Array<{ data: { status: AlertStatus; sentAt?: Date } }> = [];
+    const alertStateUpserts: unknown[] = [];
     const botLogs: Array<{ data: { message: string; metadataJson?: unknown } }> = [];
     const candles = createCandles(250);
     const database = {
@@ -65,6 +67,12 @@ describe("analyzeCryptoSignals", () => {
             id: `alert-${alertUpdates.length}`,
             ...operation.data
           };
+        }
+      },
+      alertState: {
+        findFirst: async () => null,
+        upsert: async (operation: unknown) => {
+          alertStateUpserts.push(operation);
         }
       },
       asset: {
@@ -131,6 +139,7 @@ describe("analyzeCryptoSignals", () => {
     assert.ok(
       alertUpdates.some((update) => update.data.status === AlertStatus.SENT)
     );
+    assert.equal(alertStateUpserts.length, 3);
     assert.ok(
       botLogs.some((log) => {
         const metadata = log.data.metadataJson;
@@ -260,6 +269,124 @@ describe("analyzeCryptoSignals", () => {
         }
       ),
       true
+    );
+  });
+
+  it("sends when there is no existing AlertState", () => {
+    assert.equal(
+      shouldSendAfterCooldown({
+        signal: createCooldownSignal(),
+        signalOutput: { telegramText: "BTCUSDT watch" },
+        existingAlertState: null,
+        now: new Date("2026-01-01T01:00:00.000Z"),
+        cooldownMinutes: 240,
+        scoreImprovementThreshold: 8,
+        allowStatusEscalation: true,
+        allowRiskEscalation: true
+      }).reason,
+      "NO_PREVIOUS_ALERT"
+    );
+  });
+
+  it("blocks while cooldown is active", () => {
+    const decision = shouldSendAfterCooldown({
+      signal: createCooldownSignal({ score: 72 }),
+      signalOutput: { telegramText: "BTCUSDT watch" },
+      existingAlertState: createExistingAlertState({ lastScore: 70 }),
+      now: new Date("2026-01-01T01:00:00.000Z"),
+      cooldownMinutes: 240,
+      scoreImprovementThreshold: 8,
+      allowStatusEscalation: true,
+      allowRiskEscalation: true
+    });
+
+    assert.equal(decision.shouldSend, false);
+    assert.equal(decision.reason, "COOLDOWN_ACTIVE");
+  });
+
+  it("sends when cooldown expired", () => {
+    assert.equal(
+      shouldSendAfterCooldown({
+        signal: createCooldownSignal(),
+        signalOutput: { telegramText: "BTCUSDT watch" },
+        existingAlertState: createExistingAlertState({
+          lastSentAt: new Date("2026-01-01T00:00:00.000Z")
+        }),
+        now: new Date("2026-01-01T04:00:00.000Z"),
+        cooldownMinutes: 240,
+        scoreImprovementThreshold: 8,
+        allowStatusEscalation: true,
+        allowRiskEscalation: true
+      }).reason,
+      "COOLDOWN_EXPIRED"
+    );
+  });
+
+  it("sends when score improves by the threshold", () => {
+    assert.equal(
+      shouldSendAfterCooldown({
+        signal: createCooldownSignal({ score: 78 }),
+        signalOutput: { telegramText: "BTCUSDT watch" },
+        existingAlertState: createExistingAlertState({ lastScore: 70 }),
+        now: new Date("2026-01-01T01:00:00.000Z"),
+        cooldownMinutes: 240,
+        scoreImprovementThreshold: 8,
+        allowStatusEscalation: true,
+        allowRiskEscalation: true
+      }).reason,
+      "SCORE_IMPROVED"
+    );
+  });
+
+  it("sends on status escalation from WATCH to STRONG_WATCH", () => {
+    assert.equal(
+      shouldSendAfterCooldown({
+        signal: createCooldownSignal({ status: "STRONG_WATCH" }),
+        signalOutput: { telegramText: "BTCUSDT watch" },
+        existingAlertState: createExistingAlertState({ status: "WATCH" }),
+        now: new Date("2026-01-01T01:00:00.000Z"),
+        cooldownMinutes: 240,
+        scoreImprovementThreshold: 8,
+        allowStatusEscalation: true,
+        allowRiskEscalation: true
+      }).reason,
+      "STATUS_ESCALATED"
+    );
+  });
+
+  it("sends on risk escalation from MEDIUM to HIGH", () => {
+    assert.equal(
+      shouldSendAfterCooldown({
+        signal: createCooldownSignal({ riskLevel: "HIGH" }),
+        signalOutput: { telegramText: "BTCUSDT watch" },
+        existingAlertState: createExistingAlertState({ lastRiskLevel: "MEDIUM" }),
+        now: new Date("2026-01-01T01:00:00.000Z"),
+        cooldownMinutes: 240,
+        scoreImprovementThreshold: 8,
+        allowStatusEscalation: true,
+        allowRiskEscalation: true
+      }).reason,
+      "RISK_ESCALATED"
+    );
+  });
+
+  it("sends when alignment score improves by at least 10", () => {
+    assert.equal(
+      shouldSendAfterCooldown({
+        signal: createCooldownSignal(),
+        signalOutput: { telegramText: "BTCUSDT watch" },
+        multiTimeframeSummary: {
+          alignment: "BULLISH_ALIGNED",
+          alignmentScore: 72
+        },
+        existingAlertState: createExistingAlertState({ lastAlignmentScore: 62 }),
+        now: new Date("2026-01-01T01:00:00.000Z"),
+        cooldownMinutes: 240,
+        scoreImprovementThreshold: 8,
+        allowStatusEscalation: true,
+        allowRiskEscalation: true
+      }).reason,
+      "ALIGNMENT_IMPROVED"
     );
   });
 
@@ -393,6 +520,34 @@ describe("analyzeCryptoSignals", () => {
     assert.equal(summary.sentAlertCount, 3);
     assert.equal(alertUpdates.filter((update) => update.data.status === AlertStatus.SENT).length, 3);
   });
+
+  it("increments cooldownSkippedAlertCount when cooldown blocks routed alerts", async () => {
+    process.env.N8N_WEBHOOK_SIGNAL_URL = "https://n8n.example.test/webhook";
+    globalThis.fetch = async () => new Response("ok", { status: 200 });
+
+    const botRunUpdates: Array<{ data: { metadataJson?: unknown } }> = [];
+    const alertUpdates: Array<{ data: { status: AlertStatus; sentAt?: Date } }> = [];
+    const database = createAnalyzeDatabase({
+      assetWatchlistItem: null,
+      botRunUpdates,
+      alertUpdates,
+      existingAlertState: createExistingAlertState({
+        lastScore: 95,
+        status: "STRONG_WATCH",
+        lastRiskLevel: "HIGH",
+        lastAlignmentScore: 95,
+        lastSentAt: new Date()
+      })
+    });
+
+    const summary = await analyzeCryptoSignals(database as never);
+    const metadata = botRunUpdates.at(-1)?.data.metadataJson as Record<string, unknown>;
+
+    assert.equal(summary.cooldownSkippedAlertCount, 3);
+    assert.equal(summary.sentAlertCount, 0);
+    assert.equal(alertUpdates.length, 0);
+    assert.equal(metadata.cooldownSkippedAlertCount, 3);
+  });
 });
 
 function assertDashboardJsonHasMultiTimeframeSummary(dashboardJson: unknown) {
@@ -424,10 +579,12 @@ function createAnalyzeDatabase(input: {
   assetWatchlistItem: { alertEnabled: boolean; priority: WatchlistPriority } | null;
   alertUpdates?: Array<{ data: { status: AlertStatus; sentAt?: Date } }>;
   botRunUpdates?: Array<{ data: { metadataJson?: unknown } }>;
+  existingAlertState?: ReturnType<typeof createExistingAlertState> | null;
 }) {
   const candles = createCandles(250);
   const alertUpdates = input.alertUpdates ?? [];
   const botRunUpdates = input.botRunUpdates ?? [];
+  const alertStateUpserts: unknown[] = [];
   const createdSignals: Array<{
     data: {
       symbol: string;
@@ -467,6 +624,12 @@ function createAnalyzeDatabase(input: {
           id: `alert-${alertUpdates.length}`,
           ...operation.data
         };
+      }
+    },
+    alertState: {
+      findFirst: async () => input.existingAlertState ?? null,
+      upsert: async (operation: unknown) => {
+        alertStateUpserts.push(operation);
       }
     },
     asset: {
@@ -516,4 +679,45 @@ function createAnalyzeDatabase(input: {
       }
     }
   };
+}
+
+function createCooldownSignal(overrides: Partial<ReturnType<typeof createBaseCooldownSignal>> = {}) {
+  return {
+    ...createBaseCooldownSignal(),
+    ...overrides
+  };
+}
+
+function createBaseCooldownSignal() {
+  return {
+    id: "signal-1",
+    assetId: "asset-1",
+    symbol: "BTCUSDT",
+    timeframe: "1h",
+    signalType: "TREND_ALERT",
+    status: "WATCH",
+    direction: "BULLISH",
+    score: 72,
+    riskLevel: "MEDIUM"
+  } as const;
+}
+
+function createExistingAlertState(
+  overrides: Partial<ReturnType<typeof createBaseExistingAlertState>> = {}
+) {
+  return {
+    ...createBaseExistingAlertState(),
+    ...overrides
+  };
+}
+
+function createBaseExistingAlertState() {
+  return {
+    status: "WATCH",
+    lastScore: 72,
+    lastRiskLevel: "MEDIUM",
+    lastAlignment: "MIXED",
+    lastAlignmentScore: 60,
+    lastSentAt: new Date("2026-01-01T00:00:00.000Z")
+  } as const;
 }

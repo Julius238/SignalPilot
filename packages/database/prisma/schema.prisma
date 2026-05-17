@@ -262,6 +262,31 @@ model Alert {
   @@index([createdAt])
 }
 
+model AlertState {
+  id                 String          @id @default(cuid())
+  symbol             String
+  assetId            String
+  timeframe          String
+  signalType         SignalType
+  status             SignalStatus
+  direction          SignalDirection
+  lastSignalId       String?
+  lastAlertId        String?
+  lastScore          Float
+  lastRiskLevel      RiskLevel
+  lastAlignment      String?
+  lastAlignmentScore Float?
+  lastSentAt         DateTime
+  sendCount          Int             @default(1)
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+
+  @@unique([assetId, timeframe, signalType, status])
+  @@index([symbol])
+  @@index([lastSentAt])
+  @@index([status])
+}
+
 model PaperAccount {
   id              String          @id @default(cuid())
   name            String

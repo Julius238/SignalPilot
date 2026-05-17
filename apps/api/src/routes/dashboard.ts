@@ -63,6 +63,11 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
 
     return {
       alertMode: parsePublicAlertMode(process.env.ALERT_MODE),
+      alertCooldownMinutes: parsePositiveNumberEnv(process.env.ALERT_COOLDOWN_MINUTES, 240),
+      alertScoreImprovementThreshold: parsePositiveNumberEnv(
+        process.env.ALERT_SCORE_IMPROVEMENT_THRESHOLD,
+        8
+      ),
       dashboardOrigin: process.env.DASHBOARD_ORIGIN,
       liveTradingEnabled,
       paperTradingOnly: !liveTradingEnabled
@@ -696,6 +701,27 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
       }
     });
   });
+
+  server.get("/alerts/states", async (request, reply) => {
+    const query = asQueryRecord(request.query);
+    const status = parseEnum(query.status, signalStatuses as SignalStatus[], "status", reply);
+    const limit = parseLimit(query.limit, 100, 500, reply);
+
+    if (reply.sent) {
+      return reply;
+    }
+
+    return database.alertState.findMany({
+      where: {
+        symbol: parseOptionalString(query.symbol)?.toUpperCase(),
+        status
+      },
+      orderBy: {
+        lastSentAt: "desc"
+      },
+      take: limit
+    });
+  });
 }
 
 function parsePublicAlertMode(value: string | undefined) {
@@ -708,6 +734,15 @@ function parsePublicAlertMode(value: string | undefined) {
   return publicAlertModes.includes(normalized as (typeof publicAlertModes)[number])
     ? normalized
     : "ALL_ASSETS";
+}
+
+function parsePositiveNumberEnv(value: string | undefined, defaultValue: number) {
+  if (value === undefined || value.trim() === "") {
+    return defaultValue;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : defaultValue;
 }
 
 const alertWorthyWhere = {

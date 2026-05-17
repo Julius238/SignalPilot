@@ -149,12 +149,30 @@ describe("watchlist routes", () => {
     const body = response.json();
     assert.deepEqual(body, {
       alertMode: "HIGH_PRIORITY_ONLY",
+      alertCooldownMinutes: 240,
+      alertScoreImprovementThreshold: 8,
       dashboardOrigin: "http://localhost:3000",
       liveTradingEnabled: false,
       paperTradingOnly: true
     });
     assert.equal(JSON.stringify(body).includes("secret"), false);
     assert.equal("N8N_WEBHOOK_SIGNAL_URL" in body, false);
+
+    await server.close();
+  });
+
+  it("returns alert states ordered by lastSentAt", async () => {
+    const { server, state } = await createServerWithState();
+    state.alertStates.push(createAlertState({ symbol: "ETHUSDT", lastSentAt: new Date("2026-01-01T00:00:00.000Z") }));
+    state.alertStates.push(createAlertState({ symbol: "BTCUSDT", lastSentAt: new Date("2026-01-02T00:00:00.000Z") }));
+
+    const response = await server.inject("/alerts/states?limit=100");
+
+    assert.equal(response.statusCode, 200);
+    const body = response.json();
+    assert.equal(body.length, 2);
+    assert.equal(body[0].symbol, "BTCUSDT");
+    assert.equal(body[1].symbol, "ETHUSDT");
 
     await server.close();
   });
@@ -169,6 +187,7 @@ async function createServerWithState() {
   const state = {
     assets: [createAsset()],
     watchlistItems: [] as ReturnType<typeof createWatchlistItem>[],
+    alertStates: [] as ReturnType<typeof createAlertState>[],
     signalFindManyWhere: [] as unknown[]
   };
   const server = Fastify({ logger: false });
@@ -182,6 +201,7 @@ async function createServerWithState() {
 function createDatabase(state: {
   assets: ReturnType<typeof createAsset>[];
   watchlistItems: ReturnType<typeof createWatchlistItem>[];
+  alertStates: ReturnType<typeof createAlertState>[];
   signalFindManyWhere: unknown[];
 }) {
   return {
@@ -261,6 +281,14 @@ function createDatabase(state: {
     alert: {
       count: async () => 0
     },
+    alertState: {
+      findMany: async ({ where, take }: { where: { symbol?: string; status?: SignalStatus }; take: number }) =>
+        state.alertStates
+          .filter((alertState) => !where.symbol || alertState.symbol === where.symbol)
+          .filter((alertState) => !where.status || alertState.status === where.status)
+          .sort((left, right) => right.lastSentAt.getTime() - left.lastSentAt.getTime())
+          .slice(0, take)
+    },
     botRun: {
       findFirst: async () => null
     }
@@ -328,6 +356,35 @@ function createSignal() {
       marketConfirmationJson: {},
       createdAt: new Date("2026-01-01T00:00:00.000Z")
     }
+  };
+}
+
+function createAlertState(overrides: Partial<ReturnType<typeof createBaseAlertState>> = {}) {
+  return {
+    ...createBaseAlertState(),
+    ...overrides
+  };
+}
+
+function createBaseAlertState() {
+  return {
+    id: "alert-state-1",
+    symbol: "BTCUSDT",
+    assetId: "asset-1",
+    timeframe: "1h",
+    signalType: SignalType.TREND_ALERT,
+    status: SignalStatus.WATCH,
+    direction: SignalDirection.BULLISH,
+    lastSignalId: "signal-1",
+    lastAlertId: "alert-1",
+    lastScore: 72,
+    lastRiskLevel: RiskLevel.MEDIUM,
+    lastAlignment: "MIXED",
+    lastAlignmentScore: 60,
+    lastSentAt: new Date("2026-01-01T00:00:00.000Z"),
+    sendCount: 1,
+    createdAt: new Date("2026-01-01T00:00:00.000Z"),
+    updatedAt: new Date("2026-01-01T00:00:00.000Z")
   };
 }
 
