@@ -28,8 +28,22 @@ const botRunStatuses = Object.values(BotRunStatus);
 const alertStatuses = Object.values(AlertStatus);
 const alertChannels = Object.values(AlertChannel);
 const multiTimeframes = ["1h", "4h", "1d"] as const;
+const multiTimeframeAlignments = [
+  "BULLISH_ALIGNED",
+  "BEARISH_ALIGNED",
+  "MIXED",
+  "SHORT_TERM_ONLY",
+  "HIGHER_TIMEFRAME_CONFIRMATION",
+  "CONFLICT",
+  "NO_EDGE"
+] as const;
 type SignalListItem = ReturnType<typeof toSignalListItem>;
 type SignalRecord = Prisma.SignalGetPayload<Record<string, never>>;
+type MultiTimeframeScannerRow = {
+  asset: Prisma.AssetGetPayload<{ select: typeof assetSelect }>;
+  latestSignalsByTimeframe: Partial<Record<(typeof multiTimeframes)[number], ReturnType<typeof toCompactSignal>>>;
+  multiTimeframeSummary: MultiTimeframeSummary;
+};
 
 export async function registerDashboardRoutes(server: FastifyInstance) {
   server.get("/assets", async (request, reply) => {
@@ -61,6 +75,8 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
     const { symbol } = request.params as { symbol: string };
     const query = asQueryRecord(request.query);
     const includeCandles = parseBoolean(query.includeCandles, "includeCandles", reply) ?? false;
+    const includeMultiTimeframe =
+      parseBoolean(query.includeMultiTimeframe, "includeMultiTimeframe", reply) ?? true;
     const candleLimit = parseLimit(query.candleLimit, 250, 500, reply);
 
     if (reply.sent) {
@@ -90,7 +106,7 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
           output: true
         }
       }),
-      findLatestMultiTimeframeSignalsForAsset(asset.id),
+      includeMultiTimeframe ? findLatestMultiTimeframeSignalsForAsset(asset.id) : Promise.resolve([]),
       prisma.candle.groupBy({
         by: ["timeframe"],
         where: {
@@ -122,7 +138,7 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
       latestSignal: latestSignal ? toSignalSummary(latestSignal) : null,
       latestSignalOutput: latestSignal?.output ? toSignalOutput(latestSignal.output, true) : null,
       multiTimeframeSummary:
-        multiTimeframeSignals.length > 0
+        includeMultiTimeframe && multiTimeframeSignals.length > 0
           ? calculateMultiTimeframeSummary(multiTimeframeSignals.map(toMultiTimeframeSignalInput))
           : null,
       candleCounts: Object.fromEntries(
@@ -281,11 +297,47 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
           (summary) => summary.alignment === "BEARISH_ALIGNED"
         ).length,
         conflictCount: multiTimeframeSummaryValues.filter((summary) => summary.alignment === "CONFLICT")
+          .length,
+        noEdgeCount: multiTimeframeSummaryValues.filter((summary) => summary.alignment === "NO_EDGE")
           .length
       },
       groups,
       multiTimeframeSummaries
     };
+  });
+
+  server.get("/scanner/multi-timeframe", async (request, reply) => {
+    const query = asQueryRecord(request.query);
+    const assetType = parseEnum(query.assetType, assetTypes as AssetType[], "assetType", reply);
+    const alignment = parseEnum(
+      query.alignment,
+      multiTimeframeAlignments,
+      "alignment",
+      reply
+    );
+    const limit = parseLimit(query.limit, 100, 500, reply);
+
+    if (reply.sent) {
+      return reply;
+    }
+
+    const assets = await prisma.asset.findMany({
+      where: {
+        assetType,
+        isActive: true
+      },
+      orderBy: {
+        symbol: "asc"
+      },
+      take: 500,
+      select: assetSelect
+    });
+    const rows = await buildMultiTimeframeScannerRows(assets);
+    const filteredRows = alignment
+      ? rows.filter((row) => row.multiTimeframeSummary.alignment === alignment)
+      : rows;
+
+    return filteredRows.slice(0, limit);
   });
 
   server.get("/signals/:id", async (request, reply) => {
@@ -491,10 +543,62 @@ async function findLatestMultiTimeframeSignalsForAsset(assetId: string) {
     },
     orderBy: {
       createdAt: "desc"
-    }
+    },
+    distinct: ["assetId", "timeframe"]
   });
 
   return selectLatestMultiTimeframeSignals(signals);
+}
+
+async function buildMultiTimeframeScannerRows(
+  assets: Prisma.AssetGetPayload<{ select: typeof assetSelect }>[]
+): Promise<MultiTimeframeScannerRow[]> {
+  if (assets.length === 0) {
+    return [];
+  }
+
+  const assetIds = assets.map((asset) => asset.id);
+  const signals = await prisma.signal.findMany({
+    where: {
+      assetId: {
+        in: assetIds
+      },
+      timeframe: {
+        in: [...multiTimeframes]
+      }
+    },
+    orderBy: {
+      createdAt: "desc"
+    },
+    distinct: ["assetId", "timeframe"]
+  });
+  const latestSignalsByAsset = new Map<string, SignalRecord[]>();
+
+  for (const signal of selectLatestMultiTimeframeSignalsByAsset(signals)) {
+    const assetSignals = latestSignalsByAsset.get(signal.assetId) ?? [];
+    assetSignals.push(signal);
+    latestSignalsByAsset.set(signal.assetId, assetSignals);
+  }
+
+  return assets.flatMap((asset) => {
+    const assetSignals = latestSignalsByAsset.get(asset.id) ?? [];
+
+    if (assetSignals.length === 0) {
+      return [];
+    }
+
+    return [
+      {
+        asset,
+        latestSignalsByTimeframe: Object.fromEntries(
+          assetSignals.map((signal) => [signal.timeframe, toCompactSignal(signal)])
+        ),
+        multiTimeframeSummary: calculateMultiTimeframeSummary(
+          assetSignals.map(toMultiTimeframeSignalInput)
+        )
+      }
+    ];
+  });
 }
 
 async function buildScannerMultiTimeframeSummaries(
@@ -555,6 +659,22 @@ function selectLatestMultiTimeframeSignalsBySymbol<T extends { symbol: string; t
 
   for (const signal of signals) {
     const key = `${signal.symbol}:${signal.timeframe}`;
+    const current = latest.get(key);
+    if (!current || signal.createdAt > current.createdAt) {
+      latest.set(key, signal);
+    }
+  }
+
+  return [...latest.values()];
+}
+
+function selectLatestMultiTimeframeSignalsByAsset<T extends { assetId: string; timeframe: string; createdAt: Date }>(
+  signals: T[]
+) {
+  const latest = new Map<string, T>();
+
+  for (const signal of signals) {
+    const key = `${signal.assetId}:${signal.timeframe}`;
     const current = latest.get(key);
     if (!current || signal.createdAt > current.createdAt) {
       latest.set(key, signal);
@@ -668,6 +788,22 @@ function toSignalSummary(
     include: { output: true };
   }>
 ) {
+  return {
+    id: signal.id,
+    assetId: signal.assetId,
+    symbol: signal.symbol,
+    timeframe: signal.timeframe,
+    signalType: signal.signalType,
+    status: signal.status,
+    direction: signal.direction,
+    score: signal.score,
+    riskLevel: signal.riskLevel,
+    riskScore: signal.riskScore,
+    createdAt: signal.createdAt
+  };
+}
+
+function toCompactSignal(signal: SignalRecord) {
   return {
     id: signal.id,
     assetId: signal.assetId,

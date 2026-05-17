@@ -174,9 +174,18 @@ export type ScannerResponse = {
     bullishAlignedCount: number;
     bearishAlignedCount: number;
     conflictCount: number;
+    noEdgeCount: number;
   };
   groups: Record<ScannerGroupKey, SignalListItem[]>;
   multiTimeframeSummaries: Record<string, MultiTimeframeSummary>;
+};
+
+export type MultiTimeframeScannerItem = {
+  asset: Asset;
+  latestSignalsByTimeframe: Partial<
+    Record<string, Omit<SignalListItem, "asset" | "signalOutput">>
+  >;
+  multiTimeframeSummary: MultiTimeframeSummary;
 };
 
 export type ApiResult<T> =

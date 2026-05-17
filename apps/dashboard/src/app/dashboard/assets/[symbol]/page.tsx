@@ -108,6 +108,10 @@ export default async function AssetDetailPage({ params }: AssetDetailPageProps) 
             </div>
             <div className="multi-timeframe-lists">
               <div>
+                <span className="metric-label">Primary</span>
+                <strong>{data.multiTimeframeSummary.primaryTimeframe ?? "-"}</strong>
+              </div>
+              <div>
                 <span className="metric-label">Confirming</span>
                 <strong>{formatTimeframes(data.multiTimeframeSummary.confirmingTimeframes)}</strong>
               </div>
@@ -115,6 +119,16 @@ export default async function AssetDetailPage({ params }: AssetDetailPageProps) 
                 <span className="metric-label">Conflicting</span>
                 <strong>{formatTimeframes(data.multiTimeframeSummary.conflictingTimeframes)}</strong>
               </div>
+            </div>
+            <div className="multi-timeframe-lists">
+              <SignalSnapshot
+                label="Strongest"
+                signal={data.multiTimeframeSummary.strongestSignal}
+              />
+              <SignalSnapshot
+                label="Weakest"
+                signal={data.multiTimeframeSummary.weakestSignal}
+              />
             </div>
             <p>{data.multiTimeframeSummary.summary}</p>
             <p>{data.multiTimeframeSummary.riskNote}</p>
@@ -164,4 +178,19 @@ export default async function AssetDetailPage({ params }: AssetDetailPageProps) 
 
 function formatTimeframes(timeframes: string[]) {
   return timeframes.length > 0 ? timeframes.join(", ") : "-";
+}
+
+function SignalSnapshot({
+  label,
+  signal
+}: {
+  label: string;
+  signal: NonNullable<AssetDetail["multiTimeframeSummary"]>["strongestSignal"];
+}) {
+  return (
+    <div>
+      <span className="metric-label">{label}</span>
+      <strong>{signal ? `${signal.timeframe} · ${signal.status} · ${formatScore(signal.score)}` : "-"}</strong>
+    </div>
+  );
 }

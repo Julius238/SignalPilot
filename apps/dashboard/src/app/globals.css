@@ -109,6 +109,19 @@ select {
   white-space: nowrap;
 }
 
+.page-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.secondary-link {
+  background: var(--panel-soft);
+  border: 1px solid var(--line);
+  color: var(--text);
+}
+
 .grid {
   display: grid;
   gap: 16px;
@@ -317,6 +330,10 @@ td a {
 
 .scanner-filter-bar {
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+.multi-timeframe-filter-bar {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 }
 
 .check-filter {
@@ -545,6 +562,10 @@ td a {
 .multi-timeframe-content p {
   line-height: 1.5;
   margin: 0;
+}
+
+.multi-timeframe-table-wrap {
+  margin-top: 16px;
 }
 
 .score-grid {

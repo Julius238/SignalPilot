@@ -97,6 +97,8 @@ Dashboard API examples:
 curl "http://localhost:3100/signals?limit=10"
 curl "http://localhost:3100/scanner?assetType=CRYPTO&timeframe=1h&showOnlyAlertWorthy=true"
 curl http://localhost:3100/assets/BTCUSDT
+curl "http://localhost:3100/assets/BTCUSDT?includeMultiTimeframe=true"
+curl "http://localhost:3100/scanner/multi-timeframe?assetType=CRYPTO&limit=100"
 ```
 
 ## Dashboard
@@ -118,3 +120,8 @@ Dashboard signal and asset detail pages render candlestick charts with TradingVi
 The scanner page at `/dashboard/scanner` groups current signals into Strong Watch, Watchlist,
 Volume Spikes, Breakouts, High Risk / Avoid, and No Edge / Low Priority with filters for asset
 type, timeframe, minimum score, and alert-worthy signals.
+
+The multi-timeframe page at `/dashboard/multi-timeframe` shows one row per active asset with
+the latest `1h`, `4h`, and `1d` signal alignment, risk level, primary timeframe, confirming
+and conflicting timeframes, summary, and next focus. It supports URL filters for asset type
+and alignment and links each row to the asset detail page.

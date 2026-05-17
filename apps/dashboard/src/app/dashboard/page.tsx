@@ -38,9 +38,14 @@ export default async function DashboardPage() {
           <h1>Market Intelligence Overview</h1>
           <p>Technical crypto signal pipeline, alerts, assets and operational status.</p>
         </div>
-        <Link className="primary-link" href="/dashboard/scanner">
-          Open Scanner
-        </Link>
+        <div className="page-actions">
+          <Link className="primary-link" href="/dashboard/scanner">
+            Open Scanner
+          </Link>
+          <Link className="primary-link secondary-link" href="/dashboard/multi-timeframe">
+            Multi-Timeframe
+          </Link>
+        </div>
       </div>
 
       {errors.length > 0 ? (
@@ -77,6 +82,10 @@ export default async function DashboardPage() {
         <div className="card">
           <span className="metric-label">Conflicts</span>
           <span className="metric-value">{scanner.data?.summary.conflictCount ?? 0}</span>
+        </div>
+        <div className="card">
+          <span className="metric-label">No Edge</span>
+          <span className="metric-value">{scanner.data?.summary.noEdgeCount ?? 0}</span>
         </div>
       </section>
 

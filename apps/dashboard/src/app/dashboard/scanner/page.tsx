@@ -64,6 +64,22 @@ export default async function ScannerPage({ searchParams }: ScannerPageProps) {
             {formatDateTime(summary?.lastPipelineRunAt)}
           </span>
         </div>
+        <div className="card">
+          <span className="metric-label">Bullish Aligned</span>
+          <span className="metric-value">{summary?.bullishAlignedCount ?? 0}</span>
+        </div>
+        <div className="card">
+          <span className="metric-label">Bearish Aligned</span>
+          <span className="metric-value">{summary?.bearishAlignedCount ?? 0}</span>
+        </div>
+        <div className="card">
+          <span className="metric-label">Conflicts</span>
+          <span className="metric-value">{summary?.conflictCount ?? 0}</span>
+        </div>
+        <div className="card">
+          <span className="metric-label">No Edge</span>
+          <span className="metric-value">{summary?.noEdgeCount ?? 0}</span>
+        </div>
       </section>
 
       {scanner.data ? (
