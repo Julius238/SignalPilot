@@ -3,6 +3,8 @@ import {
   AlertStatus,
   AssetType,
   BotRunStatus,
+  PaperEvaluationOutcome,
+  PaperEvaluationStatus,
   Prisma,
   RiskLevel,
   prisma,
@@ -29,6 +31,8 @@ const watchlistPriorities = Object.values(WatchlistPriority);
 const botRunStatuses = Object.values(BotRunStatus);
 const alertStatuses = Object.values(AlertStatus);
 const alertChannels = Object.values(AlertChannel);
+const paperEvaluationStatuses = Object.values(PaperEvaluationStatus);
+const paperEvaluationOutcomes = Object.values(PaperEvaluationOutcome);
 const publicAlertModes = ["ALL_ASSETS", "WATCHLIST_ONLY", "HIGH_PRIORITY_ONLY"] as const;
 const multiTimeframes = ["1h", "4h", "1d"] as const;
 const multiTimeframeAlignments = [
@@ -394,7 +398,8 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
         asset: {
           select: assetSelect
         },
-        output: true
+        output: true,
+        paperEvaluation: true
       }
     });
 
@@ -576,12 +581,146 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
       },
       take: 250
     });
+    const paperEvaluation = (
+      signal as typeof signal & {
+        paperEvaluation?: Prisma.PaperSignalEvaluationGetPayload<Record<string, never>> | null;
+      }
+    ).paperEvaluation;
 
     return {
       signal: toSignalDetail(signal),
       asset: signal.asset,
       signalOutput: signal.output ? toSignalOutput(signal.output, true) : null,
+      paperEvaluation: paperEvaluation ? toPaperEvaluation(paperEvaluation) : null,
       candles: candles.reverse().map(toCandle)
+    };
+  });
+
+  server.get("/paper/evaluations", async (request, reply) => {
+    const query = asQueryRecord(request.query);
+    const evaluationStatus = parseEnum(
+      query.status,
+      paperEvaluationStatuses as PaperEvaluationStatus[],
+      "status",
+      reply
+    );
+    const outcome = parseEnum(
+      query.outcome,
+      paperEvaluationOutcomes as PaperEvaluationOutcome[],
+      "outcome",
+      reply
+    );
+    const signalStatus = parseEnum(
+      query.signalStatus,
+      signalStatuses as SignalStatus[],
+      "signalStatus",
+      reply
+    );
+    const signalType = parseEnum(query.signalType, signalTypes as SignalType[], "signalType", reply);
+    const limit = parseLimit(query.limit, 100, 500, reply);
+
+    if (reply.sent) {
+      return reply;
+    }
+
+    const evaluations = await database.paperSignalEvaluation.findMany({
+      where: {
+        symbol: parseOptionalString(query.symbol)?.toUpperCase(),
+        evaluationStatus,
+        outcome,
+        status: signalStatus,
+        signalType
+      },
+      orderBy: {
+        openedAt: "desc"
+      },
+      take: limit,
+      include: {
+        signal: {
+          select: {
+            id: true,
+            assetId: true
+          }
+        }
+      }
+    });
+
+    return evaluations.map(toPaperEvaluation);
+  });
+
+  server.get("/paper/evaluations/:id", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const evaluation = await database.paperSignalEvaluation.findUnique({
+      where: {
+        id
+      },
+      include: {
+        signal: {
+          include: {
+            asset: {
+              select: assetSelect
+            },
+            output: true
+          }
+        }
+      }
+    });
+
+    if (!evaluation) {
+      return notFound(reply, "Paper Evaluation not found");
+    }
+
+    return {
+      evaluation: toPaperEvaluation(evaluation),
+      signal: evaluation.signal ? toSignalSummary(evaluation.signal) : null,
+      signalOutput: evaluation.signal?.output ? toSignalOutput(evaluation.signal.output, false) : null,
+      asset: evaluation.signal?.asset ?? null
+    };
+  });
+
+  server.get("/paper/stats", async () => {
+    const evaluations = await database.paperSignalEvaluation.findMany();
+    const evaluated = evaluations.filter(
+      (evaluation) => evaluation.evaluationStatus === PaperEvaluationStatus.EVALUATED
+    );
+    const positiveCount = evaluations.filter(
+      (evaluation) => evaluation.outcome === PaperEvaluationOutcome.POSITIVE
+    ).length;
+    const targetReachedCount = evaluations.filter(
+      (evaluation) => evaluation.outcome === PaperEvaluationOutcome.TARGET_REACHED
+    ).length;
+    const negativeCount = evaluations.filter(
+      (evaluation) => evaluation.outcome === PaperEvaluationOutcome.NEGATIVE
+    ).length;
+    const neutralCount = evaluations.filter(
+      (evaluation) => evaluation.outcome === PaperEvaluationOutcome.NEUTRAL
+    ).length;
+    const invalidatedCount = evaluations.filter(
+      (evaluation) => evaluation.outcome === PaperEvaluationOutcome.INVALIDATED
+    ).length;
+
+    return {
+      totalEvaluations: evaluations.length,
+      openCount: evaluations.filter((evaluation) => evaluation.evaluationStatus === PaperEvaluationStatus.OPEN)
+        .length,
+      evaluatedCount: evaluated.length,
+      positiveCount,
+      negativeCount,
+      neutralCount,
+      targetReachedCount,
+      invalidatedCount,
+      winRate:
+        evaluated.length === 0
+          ? 0
+          : ((positiveCount + targetReachedCount) / evaluated.length) * 100,
+      avgReturnAfter1h: average(evaluations.map((evaluation) => evaluation.returnAfter1h)),
+      avgReturnAfter4h: average(evaluations.map((evaluation) => evaluation.returnAfter4h)),
+      avgReturnAfter1d: average(evaluations.map((evaluation) => evaluation.returnAfter1d)),
+      avgMaxFavorableMove: average(evaluations.map((evaluation) => evaluation.maxFavorableMove)),
+      avgMaxAdverseMove: average(evaluations.map((evaluation) => evaluation.maxAdverseMove)),
+      groupedBySignalStatus: groupCount(evaluations, (evaluation) => evaluation.status),
+      groupedBySignalType: groupCount(evaluations, (evaluation) => evaluation.signalType),
+      groupedByTimeframe: groupCount(evaluations, (evaluation) => evaluation.timeframe)
     };
   });
 
@@ -1203,6 +1342,61 @@ function toCandle(candle: Prisma.CandleGetPayload<Record<string, never>>) {
     source: candle.source,
     createdAt: candle.createdAt
   };
+}
+
+function toPaperEvaluation(
+  evaluation: Prisma.PaperSignalEvaluationGetPayload<Record<string, never>>
+) {
+  return {
+    id: evaluation.id,
+    signalId: evaluation.signalId,
+    assetId: evaluation.assetId,
+    symbol: evaluation.symbol,
+    timeframe: evaluation.timeframe,
+    direction: evaluation.direction,
+    status: evaluation.status,
+    signalType: evaluation.signalType,
+    score: evaluation.score,
+    riskLevel: evaluation.riskLevel,
+    entryPrice: evaluation.entryPrice.toString(),
+    invalidationPrice: evaluation.invalidationPrice?.toString() ?? null,
+    targetPrice: evaluation.targetPrice?.toString() ?? null,
+    evaluationStatus: evaluation.evaluationStatus,
+    openedAt: evaluation.openedAt,
+    evaluatedAt: evaluation.evaluatedAt,
+    priceAfter1h: evaluation.priceAfter1h?.toString() ?? null,
+    priceAfter4h: evaluation.priceAfter4h?.toString() ?? null,
+    priceAfter1d: evaluation.priceAfter1d?.toString() ?? null,
+    priceAfter3d: evaluation.priceAfter3d?.toString() ?? null,
+    returnAfter1h: evaluation.returnAfter1h,
+    returnAfter4h: evaluation.returnAfter4h,
+    returnAfter1d: evaluation.returnAfter1d,
+    returnAfter3d: evaluation.returnAfter3d,
+    maxFavorableMove: evaluation.maxFavorableMove,
+    maxAdverseMove: evaluation.maxAdverseMove,
+    outcome: evaluation.outcome,
+    notes: evaluation.notes,
+    createdAt: evaluation.createdAt,
+    updatedAt: evaluation.updatedAt
+  };
+}
+
+function average(values: Array<number | null>) {
+  const activeValues = values.filter((value): value is number => typeof value === "number");
+
+  if (activeValues.length === 0) {
+    return 0;
+  }
+
+  return activeValues.reduce((sum, value) => sum + value, 0) / activeValues.length;
+}
+
+function groupCount<T>(items: T[], getKey: (item: T) => string) {
+  return items.reduce<Record<string, number>>((groups, item) => {
+    const key = getKey(item);
+    groups[key] = (groups[key] ?? 0) + 1;
+    return groups;
+  }, {});
 }
 
 function asQueryRecord(query: unknown): QueryRecord {

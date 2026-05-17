@@ -87,6 +87,21 @@ enum PaperPositionStatus {
   CLOSED
 }
 
+enum PaperEvaluationStatus {
+  OPEN
+  EVALUATED
+  EXPIRED
+  SKIPPED
+}
+
+enum PaperEvaluationOutcome {
+  POSITIVE
+  NEGATIVE
+  NEUTRAL
+  INVALIDATED
+  TARGET_REACHED
+}
+
 model Asset {
   id            String          @id @default(cuid())
   symbol        String
@@ -171,6 +186,7 @@ model Signal {
   output          SignalOutput?
   alerts          Alert[]
   paperOrders     PaperOrder[]
+  paperEvaluation PaperSignalEvaluation?
 
   @@index([assetId, timeframe, createdAt])
   @@index([symbol, createdAt])
@@ -285,6 +301,47 @@ model AlertState {
   @@index([symbol])
   @@index([lastSentAt])
   @@index([status])
+}
+
+model PaperSignalEvaluation {
+  id                  String                  @id @default(cuid())
+  signalId            String                  @unique
+  signal              Signal                  @relation(fields: [signalId], references: [id], onDelete: Cascade)
+  assetId             String
+  symbol              String
+  timeframe           String
+  direction           SignalDirection
+  status              SignalStatus
+  signalType          SignalType
+  score               Float
+  riskLevel           RiskLevel
+  entryPrice          Decimal                 @db.Decimal(30, 12)
+  invalidationPrice   Decimal?                @db.Decimal(30, 12)
+  targetPrice         Decimal?                @db.Decimal(30, 12)
+  evaluationStatus    PaperEvaluationStatus   @default(OPEN)
+  openedAt            DateTime                @default(now())
+  evaluatedAt         DateTime?
+  priceAfter1h        Decimal?                @db.Decimal(30, 12)
+  priceAfter4h        Decimal?                @db.Decimal(30, 12)
+  priceAfter1d        Decimal?                @db.Decimal(30, 12)
+  priceAfter3d        Decimal?                @db.Decimal(30, 12)
+  returnAfter1h       Float?
+  returnAfter4h       Float?
+  returnAfter1d       Float?
+  returnAfter3d       Float?
+  maxFavorableMove    Float?
+  maxAdverseMove      Float?
+  outcome             PaperEvaluationOutcome?
+  notes               String?
+  createdAt           DateTime                @default(now())
+  updatedAt           DateTime                @updatedAt
+
+  @@index([symbol])
+  @@index([timeframe])
+  @@index([status])
+  @@index([signalType])
+  @@index([evaluationStatus])
+  @@index([openedAt])
 }
 
 model PaperAccount {

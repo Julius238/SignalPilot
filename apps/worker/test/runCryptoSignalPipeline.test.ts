@@ -1,11 +1,21 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { afterEach, describe, it } from "node:test";
 
 import { BotRunStatus } from "@signalpilot/database";
 
 import { runCryptoSignalPipeline } from "../src/jobs/runCryptoSignalPipeline.js";
 
 describe("runCryptoSignalPipeline", () => {
+  const originalEnablePaperEvaluation = process.env.ENABLE_PAPER_EVALUATION;
+
+  afterEach(() => {
+    if (originalEnablePaperEvaluation === undefined) {
+      delete process.env.ENABLE_PAPER_EVALUATION;
+    } else {
+      process.env.ENABLE_PAPER_EVALUATION = originalEnablePaperEvaluation;
+    }
+  });
+
   it("runs candle fetch before signal analysis and stores a pipeline summary", async () => {
     const calls: string[] = [];
     const botRunUpdates: Array<{ data: { status: BotRunStatus; metadataJson?: unknown } }> = [];
@@ -34,13 +44,39 @@ describe("runCryptoSignalPipeline", () => {
           alertErrorCount: 0,
           errorCount: 0
         };
+      },
+      createPaperEvaluationsForSignals: async () => {
+        calls.push("create-paper");
+        return {
+          status: BotRunStatus.SUCCESS,
+          scannedSignalCount: 2,
+          createdEvaluationCount: 2,
+          skippedSignalCount: 0,
+          duplicateSkipCount: 0,
+          missingEntryPriceCount: 0,
+          errorCount: 0
+        };
+      },
+      evaluatePaperSignals: async () => {
+        calls.push("evaluate-paper");
+        return {
+          status: BotRunStatus.SUCCESS,
+          openEvaluationCount: 2,
+          evaluatedCount: 1,
+          expiredCount: 0,
+          stillOpenCount: 1,
+          errorCount: 0
+        };
       }
     });
 
-    assert.deepEqual(calls, ["fetch", "analyze"]);
+    assert.deepEqual(calls, ["fetch", "analyze", "create-paper", "evaluate-paper"]);
     assert.equal(summary.status, BotRunStatus.SUCCESS);
+    assert.equal(summary.paperEvaluationEnabled, true);
     assert.equal(summary.fetchCryptoCandles?.savedCandleCount, 9000);
     assert.equal(summary.analyzeCryptoSignals?.sentAlertCount, 1);
+    assert.equal(summary.createPaperEvaluationsForSignals?.createdEvaluationCount, 2);
+    assert.equal(summary.evaluatePaperSignals?.evaluatedCount, 1);
     assert.equal(botRunUpdates.at(-1)?.data.status, BotRunStatus.SUCCESS);
     assert.ok(botLogs.some((log) => log.data.message === "Pipeline gestartet"));
     assert.ok(botLogs.some((log) => log.data.message === "Candle Fetch gestartet"));
@@ -65,6 +101,14 @@ describe("runCryptoSignalPipeline", () => {
         analyzeCryptoSignals: async () => {
           calls.push("analyze");
           throw new Error("analysis should not run");
+        },
+        createPaperEvaluationsForSignals: async () => {
+          calls.push("create-paper");
+          throw new Error("paper evaluation should not run");
+        },
+        evaluatePaperSignals: async () => {
+          calls.push("evaluate-paper");
+          throw new Error("paper evaluation should not run");
         }
       }),
       /fetch failed/

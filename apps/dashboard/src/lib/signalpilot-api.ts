@@ -3,6 +3,13 @@ export type SignalStatus = "STRONG_WATCH" | "WATCH" | "WAIT" | "AVOID" | "NO_EDG
 export type SignalDirection = "BULLISH" | "BEARISH" | "NEUTRAL" | "MIXED";
 export type RiskLevel = "LOW" | "MEDIUM" | "HIGH";
 export type WatchlistPriority = "LOW" | "MEDIUM" | "HIGH";
+export type PaperEvaluationStatus = "OPEN" | "EVALUATED" | "EXPIRED" | "SKIPPED";
+export type PaperEvaluationOutcome =
+  | "POSITIVE"
+  | "NEGATIVE"
+  | "NEUTRAL"
+  | "INVALIDATED"
+  | "TARGET_REACHED";
 export type MultiTimeframeAlignment =
   | "BULLISH_ALIGNED"
   | "BEARISH_ALIGNED"
@@ -95,6 +102,7 @@ export type SignalDetail = {
     : never;
   asset: Asset;
   signalOutput: SignalOutput | null;
+  paperEvaluation: PaperSignalEvaluation | null;
   candles: Candle[];
 };
 
@@ -177,6 +185,59 @@ export type AlertState = {
   sendCount: number;
   createdAt: string;
   updatedAt: string;
+};
+
+export type PaperSignalEvaluation = {
+  id: string;
+  signalId: string;
+  assetId: string;
+  symbol: string;
+  timeframe: string;
+  direction: SignalDirection;
+  status: SignalStatus;
+  signalType: string;
+  score: number;
+  riskLevel: RiskLevel;
+  entryPrice: string;
+  invalidationPrice: string | null;
+  targetPrice: string | null;
+  evaluationStatus: PaperEvaluationStatus;
+  openedAt: string;
+  evaluatedAt: string | null;
+  priceAfter1h: string | null;
+  priceAfter4h: string | null;
+  priceAfter1d: string | null;
+  priceAfter3d: string | null;
+  returnAfter1h: number | null;
+  returnAfter4h: number | null;
+  returnAfter1d: number | null;
+  returnAfter3d: number | null;
+  maxFavorableMove: number | null;
+  maxAdverseMove: number | null;
+  outcome: PaperEvaluationOutcome | null;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type PaperStats = {
+  totalEvaluations: number;
+  openCount: number;
+  evaluatedCount: number;
+  positiveCount: number;
+  negativeCount: number;
+  neutralCount: number;
+  targetReachedCount: number;
+  invalidatedCount: number;
+  winRate: number;
+  avgReturnAfter1h: number;
+  avgReturnAfter4h: number;
+  avgReturnAfter1d: number;
+  avgMaxFavorableMove: number;
+  avgMaxAdverseMove: number;
+  groupedBySignalStatus: Record<string, number>;
+  groupedBySignalType: Record<string, number>;
+  groupedByTimeframe: Record<string, number>;
 };
 
 export type PublicConfig = {

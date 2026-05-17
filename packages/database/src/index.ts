@@ -10,6 +10,8 @@ export {
   PaperOrderSide,
   PaperOrderStatus,
   PaperPositionStatus,
+  PaperEvaluationOutcome,
+  PaperEvaluationStatus,
   Prisma,
   RiskLevel,
   SignalDirection,

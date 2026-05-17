@@ -25,6 +25,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
               <Link href="/dashboard/scanner">Scanner</Link>
               <Link href="/dashboard/multi-timeframe">Multi-Timeframe</Link>
               <Link href="/dashboard/signals">Signals</Link>
+              <Link href="/dashboard/paper">Paper Eval</Link>
               <Link href="/dashboard/assets">Assets</Link>
               <Link href="/dashboard/logs">Logs</Link>
             </nav>

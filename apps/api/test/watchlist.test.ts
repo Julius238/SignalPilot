@@ -4,6 +4,8 @@ import { afterEach, describe, it } from "node:test";
 import Fastify from "fastify";
 import {
   AssetType,
+  PaperEvaluationOutcome,
+  PaperEvaluationStatus,
   Prisma,
   RiskLevel,
   SignalDirection,
@@ -176,6 +178,35 @@ describe("watchlist routes", () => {
 
     await server.close();
   });
+
+  it("returns paper evaluation stats", async () => {
+    const { server, state } = await createServerWithState();
+    state.paperEvaluations.push(
+      createPaperEvaluation({
+        outcome: PaperEvaluationOutcome.POSITIVE,
+        returnAfter1d: 1.2
+      }),
+      createPaperEvaluation({
+        id: "paper-evaluation-2",
+        evaluationStatus: PaperEvaluationStatus.EVALUATED,
+        outcome: PaperEvaluationOutcome.NEGATIVE,
+        returnAfter1d: -0.8
+      })
+    );
+
+    const response = await server.inject("/paper/stats");
+
+    assert.equal(response.statusCode, 200);
+    const body = response.json();
+    assert.equal(body.totalEvaluations, 2);
+    assert.equal(body.evaluatedCount, 2);
+    assert.equal(body.positiveCount, 1);
+    assert.equal(body.negativeCount, 1);
+    assert.equal(body.winRate, 50);
+    assert.equal(body.groupedBySignalStatus.WATCH, 2);
+
+    await server.close();
+  });
 });
 
 async function createServer() {
@@ -188,6 +219,7 @@ async function createServerWithState() {
     assets: [createAsset()],
     watchlistItems: [] as ReturnType<typeof createWatchlistItem>[],
     alertStates: [] as ReturnType<typeof createAlertState>[],
+    paperEvaluations: [] as ReturnType<typeof createPaperEvaluation>[],
     signalFindManyWhere: [] as unknown[]
   };
   const server = Fastify({ logger: false });
@@ -202,6 +234,7 @@ function createDatabase(state: {
   assets: ReturnType<typeof createAsset>[];
   watchlistItems: ReturnType<typeof createWatchlistItem>[];
   alertStates: ReturnType<typeof createAlertState>[];
+  paperEvaluations: ReturnType<typeof createPaperEvaluation>[];
   signalFindManyWhere: unknown[];
 }) {
   return {
@@ -289,6 +322,11 @@ function createDatabase(state: {
           .sort((left, right) => right.lastSentAt.getTime() - left.lastSentAt.getTime())
           .slice(0, take)
     },
+    paperSignalEvaluation: {
+      findMany: async () => state.paperEvaluations,
+      findUnique: async ({ where }: { where: { id: string } }) =>
+        state.paperEvaluations.find((evaluation) => evaluation.id === where.id) ?? null
+    },
     botRun: {
       findFirst: async () => null
     }
@@ -363,6 +401,48 @@ function createAlertState(overrides: Partial<ReturnType<typeof createBaseAlertSt
   return {
     ...createBaseAlertState(),
     ...overrides
+  };
+}
+
+function createPaperEvaluation(overrides: Partial<ReturnType<typeof createBasePaperEvaluation>> = {}) {
+  return {
+    ...createBasePaperEvaluation(),
+    ...overrides
+  };
+}
+
+function createBasePaperEvaluation() {
+  return {
+    id: "paper-evaluation-1",
+    signalId: "signal-1",
+    assetId: "asset-1",
+    symbol: "BTCUSDT",
+    timeframe: "1h",
+    direction: SignalDirection.BULLISH,
+    status: SignalStatus.WATCH,
+    signalType: SignalType.TREND_ALERT,
+    score: 72,
+    riskLevel: RiskLevel.MEDIUM,
+    entryPrice: { toString: () => "100" },
+    invalidationPrice: { toString: () => "98" },
+    targetPrice: { toString: () => "104" },
+    evaluationStatus: PaperEvaluationStatus.EVALUATED,
+    openedAt: new Date("2026-01-01T00:00:00.000Z"),
+    evaluatedAt: new Date("2026-01-02T00:00:00.000Z"),
+    priceAfter1h: { toString: () => "100.5" },
+    priceAfter4h: { toString: () => "101" },
+    priceAfter1d: { toString: () => "101.2" },
+    priceAfter3d: null,
+    returnAfter1h: 0.5,
+    returnAfter4h: 1,
+    returnAfter1d: 1.2,
+    returnAfter3d: null,
+    maxFavorableMove: 2,
+    maxAdverseMove: 0.5,
+    outcome: PaperEvaluationOutcome.POSITIVE,
+    notes: null,
+    createdAt: new Date("2026-01-01T00:00:00.000Z"),
+    updatedAt: new Date("2026-01-01T00:00:00.000Z")
   };
 }
 

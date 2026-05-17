@@ -17,6 +17,8 @@
     "dashboard:dev": "pnpm --filter @signalpilot/dashboard dev",
     "worker:analyze-crypto-indicators": "pnpm --filter @signalpilot/worker analyze:crypto-indicators",
     "worker:analyze-crypto-signals": "pnpm --filter @signalpilot/worker analyze:crypto-signals",
+    "worker:create-paper-evaluations": "pnpm --filter @signalpilot/worker create:paper-evaluations",
+    "worker:evaluate-paper-signals": "pnpm --filter @signalpilot/worker evaluate:paper-signals",
     "worker:fetch-crypto-candles": "pnpm --filter @signalpilot/worker fetch:crypto-candles",
     "worker:run-crypto-pipeline": "pnpm --filter @signalpilot/worker run:crypto-pipeline",
     "worker:scheduler": "pnpm --filter @signalpilot/worker scheduler",

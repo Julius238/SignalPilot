@@ -100,6 +100,62 @@ export default async function SignalDetailPage({ params }: SignalDetailPageProps
         </div>
       </section>
 
+      {data.paperEvaluation ? (
+        <section className="card" style={{ marginTop: 16 }}>
+          <h2>Paper Evaluation</h2>
+          <div className="table-wrap">
+            <table>
+              <tbody>
+                <tr>
+                  <th>Hypothetical outcome</th>
+                  <td>{data.paperEvaluation.outcome ?? data.paperEvaluation.evaluationStatus}</td>
+                </tr>
+                <tr>
+                  <th>Entry Price</th>
+                  <td>{data.paperEvaluation.entryPrice}</td>
+                </tr>
+                <tr>
+                  <th>Target Price</th>
+                  <td>{data.paperEvaluation.targetPrice ?? "-"}</td>
+                </tr>
+                <tr>
+                  <th>Invalidation Price</th>
+                  <td>{data.paperEvaluation.invalidationPrice ?? "-"}</td>
+                </tr>
+                <tr>
+                  <th>Return 1h</th>
+                  <td>
+                    {data.paperEvaluation.returnAfter1h === null
+                      ? "-"
+                      : `${data.paperEvaluation.returnAfter1h.toFixed(2)}%`}
+                  </td>
+                </tr>
+                <tr>
+                  <th>Return 4h</th>
+                  <td>
+                    {data.paperEvaluation.returnAfter4h === null
+                      ? "-"
+                      : `${data.paperEvaluation.returnAfter4h.toFixed(2)}%`}
+                  </td>
+                </tr>
+                <tr>
+                  <th>Return 1d</th>
+                  <td>
+                    {data.paperEvaluation.returnAfter1d === null
+                      ? "-"
+                      : `${data.paperEvaluation.returnAfter1d.toFixed(2)}%`}
+                  </td>
+                </tr>
+                <tr>
+                  <th>Opened</th>
+                  <td>{formatDateTime(data.paperEvaluation.openedAt)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
+
       <section className="detail-grid" style={{ marginTop: 16 }}>
         <div className="card">
           <h2>Signal Output</h2>

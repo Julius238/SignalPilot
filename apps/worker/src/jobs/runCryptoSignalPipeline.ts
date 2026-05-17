@@ -7,6 +7,12 @@ import pino from "pino";
 
 import { analyzeCryptoSignals, type AnalyzeCryptoSignalsSummary } from "./analyzeCryptoSignals.js";
 import { fetchCryptoCandles, type FetchCryptoCandlesSummary } from "./fetchCryptoCandles.js";
+import {
+  createPaperEvaluationsForSignals,
+  evaluatePaperSignals,
+  type CreatePaperEvaluationsSummary,
+  type EvaluatePaperSignalsSummary
+} from "./paperSignalEvaluations.js";
 
 const logger = pino({
   name: "signalpilot-worker"
@@ -23,17 +29,24 @@ export type CryptoSignalPipelineSummary = {
   finishedAt: string;
   fetchCryptoCandles?: FetchCryptoCandlesSummary;
   analyzeCryptoSignals?: AnalyzeCryptoSignalsSummary;
+  createPaperEvaluationsForSignals?: CreatePaperEvaluationsSummary;
+  evaluatePaperSignals?: EvaluatePaperSignalsSummary;
+  paperEvaluationEnabled: boolean;
   error?: string;
 };
 
 type PipelineJobs = {
   fetchCryptoCandles: (database: PrismaClient) => Promise<FetchCryptoCandlesSummary>;
   analyzeCryptoSignals: (database: PrismaClient) => Promise<AnalyzeCryptoSignalsSummary>;
+  createPaperEvaluationsForSignals: (database: PrismaClient) => Promise<CreatePaperEvaluationsSummary>;
+  evaluatePaperSignals: (database: PrismaClient) => Promise<EvaluatePaperSignalsSummary>;
 };
 
 const defaultJobs: PipelineJobs = {
   fetchCryptoCandles,
-  analyzeCryptoSignals
+  analyzeCryptoSignals,
+  createPaperEvaluationsForSignals,
+  evaluatePaperSignals
 };
 
 export async function runCryptoSignalPipeline(
@@ -41,8 +54,11 @@ export async function runCryptoSignalPipeline(
   jobs: PipelineJobs = defaultJobs
 ): Promise<CryptoSignalPipelineSummary> {
   const startedAt = new Date();
+  const paperEvaluationEnabled = parseBooleanEnv(process.env.ENABLE_PAPER_EVALUATION, true);
   let fetchSummary: FetchCryptoCandlesSummary | undefined;
   let analyzeSummary: AnalyzeCryptoSignalsSummary | undefined;
+  let createPaperEvaluationsSummary: CreatePaperEvaluationsSummary | undefined;
+  let evaluatePaperSignalsSummary: EvaluatePaperSignalsSummary | undefined;
 
   const botRun = await database.botRun.create({
     data: {
@@ -51,7 +67,8 @@ export async function runCryptoSignalPipeline(
       startedAt,
       metadataJson: {
         startedAt: startedAt.toISOString(),
-        status: BotRunStatus.RUNNING
+        status: BotRunStatus.RUNNING,
+        paperEvaluationEnabled
       }
     }
   });
@@ -80,13 +97,36 @@ export async function runCryptoSignalPipeline(
       analyzeCryptoSignals: analyzeSummary
     });
 
+    if (paperEvaluationEnabled) {
+      await writeBotLog(database, "info", "Paper Evaluation creation started", {
+        botRunId: botRun.id
+      });
+      createPaperEvaluationsSummary = await jobs.createPaperEvaluationsForSignals(database);
+      await writeBotLog(database, "info", "Paper Evaluation creation finished", {
+        botRunId: botRun.id,
+        createPaperEvaluationsForSignals: createPaperEvaluationsSummary
+      });
+
+      await writeBotLog(database, "info", "Paper Evaluation scoring started", {
+        botRunId: botRun.id
+      });
+      evaluatePaperSignalsSummary = await jobs.evaluatePaperSignals(database);
+      await writeBotLog(database, "info", "Paper Evaluation scoring finished", {
+        botRunId: botRun.id,
+        evaluatePaperSignals: evaluatePaperSignalsSummary
+      });
+    }
+
     const finishedAt = new Date();
     const summary = buildPipelineSummary({
       status: BotRunStatus.SUCCESS,
       startedAt,
       finishedAt,
+      paperEvaluationEnabled,
       fetchSummary,
-      analyzeSummary
+      analyzeSummary,
+      createPaperEvaluationsSummary,
+      evaluatePaperSignalsSummary
     });
 
     await database.botRun.update({
@@ -113,8 +153,11 @@ export async function runCryptoSignalPipeline(
       status: BotRunStatus.FAILED,
       startedAt,
       finishedAt,
+      paperEvaluationEnabled,
       fetchSummary,
       analyzeSummary,
+      createPaperEvaluationsSummary,
+      evaluatePaperSignalsSummary,
       error: message
     });
 
@@ -142,14 +185,18 @@ function buildPipelineSummary(input: {
   status: BotRunStatus;
   startedAt: Date;
   finishedAt: Date;
+  paperEvaluationEnabled: boolean;
   fetchSummary?: FetchCryptoCandlesSummary;
   analyzeSummary?: AnalyzeCryptoSignalsSummary;
+  createPaperEvaluationsSummary?: CreatePaperEvaluationsSummary;
+  evaluatePaperSignalsSummary?: EvaluatePaperSignalsSummary;
   error?: string;
 }): CryptoSignalPipelineSummary {
   const summary: CryptoSignalPipelineSummary = {
     status: input.status,
     startedAt: input.startedAt.toISOString(),
-    finishedAt: input.finishedAt.toISOString()
+    finishedAt: input.finishedAt.toISOString(),
+    paperEvaluationEnabled: input.paperEvaluationEnabled
   };
 
   if (input.fetchSummary) {
@@ -160,11 +207,35 @@ function buildPipelineSummary(input: {
     summary.analyzeCryptoSignals = input.analyzeSummary;
   }
 
+  if (input.createPaperEvaluationsSummary) {
+    summary.createPaperEvaluationsForSignals = input.createPaperEvaluationsSummary;
+  }
+
+  if (input.evaluatePaperSignalsSummary) {
+    summary.evaluatePaperSignals = input.evaluatePaperSignalsSummary;
+  }
+
   if (input.error) {
     summary.error = input.error;
   }
 
   return summary;
+}
+
+function parseBooleanEnv(value: string | undefined, defaultValue: boolean) {
+  if (value === undefined || value.trim() === "") {
+    return defaultValue;
+  }
+
+  if (value === "true") {
+    return true;
+  }
+
+  if (value === "false") {
+    return false;
+  }
+
+  return defaultValue;
 }
 
 async function writeBotLog(
