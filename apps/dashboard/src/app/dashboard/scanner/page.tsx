@@ -1,0 +1,72 @@
+import { ErrorState } from "../../../components/empty-state";
+import { ScannerFilters } from "../../../components/scanner-filters";
+import { ScannerGroups } from "../../../components/scanner-groups";
+import { formatDateTime } from "../../../lib/format";
+import { buildQuery, fetchApi, type ScannerResponse } from "../../../lib/signalpilot-api";
+
+type ScannerPageProps = {
+  searchParams: Promise<{
+    assetType?: string;
+    timeframe?: string;
+    minScore?: string;
+    showOnlyAlertWorthy?: string;
+  }>;
+};
+
+export default async function ScannerPage({ searchParams }: ScannerPageProps) {
+  const params = await searchParams;
+  const query = buildQuery({
+    assetType: params.assetType,
+    timeframe: params.timeframe,
+    minScore: params.minScore,
+    showOnlyAlertWorthy: params.showOnlyAlertWorthy
+  });
+  const scanner = await fetchApi<ScannerResponse>(`/scanner${query}`);
+  const summary = scanner.data?.summary;
+
+  return (
+    <>
+      <div className="page-header scanner-page-header">
+        <div>
+          <h1>Signal Scanner</h1>
+          <p>Grouped current signals for fast watchlist triage.</p>
+        </div>
+      </div>
+
+      <ScannerFilters />
+
+      {scanner.error ? (
+        <ErrorState title="Could not load scanner" message={scanner.error} />
+      ) : null}
+
+      <section className="grid metrics scanner-metrics">
+        <div className="card">
+          <span className="metric-label">Strong Watch</span>
+          <span className="metric-value">{summary?.strongWatchCount ?? 0}</span>
+        </div>
+        <div className="card">
+          <span className="metric-label">Watch</span>
+          <span className="metric-value">{summary?.watchCount ?? 0}</span>
+        </div>
+        <div className="card">
+          <span className="metric-label">Alerts Sent heute</span>
+          <span className="metric-value">{summary?.alertsSentToday ?? 0}</span>
+        </div>
+        <div className="card">
+          <span className="metric-label">Last Pipeline Status</span>
+          <span className="metric-value metric-value-text">
+            {summary?.lastPipelineRunStatus ?? "-"}
+          </span>
+        </div>
+        <div className="card">
+          <span className="metric-label">Last Pipeline Run</span>
+          <span className="metric-value metric-value-text">
+            {formatDateTime(summary?.lastPipelineRunAt)}
+          </span>
+        </div>
+      </section>
+
+      {scanner.data ? <ScannerGroups groups={scanner.data.groups} /> : null}
+    </>
+  );
+}

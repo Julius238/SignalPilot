@@ -26,8 +26,13 @@ export default async function DashboardPage() {
   return (
     <>
       <div className="page-header">
-        <h1>Market Intelligence Overview</h1>
-        <p>Technical crypto signal pipeline, alerts, assets and operational status.</p>
+        <div>
+          <h1>Market Intelligence Overview</h1>
+          <p>Technical crypto signal pipeline, alerts, assets and operational status.</p>
+        </div>
+        <Link className="primary-link" href="/dashboard/scanner">
+          Open Scanner
+        </Link>
       </div>
 
       {errors.length > 0 ? (

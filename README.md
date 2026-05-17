@@ -95,6 +95,7 @@ Dashboard API examples:
 
 ```bash
 curl "http://localhost:3100/signals?limit=10"
+curl "http://localhost:3100/scanner?assetType=CRYPTO&timeframe=1h&showOnlyAlertWorthy=true"
 curl http://localhost:3100/assets/BTCUSDT
 ```
 
@@ -114,3 +115,6 @@ http://localhost:3000/dashboard
 ```
 
 Dashboard signal and asset detail pages render candlestick charts with TradingView Lightweight Charts.
+The scanner page at `/dashboard/scanner` groups current signals into Strong Watch, Watchlist,
+Volume Spikes, Breakouts, High Risk / Avoid, and No Edge / Low Priority with filters for asset
+type, timeframe, minimum score, and alert-worthy signals.

@@ -4,6 +4,7 @@ import {
   AssetType,
   BotRunStatus,
   Prisma,
+  RiskLevel,
   prisma,
   SignalDirection,
   SignalStatus,
@@ -163,6 +164,101 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
     return signals.map(toSignalListItem);
   });
 
+  server.get("/scanner", async (request, reply) => {
+    const query = asQueryRecord(request.query);
+    const assetType = parseEnum(query.assetType, assetTypes, "assetType", reply);
+    const showOnlyAlertWorthy =
+      parseBoolean(query.showOnlyAlertWorthy, "showOnlyAlertWorthy", reply) ?? false;
+    const minScore = parseOptionalNumber(query.minScore, "minScore", reply);
+
+    if (reply.sent) {
+      return reply;
+    }
+
+    const timeframe = parseOptionalString(query.timeframe);
+    const baseWhere: Prisma.SignalWhereInput = {
+      timeframe,
+      score: minScore === undefined ? undefined : { gte: minScore },
+      asset: assetType
+        ? {
+            assetType
+          }
+        : undefined
+    };
+    const today = startOfToday();
+    const scannerWhere = (where: Prisma.SignalWhereInput): Prisma.SignalWhereInput =>
+      mergeSignalWhere(baseWhere, where, showOnlyAlertWorthy ? alertWorthyWhere : undefined);
+
+    const [
+      strongWatch,
+      watchlist,
+      volumeSpikes,
+      breakouts,
+      highRisk,
+      noEdge,
+      strongWatchCount,
+      watchCount,
+      alertsSentToday,
+      lastPipelineRun
+    ] = await Promise.all([
+      findScannerSignals(scannerWhere({ status: SignalStatus.STRONG_WATCH }), { score: "desc" }),
+      findScannerSignals(scannerWhere({ status: SignalStatus.WATCH }), { score: "desc" }),
+      findScannerSignals(scannerWhere({ signalType: SignalType.VOLUME_SPIKE }), {
+        createdAt: "desc"
+      }),
+      findScannerSignals(scannerWhere({ signalType: SignalType.BREAKOUT_ALERT }), {
+        score: "desc"
+      }),
+      findScannerSignals(
+        scannerWhere({
+          OR: [{ status: SignalStatus.AVOID }, { riskLevel: RiskLevel.HIGH }]
+        }),
+        { riskScore: "desc" }
+      ),
+      findScannerSignals(scannerWhere({ status: SignalStatus.NO_EDGE }), { createdAt: "desc" }),
+      prisma.signal.count({
+        where: scannerWhere({ status: SignalStatus.STRONG_WATCH })
+      }),
+      prisma.signal.count({
+        where: scannerWhere({ status: SignalStatus.WATCH })
+      }),
+      prisma.alert.count({
+        where: {
+          status: AlertStatus.SENT,
+          sentAt: {
+            gte: today
+          }
+        }
+      }),
+      prisma.botRun.findFirst({
+        where: {
+          jobName: "runCryptoSignalPipeline"
+        },
+        orderBy: {
+          startedAt: "desc"
+        }
+      })
+    ]);
+
+    return {
+      summary: {
+        strongWatchCount,
+        watchCount,
+        alertsSentToday,
+        lastPipelineRunStatus: lastPipelineRun?.status ?? null,
+        lastPipelineRunAt: lastPipelineRun?.startedAt ?? null
+      },
+      groups: {
+        strongWatch,
+        watchlist,
+        volumeSpikes,
+        breakouts,
+        highRisk,
+        noEdge
+      }
+    };
+  });
+
   server.get("/signals/:id", async (request, reply) => {
     const { id } = request.params as { id: string };
     const signal = await prisma.signal.findUnique({
@@ -318,6 +414,64 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
   });
 }
 
+const alertWorthyWhere = {
+  OR: [
+    { status: SignalStatus.STRONG_WATCH },
+    {
+      status: SignalStatus.WATCH,
+      score: {
+        gte: 70
+      }
+    },
+    {
+      status: SignalStatus.AVOID,
+      riskLevel: RiskLevel.HIGH
+    },
+    { signalType: SignalType.VOLUME_SPIKE },
+    { signalType: SignalType.VOLATILITY_SPIKE },
+    { signalType: SignalType.BREAKOUT_ALERT }
+  ]
+} satisfies Prisma.SignalWhereInput;
+
+function findScannerSignals(where: Prisma.SignalWhereInput, orderBy: Prisma.SignalOrderByWithRelationInput) {
+  return prisma.signal.findMany({
+    where,
+    orderBy,
+    take: 20,
+    include: {
+      asset: {
+        select: assetSelect
+      },
+      output: true
+    }
+  }).then((signals) => signals.map(toSignalListItem));
+}
+
+function mergeSignalWhere(...conditions: Array<Prisma.SignalWhereInput | undefined>) {
+  const activeConditions = conditions.filter(
+    (condition): condition is Prisma.SignalWhereInput =>
+      condition !== undefined && Object.values(condition).some((value) => value !== undefined)
+  );
+
+  if (activeConditions.length === 0) {
+    return {};
+  }
+
+  if (activeConditions.length === 1) {
+    return activeConditions[0];
+  }
+
+  return {
+    AND: activeConditions
+  };
+}
+
+function startOfToday() {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return today;
+}
+
 const assetSelect = {
   id: true,
   symbol: true,
@@ -345,6 +499,7 @@ function toSignalListItem(
     direction: signal.direction,
     score: signal.score,
     riskLevel: signal.riskLevel,
+    riskScore: signal.riskScore,
     createdAt: signal.createdAt,
     asset: signal.asset,
     signalOutput: signal.output ? toSignalOutputSummary(signal.output) : null
@@ -511,6 +666,27 @@ function parseBoolean(
 
   badRequest(reply, `${name} must be true or false`);
   return undefined;
+}
+
+function parseOptionalNumber(
+  value: QueryValue,
+  name: string,
+  reply: FastifyReply
+): number | undefined {
+  const raw = firstQueryValue(value);
+
+  if (raw === undefined || raw === "") {
+    return undefined;
+  }
+
+  const parsed = Number(raw);
+
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    badRequest(reply, `${name} must be a non-negative number`);
+    return undefined;
+  }
+
+  return parsed;
 }
 
 function parseEnum<T extends string>(

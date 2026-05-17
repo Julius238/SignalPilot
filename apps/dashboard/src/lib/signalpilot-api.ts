@@ -39,6 +39,7 @@ export type SignalListItem = {
   direction: SignalDirection;
   score: number;
   riskLevel: RiskLevel;
+  riskScore?: number;
   createdAt: string;
   asset: Asset;
   signalOutput: SignalOutput | null;
@@ -129,6 +130,25 @@ export type Alert = {
     signalType: string;
     score: number;
   } | null;
+};
+
+export type ScannerGroupKey =
+  | "strongWatch"
+  | "watchlist"
+  | "volumeSpikes"
+  | "breakouts"
+  | "highRisk"
+  | "noEdge";
+
+export type ScannerResponse = {
+  summary: {
+    strongWatchCount: number;
+    watchCount: number;
+    alertsSentToday: number;
+    lastPipelineRunStatus: BotRun["status"] | null;
+    lastPipelineRunAt: string | null;
+  };
+  groups: Record<ScannerGroupKey, SignalListItem[]>;
 };
 
 export type ApiResult<T> =
