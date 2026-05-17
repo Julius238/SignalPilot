@@ -14,7 +14,8 @@ export {
   RiskLevel,
   SignalDirection,
   SignalStatus,
-  SignalType
+  SignalType,
+  WatchlistPriority
 } from "@prisma/client";
 
 export type { PrismaClient };

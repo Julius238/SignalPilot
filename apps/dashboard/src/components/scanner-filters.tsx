@@ -15,7 +15,13 @@ export function ScannerFilters() {
     const formData = new FormData(event.currentTarget);
     const query = new URLSearchParams();
 
-    for (const key of ["assetType", "timeframe", "minScore", "showOnlyAlertWorthy"]) {
+    for (const key of [
+      "assetType",
+      "timeframe",
+      "minScore",
+      "showOnlyAlertWorthy",
+      "watchlistOnly"
+    ]) {
       const value = String(formData.get(key) ?? "").trim();
 
       if (value) {
@@ -58,6 +64,15 @@ export function ScannerFilters() {
           value="true"
         />
         Alert worthy
+      </label>
+      <label className="check-filter">
+        <input
+          defaultChecked={searchParams.get("watchlistOnly") === "true"}
+          name="watchlistOnly"
+          type="checkbox"
+          value="true"
+        />
+        Watchlist only
       </label>
       <button type="submit">Apply</button>
     </form>

@@ -2,7 +2,8 @@ import type {
   MultiTimeframeAlignment,
   RiskLevel,
   SignalDirection,
-  SignalStatus
+  SignalStatus,
+  WatchlistPriority
 } from "../lib/signalpilot-api";
 
 export function StatusBadge({ value }: { value: SignalStatus | string }) {
@@ -14,6 +15,10 @@ export function DirectionBadge({ value }: { value: SignalDirection | string }) {
 }
 
 export function RiskBadge({ value }: { value: RiskLevel | string }) {
+  return <span className={`badge risk-${value.toLowerCase()}`}>{value}</span>;
+}
+
+export function PriorityBadge({ value }: { value: WatchlistPriority | string }) {
   return <span className={`badge risk-${value.toLowerCase()}`}>{value}</span>;
 }
 

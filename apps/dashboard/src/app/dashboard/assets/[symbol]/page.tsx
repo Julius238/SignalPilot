@@ -9,6 +9,7 @@ import {
 } from "../../../../components/badges";
 import { ErrorState } from "../../../../components/empty-state";
 import { SignalsTable } from "../../../../components/signals-table";
+import { AssetWatchlistControls } from "../../../../components/watchlist-controls";
 import { formatJson, formatScore } from "../../../../lib/format";
 import {
   fetchApi,
@@ -63,6 +64,11 @@ export default async function AssetDetailPage({ params }: AssetDetailPageProps) 
           <span className="metric-label">Candle Counts</span>
           <pre>{formatJson(data.candleCounts)}</pre>
         </div>
+      </section>
+
+      <section className="card watchlist-detail-card">
+        <h2>Watchlist Management</h2>
+        <AssetWatchlistControls symbol={data.symbol} watchlistItem={data.watchlistItem} />
       </section>
 
       <section className="detail-grid">

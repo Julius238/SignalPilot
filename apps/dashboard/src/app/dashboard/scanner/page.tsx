@@ -10,6 +10,7 @@ type ScannerPageProps = {
     timeframe?: string;
     minScore?: string;
     showOnlyAlertWorthy?: string;
+    watchlistOnly?: string;
   }>;
 };
 
@@ -19,7 +20,8 @@ export default async function ScannerPage({ searchParams }: ScannerPageProps) {
     assetType: params.assetType,
     timeframe: params.timeframe,
     minScore: params.minScore,
-    showOnlyAlertWorthy: params.showOnlyAlertWorthy
+    showOnlyAlertWorthy: params.showOnlyAlertWorthy,
+    watchlistOnly: params.watchlistOnly
   });
   const scanner = await fetchApi<ScannerResponse>(`/scanner${query}`);
   const summary = scanner.data?.summary;

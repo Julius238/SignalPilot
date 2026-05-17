@@ -45,6 +45,12 @@ enum RiskLevel {
   HIGH
 }
 
+enum WatchlistPriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
 enum BotRunStatus {
   SUCCESS
   FAILED
@@ -96,10 +102,28 @@ model Asset {
   signals       Signal[]
   paperOrders   PaperOrder[]
   positions     PaperPosition[]
+  watchlistItem WatchlistItem?
 
   @@unique([symbol, exchange, assetType])
   @@index([symbol])
   @@index([assetType, isActive])
+}
+
+model WatchlistItem {
+  id           String            @id @default(cuid())
+  assetId      String
+  asset        Asset             @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  symbol       String
+  priority     WatchlistPriority @default(MEDIUM)
+  notes        String?
+  alertEnabled Boolean           @default(true)
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  @@unique([assetId])
+  @@index([symbol])
+  @@index([priority])
+  @@index([alertEnabled])
 }
 
 model Candle {

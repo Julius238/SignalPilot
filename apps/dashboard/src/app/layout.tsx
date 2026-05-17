@@ -21,6 +21,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             </Link>
             <nav>
               <Link href="/dashboard">Overview</Link>
+              <Link href="/dashboard/watchlist">Watchlist</Link>
               <Link href="/dashboard/scanner">Scanner</Link>
               <Link href="/dashboard/multi-timeframe">Multi-Timeframe</Link>
               <Link href="/dashboard/signals">Signals</Link>

@@ -2,6 +2,7 @@ export type AssetType = "STOCK" | "ETF" | "CRYPTO";
 export type SignalStatus = "STRONG_WATCH" | "WATCH" | "WAIT" | "AVOID" | "NO_EDGE";
 export type SignalDirection = "BULLISH" | "BEARISH" | "NEUTRAL" | "MIXED";
 export type RiskLevel = "LOW" | "MEDIUM" | "HIGH";
+export type WatchlistPriority = "LOW" | "MEDIUM" | "HIGH";
 export type MultiTimeframeAlignment =
   | "BULLISH_ALIGNED"
   | "BEARISH_ALIGNED"
@@ -112,6 +113,8 @@ export type Candle = {
 };
 
 export type AssetDetail = Asset & {
+  isWatchlisted: boolean;
+  watchlistItem: WatchlistItem | null;
   latestSignal: Omit<SignalListItem, "asset" | "signalOutput"> | null;
   latestSignalOutput: SignalOutput | null;
   multiTimeframeSummary: MultiTimeframeSummary | null;
@@ -188,6 +191,21 @@ export type MultiTimeframeScannerItem = {
   multiTimeframeSummary: MultiTimeframeSummary;
 };
 
+export type WatchlistItem = {
+  id: string;
+  assetId: string;
+  symbol: string;
+  priority: WatchlistPriority;
+  notes: string | null;
+  alertEnabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+  asset: Asset;
+  latestSignal: Omit<SignalListItem, "asset" | "signalOutput"> | null;
+  latestSignalOutput: SignalOutput | null;
+  multiTimeframeSummary: MultiTimeframeSummary | null;
+};
+
 export type ApiResult<T> =
   | {
       data: T;
@@ -223,6 +241,13 @@ export async function fetchApi<T>(
       };
     }
 
+    if (response.status === 204) {
+      return {
+        data: null as T,
+        error: null
+      };
+    }
+
     return {
       data: (await response.json()) as T,
       error: null
@@ -233,6 +258,19 @@ export async function fetchApi<T>(
       error: error instanceof Error ? error.message : "Unable to reach SignalPilot API"
     };
   }
+}
+
+export async function mutateApi<T>(
+  path: string,
+  init: RequestInit = {}
+): Promise<ApiResult<T>> {
+  return fetchApi<T>(path, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...init.headers
+    }
+  });
 }
 
 export function buildQuery(params: Record<string, string | number | undefined>) {

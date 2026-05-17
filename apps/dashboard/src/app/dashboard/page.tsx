@@ -11,25 +11,30 @@ import {
   type Asset,
   type BotRun,
   type ScannerResponse,
-  type SignalListItem
+  type SignalListItem,
+  type WatchlistItem
 } from "../../lib/signalpilot-api";
 
 export default async function DashboardPage() {
-  const [health, assets, signals, alerts, pipelineRuns, scanner] = await Promise.all([
+  const [health, assets, signals, alerts, pipelineRuns, scanner, watchlist] = await Promise.all([
     fetchApi<{ status: string }>("/health"),
     fetchApi<Asset[]>("/assets?limit=500"),
     fetchApi<SignalListItem[]>("/signals?limit=200"),
     fetchApi<Alert[]>("/alerts?limit=200"),
     fetchApi<BotRun[]>("/bot-runs?jobName=runCryptoSignalPipeline&limit=1"),
-    fetchApi<ScannerResponse>("/scanner")
+    fetchApi<ScannerResponse>("/scanner"),
+    fetchApi<WatchlistItem[]>("/watchlist?limit=500")
   ]);
 
-  const errors = [health, assets, signals, alerts, pipelineRuns, scanner]
+  const errors = [health, assets, signals, alerts, pipelineRuns, scanner, watchlist]
     .map((result) => result.error)
     .filter(Boolean);
   const latestSignals = signals.data?.slice(0, 5) ?? [];
   const latestAlerts = alerts.data?.slice(0, 5) ?? [];
   const lastPipeline = pipelineRuns.data?.[0] ?? null;
+  const watchlistItems = watchlist.data ?? [];
+  const highPriorityCount = watchlistItems.filter((item) => item.priority === "HIGH").length;
+  const alertEnabledCount = watchlistItems.filter((item) => item.alertEnabled).length;
 
   return (
     <>
@@ -41,6 +46,9 @@ export default async function DashboardPage() {
         <div className="page-actions">
           <Link className="primary-link" href="/dashboard/scanner">
             Open Scanner
+          </Link>
+          <Link className="primary-link secondary-link" href="/dashboard/watchlist">
+            Watchlist
           </Link>
           <Link className="primary-link secondary-link" href="/dashboard/multi-timeframe">
             Multi-Timeframe
@@ -70,6 +78,18 @@ export default async function DashboardPage() {
         <div className="card">
           <span className="metric-label">Alerts</span>
           <span className="metric-value">{alerts.data?.length ?? 0}</span>
+        </div>
+        <div className="card">
+          <span className="metric-label">Watchlist</span>
+          <span className="metric-value">{watchlistItems.length}</span>
+        </div>
+        <div className="card">
+          <span className="metric-label">High Priority</span>
+          <span className="metric-value">{highPriorityCount}</span>
+        </div>
+        <div className="card">
+          <span className="metric-label">Watchlist Alerts</span>
+          <span className="metric-value">{alertEnabledCount}</span>
         </div>
         <div className="card">
           <span className="metric-label">Bullish Aligned</span>

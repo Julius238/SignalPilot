@@ -26,6 +26,7 @@ type MultiTimeframePageProps = {
   searchParams: Promise<{
     assetType?: string;
     alignment?: string;
+    watchlistOnly?: string;
   }>;
 };
 
@@ -33,7 +34,8 @@ export default async function MultiTimeframePage({ searchParams }: MultiTimefram
   const params = await searchParams;
   const query = buildQuery({
     assetType: params.assetType,
-    alignment: params.alignment
+    alignment: params.alignment,
+    watchlistOnly: params.watchlistOnly
   });
   const result = await fetchApi<MultiTimeframeScannerItem[]>(
     `/scanner/multi-timeframe${query}`
@@ -67,6 +69,15 @@ export default async function MultiTimeframePage({ searchParams }: MultiTimefram
             </option>
           ))}
         </select>
+        <label className="check-filter">
+          <input
+            defaultChecked={params.watchlistOnly === "true"}
+            name="watchlistOnly"
+            type="checkbox"
+            value="true"
+          />
+          Watchlist only
+        </label>
         <button type="submit">Apply</button>
       </form>
 

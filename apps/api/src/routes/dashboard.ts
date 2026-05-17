@@ -8,7 +8,8 @@ import {
   prisma,
   SignalDirection,
   SignalStatus,
-  SignalType
+  SignalType,
+  WatchlistPriority
 } from "@signalpilot/database";
 import {
   calculateMultiTimeframeSummary,
@@ -24,6 +25,7 @@ const assetTypes = Object.values(AssetType);
 const signalStatuses = Object.values(SignalStatus);
 const signalDirections = Object.values(SignalDirection);
 const signalTypes = Object.values(SignalType);
+const watchlistPriorities = Object.values(WatchlistPriority);
 const botRunStatuses = Object.values(BotRunStatus);
 const alertStatuses = Object.values(AlertStatus);
 const alertChannels = Object.values(AlertChannel);
@@ -39,11 +41,20 @@ const multiTimeframeAlignments = [
 ] as const;
 type SignalListItem = ReturnType<typeof toSignalListItem>;
 type SignalRecord = Prisma.SignalGetPayload<Record<string, never>>;
+type WatchlistItemRecord = Prisma.WatchlistItemGetPayload<{
+  include: { asset: { select: typeof assetSelect } };
+}>;
 type MultiTimeframeScannerRow = {
   asset: Prisma.AssetGetPayload<{ select: typeof assetSelect }>;
   latestSignalsByTimeframe: Partial<Record<(typeof multiTimeframes)[number], ReturnType<typeof toCompactSignal>>>;
   multiTimeframeSummary: MultiTimeframeSummary;
 };
+
+let database = prisma;
+
+export function setDashboardDatabaseForTests(db: typeof prisma) {
+  database = db;
+}
 
 export async function registerDashboardRoutes(server: FastifyInstance) {
   server.get("/assets", async (request, reply) => {
@@ -56,7 +67,7 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
       return reply;
     }
 
-    const assets = await prisma.asset.findMany({
+    const assets = await database.asset.findMany({
       where: {
         assetType,
         isActive
@@ -71,6 +82,177 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
     return assets;
   });
 
+  // TODO: Scope watchlist items to the authenticated user once auth is introduced.
+  server.get("/watchlist", async (request, reply) => {
+    const query = asQueryRecord(request.query);
+    const priority = parseEnum(
+      query.priority,
+      watchlistPriorities as WatchlistPriority[],
+      "priority",
+      reply
+    );
+    const alertEnabled = parseBoolean(query.alertEnabled, "alertEnabled", reply);
+    const assetType = parseEnum(query.assetType, assetTypes as AssetType[], "assetType", reply);
+    const limit = parseLimit(query.limit, 100, 500, reply);
+
+    if (reply.sent) {
+      return reply;
+    }
+
+    const items = await database.watchlistItem.findMany({
+      where: {
+        priority,
+        alertEnabled,
+        asset: {
+          assetType
+        }
+      },
+      orderBy: [{ priority: "desc" }, { createdAt: "desc" }],
+      take: limit,
+      include: {
+        asset: {
+          select: assetSelect
+        }
+      }
+    });
+
+    return buildWatchlistItems(items);
+  });
+
+  server.post("/watchlist", async (request, reply) => {
+    const body = asBodyRecord(request.body);
+    const symbol = parseRequiredBodyString(body.symbol, "symbol", reply)?.toUpperCase();
+    const priority =
+      parseOptionalBodyEnum(
+        body.priority,
+        watchlistPriorities as WatchlistPriority[],
+        "priority",
+        reply
+      ) ?? WatchlistPriority.MEDIUM;
+    const notes = parseOptionalNullableBodyString(body.notes, "notes", reply);
+    const alertEnabled = parseOptionalBodyBoolean(body.alertEnabled, "alertEnabled", reply) ?? true;
+
+    if (reply.sent || !symbol) {
+      return reply;
+    }
+
+    const asset = await database.asset.findFirst({
+      where: {
+        symbol
+      },
+      select: {
+        id: true,
+        symbol: true
+      }
+    });
+
+    if (!asset) {
+      return notFound(reply, "Asset not found");
+    }
+
+    try {
+      const item = await database.watchlistItem.create({
+        data: {
+          assetId: asset.id,
+          symbol: asset.symbol,
+          priority,
+          notes,
+          alertEnabled
+        },
+        include: {
+          asset: {
+            select: assetSelect
+          }
+        }
+      });
+
+      reply.code(201);
+      return (await buildWatchlistItems([item]))[0];
+    } catch (error) {
+      if (isUniqueConstraintError(error)) {
+        return conflict(reply, "Asset is already in the watchlist");
+      }
+
+      throw error;
+    }
+  });
+
+  server.patch("/watchlist/:id", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const body = asBodyRecord(request.body);
+    const data: Prisma.WatchlistItemUpdateInput = {};
+
+    if (hasOwn(body, "priority")) {
+      const priority = parseOptionalBodyEnum(
+        body.priority,
+        watchlistPriorities as WatchlistPriority[],
+        "priority",
+        reply
+      );
+      if (priority !== undefined) {
+        data.priority = priority;
+      }
+    }
+
+    if (hasOwn(body, "notes")) {
+      data.notes = parseOptionalNullableBodyString(body.notes, "notes", reply);
+    }
+
+    if (hasOwn(body, "alertEnabled")) {
+      const alertEnabled = parseOptionalBodyBoolean(body.alertEnabled, "alertEnabled", reply);
+      if (alertEnabled !== undefined) {
+        data.alertEnabled = alertEnabled;
+      }
+    }
+
+    if (reply.sent) {
+      return reply;
+    }
+
+    try {
+      const item = await database.watchlistItem.update({
+        where: {
+          id
+        },
+        data,
+        include: {
+          asset: {
+            select: assetSelect
+          }
+        }
+      });
+
+      return (await buildWatchlistItems([item]))[0];
+    } catch (error) {
+      if (isRecordNotFoundError(error)) {
+        return notFound(reply, "Watchlist item not found");
+      }
+
+      throw error;
+    }
+  });
+
+  server.delete("/watchlist/:id", async (request, reply) => {
+    const { id } = request.params as { id: string };
+
+    try {
+      await database.watchlistItem.delete({
+        where: {
+          id
+        }
+      });
+
+      reply.code(204);
+      return null;
+    } catch (error) {
+      if (isRecordNotFoundError(error)) {
+        return notFound(reply, "Watchlist item not found");
+      }
+
+      throw error;
+    }
+  });
+
   server.get("/assets/:symbol", async (request, reply) => {
     const { symbol } = request.params as { symbol: string };
     const query = asQueryRecord(request.query);
@@ -83,11 +265,16 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
       return reply;
     }
 
-    const asset = await prisma.asset.findFirst({
+    const asset = await database.asset.findFirst({
       where: {
         symbol: symbol.toUpperCase()
       },
-      select: assetSelect
+      select: {
+        ...assetSelect,
+        watchlistItem: {
+          select: watchlistItemSelect
+        }
+      }
     });
 
     if (!asset) {
@@ -95,7 +282,7 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
     }
 
     const [latestSignal, multiTimeframeSignals, candleCounts] = await Promise.all([
-      prisma.signal.findFirst({
+      database.signal.findFirst({
         where: {
           assetId: asset.id
         },
@@ -107,7 +294,7 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
         }
       }),
       includeMultiTimeframe ? findLatestMultiTimeframeSignalsForAsset(asset.id) : Promise.resolve([]),
-      prisma.candle.groupBy({
+      database.candle.groupBy({
         by: ["timeframe"],
         where: {
           assetId: asset.id
@@ -121,7 +308,7 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
       parseOptionalString(query.timeframe) ?? latestSignal?.timeframe ?? "1d";
     const candles =
       includeCandles && candleLimit
-        ? await prisma.candle.findMany({
+        ? await database.candle.findMany({
             where: {
               assetId: asset.id,
               timeframe: candleTimeframe
@@ -135,6 +322,7 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
 
     return {
       ...asset,
+      isWatchlisted: asset.watchlistItem !== null,
       latestSignal: latestSignal ? toSignalSummary(latestSignal) : null,
       latestSignalOutput: latestSignal?.output ? toSignalOutput(latestSignal.output, true) : null,
       multiTimeframeSummary:
@@ -167,7 +355,7 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
     const timeframe = parseOptionalString(query.timeframe);
     const symbol = parseOptionalString(query.symbol)?.toUpperCase();
 
-    const signals = await prisma.signal.findMany({
+    const signals = await database.signal.findMany({
       where: {
         symbol,
         timeframe,
@@ -201,6 +389,7 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
     const assetType = parseEnum(query.assetType, assetTypes as AssetType[], "assetType", reply);
     const showOnlyAlertWorthy =
       parseBoolean(query.showOnlyAlertWorthy, "showOnlyAlertWorthy", reply) ?? false;
+    const watchlistOnly = parseBoolean(query.watchlistOnly, "watchlistOnly", reply) ?? false;
     const minScore = parseOptionalNumber(query.minScore, "minScore", reply);
 
     if (reply.sent) {
@@ -211,11 +400,7 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
     const baseWhere: Prisma.SignalWhereInput = {
       timeframe,
       score: minScore === undefined ? undefined : { gte: minScore },
-      asset: assetType
-        ? {
-            assetType
-          }
-        : undefined
+      asset: buildAssetRelationWhere(assetType, watchlistOnly)
     };
     const today = startOfToday();
     const scannerWhere = (where: Prisma.SignalWhereInput): Prisma.SignalWhereInput =>
@@ -248,13 +433,13 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
         { riskScore: "desc" }
       ),
       findScannerSignals(scannerWhere({ status: SignalStatus.NO_EDGE }), { createdAt: "desc" }),
-      prisma.signal.count({
+      database.signal.count({
         where: scannerWhere({ status: SignalStatus.STRONG_WATCH })
       }),
-      prisma.signal.count({
+      database.signal.count({
         where: scannerWhere({ status: SignalStatus.WATCH })
       }),
-      prisma.alert.count({
+      database.alert.count({
         where: {
           status: AlertStatus.SENT,
           sentAt: {
@@ -262,7 +447,7 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
           }
         }
       }),
-      prisma.botRun.findFirst({
+      database.botRun.findFirst({
         where: {
           jobName: "runCryptoSignalPipeline"
         },
@@ -309,6 +494,7 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
   server.get("/scanner/multi-timeframe", async (request, reply) => {
     const query = asQueryRecord(request.query);
     const assetType = parseEnum(query.assetType, assetTypes as AssetType[], "assetType", reply);
+    const watchlistOnly = parseBoolean(query.watchlistOnly, "watchlistOnly", reply) ?? false;
     const alignment = parseEnum(
       query.alignment,
       multiTimeframeAlignments,
@@ -321,10 +507,15 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
       return reply;
     }
 
-    const assets = await prisma.asset.findMany({
+    const assets = await database.asset.findMany({
       where: {
         assetType,
-        isActive: true
+        isActive: true,
+        watchlistItem: watchlistOnly
+          ? {
+              isNot: null
+            }
+          : undefined
       },
       orderBy: {
         symbol: "asc"
@@ -342,7 +533,7 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
 
   server.get("/signals/:id", async (request, reply) => {
     const { id } = request.params as { id: string };
-    const signal = await prisma.signal.findUnique({
+    const signal = await database.signal.findUnique({
       where: {
         id
       },
@@ -358,7 +549,7 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
       return notFound(reply, "Signal not found");
     }
 
-    const candles = await prisma.candle.findMany({
+    const candles = await database.candle.findMany({
       where: {
         assetId: signal.assetId,
         timeframe: signal.timeframe
@@ -386,7 +577,7 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
       return reply;
     }
 
-    const asset = await prisma.asset.findFirst({
+    const asset = await database.asset.findFirst({
       where: {
         symbol: symbol.toUpperCase()
       },
@@ -399,7 +590,7 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
       return notFound(reply, "Asset not found");
     }
 
-    const signals = await prisma.signal.findMany({
+    const signals = await database.signal.findMany({
       where: {
         assetId: asset.id,
         timeframe: parseOptionalString(query.timeframe)
@@ -428,7 +619,7 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
       return reply;
     }
 
-    return prisma.botRun.findMany({
+    return database.botRun.findMany({
       where: {
         jobName: parseOptionalString(query.jobName),
         status
@@ -448,7 +639,7 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
       return reply;
     }
 
-    return prisma.botLog.findMany({
+    return database.botLog.findMany({
       where: {
         level: parseOptionalString(query.level),
         service: parseOptionalString(query.service)
@@ -470,7 +661,7 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
       return reply;
     }
 
-    return prisma.alert.findMany({
+    return database.alert.findMany({
       where: {
         status,
         channel
@@ -518,7 +709,7 @@ async function findScannerSignals(
   where: Prisma.SignalWhereInput,
   orderBy: Prisma.SignalOrderByWithRelationInput
 ) {
-  const signals = await prisma.signal.findMany({
+  const signals = await database.signal.findMany({
     where,
     orderBy,
     take: 20,
@@ -533,8 +724,43 @@ async function findScannerSignals(
   return signals.map(toSignalListItem);
 }
 
+async function buildWatchlistItems(items: WatchlistItemRecord[]) {
+  if (items.length === 0) {
+    return [];
+  }
+
+  return Promise.all(
+    items.map(async (item) => {
+      const [latestSignal, multiTimeframeSignals] = await Promise.all([
+        database.signal.findFirst({
+          where: {
+            assetId: item.assetId
+          },
+          orderBy: {
+            createdAt: "desc"
+          },
+          include: {
+            output: true
+          }
+        }),
+        findLatestMultiTimeframeSignalsForAsset(item.assetId)
+      ]);
+
+      return {
+        ...toWatchlistItem(item),
+        latestSignal: latestSignal ? toSignalSummary(latestSignal) : null,
+        latestSignalOutput: latestSignal?.output ? toSignalOutput(latestSignal.output, false) : null,
+        multiTimeframeSummary:
+          multiTimeframeSignals.length > 0
+            ? calculateMultiTimeframeSummary(multiTimeframeSignals.map(toMultiTimeframeSignalInput))
+            : null
+      };
+    })
+  );
+}
+
 async function findLatestMultiTimeframeSignalsForAsset(assetId: string) {
-  const signals = await prisma.signal.findMany({
+  const signals = await database.signal.findMany({
     where: {
       assetId,
       timeframe: {
@@ -558,7 +784,7 @@ async function buildMultiTimeframeScannerRows(
   }
 
   const assetIds = assets.map((asset) => asset.id);
-  const signals = await prisma.signal.findMany({
+  const signals = await database.signal.findMany({
     where: {
       assetId: {
         in: assetIds
@@ -610,7 +836,7 @@ async function buildScannerMultiTimeframeSummaries(
     return {};
   }
 
-  const signals = await prisma.signal.findMany({
+  const signals = await database.signal.findMany({
     where: {
       symbol: {
         in: symbols
@@ -703,6 +929,21 @@ function mergeSignalWhere(...conditions: Array<Prisma.SignalWhereInput | undefin
   };
 }
 
+function buildAssetRelationWhere(assetType: AssetType | undefined, watchlistOnly: boolean) {
+  if (!assetType && !watchlistOnly) {
+    return undefined;
+  }
+
+  return {
+    assetType,
+    watchlistItem: watchlistOnly
+      ? {
+          isNot: null
+        }
+      : undefined
+  } satisfies Prisma.AssetWhereInput;
+}
+
 function startOfToday() {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -721,6 +962,31 @@ const assetSelect = {
   createdAt: true,
   updatedAt: true
 } satisfies Prisma.AssetSelect;
+
+const watchlistItemSelect = {
+  id: true,
+  assetId: true,
+  symbol: true,
+  priority: true,
+  notes: true,
+  alertEnabled: true,
+  createdAt: true,
+  updatedAt: true
+} satisfies Prisma.WatchlistItemSelect;
+
+function toWatchlistItem(item: WatchlistItemRecord) {
+  return {
+    id: item.id,
+    assetId: item.assetId,
+    symbol: item.symbol,
+    priority: item.priority,
+    notes: item.notes,
+    alertEnabled: item.alertEnabled,
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt,
+    asset: item.asset
+  };
+}
 
 function toSignalListItem(
   signal: Prisma.SignalGetPayload<{
@@ -884,6 +1150,12 @@ function asQueryRecord(query: unknown): QueryRecord {
   return (query ?? {}) as QueryRecord;
 }
 
+function asBodyRecord(body: unknown): Record<string, unknown> {
+  return body && typeof body === "object" && !Array.isArray(body)
+    ? (body as Record<string, unknown>)
+    : {};
+}
+
 function parseLimit(
   value: QueryValue,
   defaultValue: number,
@@ -987,6 +1259,76 @@ function parseEnum<T extends string>(
   return undefined;
 }
 
+function parseRequiredBodyString(
+  value: unknown,
+  name: string,
+  reply: FastifyReply
+): string | undefined {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    badRequest(reply, `${name} is required`);
+    return undefined;
+  }
+
+  return value.trim();
+}
+
+function parseOptionalNullableBodyString(
+  value: unknown,
+  name: string,
+  reply: FastifyReply
+): string | null | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (value === null) {
+    return null;
+  }
+
+  if (typeof value !== "string") {
+    badRequest(reply, `${name} must be a string`);
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function parseOptionalBodyBoolean(
+  value: unknown,
+  name: string,
+  reply: FastifyReply
+): boolean | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (typeof value !== "boolean") {
+    badRequest(reply, `${name} must be a boolean`);
+    return undefined;
+  }
+
+  return value;
+}
+
+function parseOptionalBodyEnum<T extends string>(
+  value: unknown,
+  allowedValues: readonly T[],
+  name: string,
+  reply: FastifyReply
+): T | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (typeof value === "string" && allowedValues.includes(value as T)) {
+    return value as T;
+  }
+
+  badRequest(reply, `${name} must be one of: ${allowedValues.join(", ")}`);
+  return undefined;
+}
+
 function parseOptionalString(value: QueryValue): string | undefined {
   const raw = firstQueryValue(value);
   return raw && raw.trim().length > 0 ? raw.trim() : undefined;
@@ -996,9 +1338,20 @@ function firstQueryValue(value: QueryValue): string | undefined {
   return Array.isArray(value) ? value[0] : value;
 }
 
+function hasOwn(record: Record<string, unknown>, key: string) {
+  return Object.prototype.hasOwnProperty.call(record, key);
+}
+
 function badRequest(reply: FastifyReply, message: string) {
   reply.code(400).send({
     error: "Bad Request",
+    message
+  });
+}
+
+function conflict(reply: FastifyReply, message: string) {
+  return reply.code(409).send({
+    error: "Conflict",
     message
   });
 }
@@ -1008,4 +1361,12 @@ function notFound(reply: FastifyReply, message: string) {
     error: "Not Found",
     message
   });
+}
+
+function isUniqueConstraintError(error: unknown) {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
+}
+
+function isRecordNotFoundError(error: unknown) {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025";
 }
