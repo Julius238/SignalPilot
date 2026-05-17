@@ -1,7 +1,12 @@
 import Link from "next/link";
 
 import { CandlestickChart } from "../../../../components/CandlestickChart";
-import { DirectionBadge, RiskBadge, StatusBadge } from "../../../../components/badges";
+import {
+  AlignmentBadge,
+  DirectionBadge,
+  RiskBadge,
+  StatusBadge
+} from "../../../../components/badges";
 import { ErrorState } from "../../../../components/empty-state";
 import { SignalsTable } from "../../../../components/signals-table";
 import { formatJson, formatScore } from "../../../../lib/format";
@@ -90,6 +95,36 @@ export default async function AssetDetailPage({ params }: AssetDetailPageProps) 
         </div>
       </section>
 
+      <section className="card multi-timeframe-card">
+        <h2>Multi-Timeframe Summary</h2>
+        {data.multiTimeframeSummary ? (
+          <div className="multi-timeframe-content">
+            <div className="multi-timeframe-head">
+              <AlignmentBadge value={data.multiTimeframeSummary.alignment} />
+              <span className="metric-value metric-value-text">
+                Score {formatScore(data.multiTimeframeSummary.alignmentScore)}
+              </span>
+              <RiskBadge value={data.multiTimeframeSummary.riskLevel} />
+            </div>
+            <div className="multi-timeframe-lists">
+              <div>
+                <span className="metric-label">Confirming</span>
+                <strong>{formatTimeframes(data.multiTimeframeSummary.confirmingTimeframes)}</strong>
+              </div>
+              <div>
+                <span className="metric-label">Conflicting</span>
+                <strong>{formatTimeframes(data.multiTimeframeSummary.conflictingTimeframes)}</strong>
+              </div>
+            </div>
+            <p>{data.multiTimeframeSummary.summary}</p>
+            <p>{data.multiTimeframeSummary.riskNote}</p>
+            <p>{data.multiTimeframeSummary.nextFocus}</p>
+          </div>
+        ) : (
+          <p>No multi-timeframe summary available.</p>
+        )}
+      </section>
+
       <CandlestickChart
         candles={(data.candles ?? []).map((candle) => ({
           time: candle.openTime,
@@ -125,4 +160,8 @@ export default async function AssetDetailPage({ params }: AssetDetailPageProps) 
       </section>
     </>
   );
+}
+
+function formatTimeframes(timeframes: string[]) {
+  return timeframes.length > 0 ? timeframes.join(", ") : "-";
 }

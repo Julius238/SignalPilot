@@ -10,6 +10,11 @@ import {
   SignalStatus,
   SignalType
 } from "@signalpilot/database";
+import {
+  calculateMultiTimeframeSummary,
+  type MultiTimeframeSignalInput,
+  type MultiTimeframeSummary
+} from "@signalpilot/multi-timeframe";
 import type { FastifyInstance, FastifyReply } from "fastify";
 
 type QueryValue = string | string[] | undefined;
@@ -22,11 +27,14 @@ const signalTypes = Object.values(SignalType);
 const botRunStatuses = Object.values(BotRunStatus);
 const alertStatuses = Object.values(AlertStatus);
 const alertChannels = Object.values(AlertChannel);
+const multiTimeframes = ["1h", "4h", "1d"] as const;
+type SignalListItem = ReturnType<typeof toSignalListItem>;
+type SignalRecord = Prisma.SignalGetPayload<Record<string, never>>;
 
 export async function registerDashboardRoutes(server: FastifyInstance) {
   server.get("/assets", async (request, reply) => {
     const query = asQueryRecord(request.query);
-    const assetType = parseEnum(query.assetType, assetTypes, "assetType", reply);
+    const assetType = parseEnum(query.assetType, assetTypes as AssetType[], "assetType", reply);
     const isActive = parseBoolean(query.isActive, "isActive", reply);
     const limit = parseLimit(query.limit, 100, 500, reply);
 
@@ -70,7 +78,7 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
       return notFound(reply, "Asset not found");
     }
 
-    const [latestSignal, candleCounts] = await Promise.all([
+    const [latestSignal, multiTimeframeSignals, candleCounts] = await Promise.all([
       prisma.signal.findFirst({
         where: {
           assetId: asset.id
@@ -82,6 +90,7 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
           output: true
         }
       }),
+      findLatestMultiTimeframeSignalsForAsset(asset.id),
       prisma.candle.groupBy({
         by: ["timeframe"],
         where: {
@@ -112,8 +121,15 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
       ...asset,
       latestSignal: latestSignal ? toSignalSummary(latestSignal) : null,
       latestSignalOutput: latestSignal?.output ? toSignalOutput(latestSignal.output, true) : null,
+      multiTimeframeSummary:
+        multiTimeframeSignals.length > 0
+          ? calculateMultiTimeframeSummary(multiTimeframeSignals.map(toMultiTimeframeSignalInput))
+          : null,
       candleCounts: Object.fromEntries(
-        candleCounts.map((count) => [count.timeframe, count._count._all])
+        candleCounts.map((count: { timeframe: string; _count: { _all: number } }) => [
+          count.timeframe,
+          count._count._all
+        ])
       ),
       candles: includeCandles ? candles.reverse().map(toCandle) : undefined
     };
@@ -121,10 +137,10 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
 
   server.get("/signals", async (request, reply) => {
     const query = asQueryRecord(request.query);
-    const assetType = parseEnum(query.assetType, assetTypes, "assetType", reply);
-    const status = parseEnum(query.status, signalStatuses, "status", reply);
-    const direction = parseEnum(query.direction, signalDirections, "direction", reply);
-    const signalType = parseEnum(query.signalType, signalTypes, "signalType", reply);
+    const assetType = parseEnum(query.assetType, assetTypes as AssetType[], "assetType", reply);
+    const status = parseEnum(query.status, signalStatuses as SignalStatus[], "status", reply);
+    const direction = parseEnum(query.direction, signalDirections as SignalDirection[], "direction", reply);
+    const signalType = parseEnum(query.signalType, signalTypes as SignalType[], "signalType", reply);
     const limit = parseLimit(query.limit, 50, 200, reply);
     const offset = parseOffset(query.offset, reply);
 
@@ -166,7 +182,7 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
 
   server.get("/scanner", async (request, reply) => {
     const query = asQueryRecord(request.query);
-    const assetType = parseEnum(query.assetType, assetTypes, "assetType", reply);
+    const assetType = parseEnum(query.assetType, assetTypes as AssetType[], "assetType", reply);
     const showOnlyAlertWorthy =
       parseBoolean(query.showOnlyAlertWorthy, "showOnlyAlertWorthy", reply) ?? false;
     const minScore = parseOptionalNumber(query.minScore, "minScore", reply);
@@ -240,22 +256,35 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
       })
     ]);
 
+    const groups = {
+      strongWatch,
+      watchlist,
+      volumeSpikes,
+      breakouts,
+      highRisk,
+      noEdge
+    };
+    const multiTimeframeSummaries = await buildScannerMultiTimeframeSummaries(groups);
+    const multiTimeframeSummaryValues = Object.values(multiTimeframeSummaries);
+
     return {
       summary: {
         strongWatchCount,
         watchCount,
         alertsSentToday,
         lastPipelineRunStatus: lastPipelineRun?.status ?? null,
-        lastPipelineRunAt: lastPipelineRun?.startedAt ?? null
+        lastPipelineRunAt: lastPipelineRun?.startedAt ?? null,
+        bullishAlignedCount: multiTimeframeSummaryValues.filter(
+          (summary) => summary.alignment === "BULLISH_ALIGNED"
+        ).length,
+        bearishAlignedCount: multiTimeframeSummaryValues.filter(
+          (summary) => summary.alignment === "BEARISH_ALIGNED"
+        ).length,
+        conflictCount: multiTimeframeSummaryValues.filter((summary) => summary.alignment === "CONFLICT")
+          .length
       },
-      groups: {
-        strongWatch,
-        watchlist,
-        volumeSpikes,
-        breakouts,
-        highRisk,
-        noEdge
-      }
+      groups,
+      multiTimeframeSummaries
     };
   });
 
@@ -340,7 +369,7 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
 
   server.get("/bot-runs", async (request, reply) => {
     const query = asQueryRecord(request.query);
-    const status = parseEnum(query.status, botRunStatuses, "status", reply);
+    const status = parseEnum(query.status, botRunStatuses as BotRunStatus[], "status", reply);
     const limit = parseLimit(query.limit, 50, 200, reply);
 
     if (reply.sent) {
@@ -381,8 +410,8 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
 
   server.get("/alerts", async (request, reply) => {
     const query = asQueryRecord(request.query);
-    const status = parseEnum(query.status, alertStatuses, "status", reply);
-    const channel = parseEnum(query.channel, alertChannels, "channel", reply);
+    const status = parseEnum(query.status, alertStatuses as AlertStatus[], "status", reply);
+    const channel = parseEnum(query.channel, alertChannels as AlertChannel[], "channel", reply);
     const limit = parseLimit(query.limit, 50, 200, reply);
 
     if (reply.sent) {
@@ -433,8 +462,11 @@ const alertWorthyWhere = {
   ]
 } satisfies Prisma.SignalWhereInput;
 
-function findScannerSignals(where: Prisma.SignalWhereInput, orderBy: Prisma.SignalOrderByWithRelationInput) {
-  return prisma.signal.findMany({
+async function findScannerSignals(
+  where: Prisma.SignalWhereInput,
+  orderBy: Prisma.SignalOrderByWithRelationInput
+) {
+  const signals = await prisma.signal.findMany({
     where,
     orderBy,
     take: 20,
@@ -444,7 +476,92 @@ function findScannerSignals(where: Prisma.SignalWhereInput, orderBy: Prisma.Sign
       },
       output: true
     }
-  }).then((signals) => signals.map(toSignalListItem));
+  });
+
+  return signals.map(toSignalListItem);
+}
+
+async function findLatestMultiTimeframeSignalsForAsset(assetId: string) {
+  const signals = await prisma.signal.findMany({
+    where: {
+      assetId,
+      timeframe: {
+        in: [...multiTimeframes]
+      }
+    },
+    orderBy: {
+      createdAt: "desc"
+    }
+  });
+
+  return selectLatestMultiTimeframeSignals(signals);
+}
+
+async function buildScannerMultiTimeframeSummaries(
+  groups: Record<string, SignalListItem[]>
+): Promise<Record<string, MultiTimeframeSummary>> {
+  const symbols = [...new Set(Object.values(groups).flatMap((signals) => signals.map((signal) => signal.symbol)))];
+
+  if (symbols.length === 0) {
+    return {};
+  }
+
+  const signals = await prisma.signal.findMany({
+    where: {
+      symbol: {
+        in: symbols
+      },
+      timeframe: {
+        in: [...multiTimeframes]
+      }
+    },
+    orderBy: {
+      createdAt: "desc"
+    }
+  });
+  const latestBySymbol = new Map<string, SignalRecord[]>();
+
+  for (const signal of selectLatestMultiTimeframeSignalsBySymbol(signals)) {
+    const symbolSignals = latestBySymbol.get(signal.symbol) ?? [];
+    symbolSignals.push(signal);
+    latestBySymbol.set(signal.symbol, symbolSignals);
+  }
+
+  return Object.fromEntries(
+    [...latestBySymbol.entries()].map(([symbol, symbolSignals]) => [
+      symbol,
+      calculateMultiTimeframeSummary(symbolSignals.map(toMultiTimeframeSignalInput))
+    ])
+  );
+}
+
+function selectLatestMultiTimeframeSignals<T extends { timeframe: string; createdAt: Date }>(signals: T[]) {
+  const latest = new Map<string, T>();
+
+  for (const signal of signals) {
+    const current = latest.get(signal.timeframe);
+    if (!current || signal.createdAt > current.createdAt) {
+      latest.set(signal.timeframe, signal);
+    }
+  }
+
+  return [...latest.values()];
+}
+
+function selectLatestMultiTimeframeSignalsBySymbol<T extends { symbol: string; timeframe: string; createdAt: Date }>(
+  signals: T[]
+) {
+  const latest = new Map<string, T>();
+
+  for (const signal of signals) {
+    const key = `${signal.symbol}:${signal.timeframe}`;
+    const current = latest.get(key);
+    if (!current || signal.createdAt > current.createdAt) {
+      latest.set(key, signal);
+    }
+  }
+
+  return [...latest.values()];
 }
 
 function mergeSignalWhere(...conditions: Array<Prisma.SignalWhereInput | undefined>) {
@@ -561,6 +678,31 @@ function toSignalSummary(
     direction: signal.direction,
     score: signal.score,
     riskLevel: signal.riskLevel,
+    riskScore: signal.riskScore,
+    createdAt: signal.createdAt
+  };
+}
+
+function toMultiTimeframeSignalInput(signal: {
+  symbol: string;
+  timeframe: string;
+  status: SignalStatus;
+  direction: SignalDirection;
+  signalType: SignalType;
+  score: number;
+  riskLevel: RiskLevel;
+  riskScore: number | null;
+  createdAt: Date;
+}): MultiTimeframeSignalInput {
+  return {
+    symbol: signal.symbol,
+    timeframe: signal.timeframe,
+    status: signal.status,
+    direction: signal.direction,
+    signalType: signal.signalType,
+    score: signal.score,
+    riskLevel: signal.riskLevel,
+    riskScore: signal.riskScore,
     createdAt: signal.createdAt
   };
 }

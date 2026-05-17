@@ -66,7 +66,12 @@ export default async function ScannerPage({ searchParams }: ScannerPageProps) {
         </div>
       </section>
 
-      {scanner.data ? <ScannerGroups groups={scanner.data.groups} /> : null}
+      {scanner.data ? (
+        <ScannerGroups
+          groups={scanner.data.groups}
+          multiTimeframeSummaries={scanner.data.multiTimeframeSummaries}
+        />
+      ) : null}
     </>
   );
 }

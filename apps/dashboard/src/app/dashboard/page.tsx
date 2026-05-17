@@ -5,18 +5,26 @@ import { HealthBadge } from "../../components/badges";
 import { ErrorState } from "../../components/empty-state";
 import { SignalsTable } from "../../components/signals-table";
 import { formatDateTime } from "../../lib/format";
-import { fetchApi, type Alert, type Asset, type BotRun, type SignalListItem } from "../../lib/signalpilot-api";
+import {
+  fetchApi,
+  type Alert,
+  type Asset,
+  type BotRun,
+  type ScannerResponse,
+  type SignalListItem
+} from "../../lib/signalpilot-api";
 
 export default async function DashboardPage() {
-  const [health, assets, signals, alerts, pipelineRuns] = await Promise.all([
+  const [health, assets, signals, alerts, pipelineRuns, scanner] = await Promise.all([
     fetchApi<{ status: string }>("/health"),
     fetchApi<Asset[]>("/assets?limit=500"),
     fetchApi<SignalListItem[]>("/signals?limit=200"),
     fetchApi<Alert[]>("/alerts?limit=200"),
-    fetchApi<BotRun[]>("/bot-runs?jobName=runCryptoSignalPipeline&limit=1")
+    fetchApi<BotRun[]>("/bot-runs?jobName=runCryptoSignalPipeline&limit=1"),
+    fetchApi<ScannerResponse>("/scanner")
   ]);
 
-  const errors = [health, assets, signals, alerts, pipelineRuns]
+  const errors = [health, assets, signals, alerts, pipelineRuns, scanner]
     .map((result) => result.error)
     .filter(Boolean);
   const latestSignals = signals.data?.slice(0, 5) ?? [];
@@ -57,6 +65,18 @@ export default async function DashboardPage() {
         <div className="card">
           <span className="metric-label">Alerts</span>
           <span className="metric-value">{alerts.data?.length ?? 0}</span>
+        </div>
+        <div className="card">
+          <span className="metric-label">Bullish Aligned</span>
+          <span className="metric-value">{scanner.data?.summary.bullishAlignedCount ?? 0}</span>
+        </div>
+        <div className="card">
+          <span className="metric-label">Bearish Aligned</span>
+          <span className="metric-value">{scanner.data?.summary.bearishAlignedCount ?? 0}</span>
+        </div>
+        <div className="card">
+          <span className="metric-label">Conflicts</span>
+          <span className="metric-value">{scanner.data?.summary.conflictCount ?? 0}</span>
         </div>
       </section>
 

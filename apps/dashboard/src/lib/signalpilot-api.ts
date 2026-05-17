@@ -2,6 +2,14 @@ export type AssetType = "STOCK" | "ETF" | "CRYPTO";
 export type SignalStatus = "STRONG_WATCH" | "WATCH" | "WAIT" | "AVOID" | "NO_EDGE";
 export type SignalDirection = "BULLISH" | "BEARISH" | "NEUTRAL" | "MIXED";
 export type RiskLevel = "LOW" | "MEDIUM" | "HIGH";
+export type MultiTimeframeAlignment =
+  | "BULLISH_ALIGNED"
+  | "BEARISH_ALIGNED"
+  | "MIXED"
+  | "SHORT_TERM_ONLY"
+  | "HIGHER_TIMEFRAME_CONFIRMATION"
+  | "CONFLICT"
+  | "NO_EDGE";
 
 export type Asset = {
   id: string;
@@ -43,6 +51,21 @@ export type SignalListItem = {
   createdAt: string;
   asset: Asset;
   signalOutput: SignalOutput | null;
+};
+
+export type MultiTimeframeSummary = {
+  symbol: string;
+  alignment: MultiTimeframeAlignment;
+  alignmentScore: number;
+  primaryTimeframe: string | null;
+  confirmingTimeframes: string[];
+  conflictingTimeframes: string[];
+  strongestSignal: Omit<SignalListItem, "asset" | "signalOutput"> | null;
+  weakestSignal: Omit<SignalListItem, "asset" | "signalOutput"> | null;
+  riskLevel: RiskLevel;
+  summary: string;
+  riskNote: string;
+  nextFocus: string;
 };
 
 export type SignalDetail = {
@@ -91,6 +114,7 @@ export type Candle = {
 export type AssetDetail = Asset & {
   latestSignal: Omit<SignalListItem, "asset" | "signalOutput"> | null;
   latestSignalOutput: SignalOutput | null;
+  multiTimeframeSummary: MultiTimeframeSummary | null;
   candleCounts: Record<string, number>;
   candles?: Candle[];
 };
@@ -147,8 +171,12 @@ export type ScannerResponse = {
     alertsSentToday: number;
     lastPipelineRunStatus: BotRun["status"] | null;
     lastPipelineRunAt: string | null;
+    bullishAlignedCount: number;
+    bearishAlignedCount: number;
+    conflictCount: number;
   };
   groups: Record<ScannerGroupKey, SignalListItem[]>;
+  multiTimeframeSummaries: Record<string, MultiTimeframeSummary>;
 };
 
 export type ApiResult<T> =

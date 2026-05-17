@@ -35,6 +35,9 @@ importers:
       '@signalpilot/database':
         specifier: workspace:*
         version: link:../../packages/database
+      '@signalpilot/multi-timeframe':
+        specifier: workspace:*
+        version: link:../../packages/multi-timeframe
       '@signalpilot/shared':
         specifier: workspace:*
         version: link:../../packages/shared

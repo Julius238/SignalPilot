@@ -1,9 +1,9 @@
 import Link from "next/link";
 
-import { DirectionBadge, RiskBadge, StatusBadge } from "./badges";
+import { AlignmentBadge, DirectionBadge, RiskBadge, StatusBadge } from "./badges";
 import { EmptyState } from "./empty-state";
 import { formatDateTime, formatScore } from "../lib/format";
-import type { ScannerGroupKey, SignalListItem } from "../lib/signalpilot-api";
+import type { MultiTimeframeSummary, ScannerGroupKey, SignalListItem } from "../lib/signalpilot-api";
 
 const groupTitles: Record<ScannerGroupKey, string> = {
   strongWatch: "Strong Watch",
@@ -23,7 +23,13 @@ const groupDescriptions: Record<ScannerGroupKey, string> = {
   noEdge: "Signals without a current edge."
 };
 
-export function ScannerGroups({ groups }: { groups: Record<ScannerGroupKey, SignalListItem[]> }) {
+export function ScannerGroups({
+  groups,
+  multiTimeframeSummaries
+}: {
+  groups: Record<ScannerGroupKey, SignalListItem[]>;
+  multiTimeframeSummaries?: Record<string, MultiTimeframeSummary>;
+}) {
   const orderedGroups: ScannerGroupKey[] = [
     "strongWatch",
     "watchlist",
@@ -36,7 +42,12 @@ export function ScannerGroups({ groups }: { groups: Record<ScannerGroupKey, Sign
   return (
     <section className="scanner-grid">
       {orderedGroups.map((key) => (
-        <ScannerGroup key={key} groupKey={key} signals={groups[key] ?? []} />
+        <ScannerGroup
+          key={key}
+          groupKey={key}
+          multiTimeframeSummaries={multiTimeframeSummaries ?? {}}
+          signals={groups[key] ?? []}
+        />
       ))}
     </section>
   );
@@ -44,11 +55,20 @@ export function ScannerGroups({ groups }: { groups: Record<ScannerGroupKey, Sign
 
 function ScannerGroup({
   groupKey,
+  multiTimeframeSummaries,
   signals
 }: {
   groupKey: ScannerGroupKey;
+  multiTimeframeSummaries: Record<string, MultiTimeframeSummary>;
   signals: SignalListItem[];
 }) {
+  const sortedSignals = [...signals].sort((left, right) => {
+    const leftSummary = multiTimeframeSummaries[left.symbol];
+    const rightSummary = multiTimeframeSummaries[right.symbol];
+    const alignmentDifference = alignmentRank(leftSummary) - alignmentRank(rightSummary);
+    return alignmentDifference === 0 ? right.score - left.score : alignmentDifference;
+  });
+
   return (
     <div className={`card scanner-card scanner-card-${groupKey}`}>
       <div className="scanner-card-header">
@@ -56,15 +76,20 @@ function ScannerGroup({
           <h2>{groupTitles[groupKey]}</h2>
           <p>{groupDescriptions[groupKey]}</p>
         </div>
-        <span className="scanner-count">{signals.length}</span>
+        <span className="scanner-count">{sortedSignals.length}</span>
       </div>
 
-      {signals.length === 0 ? (
+      {sortedSignals.length === 0 ? (
         <EmptyState title="Keine passenden Signals gefunden." />
       ) : (
         <div className="scanner-list">
-          {signals.map((signal) => (
-            <SignalScannerRow key={signal.id} signal={signal} subdued={groupKey === "noEdge"} />
+          {sortedSignals.map((signal) => (
+            <SignalScannerRow
+              key={signal.id}
+              multiTimeframeSummary={multiTimeframeSummaries[signal.symbol]}
+              signal={signal}
+              subdued={groupKey === "noEdge"}
+            />
           ))}
         </div>
       )}
@@ -72,7 +97,15 @@ function ScannerGroup({
   );
 }
 
-function SignalScannerRow({ signal, subdued }: { signal: SignalListItem; subdued: boolean }) {
+function SignalScannerRow({
+  signal,
+  subdued,
+  multiTimeframeSummary
+}: {
+  signal: SignalListItem;
+  subdued: boolean;
+  multiTimeframeSummary?: MultiTimeframeSummary;
+}) {
   const isHighRisk = signal.status === "AVOID" || signal.riskLevel === "HIGH";
 
   return (
@@ -96,6 +129,7 @@ function SignalScannerRow({ signal, subdued }: { signal: SignalListItem; subdued
       </div>
 
       <div className="scanner-badges">
+        {multiTimeframeSummary ? <AlignmentBadge value={multiTimeframeSummary.alignment} /> : null}
         <StatusBadge value={signal.status} />
         <DirectionBadge value={signal.direction} />
         <RiskBadge value={signal.riskLevel} />
@@ -111,4 +145,25 @@ function SignalScannerRow({ signal, subdued }: { signal: SignalListItem; subdued
       </div>
     </article>
   );
+}
+
+function alignmentRank(summary: MultiTimeframeSummary | undefined) {
+  switch (summary?.alignment) {
+    case "BULLISH_ALIGNED":
+      return 0;
+    case "BEARISH_ALIGNED":
+      return 1;
+    case "HIGHER_TIMEFRAME_CONFIRMATION":
+      return 2;
+    case "SHORT_TERM_ONLY":
+      return 3;
+    case "CONFLICT":
+      return 4;
+    case "MIXED":
+      return 5;
+    case "NO_EDGE":
+      return 6;
+    default:
+      return 7;
+  }
 }
