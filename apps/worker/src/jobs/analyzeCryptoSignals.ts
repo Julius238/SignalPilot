@@ -8,6 +8,7 @@ import {
   BotRunStatus,
   Prisma,
   prisma,
+  WatchlistPriority,
   type PrismaClient
 } from "@signalpilot/database";
 import { buildIndicatorSnapshot, type IndicatorCandle } from "@signalpilot/indicators";
@@ -35,6 +36,7 @@ config();
 const candleLimit = 250;
 const minimumUsefulCandles = 20;
 const multiTimeframeIntervals = ["1h", "4h", "1d"] as const;
+const alertModes = ["ALL_ASSETS", "WATCHLIST_ONLY", "HIGH_PRIORITY_ONLY"] as const;
 
 const neutralIntelligenceContext: IntelligenceContext = {
   newsSummary: "Keine relevante neue Meldung im Scan-Fenster gefunden.",
@@ -50,13 +52,46 @@ export type AnalyzeCryptoSignalsSummary = {
   savedSignalCount: number;
   sentAlertCount: number;
   skippedAlertCount: number;
+  alertMode: AlertMode;
+  routedAlertCount: number;
+  routeSkippedAlertCount: number;
+  watchlistDisabledSkipCount: number;
+  notOnWatchlistSkipCount: number;
+  notHighPrioritySkipCount: number;
   alertErrorCount: number;
   errorCount: number;
+};
+
+export type AlertMode = (typeof alertModes)[number];
+
+export type AlertRouteReason =
+  | "ALL_ASSETS"
+  | "WATCHLIST_ONLY_MATCH"
+  | "HIGH_PRIORITY_MATCH"
+  | "WATCHLIST_DISABLED"
+  | "NOT_ON_WATCHLIST"
+  | "NOT_HIGH_PRIORITY"
+  | "INVALID_ALERT_MODE";
+
+type AlertRouteWatchlistItem = {
+  alertEnabled: boolean;
+  priority: WatchlistPriority;
+} | null;
+
+type AlertRouteAsset = {
+  id: string;
+  symbol: string;
+};
+
+export type AlertRouteDecision = {
+  shouldRoute: boolean;
+  reason: AlertRouteReason;
 };
 
 export async function analyzeCryptoSignals(
   database: PrismaClient = prisma
 ): Promise<AnalyzeCryptoSignalsSummary> {
+  const alertModeConfig = parseAlertMode(process.env.ALERT_MODE);
   const botRun = await database.botRun.create({
     data: {
       jobName: "analyzeCryptoSignals",
@@ -64,7 +99,8 @@ export async function analyzeCryptoSignals(
       startedAt: new Date(),
       metadataJson: {
         intervals: [...supportedBinanceIntervals],
-        candleLimit
+        candleLimit,
+        alertMode: alertModeConfig.alertMode
       }
     }
   });
@@ -73,12 +109,26 @@ export async function analyzeCryptoSignals(
   let savedSignalCount = 0;
   let sentAlertCount = 0;
   let skippedAlertCount = 0;
+  let routedAlertCount = 0;
+  let routeSkippedAlertCount = 0;
+  let watchlistDisabledSkipCount = 0;
+  let notOnWatchlistSkipCount = 0;
+  let notHighPrioritySkipCount = 0;
   let alertErrorCount = 0;
   let insufficientDataCount = 0;
   let errorCount = 0;
 
+  if (alertModeConfig.invalidValue) {
+    await writeBotLog(database, "warn", "Invalid ALERT_MODE, falling back to ALL_ASSETS", {
+      botRunId: botRun.id,
+      invalidAlertMode: alertModeConfig.invalidValue,
+      alertMode: alertModeConfig.alertMode
+    });
+  }
+
   await writeBotLog(database, "info", "analyzeCryptoSignals started", {
-    botRunId: botRun.id
+    botRunId: botRun.id,
+    alertMode: alertModeConfig.alertMode
   });
 
   try {
@@ -89,6 +139,14 @@ export async function analyzeCryptoSignals(
       },
       orderBy: {
         symbol: "asc"
+      },
+      include: {
+        watchlistItem: {
+          select: {
+            alertEnabled: true,
+            priority: true
+          }
+        }
       }
     });
 
@@ -208,6 +266,29 @@ export async function analyzeCryptoSignals(
           if (!signalOutput || !shouldSendSignalAlert(decision, signalOutput.telegramText, multiTimeframeSummary)) {
             skippedAlertCount += 1;
           } else {
+            const routeDecision = shouldRouteAlertForAsset({
+              asset,
+              watchlistItem: asset.watchlistItem ?? null,
+              alertMode: alertModeConfig.rawAlertMode
+            });
+
+            if (!routeDecision.shouldRoute) {
+              skippedAlertCount += 1;
+              routeSkippedAlertCount += 1;
+
+              if (routeDecision.reason === "WATCHLIST_DISABLED") {
+                watchlistDisabledSkipCount += 1;
+              } else if (routeDecision.reason === "NOT_ON_WATCHLIST") {
+                notOnWatchlistSkipCount += 1;
+              } else if (routeDecision.reason === "NOT_HIGH_PRIORITY") {
+                notHighPrioritySkipCount += 1;
+              }
+
+              continue;
+            }
+
+            routedAlertCount += 1;
+
             try {
               const alertResult = await sendSignalAlertToN8n({
                 signal,
@@ -297,11 +378,17 @@ export async function analyzeCryptoSignals(
         metadataJson: {
           intervals: [...supportedBinanceIntervals],
           candleLimit,
+          alertMode: alertModeConfig.alertMode,
           assetCount: assets.length,
           analyzedCount,
           savedSignalCount,
           sentAlertCount,
           skippedAlertCount,
+          routedAlertCount,
+          routeSkippedAlertCount,
+          watchlistDisabledSkipCount,
+          notOnWatchlistSkipCount,
+          notHighPrioritySkipCount,
           alertErrorCount,
           insufficientDataCount,
           errorCount
@@ -320,6 +407,12 @@ export async function analyzeCryptoSignals(
         savedSignalCount,
         sentAlertCount,
         skippedAlertCount,
+        alertMode: alertModeConfig.alertMode,
+        routedAlertCount,
+        routeSkippedAlertCount,
+        watchlistDisabledSkipCount,
+        notOnWatchlistSkipCount,
+        notHighPrioritySkipCount,
         alertErrorCount,
         insufficientDataCount,
         errorCount
@@ -332,6 +425,12 @@ export async function analyzeCryptoSignals(
       savedSignalCount,
       sentAlertCount,
       skippedAlertCount,
+      alertMode: alertModeConfig.alertMode,
+      routedAlertCount,
+      routeSkippedAlertCount,
+      watchlistDisabledSkipCount,
+      notOnWatchlistSkipCount,
+      notHighPrioritySkipCount,
       alertErrorCount,
       errorCount
     };
@@ -348,10 +447,16 @@ export async function analyzeCryptoSignals(
         metadataJson: {
           intervals: [...supportedBinanceIntervals],
           candleLimit,
+          alertMode: alertModeConfig.alertMode,
           analyzedCount,
           savedSignalCount,
           sentAlertCount,
           skippedAlertCount,
+          routedAlertCount,
+          routeSkippedAlertCount,
+          watchlistDisabledSkipCount,
+          notOnWatchlistSkipCount,
+          notHighPrioritySkipCount,
           alertErrorCount,
           insufficientDataCount,
           errorCount,
@@ -367,6 +472,62 @@ export async function analyzeCryptoSignals(
 
     throw error;
   }
+}
+
+export function shouldRouteAlertForAsset(input: {
+  asset: AlertRouteAsset;
+  watchlistItem?: AlertRouteWatchlistItem;
+  alertMode?: string | null;
+}): AlertRouteDecision {
+  const parsed = parseAlertMode(input.alertMode);
+  const watchlistItem = input.watchlistItem ?? null;
+
+  if (parsed.invalidValue && !watchlistItem) {
+    return {
+      shouldRoute: true,
+      reason: "INVALID_ALERT_MODE"
+    };
+  }
+
+  if (watchlistItem?.alertEnabled === false) {
+    return {
+      shouldRoute: false,
+      reason: "WATCHLIST_DISABLED"
+    };
+  }
+
+  if (parsed.alertMode === "ALL_ASSETS") {
+    return {
+      shouldRoute: true,
+      reason: parsed.invalidValue ? "INVALID_ALERT_MODE" : "ALL_ASSETS"
+    };
+  }
+
+  if (!watchlistItem) {
+    return {
+      shouldRoute: false,
+      reason: "NOT_ON_WATCHLIST"
+    };
+  }
+
+  if (parsed.alertMode === "WATCHLIST_ONLY") {
+    return {
+      shouldRoute: true,
+      reason: "WATCHLIST_ONLY_MATCH"
+    };
+  }
+
+  if (watchlistItem.priority === WatchlistPriority.HIGH) {
+    return {
+      shouldRoute: true,
+      reason: "HIGH_PRIORITY_MATCH"
+    };
+  }
+
+  return {
+    shouldRoute: false,
+    reason: "NOT_HIGH_PRIORITY"
+  };
 }
 
 export function shouldSendSignalAlert(
@@ -404,6 +565,36 @@ export function shouldSendSignalAlert(
     (decision.status === "WATCH" && decision.score >= 70) ||
     (decision.status === "AVOID" && decision.riskLevel === "HIGH")
   );
+}
+
+function parseAlertMode(value: string | null | undefined): {
+  alertMode: AlertMode;
+  rawAlertMode: string | null | undefined;
+  invalidValue: string | null;
+} {
+  if (value === undefined || value === null || value.trim() === "") {
+    return {
+      alertMode: "ALL_ASSETS",
+      rawAlertMode: value,
+      invalidValue: null
+    };
+  }
+
+  const normalized = value.trim();
+
+  if (alertModes.includes(normalized as AlertMode)) {
+    return {
+      alertMode: normalized as AlertMode,
+      rawAlertMode: value,
+      invalidValue: null
+    };
+  }
+
+  return {
+    alertMode: "ALL_ASSETS",
+    rawAlertMode: value,
+    invalidValue: value
+  };
 }
 
 async function loadLatestSignalsByTimeframe(

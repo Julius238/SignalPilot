@@ -159,6 +159,13 @@ export type Alert = {
   } | null;
 };
 
+export type PublicConfig = {
+  alertMode: "ALL_ASSETS" | "WATCHLIST_ONLY" | "HIGH_PRIORITY_ONLY";
+  dashboardOrigin?: string;
+  liveTradingEnabled: boolean;
+  paperTradingOnly: boolean;
+};
+
 export type ScannerGroupKey =
   | "strongWatch"
   | "watchlist"

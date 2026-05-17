@@ -29,6 +29,7 @@ const watchlistPriorities = Object.values(WatchlistPriority);
 const botRunStatuses = Object.values(BotRunStatus);
 const alertStatuses = Object.values(AlertStatus);
 const alertChannels = Object.values(AlertChannel);
+const publicAlertModes = ["ALL_ASSETS", "WATCHLIST_ONLY", "HIGH_PRIORITY_ONLY"] as const;
 const multiTimeframes = ["1h", "4h", "1d"] as const;
 const multiTimeframeAlignments = [
   "BULLISH_ALIGNED",
@@ -57,6 +58,17 @@ export function setDashboardDatabaseForTests(db: typeof prisma) {
 }
 
 export async function registerDashboardRoutes(server: FastifyInstance) {
+  server.get("/config/public", async () => {
+    const liveTradingEnabled = process.env.ENABLE_LIVE_TRADING === "true";
+
+    return {
+      alertMode: parsePublicAlertMode(process.env.ALERT_MODE),
+      dashboardOrigin: process.env.DASHBOARD_ORIGIN,
+      liveTradingEnabled,
+      paperTradingOnly: !liveTradingEnabled
+    };
+  });
+
   server.get("/assets", async (request, reply) => {
     const query = asQueryRecord(request.query);
     const assetType = parseEnum(query.assetType, assetTypes as AssetType[], "assetType", reply);
@@ -684,6 +696,18 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
       }
     });
   });
+}
+
+function parsePublicAlertMode(value: string | undefined) {
+  if (!value) {
+    return "ALL_ASSETS";
+  }
+
+  const normalized = value.trim();
+
+  return publicAlertModes.includes(normalized as (typeof publicAlertModes)[number])
+    ? normalized
+    : "ALL_ASSETS";
 }
 
 const alertWorthyWhere = {

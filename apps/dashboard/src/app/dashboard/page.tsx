@@ -10,14 +10,16 @@ import {
   type Alert,
   type Asset,
   type BotRun,
+  type PublicConfig,
   type ScannerResponse,
   type SignalListItem,
   type WatchlistItem
 } from "../../lib/signalpilot-api";
 
 export default async function DashboardPage() {
-  const [health, assets, signals, alerts, pipelineRuns, scanner, watchlist] = await Promise.all([
+  const [health, config, assets, signals, alerts, pipelineRuns, scanner, watchlist] = await Promise.all([
     fetchApi<{ status: string }>("/health"),
+    fetchApi<PublicConfig>("/config/public"),
     fetchApi<Asset[]>("/assets?limit=500"),
     fetchApi<SignalListItem[]>("/signals?limit=200"),
     fetchApi<Alert[]>("/alerts?limit=200"),
@@ -26,7 +28,7 @@ export default async function DashboardPage() {
     fetchApi<WatchlistItem[]>("/watchlist?limit=500")
   ]);
 
-  const errors = [health, assets, signals, alerts, pipelineRuns, scanner, watchlist]
+  const errors = [health, config, assets, signals, alerts, pipelineRuns, scanner, watchlist]
     .map((result) => result.error)
     .filter(Boolean);
   const latestSignals = signals.data?.slice(0, 5) ?? [];
@@ -65,6 +67,12 @@ export default async function DashboardPage() {
           <span className="metric-label">API Health</span>
           <span className="metric-value">
             <HealthBadge ok={health.data?.status === "ok"} />
+          </span>
+        </div>
+        <div className="card">
+          <span className="metric-label">Alert Mode</span>
+          <span className="metric-value metric-value-text">
+            {config.data?.alertMode ?? "Unavailable"}
           </span>
         </div>
         <div className="card">

@@ -21,6 +21,19 @@ Copy `.env.example` to `.env` and fill values locally. Do not commit secrets.
 cp .env.example .env
 ```
 
+Alert routing is controlled with `ALERT_MODE`. If it is unset or invalid, SignalPilot falls back
+to `ALL_ASSETS`.
+
+```bash
+ALERT_MODE=ALL_ASSETS
+ALERT_MODE=WATCHLIST_ONLY
+ALERT_MODE=HIGH_PRIORITY_ONLY
+```
+
+- `ALL_ASSETS`: relevant signals can alert for all active assets, except assets explicitly disabled on the watchlist.
+- `WATCHLIST_ONLY`: alerts only route for watchlist items with `alertEnabled=true`.
+- `HIGH_PRIORITY_ONLY`: alerts only route for high-priority watchlist items with `alertEnabled=true`.
+
 ## Services
 
 - API: Fastify server with `GET /health`

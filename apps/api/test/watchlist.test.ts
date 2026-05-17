@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { afterEach, describe, it } from "node:test";
 
 import Fastify from "fastify";
 import {
@@ -18,6 +18,18 @@ import {
 } from "../src/routes/dashboard.js";
 
 describe("watchlist routes", () => {
+  const originalAlertMode = process.env.ALERT_MODE;
+  const originalDashboardOrigin = process.env.DASHBOARD_ORIGIN;
+  const originalEnableLiveTrading = process.env.ENABLE_LIVE_TRADING;
+  const originalWebhookUrl = process.env.N8N_WEBHOOK_SIGNAL_URL;
+
+  afterEach(() => {
+    restoreEnv("ALERT_MODE", originalAlertMode);
+    restoreEnv("DASHBOARD_ORIGIN", originalDashboardOrigin);
+    restoreEnv("ENABLE_LIVE_TRADING", originalEnableLiveTrading);
+    restoreEnv("N8N_WEBHOOK_SIGNAL_URL", originalWebhookUrl);
+  });
+
   it("creates a watchlist item and returns asset data", async () => {
     const server = await createServer();
 
@@ -120,6 +132,29 @@ describe("watchlist routes", () => {
     assert.ok(
       state.signalFindManyWhere.some((where) => JSON.stringify(where).includes("watchlistItem"))
     );
+
+    await server.close();
+  });
+
+  it("returns only safe public config", async () => {
+    process.env.ALERT_MODE = "HIGH_PRIORITY_ONLY";
+    process.env.DASHBOARD_ORIGIN = "http://localhost:3000";
+    process.env.ENABLE_LIVE_TRADING = "false";
+    process.env.N8N_WEBHOOK_SIGNAL_URL = "https://secret.example.test/webhook";
+
+    const server = await createServer();
+    const response = await server.inject("/config/public");
+
+    assert.equal(response.statusCode, 200);
+    const body = response.json();
+    assert.deepEqual(body, {
+      alertMode: "HIGH_PRIORITY_ONLY",
+      dashboardOrigin: "http://localhost:3000",
+      liveTradingEnabled: false,
+      paperTradingOnly: true
+    });
+    assert.equal(JSON.stringify(body).includes("secret"), false);
+    assert.equal("N8N_WEBHOOK_SIGNAL_URL" in body, false);
 
     await server.close();
   });
@@ -294,4 +329,12 @@ function createSignal() {
       createdAt: new Date("2026-01-01T00:00:00.000Z")
     }
   };
+}
+
+function restoreEnv(key: string, value: string | undefined) {
+  if (value === undefined) {
+    delete process.env[key];
+  } else {
+    process.env[key] = value;
+  }
 }
