@@ -115,6 +115,19 @@ select {
   padding: 18px;
 }
 
+.chart-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin: 16px 0;
+  padding: 18px;
+}
+
+.chart-card h2 {
+  font-size: 16px;
+  margin: 0 0 14px;
+}
+
 .card h2,
 .card h3 {
   font-size: 16px;

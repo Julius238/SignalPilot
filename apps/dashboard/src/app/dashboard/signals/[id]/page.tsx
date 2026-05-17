@@ -1,3 +1,4 @@
+import { CandlestickChart } from "../../../../components/CandlestickChart";
 import { DirectionBadge, RiskBadge, StatusBadge } from "../../../../components/badges";
 import { ErrorState } from "../../../../components/empty-state";
 import { formatDateTime, formatJson, formatScore } from "../../../../lib/format";
@@ -68,6 +69,24 @@ export default async function SignalDetailPage({ params }: SignalDetailPageProps
           </span>
         </div>
       </section>
+
+      <CandlestickChart
+        candles={data.candles.map((candle) => ({
+          time: candle.openTime,
+          open: candle.open,
+          high: candle.high,
+          low: candle.low,
+          close: candle.close,
+          volume: candle.volume
+        }))}
+        signalMarker={{
+          time: data.candles.at(-1)?.openTime ?? data.signal.createdAt,
+          direction: data.signal.direction,
+          status: data.signal.status,
+          label: data.signal.signalType
+        }}
+        title={`Candles · ${data.signal.symbol} · ${data.signal.timeframe}`}
+      />
 
       <section className="card">
         <h2>Signal Scores</h2>

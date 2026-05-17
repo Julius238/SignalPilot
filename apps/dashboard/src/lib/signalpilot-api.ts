@@ -91,6 +91,7 @@ export type AssetDetail = Asset & {
   latestSignal: Omit<SignalListItem, "asset" | "signalOutput"> | null;
   latestSignalOutput: SignalOutput | null;
   candleCounts: Record<string, number>;
+  candles?: Candle[];
 };
 
 export type BotRun = {

@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { CandlestickChart } from "../../../../components/CandlestickChart";
 import { DirectionBadge, RiskBadge, StatusBadge } from "../../../../components/badges";
 import { ErrorState } from "../../../../components/empty-state";
 import { SignalsTable } from "../../../../components/signals-table";
@@ -17,7 +18,9 @@ type AssetDetailPageProps = {
 export default async function AssetDetailPage({ params }: AssetDetailPageProps) {
   const { symbol } = await params;
   const [asset, signals] = await Promise.all([
-    fetchApi<AssetDetail>(`/assets/${encodeURIComponent(symbol)}`),
+    fetchApi<AssetDetail>(
+      `/assets/${encodeURIComponent(symbol)}?includeCandles=true&candleLimit=250`
+    ),
     fetchApi<SignalListItem[]>(`/assets/${encodeURIComponent(symbol)}/signals?limit=10`)
   ]);
 
@@ -86,6 +89,28 @@ export default async function AssetDetailPage({ params }: AssetDetailPageProps) 
           <pre>{formatJson(data.latestSignalOutput?.dashboardJson ?? data.latestSignalOutput)}</pre>
         </div>
       </section>
+
+      <CandlestickChart
+        candles={(data.candles ?? []).map((candle) => ({
+          time: candle.openTime,
+          open: candle.open,
+          high: candle.high,
+          low: candle.low,
+          close: candle.close,
+          volume: candle.volume
+        }))}
+        signalMarker={
+          data.latestSignal
+            ? {
+                time: data.candles?.at(-1)?.openTime ?? data.latestSignal.createdAt,
+                direction: data.latestSignal.direction,
+                status: data.latestSignal.status,
+                label: data.latestSignal.signalType
+              }
+            : undefined
+        }
+        title={`Candles · ${data.symbol} · ${data.latestSignal?.timeframe ?? "1d"}`}
+      />
 
       {signals.error ? <ErrorState title="Could not load asset signals" message={signals.error} /> : null}
 

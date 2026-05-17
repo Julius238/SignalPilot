@@ -112,3 +112,5 @@ Open:
 ```bash
 http://localhost:3000/dashboard
 ```
+
+Dashboard signal and asset detail pages render candlestick charts with TradingView Lightweight Charts.

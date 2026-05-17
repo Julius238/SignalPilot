@@ -50,6 +50,14 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
 
   server.get("/assets/:symbol", async (request, reply) => {
     const { symbol } = request.params as { symbol: string };
+    const query = asQueryRecord(request.query);
+    const includeCandles = parseBoolean(query.includeCandles, "includeCandles", reply) ?? false;
+    const candleLimit = parseLimit(query.candleLimit, 250, 500, reply);
+
+    if (reply.sent) {
+      return reply;
+    }
+
     const asset = await prisma.asset.findFirst({
       where: {
         symbol: symbol.toUpperCase()
@@ -83,6 +91,21 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
         }
       })
     ]);
+    const candleTimeframe =
+      parseOptionalString(query.timeframe) ?? latestSignal?.timeframe ?? "1d";
+    const candles =
+      includeCandles && candleLimit
+        ? await prisma.candle.findMany({
+            where: {
+              assetId: asset.id,
+              timeframe: candleTimeframe
+            },
+            orderBy: {
+              openTime: "desc"
+            },
+            take: candleLimit
+          })
+        : [];
 
     return {
       ...asset,
@@ -90,7 +113,8 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
       latestSignalOutput: latestSignal?.output ? toSignalOutput(latestSignal.output, true) : null,
       candleCounts: Object.fromEntries(
         candleCounts.map((count) => [count.timeframe, count._count._all])
-      )
+      ),
+      candles: includeCandles ? candles.reverse().map(toCandle) : undefined
     };
   });
 

@@ -10,6 +10,7 @@
     "start": "next start -p 3000"
   },
   "dependencies": {
+    "lightweight-charts": "^5.0.9",
     "next": "^15.5.7",
     "react": "^19.2.1",
     "react-dom": "^19.2.1"
