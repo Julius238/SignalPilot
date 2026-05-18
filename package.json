@@ -22,6 +22,7 @@
     "worker:reclassify-paper-evaluations": "pnpm --filter @signalpilot/worker reclassify:paper-evaluations",
     "worker:backfill-paper-evaluations": "pnpm --filter @signalpilot/worker backfill:paper-evaluations",
     "worker:fetch-crypto-candles": "pnpm --filter @signalpilot/worker fetch:crypto-candles",
+    "worker:fetch-equity-candles": "pnpm --filter @signalpilot/worker fetch:equity-candles",
     "worker:run-crypto-pipeline": "pnpm --filter @signalpilot/worker run:crypto-pipeline",
     "worker:scheduler": "pnpm --filter @signalpilot/worker scheduler",
     "prisma:generate": "pnpm --filter @signalpilot/database prisma:generate"

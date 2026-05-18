@@ -44,6 +44,65 @@ describe("data quality", () => {
     assert.equal(report.assetCoverage[0].qualityScore >= 0, true);
     assert.equal(report.assetCoverage[0].qualityScore <= 100, true);
   });
+
+  it("does not flag STOCK assets for missing 4h candles", () => {
+    const report = buildDataQualityReport({
+      ...baseInput(),
+      assets: [
+        {
+          id: "asset-2",
+          symbol: "AAPL",
+          assetType: "STOCK",
+          isActive: true,
+          candleCountsByTimeframe: { "1h": 250, "4h": 0, "1d": 250 }
+        }
+      ]
+    });
+
+    assert.equal(report.assetCoverage[0].hasMinimumCandlesByTimeframe["4h"], true);
+    assert.equal(report.candleCoverage.assetsBelowMinimumByTimeframe["4h"], 0);
+    assert.ok(!report.warnings.some((w) => w.includes("4h")));
+  });
+
+  it("does not flag ETF assets for missing 4h candles", () => {
+    const report = buildDataQualityReport({
+      ...baseInput(),
+      assets: [
+        {
+          id: "asset-3",
+          symbol: "SPY",
+          assetType: "ETF",
+          isActive: true,
+          candleCountsByTimeframe: { "1h": 250, "4h": 0, "1d": 250 }
+        }
+      ]
+    });
+
+    assert.equal(report.assetCoverage[0].hasMinimumCandlesByTimeframe["4h"], true);
+    assert.equal(report.candleCoverage.assetsBelowMinimumByTimeframe["4h"], 0);
+    assert.ok(!report.warnings.some((w) => w.includes("4h")));
+  });
+
+  it("flags STOCK assets for missing 1h candle coverage", () => {
+    const report = buildDataQualityReport({
+      ...baseInput(),
+      assets: [
+        {
+          id: "asset-2",
+          symbol: "MSFT",
+          assetType: "STOCK",
+          isActive: true,
+          candleCountsByTimeframe: { "1h": 10, "4h": 0, "1d": 250 }
+        }
+      ]
+    });
+
+    assert.equal(report.assetCoverage[0].hasMinimumCandlesByTimeframe["1h"], false);
+    assert.equal(report.assetCoverage[0].hasMinimumCandlesByTimeframe["4h"], true);
+    assert.equal(report.candleCoverage.assetsBelowMinimumByTimeframe["1h"], 1);
+    assert.ok(report.warnings.some((w) => w.includes("1h")));
+    assert.ok(!report.warnings.some((w) => w.includes("4h")));
+  });
 });
 
 function baseInput() {

@@ -139,12 +139,22 @@ export function buildDataQualityReport(input: DataQualityInput): DataQualityRepo
   };
 }
 
+function getRequiredTimeframes(assetType: string): string[] {
+  if (assetType === "STOCK" || assetType === "ETF") {
+    return ["1h", "1d"];
+  }
+  return Object.keys(minimumCandlesByTimeframe);
+}
+
 export function buildAssetCoverage(asset: AssetQualityInput): AssetCoverage {
   const candleCountsByTimeframe = normalizeTimeframeRecord(asset.candleCountsByTimeframe);
+  const requiredTimeframes = getRequiredTimeframes(asset.assetType);
   const hasMinimumCandlesByTimeframe = Object.fromEntries(
     Object.entries(minimumCandlesByTimeframe).map(([timeframe, minimum]) => [
       timeframe,
-      (candleCountsByTimeframe[timeframe] ?? 0) >= minimum
+      requiredTimeframes.includes(timeframe)
+        ? (candleCountsByTimeframe[timeframe] ?? 0) >= minimum
+        : true
     ])
   );
   const latestCandleByTimeframe = stringifyDateRecord(asset.latestCandleByTimeframe);
@@ -199,15 +209,16 @@ function buildAssetWarnings(
   hasMinimumCandlesByTimeframe: Record<string, boolean>
 ) {
   const warnings: string[] = [];
+  const requiredTimeframes = getRequiredTimeframes(asset.assetType);
 
-  if (asset.assetType === "CRYPTO" && asset.isActive) {
-    for (const [timeframe, hasMinimum] of Object.entries(hasMinimumCandlesByTimeframe)) {
-      if (!hasMinimum) {
+  if (asset.isActive) {
+    for (const timeframe of requiredTimeframes) {
+      if (!hasMinimumCandlesByTimeframe[timeframe]) {
         warnings.push(`${asset.symbol} has insufficient ${timeframe} candle coverage.`);
       }
     }
 
-    if ((asset.recentSignalCount ?? 0) === 0) {
+    if (asset.assetType === "CRYPTO" && (asset.recentSignalCount ?? 0) === 0) {
       warnings.push(`${asset.symbol} has no crypto signals in the last 24h.`);
     }
   }
