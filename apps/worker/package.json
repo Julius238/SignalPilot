@@ -10,6 +10,8 @@
     "analyze:crypto-signals": "tsx src/jobs/analyzeCryptoSignals.ts",
     "create:paper-evaluations": "tsx src/jobs/paperSignalEvaluations.ts create",
     "evaluate:paper-signals": "tsx src/jobs/paperSignalEvaluations.ts evaluate",
+    "reclassify:paper-evaluations": "tsx src/jobs/paperSignalEvaluations.ts reclassify",
+    "backfill:paper-evaluations": "tsx src/jobs/paperSignalEvaluations.ts backfill",
     "fetch:crypto-candles": "tsx src/jobs/fetchCryptoCandles.ts",
     "run:crypto-pipeline": "tsx src/jobs/runCryptoSignalPipeline.ts",
     "scheduler": "tsx src/scheduler.ts",

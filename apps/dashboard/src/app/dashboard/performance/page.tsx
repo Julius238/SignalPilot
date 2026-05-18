@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 import { ErrorState, EmptyState } from "../../../components/empty-state";
 import {
   fetchApi,
@@ -104,6 +106,12 @@ export default async function PerformancePage() {
           <section className="card" style={{ marginTop: 16 }}>
             <h2>Overall Summary</h2>
             <p>{data.summary}</p>
+            {data.evaluatedCount < 10 || data.skippedCount > data.evaluatedCount ? (
+              <p>
+                Data coverage may be limiting this report.{" "}
+                <Link href="/dashboard/data-quality">Open Data Quality</Link>
+              </p>
+            ) : null}
             {data.warnings.length > 0 ? (
               <ul>
                 {data.warnings.map((warning) => (

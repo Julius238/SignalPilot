@@ -15,9 +15,11 @@ import {
 } from "@signalpilot/database";
 
 import {
+  backfillPaperEvaluations,
   createPaperEvaluationsForSignals,
   evaluatePaperSignals,
-  classifyPaperEvaluation
+  classifyPaperEvaluation,
+  reclassifyPaperEvaluations
 } from "../src/jobs/paperSignalEvaluations.js";
 
 describe("paper signal evaluations", () => {
@@ -273,6 +275,85 @@ describe("paper signal evaluations", () => {
     assert.equal(summary.expiredCount, 1);
     assert.equal(updates.at(-1)?.data.evaluationStatus, PaperEvaluationStatus.EXPIRED);
   });
+
+  it("reclassify dry run changes no records", async () => {
+    process.env.RECLASSIFY_DRY_RUN = "true";
+    const updates: Array<{ data: Record<string, unknown> }> = [];
+    const database = createPaperDatabase({
+      evaluations: [
+        createEvaluation({
+          evaluationKind: PaperEvaluationKind.SKIPPED,
+          expectedMoveDirection: PaperExpectedMoveDirection.NONE,
+          evaluationStatus: PaperEvaluationStatus.SKIPPED,
+          skipReason: "Neutral or mixed signal without sufficient evaluation strength.",
+          signal: createSignal({
+            status: SignalStatus.WATCH,
+            direction: SignalDirection.MIXED,
+            score: 68
+          })
+        })
+      ],
+      updates
+    });
+
+    const summary = await reclassifyPaperEvaluations(database as never);
+
+    assert.equal(summary.updatedCount, 1);
+    assert.equal(summary.skippedToOpenCount, 1);
+    assert.equal(updates.length, 0);
+    delete process.env.RECLASSIFY_DRY_RUN;
+  });
+
+  it("reclassify sets SKIPPED to OPEN when new eligibility is evaluable", async () => {
+    process.env.RECLASSIFY_DRY_RUN = "false";
+    const updates: Array<{ data: Record<string, unknown> }> = [];
+    const database = createPaperDatabase({
+      evaluations: [
+        createEvaluation({
+          evaluationKind: PaperEvaluationKind.SKIPPED,
+          expectedMoveDirection: PaperExpectedMoveDirection.NONE,
+          evaluationStatus: PaperEvaluationStatus.SKIPPED,
+          skipReason: "Neutral or mixed signal without sufficient evaluation strength.",
+          signal: createSignal({
+            status: SignalStatus.WATCH,
+            direction: SignalDirection.MIXED,
+            score: 68
+          })
+        })
+      ],
+      updates
+    });
+
+    const summary = await reclassifyPaperEvaluations(database as never);
+
+    assert.equal(summary.skippedToOpenCount, 1);
+    assert.equal(updates.at(-1)?.data.evaluationStatus, PaperEvaluationStatus.OPEN);
+    assert.equal(updates.at(-1)?.data.evaluationKind, PaperEvaluationKind.OBSERVATION);
+    assert.equal(updates.at(-1)?.data.skipReason, null);
+    delete process.env.RECLASSIFY_DRY_RUN;
+  });
+
+  it("backfill creates missing evaluations idempotently", async () => {
+    const created: unknown[] = [];
+    const database = createPaperDatabase({
+      signals: [createSignal({ id: "signal-backfill" })],
+      created
+    });
+
+    const first = await backfillPaperEvaluations(database as never);
+    const duplicateDatabase = createPaperDatabase({
+      signals: [createSignal({ id: "signal-backfill" })],
+      createError: new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {
+        code: "P2002",
+        clientVersion: "test"
+      })
+    });
+    const second = await backfillPaperEvaluations(duplicateDatabase as never);
+
+    assert.equal(first.createdCount, 1);
+    assert.equal(created.length, 1);
+    assert.equal(second.alreadyExistsCount, 1);
+  });
 });
 
 function createPaperDatabase(input: {
@@ -309,12 +390,14 @@ function createPaperDatabase(input: {
 
         created.push(operation);
       },
-      findMany: async () => input.evaluations ?? [],
+      findMany: async (operation?: { where?: { id?: { gt?: string } } }) =>
+        operation?.where?.id?.gt ? [] : (input.evaluations ?? []),
       update: async (operation: { data: Record<string, unknown> }) => {
         updates.push(operation);
         return operation.data;
       }
-    }
+    },
+    $transaction: async (operations: unknown[]) => Promise.all(operations)
   };
 }
 
@@ -385,7 +468,8 @@ function createBaseEvaluation() {
     outcome: null,
     notes: null,
     createdAt: new Date("2026-01-01T00:00:00.000Z"),
-    updatedAt: new Date("2026-01-01T00:00:00.000Z")
+    updatedAt: new Date("2026-01-01T00:00:00.000Z"),
+    signal: createSignal()
   };
 }
 

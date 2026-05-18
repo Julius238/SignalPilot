@@ -301,6 +301,52 @@ export type PerformanceIntelligenceReport = {
   warnings: string[];
 };
 
+export type AssetCoverage = {
+  symbol: string;
+  assetType: string;
+  isActive: boolean;
+  candleCountsByTimeframe: Record<string, number>;
+  hasMinimumCandlesByTimeframe: Record<string, boolean>;
+  latestCandleByTimeframe: Record<string, string | null>;
+  latestSignalByTimeframe: Record<string, string | null>;
+  signalCount: number;
+  evaluationCount: number;
+  skippedEvaluationCount: number;
+  alertCount: number;
+  qualityScore: number;
+  warnings: string[];
+};
+
+export type DataQualityReport = {
+  generatedAt: string;
+  assetCoverage: AssetCoverage[];
+  signalCoverage: {
+    totalSignals: number;
+    signalsLast24h: number;
+    signalsWithoutEvaluation: number;
+    evaluationCoverageRate: number;
+  };
+  evaluationCoverage: {
+    totalEvaluations: number;
+    openCount: number;
+    evaluatedCount: number;
+    skippedCount: number;
+    skippedRate: number;
+    skippedByReason: Record<string, number>;
+  };
+  candleCoverage: {
+    minimumCandlesByTimeframe: Record<string, number>;
+    assetsBelowMinimumByTimeframe: Record<string, number>;
+  };
+  alertCoverage: {
+    alertStateCount: number;
+    successfulAlertCount: number;
+    alertCount: number;
+  };
+  warnings: string[];
+  recommendations: string[];
+};
+
 export type ObservationStats = {
   total: number;
   evaluatedCount: number;

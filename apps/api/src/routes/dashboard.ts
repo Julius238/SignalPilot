@@ -14,6 +14,7 @@ import {
   SignalType,
   WatchlistPriority
 } from "@signalpilot/database";
+import { buildDataQualityReport } from "@signalpilot/data-quality";
 import {
   calculateMultiTimeframeSummary,
   type MultiTimeframeSignalInput,
@@ -800,6 +801,38 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
     return buildPerformanceBuckets(evaluations, groupBy, report.overallWinRate).slice(0, limit);
   });
 
+  server.get("/data-quality/report", async (request, reply) => {
+    const query = asQueryRecord(request.query);
+    const assetType = parseEnum(query.assetType, assetTypes as AssetType[], "assetType", reply);
+
+    if (reply.sent) {
+      return reply;
+    }
+
+    return loadDataQualityReport({
+      assetType,
+      symbol: parseOptionalString(query.symbol)?.toUpperCase()
+    });
+  });
+
+  server.get("/data-quality/assets", async (request, reply) => {
+    const query = asQueryRecord(request.query);
+    const assetType = parseEnum(query.assetType, assetTypes as AssetType[], "assetType", reply);
+    const minQualityScore = parseOptionalInteger(query.minQualityScore, "minQualityScore", reply);
+    const limit = parseLimit(query.limit, 100, 500, reply);
+
+    if (reply.sent || limit === undefined) {
+      return reply;
+    }
+
+    const report = await loadDataQualityReport({ assetType });
+
+    return report.assetCoverage
+      .filter((asset) => minQualityScore === undefined || asset.qualityScore >= minQualityScore)
+      .sort((left, right) => left.qualityScore - right.qualityScore || left.symbol.localeCompare(right.symbol))
+      .slice(0, limit);
+  });
+
   server.get("/assets/:symbol/signals", async (request, reply) => {
     const { symbol } = request.params as { symbol: string };
     const query = asQueryRecord(request.query);
@@ -1556,6 +1589,217 @@ async function loadPerformanceEvaluations(input: {
     maxFavorableMove: evaluation.maxFavorableMove,
     maxAdverseMove: evaluation.maxAdverseMove
   }));
+}
+
+async function loadDataQualityReport(input: { assetType?: AssetType; symbol?: string }) {
+  const now = new Date();
+  const since = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  const assets = await database.asset.findMany({
+    where: {
+      assetType: input.assetType,
+      symbol: input.symbol
+    },
+    orderBy: {
+      symbol: "asc"
+    },
+    select: assetSelect
+  });
+  const assetIds = assets.map((asset) => asset.id);
+  const assetWhere =
+    assetIds.length > 0
+      ? {
+          assetId: {
+            in: assetIds
+          }
+        }
+      : { assetId: { in: [] as string[] } };
+  const [
+    candleGroups,
+    signalGroups,
+    recentSignalGroups,
+    evaluationGroups,
+    skippedReasonGroups,
+    alertStates,
+    alerts,
+    totalSignals,
+    signalsLast24h,
+    signalsWithoutEvaluation,
+    totalEvaluations
+  ] = await Promise.all([
+    database.candle.groupBy({
+      by: ["assetId", "timeframe"],
+      where: assetWhere,
+      _count: { _all: true },
+      _max: { closeTime: true }
+    }),
+    database.signal.groupBy({
+      by: ["assetId", "timeframe"],
+      where: assetWhere,
+      _count: { _all: true },
+      _max: { createdAt: true }
+    }),
+    database.signal.groupBy({
+      by: ["assetId"],
+      where: {
+        ...assetWhere,
+        createdAt: {
+          gte: since
+        }
+      },
+      _count: { _all: true }
+    }),
+    database.paperSignalEvaluation.groupBy({
+      by: ["assetId", "evaluationStatus"],
+      where: assetWhere,
+      _count: { _all: true }
+    }),
+    database.paperSignalEvaluation.groupBy({
+      by: ["skipReason"],
+      where: {
+        ...assetWhere,
+        evaluationStatus: PaperEvaluationStatus.SKIPPED
+      },
+      _count: { _all: true }
+    }),
+    database.alertState.findMany({
+      where: assetWhere,
+      select: {
+        assetId: true
+      }
+    }),
+    database.alert.findMany({
+      where: {
+        signal: assetWhere
+      },
+      select: {
+        status: true,
+        signal: {
+          select: {
+            assetId: true
+          }
+        }
+      }
+    }),
+    database.signal.count({ where: assetWhere }),
+    database.signal.count({
+      where: {
+        ...assetWhere,
+        createdAt: {
+          gte: since
+        }
+      }
+    }),
+    database.signal.count({
+      where: {
+        ...assetWhere,
+        paperEvaluation: {
+          is: null
+        }
+      }
+    }),
+    database.paperSignalEvaluation.count({ where: assetWhere })
+  ]);
+
+  const signalCountsByAsset = new Map<string, number>();
+  const recentSignalCountsByAsset = new Map<string, number>();
+  const evaluationCountsByAsset = new Map<string, number>();
+  const skippedEvaluationCountsByAsset = new Map<string, number>();
+  const alertCountsByAsset = new Map<string, number>();
+  const successfulAlertCountsByAsset = new Map<string, number>();
+  const alertStateCountsByAsset = new Map<string, number>();
+  const candleCountsByAsset = new Map<string, Record<string, number>>();
+  const latestCandleByAsset = new Map<string, Record<string, Date | null>>();
+  const latestSignalByAsset = new Map<string, Record<string, Date | null>>();
+
+  for (const group of candleGroups) {
+    const counts = candleCountsByAsset.get(group.assetId) ?? {};
+    counts[group.timeframe] = group._count._all;
+    candleCountsByAsset.set(group.assetId, counts);
+
+    const latest = latestCandleByAsset.get(group.assetId) ?? {};
+    latest[group.timeframe] = group._max.closeTime;
+    latestCandleByAsset.set(group.assetId, latest);
+  }
+
+  for (const group of signalGroups) {
+    signalCountsByAsset.set(group.assetId, (signalCountsByAsset.get(group.assetId) ?? 0) + group._count._all);
+    const latest = latestSignalByAsset.get(group.assetId) ?? {};
+    latest[group.timeframe] = group._max.createdAt;
+    latestSignalByAsset.set(group.assetId, latest);
+  }
+
+  for (const group of recentSignalGroups) {
+    recentSignalCountsByAsset.set(group.assetId, group._count._all);
+  }
+
+  for (const group of evaluationGroups) {
+    evaluationCountsByAsset.set(group.assetId, (evaluationCountsByAsset.get(group.assetId) ?? 0) + group._count._all);
+
+    if (group.evaluationStatus === PaperEvaluationStatus.SKIPPED) {
+      skippedEvaluationCountsByAsset.set(group.assetId, group._count._all);
+    }
+  }
+
+  for (const alertState of alertStates) {
+    alertStateCountsByAsset.set(alertState.assetId, (alertStateCountsByAsset.get(alertState.assetId) ?? 0) + 1);
+  }
+
+  for (const alert of alerts) {
+    const assetId = alert.signal?.assetId;
+
+    if (!assetId) {
+      continue;
+    }
+
+    alertCountsByAsset.set(assetId, (alertCountsByAsset.get(assetId) ?? 0) + 1);
+
+    if (alert.status === AlertStatus.SENT) {
+      successfulAlertCountsByAsset.set(assetId, (successfulAlertCountsByAsset.get(assetId) ?? 0) + 1);
+    }
+  }
+
+  const skippedByReason = Object.fromEntries(
+    skippedReasonGroups.map((group) => [group.skipReason ?? "Unspecified", group._count._all])
+  );
+  const openEvaluationCount = evaluationGroups
+    .filter((group) => group.evaluationStatus === PaperEvaluationStatus.OPEN)
+    .reduce((sum, group) => sum + group._count._all, 0);
+  const evaluatedEvaluationCount = evaluationGroups
+    .filter((group) => group.evaluationStatus === PaperEvaluationStatus.EVALUATED)
+    .reduce((sum, group) => sum + group._count._all, 0);
+  const skippedEvaluationCount = evaluationGroups
+    .filter((group) => group.evaluationStatus === PaperEvaluationStatus.SKIPPED)
+    .reduce((sum, group) => sum + group._count._all, 0);
+
+  return buildDataQualityReport({
+    assets: assets.map((asset) => ({
+      id: asset.id,
+      symbol: asset.symbol,
+      assetType: asset.assetType,
+      isActive: asset.isActive,
+      candleCountsByTimeframe: candleCountsByAsset.get(asset.id),
+      latestCandleByTimeframe: latestCandleByAsset.get(asset.id),
+      latestSignalByTimeframe: latestSignalByAsset.get(asset.id),
+      signalCount: signalCountsByAsset.get(asset.id) ?? 0,
+      recentSignalCount: recentSignalCountsByAsset.get(asset.id) ?? 0,
+      evaluationCount: evaluationCountsByAsset.get(asset.id) ?? 0,
+      skippedEvaluationCount: skippedEvaluationCountsByAsset.get(asset.id) ?? 0,
+      alertCount: alertCountsByAsset.get(asset.id) ?? 0,
+      successfulAlertCount: successfulAlertCountsByAsset.get(asset.id) ?? 0,
+      alertStateCount: alertStateCountsByAsset.get(asset.id) ?? 0
+    })),
+    totalSignals,
+    signalsLast24h,
+    signalsWithoutEvaluation,
+    totalEvaluations,
+    openEvaluationCount,
+    evaluatedEvaluationCount,
+    skippedEvaluationCount,
+    skippedByReason,
+    alertStateCount: alertStates.length,
+    successfulAlertCount: alerts.filter((alert) => alert.status === AlertStatus.SENT).length,
+    alertCount: alerts.length
+  });
 }
 
 function asQueryRecord(query: unknown): QueryRecord {

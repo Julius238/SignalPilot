@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@fastify/cors": "^10.0.2",
+    "@signalpilot/data-quality": "workspace:*",
     "@signalpilot/database": "workspace:*",
     "@signalpilot/multi-timeframe": "workspace:*",
     "@signalpilot/performance-intelligence": "workspace:*",

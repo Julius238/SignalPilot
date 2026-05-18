@@ -35,6 +35,9 @@ importers:
       '@fastify/cors':
         specifier: ^10.0.2
         version: 10.1.0
+      '@signalpilot/data-quality':
+        specifier: workspace:*
+        version: link:../../packages/data-quality
       '@signalpilot/database':
         specifier: workspace:*
         version: link:../../packages/database
@@ -131,6 +134,12 @@ importers:
       dotenv:
         specifier: ^16.4.7
         version: 16.6.1
+    devDependencies:
+      tsx:
+        specifier: ^4.19.2
+        version: 4.21.0
+
+  packages/data-quality:
     devDependencies:
       tsx:
         specifier: ^4.19.2

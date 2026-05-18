@@ -57,8 +57,34 @@ export type EvaluatePaperSignalsSummary = {
   errorCount: number;
 };
 
+export type ReclassifyPaperEvaluationsSummary = {
+  status: BotRunStatus;
+  scannedCount: number;
+  updatedCount: number;
+  unchangedCount: number;
+  skippedToOpenCount: number;
+  openToSkippedCount: number;
+  evaluatedUpdatedCount: number;
+  byOldKind: Record<string, number>;
+  byNewKind: Record<string, number>;
+  dryRun: boolean;
+};
+
+export type BackfillPaperEvaluationsSummary = {
+  status: BotRunStatus;
+  scannedSignals: number;
+  createdCount: number;
+  skippedCount: number;
+  alreadyExistsCount: number;
+  missingEntryPriceCount: number;
+  byEvaluationKind: Record<string, number>;
+};
+
 type PaperSignal = Prisma.SignalGetPayload<{
   include: { output: true; paperEvaluation: true };
+}>;
+type PaperEvaluationWithSignal = Prisma.PaperSignalEvaluationGetPayload<{
+  include: { signal: true };
 }>;
 
 type EvaluationRecord = Prisma.PaperSignalEvaluationGetPayload<Record<string, never>>;
@@ -376,6 +402,346 @@ export async function evaluatePaperSignals(
   }
 }
 
+export async function reclassifyPaperEvaluations(
+  database: PrismaClient = prisma
+): Promise<ReclassifyPaperEvaluationsSummary> {
+  const startedAt = new Date();
+  const dryRun = parseBooleanEnv(process.env.RECLASSIFY_DRY_RUN, true);
+  const batchSize = parsePositiveIntegerEnv(process.env.RECLASSIFY_BATCH_SIZE, 100);
+  const botRun = await database.botRun.create({
+    data: {
+      jobName: "reclassifyPaperEvaluations",
+      status: BotRunStatus.RUNNING,
+      startedAt,
+      metadataJson: {
+        startedAt: startedAt.toISOString(),
+        dryRun,
+        batchSize
+      }
+    }
+  });
+
+  let scannedCount = 0;
+  let updatedCount = 0;
+  let unchangedCount = 0;
+  let skippedToOpenCount = 0;
+  let openToSkippedCount = 0;
+  let evaluatedUpdatedCount = 0;
+  const byOldKind: Record<string, number> = {};
+  const byNewKind: Record<string, number> = {};
+
+  await writeBotLog(database, "info", "Paper Evaluation reclassification started", {
+    botRunId: botRun.id,
+    dryRun,
+    batchSize
+  });
+
+  try {
+    let cursor: string | undefined;
+
+    while (true) {
+      const evaluations = await database.paperSignalEvaluation.findMany({
+        where: cursor
+          ? {
+              id: {
+                gt: cursor
+              }
+            }
+          : undefined,
+        orderBy: {
+          id: "asc"
+        },
+        take: batchSize,
+        include: {
+          signal: true
+        }
+      });
+
+      if (evaluations.length === 0) {
+        break;
+      }
+
+      const updates: Prisma.PrismaPromise<unknown>[] = [];
+
+      for (const evaluation of evaluations) {
+        scannedCount += 1;
+        byOldKind[evaluation.evaluationKind] = (byOldKind[evaluation.evaluationKind] ?? 0) + 1;
+
+        const reclassification = buildReclassification(evaluation);
+        byNewKind[reclassification.evaluationKind] =
+          (byNewKind[reclassification.evaluationKind] ?? 0) + 1;
+
+        if (!reclassification.changed) {
+          unchangedCount += 1;
+          continue;
+        }
+
+        updatedCount += 1;
+
+        if (
+          evaluation.evaluationStatus === PaperEvaluationStatus.SKIPPED &&
+          reclassification.data.evaluationStatus === PaperEvaluationStatus.OPEN
+        ) {
+          skippedToOpenCount += 1;
+        }
+
+        if (
+          evaluation.evaluationStatus === PaperEvaluationStatus.OPEN &&
+          reclassification.data.evaluationStatus === PaperEvaluationStatus.SKIPPED
+        ) {
+          openToSkippedCount += 1;
+        }
+
+        if (evaluation.evaluationStatus === PaperEvaluationStatus.EVALUATED) {
+          evaluatedUpdatedCount += 1;
+        }
+
+        if (!dryRun) {
+          updates.push(
+            database.paperSignalEvaluation.update({
+              where: { id: evaluation.id },
+              data: reclassification.data
+            })
+          );
+        }
+      }
+
+      if (updates.length > 0) {
+        await database.$transaction(updates);
+      }
+
+      cursor = evaluations[evaluations.length - 1].id;
+    }
+
+    const summary = {
+      status: BotRunStatus.SUCCESS,
+      scannedCount,
+      updatedCount,
+      unchangedCount,
+      skippedToOpenCount,
+      openToSkippedCount,
+      evaluatedUpdatedCount,
+      byOldKind,
+      byNewKind,
+      dryRun
+    };
+
+    await database.botRun.update({
+      where: { id: botRun.id },
+      data: {
+        status: BotRunStatus.SUCCESS,
+        finishedAt: new Date(),
+        metadataJson: summary
+      }
+    });
+    await writeBotLog(database, "info", "Paper Evaluation reclassification finished", {
+      botRunId: botRun.id,
+      ...summary
+    });
+
+    return summary;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown reclassifyPaperEvaluations error";
+    await database.botRun.update({
+      where: { id: botRun.id },
+      data: {
+        status: BotRunStatus.FAILED,
+        finishedAt: new Date(),
+        metadataJson: {
+          scannedCount,
+          updatedCount,
+          unchangedCount,
+          skippedToOpenCount,
+          openToSkippedCount,
+          evaluatedUpdatedCount,
+          byOldKind,
+          byNewKind,
+          dryRun,
+          fatalError: message
+        }
+      }
+    });
+    await writeBotLog(database, "error", "Paper Evaluation reclassification failed", {
+      botRunId: botRun.id,
+      error: message
+    });
+    throw error;
+  }
+}
+
+export async function backfillPaperEvaluations(
+  database: PrismaClient = prisma
+): Promise<BackfillPaperEvaluationsSummary> {
+  const startedAt = new Date();
+  const symbol = process.env.BACKFILL_SYMBOL?.trim().toUpperCase() || undefined;
+  const from = parseOptionalDateEnv(process.env.BACKFILL_FROM);
+  const to = parseOptionalDateEnv(process.env.BACKFILL_TO);
+  const limit = parsePositiveIntegerEnv(process.env.BACKFILL_LIMIT, 500);
+  const botRun = await database.botRun.create({
+    data: {
+      jobName: "backfillPaperEvaluations",
+      status: BotRunStatus.RUNNING,
+      startedAt,
+      metadataJson: {
+        startedAt: startedAt.toISOString(),
+        symbol,
+        from: from?.toISOString(),
+        to: to?.toISOString(),
+        limit
+      }
+    }
+  });
+
+  let scannedSignals = 0;
+  let createdCount = 0;
+  let skippedCount = 0;
+  let alreadyExistsCount = 0;
+  let missingEntryPriceCount = 0;
+  const byEvaluationKind: Record<string, number> = {};
+
+  await writeBotLog(database, "info", "Paper Evaluation backfill started", {
+    botRunId: botRun.id,
+    symbol,
+    from: from?.toISOString(),
+    to: to?.toISOString(),
+    limit
+  });
+
+  try {
+    const signals = await database.signal.findMany({
+      where: {
+        symbol,
+        createdAt:
+          from || to
+            ? {
+                gte: from,
+                lte: to
+              }
+            : undefined,
+        paperEvaluation: {
+          is: null
+        }
+      },
+      orderBy: {
+        createdAt: "asc"
+      },
+      take: limit,
+      include: {
+        output: true,
+        paperEvaluation: true
+      }
+    });
+
+    for (const signal of signals) {
+      scannedSignals += 1;
+
+      try {
+        const classification = classifyPaperEvaluation(signal);
+        byEvaluationKind[classification.evaluationKind] =
+          (byEvaluationKind[classification.evaluationKind] ?? 0) + 1;
+
+        const entryCandle = await findEntryCandle(database, signal);
+
+        if (!entryCandle) {
+          missingEntryPriceCount += 1;
+          continue;
+        }
+
+        const entryPrice = toNumber(entryCandle.close);
+        const atr = extractAtr(signal.output?.technicalJson) ?? extractAtr(signal.output?.dashboardJson);
+        const prices = buildInvalidationAndTarget(classification.evaluationKind, signal, entryPrice, atr);
+
+        await database.paperSignalEvaluation.create({
+          data: {
+            signalId: signal.id,
+            assetId: signal.assetId,
+            symbol: signal.symbol,
+            timeframe: signal.timeframe,
+            direction: signal.direction,
+            status: signal.status,
+            signalType: signal.signalType,
+            score: signal.score,
+            riskLevel: signal.riskLevel,
+            entryPrice: new Prisma.Decimal(entryPrice),
+            invalidationPrice: new Prisma.Decimal(prices.invalidationPrice),
+            targetPrice: new Prisma.Decimal(prices.targetPrice),
+            evaluationKind: classification.evaluationKind,
+            expectedMoveDirection: classification.expectedMoveDirection,
+            evaluationStatus: classification.evaluationStatus,
+            skipReason: classification.skipReason,
+            openedAt: entryCandle.closeTime,
+            evaluatedAt:
+              classification.evaluationStatus === PaperEvaluationStatus.SKIPPED
+                ? new Date()
+                : undefined
+          }
+        });
+
+        if (classification.evaluationStatus === PaperEvaluationStatus.SKIPPED) {
+          skippedCount += 1;
+        } else {
+          createdCount += 1;
+        }
+      } catch (error) {
+        if (isUniqueConstraintError(error)) {
+          alreadyExistsCount += 1;
+          continue;
+        }
+
+        throw error;
+      }
+    }
+
+    const summary = {
+      status: BotRunStatus.SUCCESS,
+      scannedSignals,
+      createdCount,
+      skippedCount,
+      alreadyExistsCount,
+      missingEntryPriceCount,
+      byEvaluationKind
+    };
+
+    await database.botRun.update({
+      where: { id: botRun.id },
+      data: {
+        status: BotRunStatus.SUCCESS,
+        finishedAt: new Date(),
+        metadataJson: summary
+      }
+    });
+    await writeBotLog(database, "info", "Paper Evaluation backfill finished", {
+      botRunId: botRun.id,
+      ...summary
+    });
+
+    return summary;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown backfillPaperEvaluations error";
+    await database.botRun.update({
+      where: { id: botRun.id },
+      data: {
+        status: BotRunStatus.FAILED,
+        finishedAt: new Date(),
+        metadataJson: {
+          scannedSignals,
+          createdCount,
+          skippedCount,
+          alreadyExistsCount,
+          missingEntryPriceCount,
+          byEvaluationKind,
+          fatalError: message
+        }
+      }
+    });
+    await writeBotLog(database, "error", "Paper Evaluation backfill failed", {
+      botRunId: botRun.id,
+      error: message
+    });
+    throw error;
+  }
+}
+
 export function isEvaluableSignal(signal: {
   direction: SignalDirection;
   status: SignalStatus;
@@ -495,6 +861,56 @@ function buildInvalidationAndTarget(
     invalidationPrice: entryPrice - invalidationDistance,
     targetPrice: entryPrice + targetDistance
   };
+}
+
+function buildReclassification(evaluation: PaperEvaluationWithSignal): {
+  changed: boolean;
+  evaluationKind: PaperEvaluationKind;
+  data: Prisma.PaperSignalEvaluationUpdateInput;
+} {
+  const classification = classifyPaperEvaluation(evaluation.signal);
+  const nextStatus = nextEvaluationStatus(evaluation.evaluationStatus, classification.evaluationStatus);
+  const nextSkipReason =
+    classification.evaluationStatus === PaperEvaluationStatus.SKIPPED ? classification.skipReason : null;
+  const data = {
+    evaluationKind: classification.evaluationKind,
+    expectedMoveDirection: classification.expectedMoveDirection,
+    evaluationStatus: nextStatus,
+    skipReason: nextSkipReason
+  } satisfies Prisma.PaperSignalEvaluationUpdateInput;
+
+  return {
+    evaluationKind: classification.evaluationKind,
+    changed:
+      evaluation.evaluationKind !== data.evaluationKind ||
+      evaluation.expectedMoveDirection !== data.expectedMoveDirection ||
+      evaluation.evaluationStatus !== data.evaluationStatus ||
+      (evaluation.skipReason ?? null) !== data.skipReason,
+    data
+  };
+}
+
+function nextEvaluationStatus(
+  currentStatus: PaperEvaluationStatus,
+  classifiedStatus: PaperEvaluationStatus
+) {
+  if (currentStatus === PaperEvaluationStatus.EVALUATED) {
+    return PaperEvaluationStatus.EVALUATED;
+  }
+
+  if (currentStatus === PaperEvaluationStatus.EXPIRED) {
+    return classifiedStatus === PaperEvaluationStatus.SKIPPED
+      ? PaperEvaluationStatus.SKIPPED
+      : PaperEvaluationStatus.EXPIRED;
+  }
+
+  if (currentStatus === PaperEvaluationStatus.SKIPPED) {
+    return classifiedStatus === PaperEvaluationStatus.OPEN
+      ? PaperEvaluationStatus.OPEN
+      : PaperEvaluationStatus.SKIPPED;
+  }
+
+  return classifiedStatus;
 }
 
 function buildEvaluationMetrics(evaluation: EvaluationRecord, candles: CandleRecord[]) {
@@ -726,6 +1142,32 @@ function isUniqueConstraintError(error: unknown) {
   return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
 }
 
+function parseBooleanEnv(value: string | undefined, defaultValue: boolean) {
+  if (value === undefined || value.trim() === "") {
+    return defaultValue;
+  }
+
+  return value.trim().toLowerCase() === "true";
+}
+
+function parsePositiveIntegerEnv(value: string | undefined, defaultValue: number) {
+  if (value === undefined || value.trim() === "") {
+    return defaultValue;
+  }
+
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : defaultValue;
+}
+
+function parseOptionalDateEnv(value: string | undefined) {
+  if (value === undefined || value.trim() === "") {
+    return undefined;
+  }
+
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed;
+}
+
 async function writeBotLog(
   database: PrismaClient,
   level: string,
@@ -749,6 +1191,12 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     if (command === "evaluate") {
       await evaluatePaperSignals();
       logger.info("evaluatePaperSignals completed");
+    } else if (command === "reclassify") {
+      await reclassifyPaperEvaluations();
+      logger.info("reclassifyPaperEvaluations completed");
+    } else if (command === "backfill") {
+      await backfillPaperEvaluations();
+      logger.info("backfillPaperEvaluations completed");
     } else {
       await createPaperEvaluationsForSignals();
       logger.info("createPaperEvaluationsForSignals completed");

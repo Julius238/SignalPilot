@@ -266,6 +266,31 @@ describe("watchlist routes", () => {
 
     await server.close();
   });
+
+  it("returns data quality report and asset coverage", async () => {
+    const { server, state } = await createServerWithState();
+    state.paperEvaluations.push(
+      createPaperEvaluation({
+        evaluationStatus: PaperEvaluationStatus.SKIPPED,
+        evaluationKind: PaperEvaluationKind.SKIPPED,
+        skipReason: "WAIT signal below evaluation threshold.",
+        outcome: null
+      })
+    );
+
+    const reportResponse = await server.inject("/data-quality/report?assetType=CRYPTO");
+    const assetsResponse = await server.inject("/data-quality/assets?assetType=CRYPTO&limit=100");
+
+    assert.equal(reportResponse.statusCode, 200);
+    assert.equal(assetsResponse.statusCode, 200);
+    const report = reportResponse.json();
+    assert.equal(report.assetCoverage[0].symbol, "BTCUSDT");
+    assert.equal(report.candleCoverage.assetsBelowMinimumByTimeframe["1h"], 1);
+    assert.equal(report.evaluationCoverage.skippedByReason["WAIT signal below evaluation threshold."], 1);
+    assert.equal(assetsResponse.json()[0].qualityScore >= 0, true);
+
+    await server.close();
+  });
 });
 
 async function createServer() {
@@ -364,14 +389,17 @@ function createDatabase(state: {
         state.signalFindManyWhere.push(where);
         return [];
       },
-      count: async () => 0
+      groupBy: async () => [],
+      count: async ({ where }: { where?: unknown } = {}) =>
+        JSON.stringify(where ?? {}).includes("paperEvaluation") ? 0 : 1
     },
     candle: {
       groupBy: async () => [],
       findMany: async () => []
     },
     alert: {
-      count: async () => 0
+      count: async () => 0,
+      findMany: async () => []
     },
     alertState: {
       findMany: async ({ where, take }: { where: { symbol?: string; status?: SignalStatus }; take: number }) =>
@@ -384,7 +412,34 @@ function createDatabase(state: {
     paperSignalEvaluation: {
       findMany: async () => state.paperEvaluations,
       findUnique: async ({ where }: { where: { id: string } }) =>
-        state.paperEvaluations.find((evaluation) => evaluation.id === where.id) ?? null
+        state.paperEvaluations.find((evaluation) => evaluation.id === where.id) ?? null,
+      count: async () => state.paperEvaluations.length,
+      groupBy: async ({ by }: { by: string[] }) => {
+        if (by.includes("assetId") && by.includes("evaluationStatus")) {
+          return state.paperEvaluations.map((evaluation) => ({
+            assetId: evaluation.assetId,
+            evaluationStatus: evaluation.evaluationStatus,
+            _count: { _all: 1 }
+          }));
+        }
+
+        if (by.includes("skipReason")) {
+          return Object.entries(
+            state.paperEvaluations
+              .filter((evaluation) => evaluation.evaluationStatus === PaperEvaluationStatus.SKIPPED)
+              .reduce<Record<string, number>>((groups, evaluation) => {
+                const key = evaluation.skipReason ?? "Unspecified";
+                groups[key] = (groups[key] ?? 0) + 1;
+                return groups;
+              }, {})
+          ).map(([skipReason, count]) => ({
+            skipReason,
+            _count: { _all: count }
+          }));
+        }
+
+        return [];
+      }
     },
     botRun: {
       findFirst: async () => null

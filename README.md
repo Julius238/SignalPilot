@@ -138,3 +138,54 @@ The multi-timeframe page at `/dashboard/multi-timeframe` shows one row per activ
 the latest `1h`, `4h`, and `1d` signal alignment, risk level, primary timeframe, confirming
 and conflicting timeframes, summary, and next focus. It supports URL filters for asset type
 and alignment and links each row to the asset detail page.
+
+## Paper Evaluation Maintenance
+
+Paper Evaluations are hypothetical signal-quality measurements only. SignalPilot does not
+execute real trades, does not place paper orders, and does not integrate with brokers.
+
+Reclassify older Paper Evaluations with the current eligibility rules:
+
+```bash
+pnpm worker:reclassify-paper-evaluations
+```
+
+The reclassification worker defaults to dry-run mode:
+
+```bash
+RECLASSIFY_DRY_RUN=true
+RECLASSIFY_BATCH_SIZE=100
+```
+
+Set `RECLASSIFY_DRY_RUN=false` only when you want to update stored `evaluationKind`,
+`expectedMoveDirection`, `skipReason`, and safe `evaluationStatus` transitions. Existing
+prices, returns, and outcomes are preserved.
+
+Backfill missing Paper Evaluations for signals that do not have one yet:
+
+```bash
+pnpm worker:backfill-paper-evaluations
+```
+
+Optional filters:
+
+```bash
+BACKFILL_SYMBOL=BTCUSDT
+BACKFILL_FROM=2026-05-01T00:00:00.000Z
+BACKFILL_TO=2026-05-18T00:00:00.000Z
+BACKFILL_LIMIT=500
+```
+
+## Data Quality
+
+The Data Quality dashboard at `/dashboard/data-quality` shows candle coverage, signal
+coverage, Paper Evaluation coverage, skipped reasons, alert coverage, and per-asset quality
+scores. Use it when Performance Intelligence has too few evaluated records or too many
+skipped evaluations.
+
+API endpoints:
+
+```bash
+curl "http://localhost:3100/data-quality/report?assetType=CRYPTO"
+curl "http://localhost:3100/data-quality/assets?assetType=CRYPTO&minQualityScore=70"
+```
