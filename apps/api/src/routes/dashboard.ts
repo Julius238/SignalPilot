@@ -3,6 +3,7 @@ import {
   AlertStatus,
   AssetType,
   BotRunStatus,
+  PaperEvaluationKind,
   PaperEvaluationOutcome,
   PaperEvaluationStatus,
   Prisma,
@@ -38,12 +39,14 @@ const alertStatuses = Object.values(AlertStatus);
 const alertChannels = Object.values(AlertChannel);
 const paperEvaluationStatuses = Object.values(PaperEvaluationStatus);
 const paperEvaluationOutcomes = Object.values(PaperEvaluationOutcome);
+const paperEvaluationKinds = Object.values(PaperEvaluationKind);
 const performanceGroupBys = [
   "signalType",
   "timeframe",
   "symbol",
   "status",
   "riskLevel",
+  "evaluationKind",
   "scoreBucket"
 ] as const;
 const publicAlertModes = ["ALL_ASSETS", "WATCHLIST_ONLY", "HIGH_PRIORITY_ONLY"] as const;
@@ -630,6 +633,12 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
       reply
     );
     const signalType = parseEnum(query.signalType, signalTypes as SignalType[], "signalType", reply);
+    const evaluationKind = parseEnum(
+      query.evaluationKind,
+      paperEvaluationKinds as PaperEvaluationKind[],
+      "evaluationKind",
+      reply
+    );
     const limit = parseLimit(query.limit, 100, 500, reply);
 
     if (reply.sent) {
@@ -640,6 +649,8 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
       where: {
         symbol: parseOptionalString(query.symbol)?.toUpperCase(),
         evaluationStatus,
+        evaluationKind,
+        skipReason: parseOptionalString(query.skipReason),
         outcome,
         status: signalStatus,
         signalType
@@ -733,7 +744,13 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
       avgMaxAdverseMove: average(evaluations.map((evaluation) => evaluation.maxAdverseMove)),
       groupedBySignalStatus: groupCount(evaluations, (evaluation) => evaluation.status),
       groupedBySignalType: groupCount(evaluations, (evaluation) => evaluation.signalType),
-      groupedByTimeframe: groupCount(evaluations, (evaluation) => evaluation.timeframe)
+      groupedByTimeframe: groupCount(evaluations, (evaluation) => evaluation.timeframe),
+      byEvaluationKind: groupCount(evaluations, (evaluation) => evaluation.evaluationKind),
+      skippedByReason: groupCount(
+        evaluations.filter((evaluation) => evaluation.evaluationStatus === PaperEvaluationStatus.SKIPPED),
+        (evaluation) => evaluation.skipReason ?? "Unspecified"
+      ),
+      observationStats: buildPaperObservationStats(evaluations)
     };
   });
 
@@ -1420,7 +1437,10 @@ function toPaperEvaluation(
     entryPrice: evaluation.entryPrice.toString(),
     invalidationPrice: evaluation.invalidationPrice?.toString() ?? null,
     targetPrice: evaluation.targetPrice?.toString() ?? null,
+    evaluationKind: evaluation.evaluationKind,
+    expectedMoveDirection: evaluation.expectedMoveDirection,
     evaluationStatus: evaluation.evaluationStatus,
+    skipReason: evaluation.skipReason,
     openedAt: evaluation.openedAt,
     evaluatedAt: evaluation.evaluatedAt,
     priceAfter1h: evaluation.priceAfter1h?.toString() ?? null,
@@ -1458,6 +1478,38 @@ function groupCount<T>(items: T[], getKey: (item: T) => string) {
   }, {});
 }
 
+function buildPaperObservationStats(
+  evaluations: Array<{
+    evaluationKind: PaperEvaluationKind;
+    evaluationStatus: PaperEvaluationStatus;
+    outcome: PaperEvaluationOutcome | null;
+    returnAfter1d: number | null;
+  }>
+) {
+  const observations = evaluations.filter(
+    (evaluation) => evaluation.evaluationKind === PaperEvaluationKind.OBSERVATION
+  );
+  const evaluated = observations.filter(
+    (evaluation) => evaluation.evaluationStatus === PaperEvaluationStatus.EVALUATED
+  );
+
+  return {
+    total: observations.length,
+    evaluatedCount: evaluated.length,
+    positiveMovementCount: evaluated.filter((evaluation) => evaluation.outcome === PaperEvaluationOutcome.POSITIVE)
+      .length,
+    neutralCount: evaluated.filter((evaluation) => evaluation.outcome === PaperEvaluationOutcome.NEUTRAL)
+      .length,
+    negativeCount: evaluated.filter((evaluation) => evaluation.outcome === PaperEvaluationOutcome.NEGATIVE)
+      .length,
+    avgAbsReturnAfter1d: average(
+      evaluated.map((evaluation) =>
+        typeof evaluation.returnAfter1d === "number" ? Math.abs(evaluation.returnAfter1d) : null
+      )
+    )
+  };
+}
+
 async function loadPerformanceEvaluations(input: {
   symbol?: string;
   assetType?: AssetType;
@@ -1493,6 +1545,8 @@ async function loadPerformanceEvaluations(input: {
     signalType: evaluation.signalType,
     score: evaluation.score,
     riskLevel: evaluation.riskLevel,
+    evaluationKind: evaluation.evaluationKind,
+    skipReason: evaluation.skipReason,
     evaluationStatus: evaluation.evaluationStatus,
     outcome: evaluation.outcome,
     returnAfter1h: evaluation.returnAfter1h,

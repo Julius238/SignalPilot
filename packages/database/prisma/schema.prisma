@@ -102,6 +102,21 @@ enum PaperEvaluationOutcome {
   TARGET_REACHED
 }
 
+enum PaperEvaluationKind {
+  DIRECTIONAL_BULLISH
+  DIRECTIONAL_BEARISH
+  RISK_WARNING
+  OBSERVATION
+  SKIPPED
+}
+
+enum PaperExpectedMoveDirection {
+  UP
+  DOWN
+  ANY
+  NONE
+}
+
 model Asset {
   id            String          @id @default(cuid())
   symbol        String
@@ -318,7 +333,10 @@ model PaperSignalEvaluation {
   entryPrice          Decimal                 @db.Decimal(30, 12)
   invalidationPrice   Decimal?                @db.Decimal(30, 12)
   targetPrice         Decimal?                @db.Decimal(30, 12)
+  evaluationKind      PaperEvaluationKind     @default(SKIPPED)
+  expectedMoveDirection PaperExpectedMoveDirection @default(NONE)
   evaluationStatus    PaperEvaluationStatus   @default(OPEN)
+  skipReason          String?
   openedAt            DateTime                @default(now())
   evaluatedAt         DateTime?
   priceAfter1h        Decimal?                @db.Decimal(30, 12)
@@ -340,6 +358,7 @@ model PaperSignalEvaluation {
   @@index([timeframe])
   @@index([status])
   @@index([signalType])
+  @@index([evaluationKind])
   @@index([evaluationStatus])
   @@index([openedAt])
 }

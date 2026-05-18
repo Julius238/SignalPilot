@@ -3,8 +3,10 @@ import { describe, it } from "node:test";
 
 import {
   BotRunStatus,
+  PaperEvaluationKind,
   PaperEvaluationOutcome,
   PaperEvaluationStatus,
+  PaperExpectedMoveDirection,
   Prisma,
   RiskLevel,
   SignalDirection,
@@ -14,7 +16,8 @@ import {
 
 import {
   createPaperEvaluationsForSignals,
-  evaluatePaperSignals
+  evaluatePaperSignals,
+  classifyPaperEvaluation
 } from "../src/jobs/paperSignalEvaluations.js";
 
 describe("paper signal evaluations", () => {
@@ -34,7 +37,75 @@ describe("paper signal evaluations", () => {
     assert.equal(created.length, 2);
   });
 
-  it("skips NO_EDGE signals", async () => {
+  it("classifies BULLISH as DIRECTIONAL_BULLISH OPEN", () => {
+    assert.deepEqual(classifyPaperEvaluation(createSignal({ direction: SignalDirection.BULLISH })), {
+      evaluationKind: PaperEvaluationKind.DIRECTIONAL_BULLISH,
+      expectedMoveDirection: PaperExpectedMoveDirection.UP,
+      evaluationStatus: PaperEvaluationStatus.OPEN
+    });
+  });
+
+  it("classifies BEARISH as DIRECTIONAL_BEARISH OPEN", () => {
+    assert.deepEqual(classifyPaperEvaluation(createSignal({ direction: SignalDirection.BEARISH })), {
+      evaluationKind: PaperEvaluationKind.DIRECTIONAL_BEARISH,
+      expectedMoveDirection: PaperExpectedMoveDirection.DOWN,
+      evaluationStatus: PaperEvaluationStatus.OPEN
+    });
+  });
+
+  it("classifies AVOID or HIGH risk as RISK_WARNING OPEN", () => {
+    assert.deepEqual(
+      classifyPaperEvaluation(
+        createSignal({
+          status: SignalStatus.AVOID,
+          riskLevel: RiskLevel.HIGH,
+          direction: SignalDirection.BEARISH
+        })
+      ),
+      {
+        evaluationKind: PaperEvaluationKind.RISK_WARNING,
+        expectedMoveDirection: PaperExpectedMoveDirection.ANY,
+        evaluationStatus: PaperEvaluationStatus.OPEN
+      }
+    );
+  });
+
+  it("classifies WATCH score >= 65 with MIXED as OBSERVATION OPEN", () => {
+    assert.deepEqual(
+      classifyPaperEvaluation(
+        createSignal({
+          status: SignalStatus.WATCH,
+          direction: SignalDirection.MIXED,
+          score: 68
+        })
+      ),
+      {
+        evaluationKind: PaperEvaluationKind.OBSERVATION,
+        expectedMoveDirection: PaperExpectedMoveDirection.ANY,
+        evaluationStatus: PaperEvaluationStatus.OPEN
+      }
+    );
+  });
+
+  it("classifies VOLUME_SPIKE with NEUTRAL as OBSERVATION OPEN", () => {
+    assert.deepEqual(
+      classifyPaperEvaluation(
+        createSignal({
+          status: SignalStatus.WAIT,
+          signalType: SignalType.VOLUME_SPIKE,
+          direction: SignalDirection.NEUTRAL,
+          score: 65
+        })
+      ),
+      {
+        evaluationKind: PaperEvaluationKind.OBSERVATION,
+        expectedMoveDirection: PaperExpectedMoveDirection.ANY,
+        evaluationStatus: PaperEvaluationStatus.OPEN
+      }
+    );
+  });
+
+  it("skips NO_EDGE signals with skipReason", async () => {
     const created: unknown[] = [];
     const database = createPaperDatabase({
       signals: [createSignal({ status: SignalStatus.NO_EDGE, signalType: SignalType.NO_SIGNAL })],
@@ -45,7 +116,38 @@ describe("paper signal evaluations", () => {
 
     assert.equal(summary.skippedSignalCount, 1);
     assert.equal(summary.createdEvaluationCount, 0);
-    assert.equal(created.length, 0);
+    assert.equal(created.length, 1);
+    assert.equal(
+      (created[0] as { data: { evaluationKind: PaperEvaluationKind; skipReason: string } }).data
+        .evaluationKind,
+      PaperEvaluationKind.SKIPPED
+    );
+    assert.equal(
+      (created[0] as { data: { skipReason: string } }).data.skipReason,
+      "NO_EDGE signal has no measurable evaluation edge."
+    );
+  });
+
+  it("skips WAIT score < 65 with skipReason", async () => {
+    const created: unknown[] = [];
+    const database = createPaperDatabase({
+      signals: [
+        createSignal({
+          status: SignalStatus.WAIT,
+          direction: SignalDirection.NEUTRAL,
+          score: 50
+        })
+      ],
+      created
+    });
+
+    const summary = await createPaperEvaluationsForSignals(database as never);
+
+    assert.equal(summary.skippedSignalCount, 1);
+    assert.equal(
+      (created[0] as { data: { skipReason: string } }).data.skipReason,
+      "WAIT signal below evaluation threshold."
+    );
   });
 
   it("keeps evaluation creation idempotent per signalId", async () => {
@@ -86,6 +188,51 @@ describe("paper signal evaluations", () => {
     assert.equal(summary.evaluatedCount, 1);
     assert.equal(update?.outcome, PaperEvaluationOutcome.POSITIVE);
     assert.equal(Math.round((update?.returnAfter1d as number) * 10) / 10, 1.2);
+  });
+
+  it("evaluates OBSERVATION movement as positive", async () => {
+    const updates: Array<{ data: Record<string, unknown> }> = [];
+    const openedAt = new Date("2026-01-01T00:00:00.000Z");
+    const database = createPaperDatabase({
+      evaluations: [
+        createEvaluation({
+          evaluationKind: PaperEvaluationKind.OBSERVATION,
+          expectedMoveDirection: PaperExpectedMoveDirection.ANY,
+          direction: SignalDirection.MIXED,
+          entryPrice: "100",
+          openedAt
+        })
+      ],
+      candles: createEvaluationCandles(openedAt, [100, 100.2, 100.4, 101, 101.2], 101.6, 99.5),
+      updates
+    });
+
+    await evaluatePaperSignals(database as never);
+
+    assert.equal(updates.at(-1)?.data.outcome, PaperEvaluationOutcome.POSITIVE);
+  });
+
+  it("evaluates OBSERVATION without movement as neutral for moderate score", async () => {
+    const updates: Array<{ data: Record<string, unknown> }> = [];
+    const openedAt = new Date("2026-01-01T00:00:00.000Z");
+    const database = createPaperDatabase({
+      evaluations: [
+        createEvaluation({
+          evaluationKind: PaperEvaluationKind.OBSERVATION,
+          expectedMoveDirection: PaperExpectedMoveDirection.ANY,
+          direction: SignalDirection.MIXED,
+          score: 70,
+          entryPrice: "100",
+          openedAt
+        })
+      ],
+      candles: createEvaluationCandles(openedAt, [100, 100.1, 100.2, 100.1, 100.2], 100.4, 99.8),
+      updates
+    });
+
+    await evaluatePaperSignals(database as never);
+
+    assert.equal(updates.at(-1)?.data.outcome, PaperEvaluationOutcome.NEUTRAL);
   });
 
   it("evaluates bearish and AVOID signals as positive warning outcomes when price falls", async () => {
@@ -219,7 +366,10 @@ function createBaseEvaluation() {
     entryPrice: "100",
     invalidationPrice: "98",
     targetPrice: "104",
+    evaluationKind: PaperEvaluationKind.DIRECTIONAL_BULLISH,
+    expectedMoveDirection: PaperExpectedMoveDirection.UP,
     evaluationStatus: PaperEvaluationStatus.OPEN,
+    skipReason: null,
     openedAt: new Date("2026-01-01T00:00:00.000Z"),
     evaluatedAt: null,
     priceAfter1h: null,

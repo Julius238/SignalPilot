@@ -3,8 +3,10 @@ import { fileURLToPath } from "node:url";
 
 import {
   BotRunStatus,
+  PaperEvaluationKind,
   PaperEvaluationOutcome,
   PaperEvaluationStatus,
+  PaperExpectedMoveDirection,
   Prisma,
   prisma,
   SignalDirection,
@@ -31,6 +33,10 @@ const horizons = {
   priceAfter3d: 3 * 24 * 60 * 60 * 1000
 } as const;
 const expirationMs = 4 * 24 * 60 * 60 * 1000;
+const observationReturnThreshold = 0.75;
+const observationMoveThreshold = 1.5;
+const riskWarningAdverseMoveThreshold = 1.5;
+const riskWarningReturnThreshold = 0.75;
 
 export type CreatePaperEvaluationsSummary = {
   status: BotRunStatus;
@@ -105,16 +111,7 @@ export async function createPaperEvaluationsForSignals(
       scannedSignalCount += 1;
 
       try {
-        if (!isEvaluableSignal(signal)) {
-          skippedSignalCount += 1;
-          continue;
-        }
-
-        if (signal.direction === SignalDirection.NEUTRAL || signal.direction === SignalDirection.MIXED) {
-          await createSkippedEvaluation(database, signal, "Neutral or mixed direction is skipped.");
-          skippedSignalCount += 1;
-          continue;
-        }
+        const classification = classifyPaperEvaluation(signal);
 
         const entryCandle = await findEntryCandle(database, signal);
 
@@ -125,7 +122,7 @@ export async function createPaperEvaluationsForSignals(
 
         const entryPrice = toNumber(entryCandle.close);
         const atr = extractAtr(signal.output?.technicalJson) ?? extractAtr(signal.output?.dashboardJson);
-        const prices = buildInvalidationAndTarget(signal, entryPrice, atr);
+        const prices = buildInvalidationAndTarget(classification.evaluationKind, signal, entryPrice, atr);
 
         await database.paperSignalEvaluation.create({
           data: {
@@ -141,10 +138,23 @@ export async function createPaperEvaluationsForSignals(
             entryPrice: new Prisma.Decimal(entryPrice),
             invalidationPrice: new Prisma.Decimal(prices.invalidationPrice),
             targetPrice: new Prisma.Decimal(prices.targetPrice),
-            openedAt: entryCandle.closeTime
+            evaluationKind: classification.evaluationKind,
+            expectedMoveDirection: classification.expectedMoveDirection,
+            evaluationStatus: classification.evaluationStatus,
+            skipReason: classification.skipReason,
+            openedAt: entryCandle.closeTime,
+            evaluatedAt:
+              classification.evaluationStatus === PaperEvaluationStatus.SKIPPED
+                ? new Date()
+                : undefined
           }
         });
-        createdEvaluationCount += 1;
+
+        if (classification.evaluationStatus === PaperEvaluationStatus.SKIPPED) {
+          skippedSignalCount += 1;
+        } else {
+          createdEvaluationCount += 1;
+        }
       } catch (error) {
         if (isUniqueConstraintError(error)) {
           duplicateSkipCount += 1;
@@ -367,39 +377,114 @@ export async function evaluatePaperSignals(
 }
 
 export function isEvaluableSignal(signal: {
+  direction: SignalDirection;
   status: SignalStatus;
   signalType: SignalType;
   riskLevel: string;
   score: number;
 }) {
-  if (signal.status === SignalStatus.NO_EDGE) {
-    return false;
-  }
-
-  if (signal.status === SignalStatus.STRONG_WATCH || signal.status === SignalStatus.WATCH) {
-    return true;
-  }
-
-  if (signal.status === SignalStatus.AVOID && signal.riskLevel === "HIGH") {
-    return true;
-  }
-
-  return (
-    signal.signalType === SignalType.BREAKOUT_ALERT ||
-    signal.signalType === SignalType.VOLUME_SPIKE ||
-    signal.signalType === SignalType.VOLATILITY_SPIKE
-  );
+  return classifyPaperEvaluation(signal).evaluationStatus === PaperEvaluationStatus.OPEN;
 }
 
 export function calculateReturn(entryPrice: number, laterPrice: number) {
   return ((laterPrice - entryPrice) / entryPrice) * 100;
 }
 
-function buildInvalidationAndTarget(signal: PaperSignal, entryPrice: number, atr?: number) {
+export function classifyPaperEvaluation(signal: {
+  direction: SignalDirection;
+  status: SignalStatus;
+  signalType: SignalType;
+  riskLevel: string;
+  score: number;
+}): {
+  evaluationKind: PaperEvaluationKind;
+  expectedMoveDirection: PaperExpectedMoveDirection;
+  evaluationStatus: PaperEvaluationStatus;
+  skipReason?: string;
+} {
+  if (signal.status === SignalStatus.NO_EDGE) {
+    return {
+      evaluationKind: PaperEvaluationKind.SKIPPED,
+      expectedMoveDirection: PaperExpectedMoveDirection.NONE,
+      evaluationStatus: PaperEvaluationStatus.SKIPPED,
+      skipReason: "NO_EDGE signal has no measurable evaluation edge."
+    };
+  }
+
+  if (signal.status === SignalStatus.WAIT && signal.score < 65) {
+    return {
+      evaluationKind: PaperEvaluationKind.SKIPPED,
+      expectedMoveDirection: PaperExpectedMoveDirection.NONE,
+      evaluationStatus: PaperEvaluationStatus.SKIPPED,
+      skipReason: "WAIT signal below evaluation threshold."
+    };
+  }
+
+  if (signal.status === SignalStatus.AVOID || signal.riskLevel === "HIGH") {
+    return {
+      evaluationKind: PaperEvaluationKind.RISK_WARNING,
+      expectedMoveDirection: PaperExpectedMoveDirection.ANY,
+      evaluationStatus: PaperEvaluationStatus.OPEN
+    };
+  }
+
+  if (signal.direction === SignalDirection.BULLISH) {
+    return {
+      evaluationKind: PaperEvaluationKind.DIRECTIONAL_BULLISH,
+      expectedMoveDirection: PaperExpectedMoveDirection.UP,
+      evaluationStatus: PaperEvaluationStatus.OPEN
+    };
+  }
+
+  if (signal.direction === SignalDirection.BEARISH) {
+    return {
+      evaluationKind: PaperEvaluationKind.DIRECTIONAL_BEARISH,
+      expectedMoveDirection: PaperExpectedMoveDirection.DOWN,
+      evaluationStatus: PaperEvaluationStatus.OPEN
+    };
+  }
+
+  if (
+    (signal.status === SignalStatus.STRONG_WATCH || signal.status === SignalStatus.WATCH) &&
+    signal.score >= 65
+  ) {
+    return {
+      evaluationKind: PaperEvaluationKind.OBSERVATION,
+      expectedMoveDirection: PaperExpectedMoveDirection.ANY,
+      evaluationStatus: PaperEvaluationStatus.OPEN
+    };
+  }
+
+  if (
+    signal.signalType === SignalType.BREAKOUT_ALERT ||
+    signal.signalType === SignalType.VOLUME_SPIKE ||
+    signal.signalType === SignalType.VOLATILITY_SPIKE
+  ) {
+    return {
+      evaluationKind: PaperEvaluationKind.OBSERVATION,
+      expectedMoveDirection: PaperExpectedMoveDirection.ANY,
+      evaluationStatus: PaperEvaluationStatus.OPEN
+    };
+  }
+
+  return {
+    evaluationKind: PaperEvaluationKind.SKIPPED,
+    expectedMoveDirection: PaperExpectedMoveDirection.NONE,
+    evaluationStatus: PaperEvaluationStatus.SKIPPED,
+    skipReason: "Neutral or mixed signal without sufficient evaluation strength."
+  };
+}
+
+function buildInvalidationAndTarget(
+  evaluationKind: PaperEvaluationKind,
+  signal: { direction: SignalDirection; status: SignalStatus },
+  entryPrice: number,
+  atr?: number
+) {
   const invalidationDistance = atr && atr > 0 ? atr * 1.5 : entryPrice * 0.02;
   const targetDistance = atr && atr > 0 ? atr * 3 : entryPrice * 0.04;
 
-  if (isBearishEvaluation(signal)) {
+  if (evaluationKind === PaperEvaluationKind.DIRECTIONAL_BEARISH || isBearishEvaluation(signal)) {
     return {
       invalidationPrice: entryPrice + invalidationDistance,
       targetPrice: entryPrice - targetDistance
@@ -437,6 +522,14 @@ function determineOutcome(
   evaluation: EvaluationRecord,
   metrics: ReturnType<typeof buildEvaluationMetrics>
 ) {
+  if (evaluation.evaluationKind === PaperEvaluationKind.OBSERVATION) {
+    return determineObservationOutcome(evaluation, metrics);
+  }
+
+  if (evaluation.evaluationKind === PaperEvaluationKind.RISK_WARNING) {
+    return determineRiskWarningOutcome(metrics);
+  }
+
   const isBearish = isBearishEvaluation(evaluation);
 
   if (targetWasReached(evaluation, metrics.maxFavorableMove)) {
@@ -472,6 +565,41 @@ function determineOutcome(
   return PaperEvaluationOutcome.NEUTRAL;
 }
 
+function determineObservationOutcome(
+  evaluation: EvaluationRecord,
+  metrics: ReturnType<typeof buildEvaluationMetrics>
+) {
+  const absoluteReturnAfter1d = Math.abs(metrics.returnAfter1d ?? 0);
+  const hasRelevantMovement =
+    absoluteReturnAfter1d >= observationReturnThreshold ||
+    metrics.maxFavorableMove >= observationMoveThreshold ||
+    metrics.maxAdverseMove >= observationMoveThreshold;
+
+  if (hasRelevantMovement) {
+    return PaperEvaluationOutcome.POSITIVE;
+  }
+
+  return evaluation.score >= 80 ? PaperEvaluationOutcome.NEGATIVE : PaperEvaluationOutcome.NEUTRAL;
+}
+
+function determineRiskWarningOutcome(metrics: ReturnType<typeof buildEvaluationMetrics>) {
+  const oneDayReturn = metrics.returnAfter1d ?? 0;
+
+  if (
+    metrics.maxAdverseMove >= riskWarningAdverseMoveThreshold ||
+    oneDayReturn <= -riskWarningReturnThreshold ||
+    Math.abs(oneDayReturn) >= observationReturnThreshold
+  ) {
+    return PaperEvaluationOutcome.POSITIVE;
+  }
+
+  if (oneDayReturn > riskWarningReturnThreshold && metrics.maxAdverseMove < riskWarningAdverseMoveThreshold / 2) {
+    return PaperEvaluationOutcome.NEGATIVE;
+  }
+
+  return PaperEvaluationOutcome.NEUTRAL;
+}
+
 function targetWasReached(evaluation: EvaluationRecord, maxFavorableMove: number) {
   const target = evaluation.targetPrice === null ? null : toNumber(evaluation.targetPrice);
 
@@ -498,7 +626,9 @@ function invalidationWasReached(evaluation: EvaluationRecord, maxAdverseMove: nu
 
 function calculateMoveStats(evaluation: EvaluationRecord, candles: CandleRecord[]) {
   const entryPrice = toNumber(evaluation.entryPrice);
-  const isBearish = isBearishEvaluation(evaluation);
+  const isBearish =
+    evaluation.evaluationKind === PaperEvaluationKind.DIRECTIONAL_BEARISH ||
+    isBearishEvaluation(evaluation);
   let maxFavorableMove = 0;
   let maxAdverseMove = 0;
 
@@ -559,33 +689,6 @@ async function findEntryCandle(database: PrismaClient, signal: PaperSignal) {
     },
     orderBy: {
       closeTime: "asc"
-    }
-  });
-}
-
-async function createSkippedEvaluation(database: PrismaClient, signal: PaperSignal, notes: string) {
-  const entryCandle = await findEntryCandle(database, signal);
-
-  if (!entryCandle) {
-    return;
-  }
-
-  await database.paperSignalEvaluation.create({
-    data: {
-      signalId: signal.id,
-      assetId: signal.assetId,
-      symbol: signal.symbol,
-      timeframe: signal.timeframe,
-      direction: signal.direction,
-      status: signal.status,
-      signalType: signal.signalType,
-      score: signal.score,
-      riskLevel: signal.riskLevel,
-      entryPrice: entryCandle.close,
-      evaluationStatus: PaperEvaluationStatus.SKIPPED,
-      openedAt: entryCandle.closeTime,
-      evaluatedAt: new Date(),
-      notes
     }
   });
 }

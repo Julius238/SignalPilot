@@ -111,6 +111,20 @@ export default async function SignalDetailPage({ params }: SignalDetailPageProps
                   <td>{data.paperEvaluation.outcome ?? data.paperEvaluation.evaluationStatus}</td>
                 </tr>
                 <tr>
+                  <th>Evaluation Kind</th>
+                  <td>{data.paperEvaluation.evaluationKind}</td>
+                </tr>
+                <tr>
+                  <th>Expected Move</th>
+                  <td>{data.paperEvaluation.expectedMoveDirection}</td>
+                </tr>
+                {data.paperEvaluation.skipReason ? (
+                  <tr>
+                    <th>Skip Reason</th>
+                    <td>{data.paperEvaluation.skipReason}</td>
+                  </tr>
+                ) : null}
+                <tr>
                   <th>Entry Price</th>
                   <td>{data.paperEvaluation.entryPrice}</td>
                 </tr>

@@ -58,6 +58,21 @@ describe("performance intelligence", () => {
     );
   });
 
+  it("groups evaluationKind buckets", () => {
+    const buckets = buildPerformanceBuckets(
+      [
+        evaluation({ evaluationKind: "OBSERVATION" }),
+        evaluation({ evaluationKind: "RISK_WARNING" })
+      ],
+      "evaluationKind"
+    );
+
+    assert.deepEqual(
+      buckets.map((bucket) => bucket.key).sort(),
+      ["OBSERVATION", "RISK_WARNING"]
+    );
+  });
+
   it("sorts report best and worst buckets", () => {
     const report = buildPerformanceReport([
       ...Array.from({ length: 12 }, () =>
@@ -89,6 +104,8 @@ function evaluation(overrides: Partial<PaperEvaluationLike> = {}): PaperEvaluati
     signalType: "TREND_ALERT",
     score: 72,
     riskLevel: "MEDIUM",
+    evaluationKind: "DIRECTIONAL_BULLISH",
+    skipReason: null,
     evaluationStatus: "EVALUATED",
     outcome: "POSITIVE",
     returnAfter1h: 0.2,

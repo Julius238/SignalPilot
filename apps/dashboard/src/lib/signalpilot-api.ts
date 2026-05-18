@@ -4,6 +4,13 @@ export type SignalDirection = "BULLISH" | "BEARISH" | "NEUTRAL" | "MIXED";
 export type RiskLevel = "LOW" | "MEDIUM" | "HIGH";
 export type WatchlistPriority = "LOW" | "MEDIUM" | "HIGH";
 export type PaperEvaluationStatus = "OPEN" | "EVALUATED" | "EXPIRED" | "SKIPPED";
+export type PaperEvaluationKind =
+  | "DIRECTIONAL_BULLISH"
+  | "DIRECTIONAL_BEARISH"
+  | "RISK_WARNING"
+  | "OBSERVATION"
+  | "SKIPPED";
+export type PaperExpectedMoveDirection = "UP" | "DOWN" | "ANY" | "NONE";
 export type PaperEvaluationOutcome =
   | "POSITIVE"
   | "NEGATIVE"
@@ -201,7 +208,10 @@ export type PaperSignalEvaluation = {
   entryPrice: string;
   invalidationPrice: string | null;
   targetPrice: string | null;
+  evaluationKind: PaperEvaluationKind;
+  expectedMoveDirection: PaperExpectedMoveDirection;
   evaluationStatus: PaperEvaluationStatus;
+  skipReason: string | null;
   openedAt: string;
   evaluatedAt: string | null;
   priceAfter1h: string | null;
@@ -238,6 +248,9 @@ export type PaperStats = {
   groupedBySignalStatus: Record<string, number>;
   groupedBySignalType: Record<string, number>;
   groupedByTimeframe: Record<string, number>;
+  byEvaluationKind: Record<string, number>;
+  skippedByReason: Record<string, number>;
+  observationStats: ObservationStats;
 };
 
 export type ConfidenceLevel = "LOW" | "MEDIUM" | "HIGH";
@@ -281,8 +294,20 @@ export type PerformanceIntelligenceReport = {
   scoreBuckets: PerformanceBucket[];
   riskBuckets: PerformanceBucket[];
   statusBuckets: PerformanceBucket[];
+  groupedByEvaluationKind: PerformanceBucket[];
+  observationStats: ObservationStats;
+  skippedByReason: Record<string, number>;
   summary: string;
   warnings: string[];
+};
+
+export type ObservationStats = {
+  total: number;
+  evaluatedCount: number;
+  positiveMovementCount: number;
+  neutralCount: number;
+  negativeCount: number;
+  avgAbsReturnAfter1d: number;
 };
 
 export type PublicConfig = {

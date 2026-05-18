@@ -4,8 +4,10 @@ import { afterEach, describe, it } from "node:test";
 import Fastify from "fastify";
 import {
   AssetType,
+  PaperEvaluationKind,
   PaperEvaluationOutcome,
   PaperEvaluationStatus,
+  PaperExpectedMoveDirection,
   Prisma,
   RiskLevel,
   SignalDirection,
@@ -204,6 +206,9 @@ describe("watchlist routes", () => {
     assert.equal(body.negativeCount, 1);
     assert.equal(body.winRate, 50);
     assert.equal(body.groupedBySignalStatus.WATCH, 2);
+    assert.equal(body.byEvaluationKind.DIRECTIONAL_BULLISH, 2);
+    assert.deepEqual(body.skippedByReason, {});
+    assert.equal(body.observationStats.total, 0);
 
     await server.close();
   });
@@ -246,14 +251,18 @@ describe("watchlist routes", () => {
 
     const response = await server.inject("/performance/report");
     const bucketsResponse = await server.inject("/performance/buckets?groupBy=signalType");
+    const kindBucketsResponse = await server.inject("/performance/buckets?groupBy=evaluationKind");
 
     assert.equal(response.statusCode, 200);
     assert.equal(bucketsResponse.statusCode, 200);
+    assert.equal(kindBucketsResponse.statusCode, 200);
     const body = response.json();
     assert.equal(body.totalEvaluations, 3);
     assert.equal(Math.round(body.overallWinRate * 10) / 10, 66.7);
     assert.equal(body.bestSignalTypes[0].key, SignalType.BREAKOUT_ALERT);
+    assert.equal(body.groupedByEvaluationKind[0].key, PaperEvaluationKind.DIRECTIONAL_BULLISH);
     assert.equal(bucketsResponse.json()[0].key, SignalType.BREAKOUT_ALERT);
+    assert.equal(kindBucketsResponse.json()[0].key, PaperEvaluationKind.DIRECTIONAL_BULLISH);
 
     await server.close();
   });
@@ -476,7 +485,10 @@ function createBasePaperEvaluation() {
     entryPrice: { toString: () => "100" },
     invalidationPrice: { toString: () => "98" },
     targetPrice: { toString: () => "104" },
+    evaluationKind: PaperEvaluationKind.DIRECTIONAL_BULLISH,
+    expectedMoveDirection: PaperExpectedMoveDirection.UP,
     evaluationStatus: PaperEvaluationStatus.EVALUATED,
+    skipReason: null,
     openedAt: new Date("2026-01-01T00:00:00.000Z"),
     evaluatedAt: new Date("2026-01-02T00:00:00.000Z"),
     priceAfter1h: { toString: () => "100.5" },

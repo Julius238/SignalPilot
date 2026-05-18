@@ -113,6 +113,27 @@ export default async function PerformancePage() {
             ) : null}
           </section>
 
+          <section className="grid metrics" style={{ marginTop: 16 }}>
+            <div className="card">
+              <span className="metric-label">Observations</span>
+              <span className="metric-value">{data.observationStats.total}</span>
+            </div>
+            <div className="card">
+              <span className="metric-label">Observation Evaluated</span>
+              <span className="metric-value">{data.observationStats.evaluatedCount}</span>
+            </div>
+            <div className="card">
+              <span className="metric-label">Observation Movement</span>
+              <span className="metric-value">{data.observationStats.positiveMovementCount}</span>
+            </div>
+            <div className="card">
+              <span className="metric-label">Avg Abs 1d</span>
+              <span className="metric-value">
+                {formatPercent(data.observationStats.avgAbsReturnAfter1d)}
+              </span>
+            </div>
+          </section>
+
           <div className="grid two" style={{ marginTop: 16 }}>
             <BucketTable title="Best Signal Types" buckets={data.bestSignalTypes} />
             <BucketTable title="Worst Signal Types" buckets={data.worstSignalTypes} />
@@ -126,7 +147,34 @@ export default async function PerformancePage() {
             <BucketTable title="Score Buckets" buckets={data.scoreBuckets} />
             <BucketTable title="Risk Buckets" buckets={data.riskBuckets} />
             <BucketTable title="Status Buckets" buckets={data.statusBuckets} />
+            <BucketTable title="Evaluation Kinds" buckets={data.groupedByEvaluationKind} />
           </div>
+
+          <section className="card" style={{ marginTop: 16 }}>
+            <h2>Skipped by Reason</h2>
+            {Object.keys(data.skippedByReason).length > 0 ? (
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Reason</th>
+                      <th>Count</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Object.entries(data.skippedByReason).map(([reason, count]) => (
+                      <tr key={reason}>
+                        <td>{reason}</td>
+                        <td>{count}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <EmptyState title="Keine skipped Reasons gefunden." />
+            )}
+          </section>
         </>
       ) : null}
     </>

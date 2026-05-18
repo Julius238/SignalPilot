@@ -3,6 +3,7 @@ import Link from "next/link";
 import { ErrorState, EmptyState } from "../../../components/empty-state";
 import { formatDateTime, formatScore } from "../../../lib/format";
 import {
+  buildQuery,
   fetchApi,
   type PaperSignalEvaluation,
   type PaperStats
@@ -12,10 +13,31 @@ function formatPercent(value: number | null | undefined) {
   return typeof value === "number" ? `${value.toFixed(2)}%` : "-";
 }
 
-export default async function PaperPage() {
+type PaperPageProps = {
+  searchParams: Promise<{
+    evaluationKind?: string;
+    skipReason?: string;
+  }>;
+};
+
+const evaluationKinds = [
+  "DIRECTIONAL_BULLISH",
+  "DIRECTIONAL_BEARISH",
+  "RISK_WARNING",
+  "OBSERVATION",
+  "SKIPPED"
+];
+
+export default async function PaperPage({ searchParams }: PaperPageProps) {
+  const params = await searchParams;
+  const query = buildQuery({
+    limit: 100,
+    evaluationKind: params.evaluationKind,
+    skipReason: params.skipReason
+  });
   const [stats, evaluations] = await Promise.all([
     fetchApi<PaperStats>("/paper/stats"),
-    fetchApi<PaperSignalEvaluation[]>("/paper/evaluations?limit=100")
+    fetchApi<PaperSignalEvaluation[]>(`/paper/evaluations${query}`)
   ]);
 
   const summary = stats.data;
@@ -34,6 +56,25 @@ export default async function PaperPage() {
       {evaluations.error ? (
         <ErrorState title="Could not load paper evaluations" message={evaluations.error} />
       ) : null}
+
+      <form className="filter-bar">
+        <label>
+          Evaluation Kind
+          <select name="evaluationKind" defaultValue={params.evaluationKind ?? ""}>
+            <option value="">All</option>
+            {evaluationKinds.map((kind) => (
+              <option key={kind} value={kind}>
+                {kind}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Skip Reason
+          <input name="skipReason" defaultValue={params.skipReason ?? ""} />
+        </label>
+        <button type="submit">Apply</button>
+      </form>
 
       <section className="grid metrics">
         <div className="card">
@@ -88,6 +129,7 @@ export default async function PaperPage() {
                   <th>Symbol</th>
                   <th>TF</th>
                   <th>Status</th>
+                  <th>Kind</th>
                   <th>Signal</th>
                   <th>Direction</th>
                   <th>Score</th>
@@ -96,6 +138,7 @@ export default async function PaperPage() {
                   <th>4h</th>
                   <th>1d</th>
                   <th>Hypothetical outcome</th>
+                  <th>Skip Reason</th>
                   <th>Opened</th>
                 </tr>
               </thead>
@@ -109,6 +152,7 @@ export default async function PaperPage() {
                     </td>
                     <td>{evaluation.timeframe}</td>
                     <td>{evaluation.status}</td>
+                    <td>{evaluation.evaluationKind}</td>
                     <td>
                       <Link href={`/dashboard/signals/${encodeURIComponent(evaluation.signalId)}`}>
                         {evaluation.signalType}
@@ -121,6 +165,7 @@ export default async function PaperPage() {
                     <td>{formatPercent(evaluation.returnAfter4h)}</td>
                     <td>{formatPercent(evaluation.returnAfter1d)}</td>
                     <td>{evaluation.outcome ?? evaluation.evaluationStatus}</td>
+                    <td>{evaluation.skipReason ?? "-"}</td>
                     <td>{formatDateTime(evaluation.openedAt)}</td>
                   </tr>
                 ))}
