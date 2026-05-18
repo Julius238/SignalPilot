@@ -67,6 +67,32 @@ pnpm worker:fetch-crypto-candles
 
 The job fetches `1h`, `4h`, and `1d` klines, stores them with idempotent upserts, and writes `BotRun` and `BotLog` records. It uses the public Binance API only and does not require API keys.
 
+Fetch Finnhub OHLCV candles for active STOCK and ETF assets:
+
+```bash
+pnpm worker:fetch-equity-candles
+```
+
+Requires `FINNHUB_API_KEY` in `.env`. Fetches `1h` and `1d` candles only. If the key is missing, the job logs a clear error and ends with `FAILED` status without throwing.
+
+## Signal Analysis
+
+Run the equity signal analysis pipeline:
+
+```bash
+pnpm worker:analyze-equity-signals
+pnpm worker:run-equity-pipeline
+```
+
+`analyzeEquitySignals` processes active STOCK and ETF assets over `1h` and `1d` timeframes, generates signals and `SignalOutput` records, computes multi-timeframe summaries from `1d` and `1h` only (no `4h`), and optionally routes alerts to n8n.
+
+Alert gate: set `ENABLE_EQUITY_ALERTS=true` to allow equity signals to trigger n8n webhooks. The default is `false` — signals and outputs are always written, but no webhooks are sent.
+
+```bash
+ENABLE_EQUITY_ALERTS=false   # default — signals written, no n8n dispatch
+ENABLE_EQUITY_ALERTS=true    # enables n8n alert routing for equity signals
+```
+
 ## Worker Scheduler
 
 Run the crypto signal pipeline scheduler:
@@ -80,9 +106,14 @@ Scheduler environment:
 ```bash
 CRYPTO_PIPELINE_CRON="0 * * * *"
 RUN_PIPELINE_ON_START=false
+ENABLE_EQUITY_PIPELINE=false
+EQUITY_PIPELINE_CRON="30 * * * *"
+RUN_EQUITY_PIPELINE_ON_START=false
 ```
 
-The default cron runs hourly at the top of the hour. Set `RUN_PIPELINE_ON_START=true` to run the pipeline once immediately when the scheduler starts, then continue on the cron schedule.
+The crypto cron runs hourly at the top of the hour by default. Set `RUN_PIPELINE_ON_START=true` to run the crypto pipeline immediately when the scheduler starts.
+
+Set `ENABLE_EQUITY_PIPELINE=true` to activate the equity signal pipeline on its own cron (default: 30 minutes past each hour). Set `RUN_EQUITY_PIPELINE_ON_START=true` to run it once immediately on scheduler start. The crypto pipeline is unaffected by equity settings.
 
 ## API Health Check
 

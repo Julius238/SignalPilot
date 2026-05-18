@@ -10,6 +10,10 @@ import {
   runCryptoSignalPipeline,
   type CryptoSignalPipelineSummary
 } from "./jobs/runCryptoSignalPipeline.js";
+import {
+  runEquitySignalPipeline,
+  type EquitySignalPipelineSummary
+} from "./jobs/runEquitySignalPipeline.js";
 
 const logger = pino({
   name: "signalpilot-worker-scheduler"
@@ -27,10 +31,16 @@ export type SchedulerState = {
 
 export type ScheduledRunResult = "skipped" | "success" | "failed";
 
-type RunPipeline = (database: PrismaClient) => Promise<CryptoSignalPipelineSummary>;
+type RunCryptoPipeline = (database: PrismaClient) => Promise<CryptoSignalPipelineSummary>;
+type RunEquityPipeline = (database: PrismaClient) => Promise<EquitySignalPipelineSummary>;
 
-const defaultCron = "0 * * * *";
+const defaultCryptoCron = "0 * * * *";
+const defaultEquityCron = "30 * * * *";
 const schedulerState: SchedulerState = {
+  isRunning: false,
+  isShuttingDown: false
+};
+const equitySchedulerState: SchedulerState = {
   isRunning: false,
   isShuttingDown: false
 };
@@ -38,7 +48,7 @@ const schedulerState: SchedulerState = {
 export async function runScheduledCryptoPipeline(
   database: PrismaClient,
   state: SchedulerState,
-  runPipeline: RunPipeline = runCryptoSignalPipeline
+  runPipeline: RunCryptoPipeline = runCryptoSignalPipeline
 ): Promise<ScheduledRunResult> {
   if (state.isRunning) {
     await writeBotLog(
@@ -82,44 +92,117 @@ export async function runScheduledCryptoPipeline(
   }
 }
 
-async function startScheduler() {
-  const cronExpression = process.env.CRYPTO_PIPELINE_CRON ?? defaultCron;
-  const runOnStart = process.env.RUN_PIPELINE_ON_START === "true";
+export async function runScheduledEquityPipeline(
+  database: PrismaClient,
+  state: SchedulerState,
+  runPipeline: RunEquityPipeline = runEquitySignalPipeline
+): Promise<ScheduledRunResult> {
+  if (state.isRunning) {
+    await writeBotLog(
+      database,
+      "warn",
+      "Skipped scheduled equity pipeline run because previous run is still active",
+      { skippedAt: new Date().toISOString() }
+    );
+    return "skipped";
+  }
 
-  if (!cron.validate(cronExpression)) {
-    throw new Error(`Invalid CRYPTO_PIPELINE_CRON expression: ${cronExpression}`);
+  state.isRunning = true;
+
+  await writeBotLog(database, "info", "Scheduled equity pipeline run started", {
+    startedAt: new Date().toISOString()
+  });
+
+  try {
+    const summary = await runPipeline(database);
+
+    await writeBotLog(database, "info", "Scheduled equity pipeline run finished", {
+      finishedAt: new Date().toISOString(),
+      summary
+    });
+
+    return "success";
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown scheduled pipeline error";
+
+    logger.error({ error }, message);
+    await writeBotLog(database, "error", "Scheduled equity pipeline run failed", {
+      failedAt: new Date().toISOString(),
+      error: message
+    });
+
+    return "failed";
+  } finally {
+    state.isRunning = false;
+  }
+}
+
+async function startScheduler() {
+  const cryptoCron = process.env.CRYPTO_PIPELINE_CRON ?? defaultCryptoCron;
+  const runOnStart = process.env.RUN_PIPELINE_ON_START === "true";
+  const equityEnabled = process.env.ENABLE_EQUITY_PIPELINE === "true";
+  const equityCron = process.env.EQUITY_PIPELINE_CRON ?? defaultEquityCron;
+  const runEquityOnStart = process.env.RUN_EQUITY_PIPELINE_ON_START === "true";
+
+  if (!cron.validate(cryptoCron)) {
+    throw new Error(`Invalid CRYPTO_PIPELINE_CRON expression: ${cryptoCron}`);
+  }
+
+  if (equityEnabled && !cron.validate(equityCron)) {
+    throw new Error(`Invalid EQUITY_PIPELINE_CRON expression: ${equityCron}`);
   }
 
   await writeBotLog(prisma, "info", "Crypto pipeline scheduler started", {
-    cronExpression,
+    cronExpression: cryptoCron,
     runOnStart,
     startedAt: new Date().toISOString()
   });
-  logger.info({ cronExpression, runOnStart }, "Crypto pipeline scheduler started");
+  logger.info({ cronExpression: cryptoCron, runOnStart }, "Crypto pipeline scheduler started");
 
-  const task = cron.schedule(cronExpression, () => {
+  const cryptoTask = cron.schedule(cryptoCron, () => {
     void runScheduledCryptoPipeline(prisma, schedulerState);
   });
 
-  registerShutdownHandlers(task);
+  const tasks = [cryptoTask];
+
+  if (equityEnabled) {
+    await writeBotLog(prisma, "info", "Equity pipeline scheduler started", {
+      cronExpression: equityCron,
+      runEquityOnStart,
+      startedAt: new Date().toISOString()
+    });
+    logger.info({ cronExpression: equityCron, runEquityOnStart }, "Equity pipeline scheduler started");
+
+    const equityTask = cron.schedule(equityCron, () => {
+      void runScheduledEquityPipeline(prisma, equitySchedulerState);
+    });
+    tasks.push(equityTask);
+
+    if (runEquityOnStart) {
+      void runScheduledEquityPipeline(prisma, equitySchedulerState);
+    }
+  }
+
+  registerShutdownHandlers(tasks);
 
   if (runOnStart) {
     void runScheduledCryptoPipeline(prisma, schedulerState);
   }
 }
 
-function registerShutdownHandlers(task: ScheduledTask) {
+function registerShutdownHandlers(tasks: ScheduledTask[]) {
   const shutdown = async (signal: NodeJS.Signals) => {
     if (schedulerState.isShuttingDown) {
       return;
     }
 
     schedulerState.isShuttingDown = true;
-    task.stop();
+    equitySchedulerState.isShuttingDown = true;
+    tasks.forEach((task) => task.stop());
 
-    logger.info({ signal, isRunning: schedulerState.isRunning }, "Crypto pipeline scheduler shutdown");
+    logger.info({ signal, isRunning: schedulerState.isRunning }, "Pipeline schedulers shutdown");
 
-    await writeBotLog(prisma, "info", "Crypto pipeline scheduler shutdown", {
+    await writeBotLog(prisma, "info", "Pipeline schedulers shutdown", {
       signal,
       isRunning: schedulerState.isRunning,
       stoppedAt: new Date().toISOString()

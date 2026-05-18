@@ -100,7 +100,7 @@ export function calculateMultiTimeframeSummary(signals: MultiTimeframeSignalInpu
     strongestSignal,
     weakestSignal,
     riskLevel,
-    summary: buildSummary(symbol, alignment, primaryTimeframe, confirmingTimeframes, conflictingTimeframes),
+    summary: buildSummary(symbol, alignment, primaryTimeframe, confirmingTimeframes, conflictingTimeframes, evaluatedSignals),
     riskNote: buildRiskNote(riskLevel, avoidSignals, evaluatedSignals),
     nextFocus: buildNextFocus(alignment, primaryTimeframe, evaluatedSignals)
   };
@@ -199,20 +199,36 @@ function determineAlignment(evaluatedSignals: EvaluatedSignal[]): MultiTimeframe
     return "CONFLICT";
   }
 
-  if (daily?.bias === "BULLISH" && fourHour?.bias === "BULLISH" && oneHour?.bias !== "BEARISH") {
-    return "BULLISH_ALIGNED";
-  }
+  if (fourHour) {
+    // 3-timeframe mode (crypto): require 1d and 4h agreement
+    if (daily?.bias === "BULLISH" && fourHour.bias === "BULLISH" && oneHour?.bias !== "BEARISH") {
+      return "BULLISH_ALIGNED";
+    }
 
-  if (daily?.bias === "BEARISH" && fourHour?.bias === "BEARISH" && oneHour?.bias !== "BULLISH") {
-    return "BEARISH_ALIGNED";
-  }
+    if (daily?.bias === "BEARISH" && fourHour.bias === "BEARISH" && oneHour?.bias !== "BULLISH") {
+      return "BEARISH_ALIGNED";
+    }
 
-  if (daily && oneHour && daily.bias === oneHour.bias && daily.bias !== "NEUTRAL" && fourHour?.bias === "NEUTRAL") {
-    return "HIGHER_TIMEFRAME_CONFIRMATION";
-  }
+    if (daily && oneHour && daily.bias === oneHour.bias && daily.bias !== "NEUTRAL" && fourHour.bias === "NEUTRAL") {
+      return "HIGHER_TIMEFRAME_CONFIRMATION";
+    }
 
-  if (oneHour && oneHour.bias !== "NEUTRAL" && oneHour.strength >= 0.65 && daily?.bias !== oneHour.bias && fourHour?.bias !== oneHour.bias) {
-    return "SHORT_TERM_ONLY";
+    if (oneHour && oneHour.bias !== "NEUTRAL" && oneHour.strength >= 0.65 && daily?.bias !== oneHour.bias && fourHour.bias !== oneHour.bias) {
+      return "SHORT_TERM_ONLY";
+    }
+  } else {
+    // 2-timeframe mode (equity/ETF): 1d is the primary higher timeframe
+    if (daily?.bias === "BULLISH" && oneHour?.bias !== "BEARISH") {
+      return "BULLISH_ALIGNED";
+    }
+
+    if (daily?.bias === "BEARISH" && oneHour?.bias !== "BULLISH") {
+      return "BEARISH_ALIGNED";
+    }
+
+    if (oneHour && oneHour.bias !== "NEUTRAL" && oneHour.strength >= 0.65 && daily?.bias !== oneHour.bias) {
+      return "SHORT_TERM_ONLY";
+    }
   }
 
   return "MIXED";
@@ -360,8 +376,10 @@ function buildSummary(
   alignment: MultiTimeframeAlignment,
   primaryTimeframe: MultiTimeframe | null,
   confirmingTimeframes: MultiTimeframe[],
-  conflictingTimeframes: MultiTimeframe[]
+  conflictingTimeframes: MultiTimeframe[],
+  evaluatedSignals: EvaluatedSignal[]
 ): string {
+  const has4h = evaluatedSignals.some(({ signal }) => signal.timeframe === "4h");
   const primaryText = primaryTimeframe ? `${primaryTimeframe} ist der fuehrende Timeframe` : "kein fuehrender Timeframe";
   const confirmationText =
     confirmingTimeframes.length > 0 ? ` Bestaetigung kommt von ${confirmingTimeframes.join(", ")}.` : "";
@@ -370,13 +388,21 @@ function buildSummary(
 
   switch (alignment) {
     case "BULLISH_ALIGNED":
-      return `${symbol}: 1d und 4h sind konstruktiv ausgerichtet; ${primaryText}.${confirmationText}${conflictText}`;
+      return has4h
+        ? `${symbol}: 1d und 4h sind konstruktiv ausgerichtet; ${primaryText}.${confirmationText}${conflictText}`
+        : `${symbol}: 1d gibt die konstruktive Richtung vor; ${primaryText}.${confirmationText}${conflictText}`;
     case "BEARISH_ALIGNED":
-      return `${symbol}: 1d und 4h zeigen eine defensive Ausrichtung; ${primaryText}.${confirmationText}${conflictText}`;
+      return has4h
+        ? `${symbol}: 1d und 4h zeigen eine defensive Ausrichtung; ${primaryText}.${confirmationText}${conflictText}`
+        : `${symbol}: 1d zeigt eine defensive Ausrichtung; ${primaryText}.${confirmationText}${conflictText}`;
     case "HIGHER_TIMEFRAME_CONFIRMATION":
-      return `${symbol}: 1d gibt die Richtung vor, 4h ist neutral, 1h liefert den kurzfristigen Trigger.`;
+      return has4h
+        ? `${symbol}: 1d gibt die Richtung vor, 4h ist neutral, 1h liefert den kurzfristigen Trigger.`
+        : `${symbol}: 1d gibt die Richtung vor, 1h liefert den kurzfristigen Trigger.`;
     case "SHORT_TERM_ONLY":
-      return `${symbol}: Das Signal liegt vor allem im 1h-Chart; 4h und 1d bestaetigen es noch nicht.`;
+      return has4h
+        ? `${symbol}: Das Signal liegt vor allem im 1h-Chart; 4h und 1d bestaetigen es noch nicht.`
+        : `${symbol}: Das Signal liegt vor allem im 1h-Chart; 1d bestaetigt es noch nicht.`;
     case "CONFLICT":
       return `${symbol}: Die Timeframes widersprechen sich. ${primaryText}.${conflictText}`;
     case "NO_EDGE":
@@ -412,28 +438,40 @@ function buildNextFocus(
   primaryTimeframe: MultiTimeframe | null,
   evaluatedSignals: EvaluatedSignal[]
 ): string {
+  const has4h = evaluatedSignals.some(({ signal }) => signal.timeframe === "4h");
+
   if (alignment === "NO_EDGE") {
-    return "Als naechstes 4h und 1d auf ein staerkeres Signal beobachten.";
+    return has4h
+      ? "Als naechstes 4h und 1d auf ein staerkeres Signal beobachten."
+      : "Als naechstes 1d auf ein staerkeres Signal beobachten.";
   }
 
   if (alignment === "SHORT_TERM_ONLY") {
-    return "Als naechstes 4h beobachten, ob der kurzfristige 1h-Trigger bestaetigt wird.";
+    return has4h
+      ? "Als naechstes 4h beobachten, ob der kurzfristige 1h-Trigger bestaetigt wird."
+      : "Als naechstes 1d beobachten, ob der kurzfristige 1h-Trigger bestaetigt wird.";
   }
 
   if (alignment === "CONFLICT") {
-    return "Als naechstes 1d und 4h beobachten, bis der Konflikt zum 1h-Trigger aufgeloest ist.";
+    return has4h
+      ? "Als naechstes 1d und 4h beobachten, bis der Konflikt zum 1h-Trigger aufgeloest ist."
+      : "Als naechstes 1d beobachten, bis der Konflikt zum 1h-Trigger aufgeloest ist.";
   }
 
-  const missingTimeframe = timeframes.find((timeframe) => !findEvaluation(evaluatedSignals, timeframe));
+  const missingTimeframe = timeframes.find(
+    (timeframe) => !findEvaluation(evaluatedSignals, timeframe) && (has4h || timeframe !== "4h")
+  );
   if (missingTimeframe) {
     return `Als naechstes ${missingTimeframe} aktualisieren, um die Multi-Timeframe-Lage zu vervollstaendigen.`;
   }
 
   if (primaryTimeframe === "1d") {
-    return "Als naechstes 4h beobachten, ob die hoehere Timeframe-Lage weiter bestaetigt wird.";
+    return has4h
+      ? "Als naechstes 4h beobachten, ob die hoehere Timeframe-Lage weiter bestaetigt wird."
+      : "Als naechstes 1h beobachten, ob die hoehere Timeframe-Lage weiter bestaetigt wird.";
   }
 
-  return `Als naechstes ${primaryTimeframe ?? "4h"} beobachten und die 1d-Lage als Kontext halten.`;
+  return `Als naechstes ${primaryTimeframe ?? (has4h ? "4h" : "1h")} beobachten und die 1d-Lage als Kontext halten.`;
 }
 
 function clamp(value: number, minimum: number, maximum: number): number {

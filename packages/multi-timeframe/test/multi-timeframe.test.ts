@@ -107,15 +107,47 @@ describe("calculateMultiTimeframeSummary", () => {
     assert.equal(summary.riskNote.includes("Risiko hat Vorrang"), true);
   });
 
-  it("handles a missing timeframe cleanly", () => {
+  it("summarizes 1d and 1h as bullish aligned without 4h", () => {
     const summary = calculateMultiTimeframeSummary([
       signal({ timeframe: "1d", direction: "BULLISH", status: "WATCH", score: 72 }),
       signal({ timeframe: "1h", direction: "BULLISH", status: "WATCH", score: 69 })
     ]);
 
+    assert.equal(summary.alignment, "BULLISH_ALIGNED");
     assert.equal(summary.symbol, "BTCUSDT");
     assert.equal(summary.primaryTimeframe, "1d");
     assert.deepEqual(summary.confirmingTimeframes, ["1h"]);
-    assert.equal(summary.nextFocus.includes("4h"), true);
+    assert.equal(summary.nextFocus.includes("4h"), false);
+    assert.ok(summary.alignmentScore > 0);
+  });
+
+  it("summarizes 1d bullish and 1h neutral as bullish aligned in 2-TF mode", () => {
+    const summary = calculateMultiTimeframeSummary([
+      signal({ timeframe: "1d", direction: "BULLISH", status: "WATCH", score: 74 }),
+      signal({ timeframe: "1h", direction: "NEUTRAL", status: "WAIT", score: 52 })
+    ]);
+
+    assert.equal(summary.alignment, "BULLISH_ALIGNED");
+    assert.equal(summary.primaryTimeframe, "1d");
+  });
+
+  it("summarizes 1d neutral and strong 1h bullish as short term only in 2-TF mode", () => {
+    const summary = calculateMultiTimeframeSummary([
+      signal({ timeframe: "1d", direction: "NEUTRAL", status: "WAIT", score: 51 }),
+      signal({ timeframe: "1h", direction: "BULLISH", status: "STRONG_WATCH", score: 88 })
+    ]);
+
+    assert.equal(summary.alignment, "SHORT_TERM_ONLY");
+    assert.equal(summary.nextFocus.includes("4h"), false);
+    assert.equal(summary.nextFocus.includes("1d"), true);
+  });
+
+  it("summarizes 1d bearish and 1h bullish as conflict in 2-TF mode", () => {
+    const summary = calculateMultiTimeframeSummary([
+      signal({ timeframe: "1d", direction: "BEARISH", status: "WATCH", score: 72 }),
+      signal({ timeframe: "1h", direction: "BULLISH", status: "STRONG_WATCH", score: 84 })
+    ]);
+
+    assert.equal(summary.alignment, "CONFLICT");
   });
 });

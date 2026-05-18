@@ -488,7 +488,9 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
       }),
       database.botRun.findFirst({
         where: {
-          jobName: "runCryptoSignalPipeline"
+          jobName: {
+            in: ["runCryptoSignalPipeline", "runEquitySignalPipeline"]
+          }
         },
         orderBy: {
           startedAt: "desc"
