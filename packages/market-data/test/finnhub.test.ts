@@ -100,13 +100,33 @@ describe("FinnhubMarketDataAdapter", () => {
     assert.equal(result.kind, "rate_limit");
   });
 
-  it("throws for a non-429 HTTP error", async () => {
+  it("returns forbidden for HTTP 403", async () => {
     const mockFetch = async () =>
       ({
         ok: false,
         status: 403,
-        json: async () => ({})
-      }) as Response;
+        text: async () => "Forbidden"
+      }) as unknown as Response;
+
+    const adapter = new FinnhubMarketDataAdapter({ apiKey: "test-key", fetchClient: mockFetch });
+
+    const from = new Date("2026-01-01T00:00:00.000Z");
+    const to = new Date("2026-01-02T00:00:00.000Z");
+    const result = await adapter.fetchStockCandles("AAPL", "1h", from, to);
+
+    assert.equal(result.kind, "forbidden");
+    if (result.kind !== "forbidden") return;
+    assert.equal(result.statusCode, 403);
+    assert.equal(result.body, "Forbidden");
+  });
+
+  it("throws for non-429 non-403 HTTP error", async () => {
+    const mockFetch = async () =>
+      ({
+        ok: false,
+        status: 500,
+        text: async () => "Internal Server Error"
+      }) as unknown as Response;
 
     const adapter = new FinnhubMarketDataAdapter({ apiKey: "test-key", fetchClient: mockFetch });
 
@@ -115,7 +135,7 @@ describe("FinnhubMarketDataAdapter", () => {
 
     await assert.rejects(
       () => adapter.fetchStockCandles("AAPL", "1h", from, to),
-      /HTTP 403/
+      /HTTP 500/
     );
   });
 

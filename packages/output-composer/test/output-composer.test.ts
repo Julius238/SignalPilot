@@ -186,4 +186,39 @@ describe("composeSignalOutput", () => {
     assert.match(output.telegramText, /Multi-Timeframe:\n• Noch nicht berechnet\./);
     assert.equal(output.dashboardJson.multiTimeframeSummary, null);
   });
+
+  it("uses newsContext summary in the news block when provided", () => {
+    const newsContext = {
+      hasRecentNews: true,
+      summary: "AAPL: Hochrelevante Meldung – \"Apple beats earnings expectations\".",
+      sentiment: "POSITIVE",
+      relevanceScore: 80,
+      topNews: [{ headline: "Apple beats earnings", source: "Reuters", url: "https://example.com" }],
+      riskNote: "",
+      sourceNote: "Quelle: Reuters."
+    };
+
+    const output = composeSignalOutput({ decision: baseDecision, newsContext });
+
+    assert.match(output.telegramText, /News: AAPL: Hochrelevante Meldung/);
+    assert.equal(output.intelligenceJson.newsSummary, newsContext.summary);
+    assert.equal(output.dashboardJson.newsContext, newsContext);
+  });
+
+  it("uses no-news fallback when newsContext.hasRecentNews is false", () => {
+    const newsContext = {
+      hasRecentNews: false,
+      summary: "Keine relevante neue Meldung im News-Fenster gefunden.",
+      sentiment: "UNKNOWN",
+      relevanceScore: 0,
+      topNews: [],
+      riskNote: "",
+      sourceNote: ""
+    };
+
+    const output = composeSignalOutput({ decision: baseDecision, newsContext });
+
+    assert.match(output.telegramText, /News: Keine relevante neue Meldung/);
+    assert.equal(output.dashboardJson.newsContext, newsContext);
+  });
 });

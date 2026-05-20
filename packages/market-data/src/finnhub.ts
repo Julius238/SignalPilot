@@ -15,7 +15,8 @@ type FinnhubCandleResponse = {
 export type FinnhubFetchResult =
   | { kind: "ok"; candles: NormalizedCandle[] }
   | { kind: "no_data" }
-  | { kind: "rate_limit" };
+  | { kind: "rate_limit" }
+  | { kind: "forbidden"; statusCode: number; body: string };
 
 export class FinnhubMarketDataAdapter {
   private readonly baseUrl: string;
@@ -54,6 +55,11 @@ export class FinnhubMarketDataAdapter {
 
     if (response.status === 429) {
       return { kind: "rate_limit" };
+    }
+
+    if (response.status === 403) {
+      const body = await response.text().catch(() => "");
+      return { kind: "forbidden", statusCode: 403, body };
     }
 
     if (!response.ok) {

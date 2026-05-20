@@ -51,7 +51,11 @@ function makeMockDatabase(assets: { id: string; symbol: string; assetType: strin
 }
 
 function makeMockAdapter(
-  result: { kind: "ok"; candles: typeof mockCandle[] } | { kind: "no_data" } | { kind: "rate_limit" } = {
+  result:
+    | { kind: "ok"; candles: typeof mockCandle[] }
+    | { kind: "no_data" }
+    | { kind: "rate_limit" }
+    | { kind: "forbidden"; statusCode: number; body: string } = {
     kind: "ok",
     candles: [mockCandle]
   }
@@ -144,6 +148,22 @@ describe("fetchEquityCandles", () => {
 
     assert.equal(summary.status, BotRunStatus.FAILED);
     assert.equal(summary.rateLimitCount, 2);
+  });
+
+  it("marks FAILED and counts forbidden hits for HTTP 403", async () => {
+    process.env.FINNHUB_API_KEY = "test-key";
+    process.env.MARKET_DATA_REQUEST_DELAY_MS = "0";
+
+    const assets = [{ id: "asset-1", symbol: "AAPL", assetType: "STOCK" }];
+    const { db, botLogs } = makeMockDatabase(assets);
+    const adapter = makeMockAdapter({ kind: "forbidden", statusCode: 403, body: "Forbidden" });
+
+    const summary = await fetchEquityCandles(db as never, adapter);
+
+    assert.equal(summary.status, BotRunStatus.FAILED);
+    assert.equal(summary.forbiddenCount, 2);
+    assert.equal(summary.errorCount, 0);
+    assert.ok(botLogs.some((log) => log.data.message.includes("403")));
   });
 
   it("writes summary fields to the final BotRun metadata", async () => {

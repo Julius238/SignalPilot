@@ -22,7 +22,21 @@ describe("runEquitySignalPipeline", () => {
           savedCandleCount: 2500,
           noDataCount: 0,
           errorCount: 0,
-          rateLimitCount: 0
+          rateLimitCount: 0,
+          forbiddenCount: 0
+        };
+      },
+      fetchEquityNews: async () => {
+        calls.push("fetch-news");
+        return {
+          status: BotRunStatus.SUCCESS,
+          assetCount: 5,
+          fetchedNewsCount: 10,
+          savedNewsCount: 8,
+          duplicateCount: 2,
+          noNewsCount: 0,
+          rateLimitCount: 0,
+          errorCount: 0
         };
       },
       analyzeEquitySignals: async () => {
@@ -71,11 +85,13 @@ describe("runEquitySignalPipeline", () => {
       }
     });
 
-    assert.deepEqual(calls, ["fetch", "analyze", "create-paper", "evaluate-paper"]);
+    assert.deepEqual(calls, ["fetch", "fetch-news", "analyze", "create-paper", "evaluate-paper"]);
     assert.equal(summary.status, BotRunStatus.SUCCESS);
     assert.equal(summary.fetchEquityCandles?.savedCandleCount, 2500);
+    assert.equal(summary.fetchEquityNews?.savedNewsCount, 8);
     assert.equal(summary.analyzeEquitySignals?.savedSignalCount, 10);
     assert.equal(summary.paperEvaluationEnabled, true);
+    assert.equal(summary.equityNewsEnabled, true);
     assert.equal(botRunUpdates.at(-1)?.data.status, BotRunStatus.SUCCESS);
     assert.ok(botLogs.some((log) => log.data.message === "Equity Pipeline gestartet"));
     assert.ok(botLogs.some((log) => log.data.message === "Equity Candle Fetch beendet"));
@@ -94,6 +110,9 @@ describe("runEquitySignalPipeline", () => {
         fetchEquityCandles: async () => {
           calls.push("fetch");
           throw new Error("fetch failed");
+        },
+        fetchEquityNews: async () => {
+          throw new Error("should not run");
         },
         analyzeEquitySignals: async () => {
           calls.push("analyze");

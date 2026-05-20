@@ -39,6 +39,7 @@ export type FetchEquityCandlesSummary = {
   noDataCount: number;
   errorCount: number;
   rateLimitCount: number;
+  forbiddenCount: number;
 };
 
 export async function fetchEquityCandles(
@@ -69,7 +70,8 @@ export async function fetchEquityCandles(
       savedCandleCount: 0,
       noDataCount: 0,
       errorCount: 1,
-      rateLimitCount: 0
+      rateLimitCount: 0,
+      forbiddenCount: 0
     };
   }
 
@@ -94,6 +96,7 @@ export async function fetchEquityCandles(
   let noDataCount = 0;
   let errorCount = 0;
   let rateLimitCount = 0;
+  let forbiddenCount = 0;
   let assetCount = 0;
 
   await writeBotLog(database, "info", "fetchEquityCandles started", { botRunId: botRun.id });
@@ -124,6 +127,22 @@ export async function fetchEquityCandles(
               botRunId: botRun.id,
               symbol: asset.symbol,
               timeframe: interval
+            });
+          } else if (result.kind === "forbidden") {
+            forbiddenCount += 1;
+            logger.warn({
+              statusCode: result.statusCode,
+              responseBody: result.body,
+              symbol: asset.symbol,
+              timeframe: interval,
+              endpointType: "stock/candle"
+            }, "Finnhub 403 Forbidden for candle request");
+            await writeBotLog(database, "warn", "Finnhub 403 Forbidden for candle request", {
+              botRunId: botRun.id,
+              statusCode: result.statusCode,
+              symbol: asset.symbol,
+              timeframe: interval,
+              endpointType: "stock/candle"
             });
           } else if (result.kind === "no_data") {
             noDataCount += 1;
@@ -159,7 +178,7 @@ export async function fetchEquityCandles(
       }
     }
 
-    const status = errorCount > 0 || rateLimitCount > 0 ? BotRunStatus.FAILED : BotRunStatus.SUCCESS;
+    const status = errorCount > 0 || rateLimitCount > 0 || forbiddenCount > 0 ? BotRunStatus.FAILED : BotRunStatus.SUCCESS;
 
     await database.botRun.update({
       where: { id: botRun.id },
@@ -173,6 +192,7 @@ export async function fetchEquityCandles(
           noDataCount,
           errorCount,
           rateLimitCount,
+          forbiddenCount,
           assetCount
         }
       }
@@ -188,6 +208,7 @@ export async function fetchEquityCandles(
         noDataCount,
         errorCount,
         rateLimitCount,
+        forbiddenCount,
         assetCount
       }
     );
@@ -199,7 +220,8 @@ export async function fetchEquityCandles(
       savedCandleCount: savedCandles,
       noDataCount,
       errorCount,
-      rateLimitCount
+      rateLimitCount,
+      forbiddenCount
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown fetchEquityCandles error";
@@ -216,6 +238,7 @@ export async function fetchEquityCandles(
           noDataCount,
           errorCount,
           rateLimitCount,
+          forbiddenCount,
           fatalError: message
         }
       }

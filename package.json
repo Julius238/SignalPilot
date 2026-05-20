@@ -23,6 +23,7 @@
     "worker:backfill-paper-evaluations": "pnpm --filter @signalpilot/worker backfill:paper-evaluations",
     "worker:fetch-crypto-candles": "pnpm --filter @signalpilot/worker fetch:crypto-candles",
     "worker:fetch-equity-candles": "pnpm --filter @signalpilot/worker fetch:equity-candles",
+    "worker:fetch-equity-news": "pnpm --filter @signalpilot/worker fetch:equity-news",
     "worker:analyze-equity-signals": "pnpm --filter @signalpilot/worker analyze:equity-signals",
     "worker:run-equity-pipeline": "pnpm --filter @signalpilot/worker run:equity-pipeline",
     "worker:run-crypto-pipeline": "pnpm --filter @signalpilot/worker run:crypto-pipeline",

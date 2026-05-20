@@ -11,9 +11,11 @@ import { ErrorState } from "../../../../components/empty-state";
 import { SignalsTable } from "../../../../components/signals-table";
 import { AssetWatchlistControls } from "../../../../components/watchlist-controls";
 import { formatJson, formatScore } from "../../../../lib/format";
+import { formatDateTime } from "../../../../lib/format";
 import {
   fetchApi,
   type AssetDetail,
+  type NewsItem,
   type SignalListItem
 } from "../../../../lib/signalpilot-api";
 
@@ -23,11 +25,12 @@ type AssetDetailPageProps = {
 
 export default async function AssetDetailPage({ params }: AssetDetailPageProps) {
   const { symbol } = await params;
-  const [asset, signals] = await Promise.all([
+  const [asset, signals, newsResult] = await Promise.all([
     fetchApi<AssetDetail>(
       `/assets/${encodeURIComponent(symbol)}?includeCandles=true&candleLimit=250`
     ),
-    fetchApi<SignalListItem[]>(`/assets/${encodeURIComponent(symbol)}/signals?limit=10`)
+    fetchApi<SignalListItem[]>(`/assets/${encodeURIComponent(symbol)}/signals?limit=10`),
+    fetchApi<NewsItem[]>(`/assets/${encodeURIComponent(symbol)}/news?limit=10`)
   ]);
 
   if (asset.error) {
@@ -177,6 +180,41 @@ export default async function AssetDetailPage({ params }: AssetDetailPageProps) 
           </Link>
         </h2>
         <SignalsTable signals={signals.data ?? []} />
+      </section>
+
+      <section className="card" style={{ marginTop: 16 }}>
+        <h2>
+          Recent News{" "}
+          <Link href={`/dashboard/news?symbol=${encodeURIComponent(data.symbol)}`}>View all</Link>
+        </h2>
+        {!newsResult.data || newsResult.data.length === 0 ? (
+          <p className="muted">No recent news found.</p>
+        ) : (
+          <div className="stack-list">
+            {newsResult.data.map((item) => (
+              <div key={item.id} className="list-row">
+                <div>
+                  <strong>
+                    {item.url ? (
+                      <a href={item.url} target="_blank" rel="noopener noreferrer">
+                        {item.headline}
+                      </a>
+                    ) : (
+                      item.headline
+                    )}
+                  </strong>
+                  {item.summary && (
+                    <p className="muted small">{item.summary.slice(0, 120)}{item.summary.length > 120 ? "…" : ""}</p>
+                  )}
+                </div>
+                <div className="nowrap muted small">
+                  {item.source} · {formatDateTime(item.publishedAt)}
+                  {item.sentiment && ` · ${item.sentiment}`}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </section>
     </>
   );

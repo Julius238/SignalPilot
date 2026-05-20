@@ -15,6 +15,7 @@
     "@signalpilot/data-quality": "workspace:*",
     "@signalpilot/database": "workspace:*",
     "@signalpilot/multi-timeframe": "workspace:*",
+    "@signalpilot/news-intelligence": "workspace:*",
     "@signalpilot/performance-intelligence": "workspace:*",
     "@signalpilot/shared": "workspace:*",
     "dotenv": "^16.4.7",

@@ -6,6 +6,16 @@ import type {
   SignalOutputDraft
 } from "@signalpilot/shared";
 
+export type NewsContextLike = {
+  hasRecentNews: boolean;
+  summary: string;
+  sentiment: string;
+  relevanceScore: number;
+  topNews: Array<{ headline: string; source: string; url: string | null }>;
+  riskNote: string;
+  sourceNote: string;
+};
+
 export type ComposeSignalOutputInput = {
   decision: SignalDecision;
   asset?: {
@@ -14,6 +24,7 @@ export type ComposeSignalOutputInput = {
   };
   intelligence?: Partial<IntelligenceContext>;
   multiTimeframeSummary?: MultiTimeframeSummary | null;
+  newsContext?: NewsContextLike | null;
 };
 
 type TechnicalSummary = {
@@ -33,7 +44,7 @@ export function composeSignalOutput(input: ComposeSignalOutputInput): SignalOutp
   const decision = input.decision;
   const symbol = input.asset?.symbol ?? decision.symbol;
   const assetType = input.asset?.assetType ?? decision.assetType;
-  const intelligence = normalizeIntelligence(input.intelligence);
+  const intelligence = normalizeIntelligence(input.intelligence, input.newsContext);
   const technical = buildTechnicalSummary(decision);
   const confirmations = buildConfirmations(decision);
   const multiTimeframeLines = buildMultiTimeframeLines(input.multiTimeframeSummary);
@@ -113,6 +124,7 @@ export function composeSignalOutput(input: ComposeSignalOutputInput): SignalOutp
       intelligence,
       confirmations,
       multiTimeframeSummary: input.multiTimeframeSummary ?? null,
+      newsContext: input.newsContext ?? null,
       counterArgument,
       nextTrigger: decision.nextTrigger,
       generatedSections: [
@@ -193,10 +205,16 @@ function formatTimeframes(timeframes: string[]): string {
 }
 
 function normalizeIntelligence(
-  intelligence?: Partial<IntelligenceContext>
+  intelligence?: Partial<IntelligenceContext>,
+  newsContext?: NewsContextLike | null
 ): Required<IntelligenceContext> {
+  const newsSummary =
+    newsContext != null
+      ? newsContext.summary
+      : cleanText(intelligence?.newsSummary) ?? defaultNewsSummary;
+
   return {
-    newsSummary: cleanText(intelligence?.newsSummary) ?? defaultNewsSummary,
+    newsSummary,
     socialSummary: cleanText(intelligence?.socialSummary) ?? defaultSocialSummary,
     eventSummary: cleanText(intelligence?.eventSummary) ?? defaultEventSummary,
     impactSummary: cleanText(intelligence?.impactSummary) ?? defaultImpactSummary,

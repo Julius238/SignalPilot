@@ -20,6 +20,7 @@ import {
   type MultiTimeframeSignalInput,
   type MultiTimeframeSummary
 } from "@signalpilot/multi-timeframe";
+import { buildNewsContextForSignal, type NewsContext } from "@signalpilot/news-intelligence";
 import { composeSignalOutput } from "@signalpilot/output-composer";
 import { scoreSignal } from "@signalpilot/scoring-engine";
 import type { AssetClass, IntelligenceContext, SignalDecision } from "@signalpilot/shared";
@@ -137,8 +138,19 @@ export async function analyzeEquitySignals(
       }
     });
 
+    const equityNewsEnabled = parseBooleanEnv(process.env.ENABLE_EQUITY_NEWS, true);
+    const now = new Date();
+
     for (const asset of assets) {
       const latestSignalsByTimeframe = await loadLatestEquitySignalsByTimeframe(database, asset.id);
+      let newsContext: NewsContext | null = null;
+      if (equityNewsEnabled) {
+        try {
+          newsContext = await loadNewsContext(database, asset, now);
+        } catch {
+          newsContext = buildNewsContextForSignal({ asset, signal: { createdAt: now }, newsItems: [], now });
+        }
+      }
 
       for (const timeframe of equityIntervals) {
         try {
@@ -180,7 +192,8 @@ export async function analyzeEquitySignals(
             decision,
             asset: { symbol: asset.symbol, assetType: mapAssetType(asset.assetType) },
             intelligence: neutralIntelligenceContext,
-            multiTimeframeSummary
+            multiTimeframeSummary,
+            newsContext
           });
 
           const signal = await database.signal.create({
@@ -430,6 +443,38 @@ export async function analyzeEquitySignals(
 
     throw error;
   }
+}
+
+async function loadNewsContext(
+  database: PrismaClient,
+  asset: { id: string; symbol: string },
+  now: Date
+): Promise<NewsContext> {
+  const since = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const newsItems = await database.newsItem.findMany({
+    where: {
+      assetId: asset.id,
+      publishedAt: { gte: since }
+    },
+    orderBy: { publishedAt: "desc" },
+    take: 20
+  });
+
+  return buildNewsContextForSignal({
+    asset,
+    signal: { createdAt: now },
+    newsItems: newsItems.map((item) => ({
+      id: item.id,
+      symbol: item.symbol,
+      headline: item.headline,
+      summary: item.summary,
+      url: item.url,
+      source: item.source,
+      publishedAt: item.publishedAt,
+      category: item.category
+    })),
+    now
+  });
 }
 
 async function loadLatestEquitySignalsByTimeframe(

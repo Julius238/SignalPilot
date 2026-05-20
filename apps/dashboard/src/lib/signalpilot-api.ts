@@ -356,6 +356,43 @@ export type ObservationStats = {
   avgAbsReturnAfter1d: number;
 };
 
+export type NewsItem = {
+  id: string;
+  assetId: string | null;
+  symbol: string;
+  source: string;
+  headline: string;
+  summary: string | null;
+  url: string | null;
+  imageUrl: string | null;
+  publishedAt: string;
+  category: string | null;
+  sentiment: string | null;
+  relevanceScore: number | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type NewsContextItem = {
+  headline: string;
+  source: string;
+  publishedAt: string;
+  url: string | null;
+  sentiment: string;
+};
+
+export type NewsContext = {
+  hasRecentNews: boolean;
+  recentNewsCount: number;
+  relevantNewsCount: number;
+  topNews: NewsContextItem[];
+  relevanceScore: number;
+  sentiment: "POSITIVE" | "NEGATIVE" | "NEUTRAL" | "MIXED" | "UNKNOWN";
+  summary: string;
+  riskNote: string;
+  sourceNote: string;
+};
+
 export type PublicConfig = {
   alertMode: "ALL_ASSETS" | "WATCHLIST_ONLY" | "HIGH_PRIORITY_ONLY";
   alertCooldownMinutes: number;

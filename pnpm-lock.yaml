@@ -44,6 +44,9 @@ importers:
       '@signalpilot/multi-timeframe':
         specifier: workspace:*
         version: link:../../packages/multi-timeframe
+      '@signalpilot/news-intelligence':
+        specifier: workspace:*
+        version: link:../../packages/news-intelligence
       '@signalpilot/performance-intelligence':
         specifier: workspace:*
         version: link:../../packages/performance-intelligence
@@ -103,6 +106,9 @@ importers:
       '@signalpilot/multi-timeframe':
         specifier: workspace:*
         version: link:../../packages/multi-timeframe
+      '@signalpilot/news-intelligence':
+        specifier: workspace:*
+        version: link:../../packages/news-intelligence
       '@signalpilot/output-composer':
         specifier: workspace:*
         version: link:../../packages/output-composer
@@ -186,6 +192,12 @@ importers:
       '@signalpilot/shared':
         specifier: workspace:*
         version: link:../shared
+    devDependencies:
+      tsx:
+        specifier: ^4.19.2
+        version: 4.21.0
+
+  packages/news-intelligence:
     devDependencies:
       tsx:
         specifier: ^4.19.2

@@ -15,6 +15,29 @@ function createCandles(count: number) {
   }));
 }
 
+function makeNewsItems() {
+  return [
+    {
+      id: "news-1",
+      assetId: "asset-1",
+      symbol: "AAPL",
+      headline: "Apple beats earnings expectations",
+      summary: "Strong Q1 results.",
+      url: "https://reuters.com/apple",
+      source: "Reuters",
+      publishedAt: new Date(),
+      category: "company news",
+      sentiment: null,
+      relevanceScore: null,
+      rawJson: {},
+      relatedSymbols: null,
+      imageUrl: null,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    }
+  ];
+}
+
 function makeMockDatabase(options: {
   assets?: { id: string; symbol: string; assetType: AssetType; isActive: boolean; watchlistItem?: null }[];
   candles?: unknown[];
@@ -52,6 +75,9 @@ function makeMockDatabase(options: {
       },
       candle: {
         findMany: async () => [...candles].reverse()
+      },
+      newsItem: {
+        findMany: async () => []
       },
       signal: {
         findFirst: async () => null,
@@ -92,6 +118,8 @@ function makeMockDatabase(options: {
 describe("analyzeEquitySignals", () => {
   const savedWebhookUrl = process.env.N8N_WEBHOOK_SIGNAL_URL;
   const savedEquityAlerts = process.env.ENABLE_EQUITY_ALERTS;
+  const savedEquityNews = process.env.ENABLE_EQUITY_NEWS;
+  const savedDelay = process.env.MARKET_DATA_REQUEST_DELAY_MS;
   const savedFetch = globalThis.fetch;
 
   afterEach(() => {
@@ -107,10 +135,23 @@ describe("analyzeEquitySignals", () => {
       process.env.ENABLE_EQUITY_ALERTS = savedEquityAlerts;
     }
 
+    if (savedEquityNews === undefined) {
+      delete process.env.ENABLE_EQUITY_NEWS;
+    } else {
+      process.env.ENABLE_EQUITY_NEWS = savedEquityNews;
+    }
+
+    if (savedDelay === undefined) {
+      delete process.env.MARKET_DATA_REQUEST_DELAY_MS;
+    } else {
+      process.env.MARKET_DATA_REQUEST_DELAY_MS = savedDelay;
+    }
+
     globalThis.fetch = savedFetch;
   });
 
   it("generates signals for STOCK and ETF assets with enough candles", async () => {
+    process.env.MARKET_DATA_REQUEST_DELAY_MS = "0";
     const assets = [
       { id: "asset-1", symbol: "AAPL", assetType: AssetType.STOCK, isActive: true, watchlistItem: null },
       { id: "asset-2", symbol: "SPY", assetType: AssetType.ETF, isActive: true, watchlistItem: null }
@@ -131,6 +172,7 @@ describe("analyzeEquitySignals", () => {
   });
 
   it("skips asset/timeframe and increments missingDataCount when too few candles", async () => {
+    process.env.MARKET_DATA_REQUEST_DELAY_MS = "0";
     const assets = [
       { id: "asset-1", symbol: "AAPL", assetType: AssetType.STOCK, isActive: true, watchlistItem: null }
     ];
@@ -144,6 +186,7 @@ describe("analyzeEquitySignals", () => {
   });
 
   it("does not analyze 4h timeframe for STOCK/ETF assets", async () => {
+    process.env.MARKET_DATA_REQUEST_DELAY_MS = "0";
     const assets = [
       { id: "asset-1", symbol: "MSFT", assetType: AssetType.STOCK, isActive: true, watchlistItem: null }
     ];
@@ -210,6 +253,30 @@ describe("analyzeEquitySignals", () => {
     assert.ok("equityAlertsDisabledCount" in meta);
   });
 
+  it("stores newsContext in dashboardJson when news items are available", async () => {
+    process.env.ENABLE_EQUITY_ALERTS = "false";
+    process.env.ENABLE_EQUITY_NEWS = "true";
+    process.env.MARKET_DATA_REQUEST_DELAY_MS = "0";
+
+    const assets = [
+      { id: "asset-1", symbol: "AAPL", assetType: AssetType.STOCK, isActive: true, watchlistItem: null }
+    ];
+    const newsItems = makeNewsItems();
+
+    const { db, createdSignals } = makeMockDatabase({ assets });
+    // Override newsItem.findMany to return news items
+    (db as Record<string, unknown>).newsItem = { findMany: async () => newsItems };
+
+    await analyzeEquitySignals(db as never);
+
+    const outputs = (createdSignals as Array<{
+      output: { dashboardJson: Record<string, unknown> | null };
+    }>).map((s) => s.output?.dashboardJson);
+
+    const newsContextFound = outputs.some((json) => json && "newsContext" in json);
+    assert.equal(newsContextFound, true);
+  });
+
   it("isolates errors per asset/timeframe and continues processing", async () => {
     const assets = [
       { id: "asset-1", symbol: "AAPL", assetType: AssetType.STOCK, isActive: true, watchlistItem: null },
@@ -232,7 +299,8 @@ describe("analyzeEquitySignals", () => {
           if (callCount === 1) throw new Error("DB error for AAPL 1h");
           return [...createCandles(250)].reverse();
         }
-      }
+      },
+      newsItem: { findMany: async () => [] }
     };
 
     const summary = await analyzeEquitySignals(db as never);

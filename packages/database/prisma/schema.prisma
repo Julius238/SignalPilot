@@ -133,6 +133,7 @@ model Asset {
   paperOrders   PaperOrder[]
   positions     PaperPosition[]
   watchlistItem WatchlistItem?
+  newsItems     NewsItem[]
 
   @@unique([symbol, exchange, assetType])
   @@index([symbol])
@@ -224,16 +225,27 @@ model SignalOutput {
 }
 
 model NewsItem {
-  id          String   @id @default(cuid())
-  source      String
-  title       String
-  summary     String?
-  url         String?
-  publishedAt DateTime
-  rawJson     Json
-  createdAt   DateTime @default(now())
+  id             String   @id @default(cuid())
+  assetId        String?
+  symbol         String
+  source         String
+  headline       String
+  summary        String?
+  url            String?  @unique
+  imageUrl       String?
+  publishedAt    DateTime
+  category       String?
+  relatedSymbols Json?
+  sentiment      String?
+  relevanceScore Float?
+  rawJson        Json
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  asset          Asset?   @relation(fields: [assetId], references: [id], onDelete: SetNull)
 
-  @@index([source, publishedAt])
+  @@index([assetId])
+  @@index([symbol])
+  @@index([source])
   @@index([publishedAt])
 }
 

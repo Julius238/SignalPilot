@@ -15,6 +15,7 @@ import {
   WatchlistPriority
 } from "@signalpilot/database";
 import { buildDataQualityReport } from "@signalpilot/data-quality";
+import { buildNewsContextForSignal } from "@signalpilot/news-intelligence";
 import {
   calculateMultiTimeframeSummary,
   type MultiTimeframeSignalInput,
@@ -613,6 +614,91 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
       paperEvaluation: paperEvaluation ? toPaperEvaluation(paperEvaluation) : null,
       candles: candles.reverse().map(toCandle)
     };
+  });
+
+  server.get("/news", async (request, reply) => {
+    const query = asQueryRecord(request.query);
+    const symbol = parseOptionalString(query.symbol)?.toUpperCase();
+    const source = parseOptionalString(query.source);
+    const from = parseOptionalIsoDate(query.from);
+    const to = parseOptionalIsoDate(query.to);
+    const limit = parseLimit(query.limit, 100, 500, reply);
+
+    if (reply.sent) {
+      return reply;
+    }
+
+    const newsItems = await database.newsItem.findMany({
+      where: {
+        symbol,
+        source: source ?? undefined,
+        publishedAt: from || to
+          ? {
+              gte: from ?? undefined,
+              lte: to ?? undefined
+            }
+          : undefined
+      },
+      orderBy: { publishedAt: "desc" },
+      take: limit
+    });
+
+    return newsItems.map(toNewsItem);
+  });
+
+  server.get("/assets/:symbol/news", async (request, reply) => {
+    const { symbol } = request.params as { symbol: string };
+    const query = asQueryRecord(request.query);
+    const limit = parseLimit(query.limit, 50, 200, reply);
+
+    if (reply.sent) {
+      return reply;
+    }
+
+    const newsItems = await database.newsItem.findMany({
+      where: { symbol: symbol.toUpperCase() },
+      orderBy: { publishedAt: "desc" },
+      take: limit
+    });
+
+    return newsItems.map(toNewsItem);
+  });
+
+  server.get("/signals/:id/news-context", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const signal = await database.signal.findUnique({
+      where: { id },
+      select: { id: true, assetId: true, symbol: true, createdAt: true }
+    });
+
+    if (!signal) {
+      return notFound(reply, "Signal not found");
+    }
+
+    const since = new Date(signal.createdAt.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const newsItems = await database.newsItem.findMany({
+      where: {
+        assetId: signal.assetId,
+        publishedAt: { gte: since }
+      },
+      orderBy: { publishedAt: "desc" },
+      take: 20
+    });
+
+    return buildNewsContextForSignal({
+      asset: { id: signal.assetId, symbol: signal.symbol },
+      signal: { createdAt: signal.createdAt },
+      newsItems: newsItems.map((item) => ({
+        id: item.id,
+        symbol: item.symbol,
+        headline: item.headline,
+        summary: item.summary,
+        url: item.url,
+        source: item.source,
+        publishedAt: item.publishedAt,
+        category: item.category
+      }))
+    });
   });
 
   server.get("/paper/evaluations", async (request, reply) => {
@@ -1236,6 +1322,47 @@ function mergeSignalWhere(...conditions: Array<Prisma.SignalWhereInput | undefin
   return {
     AND: activeConditions
   };
+}
+
+function toNewsItem(item: {
+  id: string;
+  assetId: string | null;
+  symbol: string;
+  source: string;
+  headline: string;
+  summary: string | null;
+  url: string | null;
+  imageUrl: string | null;
+  publishedAt: Date;
+  category: string | null;
+  sentiment: string | null;
+  relevanceScore: number | null;
+  createdAt: Date;
+  updatedAt: Date;
+}) {
+  return {
+    id: item.id,
+    assetId: item.assetId,
+    symbol: item.symbol,
+    source: item.source,
+    headline: item.headline,
+    summary: item.summary,
+    url: item.url,
+    imageUrl: item.imageUrl,
+    publishedAt: item.publishedAt,
+    category: item.category,
+    sentiment: item.sentiment,
+    relevanceScore: item.relevanceScore,
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt
+  };
+}
+
+function parseOptionalIsoDate(value: QueryValue): Date | undefined {
+  const raw = firstQueryValue(value);
+  if (!raw) return undefined;
+  const date = new Date(raw);
+  return Number.isNaN(date.getTime()) ? undefined : date;
 }
 
 function buildAssetRelationWhere(assetType: AssetType | undefined, watchlistOnly: boolean) {

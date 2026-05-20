@@ -2,7 +2,7 @@ import { CandlestickChart } from "../../../../components/CandlestickChart";
 import { DirectionBadge, RiskBadge, StatusBadge } from "../../../../components/badges";
 import { ErrorState } from "../../../../components/empty-state";
 import { formatDateTime, formatJson, formatScore } from "../../../../lib/format";
-import { fetchApi, type SignalDetail } from "../../../../lib/signalpilot-api";
+import { fetchApi, type NewsContext, type SignalDetail } from "../../../../lib/signalpilot-api";
 
 type SignalDetailPageProps = {
   params: Promise<{ id: string }>;
@@ -22,7 +22,10 @@ const scoreKeys = [
 
 export default async function SignalDetailPage({ params }: SignalDetailPageProps) {
   const { id } = await params;
-  const signal = await fetchApi<SignalDetail>(`/signals/${encodeURIComponent(id)}`);
+  const [signal, newsContext] = await Promise.all([
+    fetchApi<SignalDetail>(`/signals/${encodeURIComponent(id)}`),
+    fetchApi<NewsContext>(`/signals/${encodeURIComponent(id)}/news-context`)
+  ]);
 
   if (signal.error) {
     return <ErrorState title="Could not load signal" message={signal.error} />;
@@ -169,6 +172,62 @@ export default async function SignalDetailPage({ params }: SignalDetailPageProps
           </div>
         </section>
       ) : null}
+
+      {newsContext.data && (
+        <section className="card" style={{ marginTop: 16 }}>
+          <h2>News Context</h2>
+          <div className="score-grid">
+            <div className="score-item">
+              <span>Recent News</span>
+              <strong>{newsContext.data.hasRecentNews ? "Yes" : "No"}</strong>
+            </div>
+            <div className="score-item">
+              <span>News Count</span>
+              <strong>{newsContext.data.recentNewsCount}</strong>
+            </div>
+            <div className="score-item">
+              <span>Relevance Score</span>
+              <strong>{newsContext.data.relevanceScore}</strong>
+            </div>
+            <div className="score-item">
+              <span>Sentiment</span>
+              <strong>{newsContext.data.sentiment}</strong>
+            </div>
+          </div>
+          {newsContext.data.summary && (
+            <p style={{ marginTop: 8 }}>{newsContext.data.summary}</p>
+          )}
+          {newsContext.data.riskNote && (
+            <p className="muted small">{newsContext.data.riskNote}</p>
+          )}
+          {newsContext.data.sourceNote && (
+            <p className="muted small">{newsContext.data.sourceNote}</p>
+          )}
+          {newsContext.data.topNews.length > 0 && (
+            <>
+              <h3 style={{ marginTop: 12 }}>Top News</h3>
+              <div className="stack-list">
+                {newsContext.data.topNews.map((item, i) => (
+                  <div key={i} className="list-row">
+                    <div>
+                      {item.url ? (
+                        <a href={item.url} target="_blank" rel="noopener noreferrer">
+                          {item.headline}
+                        </a>
+                      ) : (
+                        <span>{item.headline}</span>
+                      )}
+                    </div>
+                    <div className="nowrap muted small">
+                      {item.source} · {formatDateTime(item.publishedAt)} · {item.sentiment}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </section>
+      )}
 
       <section className="detail-grid" style={{ marginTop: 16 }}>
         <div className="card">

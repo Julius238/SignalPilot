@@ -88,6 +88,26 @@ pnpm worker:run-equity-pipeline
 
 Alert gate: set `ENABLE_EQUITY_ALERTS=true` to allow equity signals to trigger n8n webhooks. The default is `false` — signals and outputs are always written, but no webhooks are sent.
 
+## Equity News
+
+Fetch equity and ETF news via Finnhub Company News:
+
+```bash
+pnpm worker:fetch-equity-news
+```
+
+Requires `FINNHUB_API_KEY`. Fetches news for active STOCK and ETF assets and stores them in the `NewsItem` table with idempotent deduplication by URL.
+
+News environment:
+
+```bash
+ENABLE_EQUITY_NEWS=true        # default — load news before signal analysis
+NEWS_LOOKBACK_DAYS=7           # days of news history to fetch (default: 7)
+NEWS_WATCHLIST_ONLY=false      # only fetch news for watchlist assets (default: false)
+```
+
+When `ENABLE_EQUITY_NEWS=true` (default), the equity signal pipeline fetches news before running signal analysis. News context is embedded in `SignalOutput.dashboardJson` and in the Telegram text block. The `/dashboard/news` page shows all stored news items.
+
 ```bash
 ENABLE_EQUITY_ALERTS=false   # default — signals written, no n8n dispatch
 ENABLE_EQUITY_ALERTS=true    # enables n8n alert routing for equity signals
