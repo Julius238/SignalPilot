@@ -356,6 +356,59 @@ export type ObservationStats = {
   avgAbsReturnAfter1d: number;
 };
 
+export type EventItem = {
+  id: string;
+  assetId: string | null;
+  symbol: string | null;
+  eventType: string;
+  title: string;
+  description: string | null;
+  source: string;
+  sourceUrl: string | null;
+  eventDate: string | null;
+  eventTime: string | null;
+  fiscalQuarter: string | null;
+  fiscalYear: number | null;
+  epsEstimate: string | null;
+  epsActual: string | null;
+  revenueEstimate: string | null;
+  revenueActual: string | null;
+  importance: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type EventContextItem = {
+  id: string;
+  symbol: string;
+  eventType: string;
+  title: string;
+  eventDate: string;
+  fiscalQuarter: string | null;
+  fiscalYear: number | null;
+  epsEstimate: number | null;
+  epsActual: number | null;
+  revenueEstimate: number | null;
+  revenueActual: number | null;
+  daysFromNow: number;
+};
+
+export type EventRiskLevel = "LOW" | "MEDIUM" | "HIGH" | "NONE";
+
+export type EventContext = {
+  hasUpcomingEvent: boolean;
+  hasRecentEvent: boolean;
+  upcomingEvents: EventContextItem[];
+  recentEvents: EventContextItem[];
+  nearestEvent: EventContextItem | null;
+  eventRiskLevel: EventRiskLevel;
+  daysToNearestEvent: number | null;
+  daysSinceRecentEvent: number | null;
+  summary: string;
+  riskNote: string;
+  sourceNote: string;
+};
+
 export type NewsItem = {
   id: string;
   assetId: string | null;

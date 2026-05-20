@@ -15,6 +15,7 @@ import {
   WatchlistPriority
 } from "@signalpilot/database";
 import { buildDataQualityReport } from "@signalpilot/data-quality";
+import { buildEventContextForSignal, type EventInput } from "@signalpilot/events-intelligence";
 import { buildNewsContextForSignal } from "@signalpilot/news-intelligence";
 import {
   calculateMultiTimeframeSummary,
@@ -701,6 +702,108 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
     });
   });
 
+  server.get("/events", async (request, reply) => {
+    const query = asQueryRecord(request.query);
+    const symbol = parseOptionalString(query.symbol)?.toUpperCase();
+    const eventType = parseOptionalString(query.eventType);
+    const from = parseOptionalIsoDate(query.from);
+    const to = parseOptionalIsoDate(query.to);
+    const limit = parseLimit(query.limit, 100, 500, reply);
+
+    if (reply.sent) {
+      return reply;
+    }
+
+    const events = await database.event.findMany({
+      where: {
+        symbol,
+        eventType: eventType ?? undefined,
+        eventDate:
+          from || to
+            ? { gte: from ?? undefined, lte: to ?? undefined }
+            : undefined
+      },
+      orderBy: { eventDate: "desc" },
+      take: limit
+    });
+
+    return events.map(toEvent);
+  });
+
+  server.get("/assets/:symbol/events", async (request, reply) => {
+    const { symbol } = request.params as { symbol: string };
+    const query = asQueryRecord(request.query);
+    const limit = parseLimit(query.limit, 50, 200, reply);
+
+    if (reply.sent) {
+      return reply;
+    }
+
+    const events = await database.event.findMany({
+      where: { symbol: symbol.toUpperCase() },
+      orderBy: { eventDate: "asc" },
+      take: limit
+    });
+
+    return events.map(toEvent);
+  });
+
+  server.get("/signals/:id/event-context", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const signal = await database.signal.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        assetId: true,
+        symbol: true,
+        createdAt: true,
+        asset: { select: { assetType: true } }
+      }
+    });
+
+    if (!signal) {
+      return notFound(reply, "Signal not found");
+    }
+
+    const lookbackDays = parsePositiveNumberEnv(process.env.EVENTS_LOOKBACK_DAYS, 14);
+    const lookaheadDays = parsePositiveNumberEnv(process.env.EVENTS_LOOKAHEAD_DAYS, 60);
+    const from = new Date(signal.createdAt.getTime() - lookbackDays * 24 * 60 * 60 * 1000);
+    const to = new Date(signal.createdAt.getTime() + lookaheadDays * 24 * 60 * 60 * 1000);
+
+    const events = await database.event.findMany({
+      where: {
+        symbol: signal.symbol,
+        eventDate: { gte: from, lte: to }
+      },
+      orderBy: { eventDate: "asc" }
+    });
+
+    return buildEventContextForSignal({
+      asset: {
+        symbol: signal.symbol,
+        assetType: signal.asset?.assetType ?? "STOCK"
+      },
+      signal: { createdAt: signal.createdAt },
+      events: events.map(
+        (e) =>
+          ({
+            id: e.id,
+            symbol: e.symbol ?? signal.symbol,
+            eventType: e.eventType,
+            title: e.title,
+            eventDate: e.eventDate ?? signal.createdAt,
+            fiscalQuarter: e.fiscalQuarter,
+            fiscalYear: e.fiscalYear,
+            epsEstimate: e.epsEstimate?.toString() ?? null,
+            epsActual: e.epsActual?.toString() ?? null,
+            revenueEstimate: e.revenueEstimate?.toString() ?? null,
+            revenueActual: e.revenueActual?.toString() ?? null
+          }) satisfies EventInput
+      ),
+      now: signal.createdAt
+    });
+  });
+
   server.get("/paper/evaluations", async (request, reply) => {
     const query = asQueryRecord(request.query);
     const evaluationStatus = parseEnum(
@@ -1321,6 +1424,50 @@ function mergeSignalWhere(...conditions: Array<Prisma.SignalWhereInput | undefin
 
   return {
     AND: activeConditions
+  };
+}
+
+function toEvent(event: {
+  id: string;
+  assetId: string | null;
+  symbol: string | null;
+  eventType: string;
+  title: string;
+  description: string | null;
+  source: string;
+  sourceUrl: string | null;
+  eventDate: Date | null;
+  eventTime: string | null;
+  fiscalQuarter: string | null;
+  fiscalYear: number | null;
+  epsEstimate: { toString(): string } | null;
+  epsActual: { toString(): string } | null;
+  revenueEstimate: { toString(): string } | null;
+  revenueActual: { toString(): string } | null;
+  importance: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}) {
+  return {
+    id: event.id,
+    assetId: event.assetId,
+    symbol: event.symbol,
+    eventType: event.eventType,
+    title: event.title,
+    description: event.description,
+    source: event.source,
+    sourceUrl: event.sourceUrl,
+    eventDate: event.eventDate,
+    eventTime: event.eventTime,
+    fiscalQuarter: event.fiscalQuarter,
+    fiscalYear: event.fiscalYear,
+    epsEstimate: event.epsEstimate?.toString() ?? null,
+    epsActual: event.epsActual?.toString() ?? null,
+    revenueEstimate: event.revenueEstimate?.toString() ?? null,
+    revenueActual: event.revenueActual?.toString() ?? null,
+    importance: event.importance,
+    createdAt: event.createdAt,
+    updatedAt: event.updatedAt
   };
 }
 

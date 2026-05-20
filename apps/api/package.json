@@ -14,6 +14,7 @@
     "@fastify/cors": "^10.0.2",
     "@signalpilot/data-quality": "workspace:*",
     "@signalpilot/database": "workspace:*",
+    "@signalpilot/events-intelligence": "workspace:*",
     "@signalpilot/multi-timeframe": "workspace:*",
     "@signalpilot/news-intelligence": "workspace:*",
     "@signalpilot/performance-intelligence": "workspace:*",

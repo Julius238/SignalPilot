@@ -15,6 +15,7 @@
     "fetch:crypto-candles": "tsx src/jobs/fetchCryptoCandles.ts",
     "fetch:equity-candles": "tsx src/jobs/fetchEquityCandles.ts",
     "fetch:equity-news": "tsx src/jobs/fetchEquityNews.ts",
+    "fetch:equity-events": "tsx src/jobs/fetchEquityEvents.ts",
     "analyze:equity-signals": "tsx src/jobs/analyzeEquitySignals.ts",
     "run:equity-pipeline": "tsx src/jobs/runEquitySignalPipeline.ts",
     "run:crypto-pipeline": "tsx src/jobs/runCryptoSignalPipeline.ts",
@@ -26,6 +27,7 @@
   "dependencies": {
     "@signalpilot/alerts": "workspace:*",
     "@signalpilot/database": "workspace:*",
+    "@signalpilot/events-intelligence": "workspace:*",
     "@signalpilot/indicators": "workspace:*",
     "@signalpilot/market-data": "workspace:*",
     "@signalpilot/multi-timeframe": "workspace:*",

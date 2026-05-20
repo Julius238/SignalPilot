@@ -7,6 +7,7 @@ import pino from "pino";
 
 import { analyzeEquitySignals, type AnalyzeEquitySignalsSummary } from "./analyzeEquitySignals.js";
 import { fetchEquityCandles, type FetchEquityCandlesSummary } from "./fetchEquityCandles.js";
+import { fetchEquityEvents, type FetchEquityEventsSummary } from "./fetchEquityEvents.js";
 import { fetchEquityNews, type FetchEquityNewsSummary } from "./fetchEquityNews.js";
 import {
   createPaperEvaluationsForSignals,
@@ -27,17 +28,20 @@ export type EquitySignalPipelineSummary = {
   finishedAt: string;
   fetchEquityCandles?: FetchEquityCandlesSummary;
   fetchEquityNews?: FetchEquityNewsSummary;
+  fetchEquityEvents?: FetchEquityEventsSummary;
   analyzeEquitySignals?: AnalyzeEquitySignalsSummary;
   createPaperEvaluationsForSignals?: CreatePaperEvaluationsSummary;
   evaluatePaperSignals?: EvaluatePaperSignalsSummary;
   paperEvaluationEnabled: boolean;
   equityNewsEnabled: boolean;
+  equityEventsEnabled: boolean;
   error?: string;
 };
 
 type PipelineJobs = {
   fetchEquityCandles: (database: PrismaClient) => Promise<FetchEquityCandlesSummary>;
   fetchEquityNews: (database: PrismaClient) => Promise<FetchEquityNewsSummary>;
+  fetchEquityEvents: (database: PrismaClient) => Promise<FetchEquityEventsSummary>;
   analyzeEquitySignals: (database: PrismaClient) => Promise<AnalyzeEquitySignalsSummary>;
   createPaperEvaluationsForSignals: (database: PrismaClient) => Promise<CreatePaperEvaluationsSummary>;
   evaluatePaperSignals: (database: PrismaClient) => Promise<EvaluatePaperSignalsSummary>;
@@ -46,6 +50,7 @@ type PipelineJobs = {
 const defaultJobs: PipelineJobs = {
   fetchEquityCandles,
   fetchEquityNews,
+  fetchEquityEvents,
   analyzeEquitySignals,
   createPaperEvaluationsForSignals,
   evaluatePaperSignals
@@ -58,8 +63,10 @@ export async function runEquitySignalPipeline(
   const startedAt = new Date();
   const paperEvaluationEnabled = parseBooleanEnv(process.env.ENABLE_PAPER_EVALUATION, true);
   const equityNewsEnabled = parseBooleanEnv(process.env.ENABLE_EQUITY_NEWS, true);
+  const equityEventsEnabled = parseBooleanEnv(process.env.ENABLE_EQUITY_EVENTS, true);
   let fetchSummary: FetchEquityCandlesSummary | undefined;
   let fetchNewsSummary: FetchEquityNewsSummary | undefined;
+  let fetchEventsSummary: FetchEquityEventsSummary | undefined;
   let analyzeSummary: AnalyzeEquitySignalsSummary | undefined;
   let createPaperEvaluationsSummary: CreatePaperEvaluationsSummary | undefined;
   let evaluatePaperSignalsSummary: EvaluatePaperSignalsSummary | undefined;
@@ -73,7 +80,8 @@ export async function runEquitySignalPipeline(
         startedAt: startedAt.toISOString(),
         status: BotRunStatus.RUNNING,
         paperEvaluationEnabled,
-        equityNewsEnabled
+        equityNewsEnabled,
+        equityEventsEnabled
       }
     }
   });
@@ -97,6 +105,15 @@ export async function runEquitySignalPipeline(
       await writeBotLog(database, "info", "Equity News Fetch beendet", {
         botRunId: botRun.id,
         fetchEquityNews: fetchNewsSummary
+      });
+    }
+
+    if (equityEventsEnabled) {
+      await writeBotLog(database, "info", "Equity Events Fetch gestartet", { botRunId: botRun.id });
+      fetchEventsSummary = await jobs.fetchEquityEvents(database);
+      await writeBotLog(database, "info", "Equity Events Fetch beendet", {
+        botRunId: botRun.id,
+        fetchEquityEvents: fetchEventsSummary
       });
     }
 
@@ -130,8 +147,10 @@ export async function runEquitySignalPipeline(
       finishedAt,
       paperEvaluationEnabled,
       equityNewsEnabled,
+      equityEventsEnabled,
       fetchSummary,
       fetchNewsSummary,
+      fetchEventsSummary,
       analyzeSummary,
       createPaperEvaluationsSummary,
       evaluatePaperSignalsSummary
@@ -157,8 +176,10 @@ export async function runEquitySignalPipeline(
       finishedAt,
       paperEvaluationEnabled,
       equityNewsEnabled,
+      equityEventsEnabled,
       fetchSummary,
       fetchNewsSummary,
+      fetchEventsSummary,
       analyzeSummary,
       createPaperEvaluationsSummary,
       evaluatePaperSignalsSummary,
@@ -185,8 +206,10 @@ function buildPipelineSummary(input: {
   finishedAt: Date;
   paperEvaluationEnabled: boolean;
   equityNewsEnabled: boolean;
+  equityEventsEnabled: boolean;
   fetchSummary?: FetchEquityCandlesSummary;
   fetchNewsSummary?: FetchEquityNewsSummary;
+  fetchEventsSummary?: FetchEquityEventsSummary;
   analyzeSummary?: AnalyzeEquitySignalsSummary;
   createPaperEvaluationsSummary?: CreatePaperEvaluationsSummary;
   evaluatePaperSignalsSummary?: EvaluatePaperSignalsSummary;
@@ -197,11 +220,13 @@ function buildPipelineSummary(input: {
     startedAt: input.startedAt.toISOString(),
     finishedAt: input.finishedAt.toISOString(),
     paperEvaluationEnabled: input.paperEvaluationEnabled,
-    equityNewsEnabled: input.equityNewsEnabled
+    equityNewsEnabled: input.equityNewsEnabled,
+    equityEventsEnabled: input.equityEventsEnabled
   };
 
   if (input.fetchSummary) summary.fetchEquityCandles = input.fetchSummary;
   if (input.fetchNewsSummary) summary.fetchEquityNews = input.fetchNewsSummary;
+  if (input.fetchEventsSummary) summary.fetchEquityEvents = input.fetchEventsSummary;
   if (input.analyzeSummary) summary.analyzeEquitySignals = input.analyzeSummary;
   if (input.createPaperEvaluationsSummary) summary.createPaperEvaluationsForSignals = input.createPaperEvaluationsSummary;
   if (input.evaluatePaperSignalsSummary) summary.evaluatePaperSignals = input.evaluatePaperSignalsSummary;

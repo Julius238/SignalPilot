@@ -41,6 +41,9 @@ importers:
       '@signalpilot/database':
         specifier: workspace:*
         version: link:../../packages/database
+      '@signalpilot/events-intelligence':
+        specifier: workspace:*
+        version: link:../../packages/events-intelligence
       '@signalpilot/multi-timeframe':
         specifier: workspace:*
         version: link:../../packages/multi-timeframe
@@ -97,6 +100,9 @@ importers:
       '@signalpilot/database':
         specifier: workspace:*
         version: link:../../packages/database
+      '@signalpilot/events-intelligence':
+        specifier: workspace:*
+        version: link:../../packages/events-intelligence
       '@signalpilot/indicators':
         specifier: workspace:*
         version: link:../../packages/indicators
@@ -163,6 +169,12 @@ importers:
       prisma:
         specifier: ^6.2.1
         version: 6.19.3(typescript@5.9.3)
+      tsx:
+        specifier: ^4.19.2
+        version: 4.21.0
+
+  packages/events-intelligence:
+    devDependencies:
       tsx:
         specifier: ^4.19.2
         version: 4.21.0

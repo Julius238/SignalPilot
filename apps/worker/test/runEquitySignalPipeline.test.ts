@@ -39,6 +39,20 @@ describe("runEquitySignalPipeline", () => {
           errorCount: 0
         };
       },
+      fetchEquityEvents: async () => {
+        calls.push("fetch-events");
+        return {
+          status: BotRunStatus.SUCCESS,
+          assetCount: 5,
+          fetchedEventCount: 3,
+          savedEventCount: 3,
+          duplicateCount: 0,
+          noEventCount: 2,
+          rateLimitCount: 0,
+          forbiddenCount: 0,
+          errorCount: 0
+        };
+      },
       analyzeEquitySignals: async () => {
         calls.push("analyze");
         return {
@@ -85,7 +99,7 @@ describe("runEquitySignalPipeline", () => {
       }
     });
 
-    assert.deepEqual(calls, ["fetch", "fetch-news", "analyze", "create-paper", "evaluate-paper"]);
+    assert.deepEqual(calls, ["fetch", "fetch-news", "fetch-events", "analyze", "create-paper", "evaluate-paper"]);
     assert.equal(summary.status, BotRunStatus.SUCCESS);
     assert.equal(summary.fetchEquityCandles?.savedCandleCount, 2500);
     assert.equal(summary.fetchEquityNews?.savedNewsCount, 8);
@@ -112,6 +126,9 @@ describe("runEquitySignalPipeline", () => {
           throw new Error("fetch failed");
         },
         fetchEquityNews: async () => {
+          throw new Error("should not run");
+        },
+        fetchEquityEvents: async () => {
           throw new Error("should not run");
         },
         analyzeEquitySignals: async () => {

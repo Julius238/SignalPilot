@@ -15,6 +15,7 @@ import { formatDateTime } from "../../../../lib/format";
 import {
   fetchApi,
   type AssetDetail,
+  type EventItem,
   type NewsItem,
   type SignalListItem
 } from "../../../../lib/signalpilot-api";
@@ -25,12 +26,13 @@ type AssetDetailPageProps = {
 
 export default async function AssetDetailPage({ params }: AssetDetailPageProps) {
   const { symbol } = await params;
-  const [asset, signals, newsResult] = await Promise.all([
+  const [asset, signals, newsResult, eventsResult] = await Promise.all([
     fetchApi<AssetDetail>(
       `/assets/${encodeURIComponent(symbol)}?includeCandles=true&candleLimit=250`
     ),
     fetchApi<SignalListItem[]>(`/assets/${encodeURIComponent(symbol)}/signals?limit=10`),
-    fetchApi<NewsItem[]>(`/assets/${encodeURIComponent(symbol)}/news?limit=10`)
+    fetchApi<NewsItem[]>(`/assets/${encodeURIComponent(symbol)}/news?limit=10`),
+    fetchApi<EventItem[]>(`/assets/${encodeURIComponent(symbol)}/events?limit=10`)
   ]);
 
   if (asset.error) {
@@ -180,6 +182,47 @@ export default async function AssetDetailPage({ params }: AssetDetailPageProps) 
           </Link>
         </h2>
         <SignalsTable signals={signals.data ?? []} />
+      </section>
+
+      <section className="card" style={{ marginTop: 16 }}>
+        <h2>
+          Upcoming / Recent Events{" "}
+          <Link href={`/dashboard/events?symbol=${encodeURIComponent(data.symbol)}`}>View all</Link>
+        </h2>
+        {!eventsResult.data || eventsResult.data.length === 0 ? (
+          <p className="muted">
+            No events found.{" "}
+            {data.assetType === "ETF"
+              ? "Earnings events are not applicable for ETFs."
+              : "Run pnpm worker:fetch-equity-events to populate."}
+          </p>
+        ) : (
+          <div className="stack-list">
+            {eventsResult.data.map((event) => (
+              <div key={event.id} className="list-row">
+                <div>
+                  <strong>{event.title}</strong>
+                  {event.fiscalQuarter && (
+                    <span className="muted small">
+                      {" "}
+                      · Q{event.fiscalQuarter} {event.fiscalYear}
+                    </span>
+                  )}
+                  {(event.epsEstimate !== null || event.epsActual !== null) && (
+                    <p className="muted small">
+                      EPS: est. {event.epsEstimate ?? "-"} / actual {event.epsActual ?? "-"}
+                    </p>
+                  )}
+                </div>
+                <div className="nowrap muted small">
+                  {event.eventDate ? formatDateTime(event.eventDate) : "-"}
+                  {event.eventTime && ` · ${event.eventTime}`}
+                  {" · "}{event.source}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </section>
 
       <section className="card" style={{ marginTop: 16 }}>

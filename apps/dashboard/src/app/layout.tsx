@@ -28,6 +28,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
               <Link href="/dashboard/paper">Paper Eval</Link>
               <Link href="/dashboard/performance">Performance</Link>
               <Link href="/dashboard/news">News</Link>
+              <Link href="/dashboard/events">Events</Link>
               <Link href="/dashboard/data-quality">Data Quality</Link>
               <Link href="/dashboard/assets">Assets</Link>
               <Link href="/dashboard/logs">Logs</Link>

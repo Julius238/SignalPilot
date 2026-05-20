@@ -20,6 +20,11 @@ import {
   type MultiTimeframeSignalInput,
   type MultiTimeframeSummary
 } from "@signalpilot/multi-timeframe";
+import {
+  buildEventContextForSignal,
+  type EventContext,
+  type EventInput
+} from "@signalpilot/events-intelligence";
 import { buildNewsContextForSignal, type NewsContext } from "@signalpilot/news-intelligence";
 import { composeSignalOutput } from "@signalpilot/output-composer";
 import { scoreSignal } from "@signalpilot/scoring-engine";
@@ -139,6 +144,7 @@ export async function analyzeEquitySignals(
     });
 
     const equityNewsEnabled = parseBooleanEnv(process.env.ENABLE_EQUITY_NEWS, true);
+    const equityEventsEnabled = parseBooleanEnv(process.env.ENABLE_EQUITY_EVENTS, true);
     const now = new Date();
 
     for (const asset of assets) {
@@ -149,6 +155,15 @@ export async function analyzeEquitySignals(
           newsContext = await loadNewsContext(database, asset, now);
         } catch {
           newsContext = buildNewsContextForSignal({ asset, signal: { createdAt: now }, newsItems: [], now });
+        }
+      }
+
+      let eventContext: EventContext | null = null;
+      if (equityEventsEnabled) {
+        try {
+          eventContext = await loadEventContext(database, asset, now);
+        } catch {
+          eventContext = null;
         }
       }
 
@@ -193,7 +208,8 @@ export async function analyzeEquitySignals(
             asset: { symbol: asset.symbol, assetType: mapAssetType(asset.assetType) },
             intelligence: neutralIntelligenceContext,
             multiTimeframeSummary,
-            newsContext
+            newsContext,
+            eventContext
           });
 
           const signal = await database.signal.create({
@@ -443,6 +459,44 @@ export async function analyzeEquitySignals(
 
     throw error;
   }
+}
+
+async function loadEventContext(
+  database: PrismaClient,
+  asset: { id: string; symbol: string; assetType: AssetType },
+  now: Date
+): Promise<EventContext> {
+  const lookbackDays = Number(process.env.EVENTS_LOOKBACK_DAYS ?? 14);
+  const lookaheadDays = Number(process.env.EVENTS_LOOKAHEAD_DAYS ?? 60);
+  const from = new Date(now.getTime() - lookbackDays * 24 * 60 * 60 * 1000);
+  const to = new Date(now.getTime() + lookaheadDays * 24 * 60 * 60 * 1000);
+
+  const events = await database.event.findMany({
+    where: {
+      symbol: asset.symbol,
+      eventDate: { gte: from, lte: to }
+    },
+    orderBy: { eventDate: "asc" }
+  });
+
+  return buildEventContextForSignal({
+    asset: { symbol: asset.symbol, assetType: mapAssetType(asset.assetType) },
+    signal: { createdAt: now },
+    events: events.map((e) => ({
+      id: e.id,
+      symbol: e.symbol ?? asset.symbol,
+      eventType: e.eventType,
+      title: e.title,
+      eventDate: e.eventDate ?? now,
+      fiscalQuarter: e.fiscalQuarter,
+      fiscalYear: e.fiscalYear,
+      epsEstimate: e.epsEstimate?.toString() ?? null,
+      epsActual: e.epsActual?.toString() ?? null,
+      revenueEstimate: e.revenueEstimate?.toString() ?? null,
+      revenueActual: e.revenueActual?.toString() ?? null
+    } satisfies EventInput)),
+    now
+  });
 }
 
 async function loadNewsContext(

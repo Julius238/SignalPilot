@@ -16,6 +16,17 @@ export type NewsContextLike = {
   sourceNote: string;
 };
 
+export type EventContextLike = {
+  hasUpcomingEvent: boolean;
+  hasRecentEvent: boolean;
+  eventRiskLevel: string;
+  daysToNearestEvent: number | null;
+  daysSinceRecentEvent: number | null;
+  summary: string;
+  riskNote: string;
+  sourceNote: string;
+};
+
 export type ComposeSignalOutputInput = {
   decision: SignalDecision;
   asset?: {
@@ -25,6 +36,7 @@ export type ComposeSignalOutputInput = {
   intelligence?: Partial<IntelligenceContext>;
   multiTimeframeSummary?: MultiTimeframeSummary | null;
   newsContext?: NewsContextLike | null;
+  eventContext?: EventContextLike | null;
 };
 
 type TechnicalSummary = {
@@ -53,6 +65,9 @@ export function composeSignalOutput(input: ComposeSignalOutputInput): SignalOutp
   const shortConclusion = buildShortConclusion(decision);
   const emoji = emojiForSignalType(decision.signalType);
 
+  const eventSummaryLine = buildEventSummaryLine(input.eventContext);
+  const impactNote = buildImpactNote(input.eventContext, intelligence);
+
   const telegramText = [
     `${emoji} ${symbol} · ${assetType.toUpperCase()} · ${decision.timeframe}`,
     "",
@@ -74,8 +89,8 @@ export function composeSignalOutput(input: ComposeSignalOutputInput): SignalOutp
     "News/X/Event:",
     `• News: ${intelligence.newsSummary}`,
     `• X/Social: ${intelligence.socialSummary}`,
-    `• Events: ${intelligence.eventSummary}`,
-    `• Impact: ${intelligence.impactSummary}`,
+    `• Events: ${eventSummaryLine}`,
+    `• Impact: ${impactNote}`,
     "",
     "Marktbestätigung:",
     ...confirmations.map((confirmation) => `• ${confirmation}`),
@@ -89,6 +104,12 @@ export function composeSignalOutput(input: ComposeSignalOutputInput): SignalOutp
     "Nächster Trigger:",
     decision.nextTrigger
   ].join("\n");
+
+  const eventContextForDashboard = input.eventContext ?? null;
+  const impactNoteForDashboard =
+    input.eventContext?.eventRiskLevel === "HIGH"
+      ? `Event-Risiko HOCH: ${input.eventContext.summary}`
+      : null;
 
   return {
     shortConclusion,
@@ -125,6 +146,8 @@ export function composeSignalOutput(input: ComposeSignalOutputInput): SignalOutp
       confirmations,
       multiTimeframeSummary: input.multiTimeframeSummary ?? null,
       newsContext: input.newsContext ?? null,
+      eventContext: eventContextForDashboard,
+      impactNote: impactNoteForDashboard,
       counterArgument,
       nextTrigger: decision.nextTrigger,
       generatedSections: [
@@ -277,6 +300,23 @@ function emojiForSignalType(signalType: SignalDecision["signalType"]): string {
     case "NO_SIGNAL":
       return "▫️";
   }
+}
+
+function buildEventSummaryLine(eventContext?: EventContextLike | null): string {
+  if (!eventContext) {
+    return "Keine Event-Daten in diesem Scan.";
+  }
+  return eventContext.summary;
+}
+
+function buildImpactNote(
+  eventContext?: EventContextLike | null,
+  intelligence?: Required<IntelligenceContext>
+): string {
+  if (eventContext?.riskNote) {
+    return eventContext.riskNote;
+  }
+  return intelligence?.impactSummary ?? "Signal basiert primär auf technischen Daten.";
 }
 
 function cleanText(value: string | undefined): string | undefined {

@@ -2,7 +2,7 @@ import { CandlestickChart } from "../../../../components/CandlestickChart";
 import { DirectionBadge, RiskBadge, StatusBadge } from "../../../../components/badges";
 import { ErrorState } from "../../../../components/empty-state";
 import { formatDateTime, formatJson, formatScore } from "../../../../lib/format";
-import { fetchApi, type NewsContext, type SignalDetail } from "../../../../lib/signalpilot-api";
+import { fetchApi, type EventContext, type NewsContext, type SignalDetail } from "../../../../lib/signalpilot-api";
 
 type SignalDetailPageProps = {
   params: Promise<{ id: string }>;
@@ -22,9 +22,10 @@ const scoreKeys = [
 
 export default async function SignalDetailPage({ params }: SignalDetailPageProps) {
   const { id } = await params;
-  const [signal, newsContext] = await Promise.all([
+  const [signal, newsContext, eventContext] = await Promise.all([
     fetchApi<SignalDetail>(`/signals/${encodeURIComponent(id)}`),
-    fetchApi<NewsContext>(`/signals/${encodeURIComponent(id)}/news-context`)
+    fetchApi<NewsContext>(`/signals/${encodeURIComponent(id)}/news-context`),
+    fetchApi<EventContext>(`/signals/${encodeURIComponent(id)}/event-context`)
   ]);
 
   if (signal.error) {
@@ -223,6 +224,80 @@ export default async function SignalDetailPage({ params }: SignalDetailPageProps
                     </div>
                   </div>
                 ))}
+              </div>
+            </>
+          )}
+        </section>
+      )}
+
+      {eventContext.data && (
+        <section className="card" style={{ marginTop: 16 }}>
+          <h2>Event Context</h2>
+          <div className="score-grid">
+            <div className="score-item">
+              <span>Risk Level</span>
+              <strong
+                style={{
+                  color:
+                    eventContext.data.eventRiskLevel === "HIGH"
+                      ? "var(--color-danger, #e53e3e)"
+                      : eventContext.data.eventRiskLevel === "MEDIUM"
+                        ? "var(--color-warn, #dd6b20)"
+                        : undefined
+                }}
+              >
+                {eventContext.data.eventRiskLevel}
+              </strong>
+            </div>
+            <div className="score-item">
+              <span>Upcoming Event</span>
+              <strong>{eventContext.data.hasUpcomingEvent ? "Yes" : "No"}</strong>
+            </div>
+            <div className="score-item">
+              <span>Recent Event</span>
+              <strong>{eventContext.data.hasRecentEvent ? "Yes" : "No"}</strong>
+            </div>
+            {eventContext.data.daysToNearestEvent !== null && (
+              <div className="score-item">
+                <span>Days to Event</span>
+                <strong>{eventContext.data.daysToNearestEvent}</strong>
+              </div>
+            )}
+            {eventContext.data.daysSinceRecentEvent !== null && (
+              <div className="score-item">
+                <span>Days Since Event</span>
+                <strong>{eventContext.data.daysSinceRecentEvent}</strong>
+              </div>
+            )}
+          </div>
+          {eventContext.data.summary && (
+            <p style={{ marginTop: 8 }}>{eventContext.data.summary}</p>
+          )}
+          {eventContext.data.riskNote && (
+            <p className="muted small">{eventContext.data.riskNote}</p>
+          )}
+          {eventContext.data.nearestEvent && (
+            <>
+              <h3 style={{ marginTop: 12 }}>Nearest Event</h3>
+              <div className="stack-list">
+                <div className="list-row">
+                  <div>
+                    <strong>{eventContext.data.nearestEvent.title}</strong>
+                    {eventContext.data.nearestEvent.fiscalQuarter && (
+                      <span className="muted small">
+                        {" "}
+                        · Q{eventContext.data.nearestEvent.fiscalQuarter}{" "}
+                        {eventContext.data.nearestEvent.fiscalYear}
+                      </span>
+                    )}
+                  </div>
+                  <div className="nowrap muted small">
+                    {formatDateTime(eventContext.data.nearestEvent.eventDate)}
+                    {eventContext.data.nearestEvent.daysFromNow > 0
+                      ? ` · in ${eventContext.data.nearestEvent.daysFromNow}d`
+                      : ` · ${Math.abs(eventContext.data.nearestEvent.daysFromNow)}d ago`}
+                  </div>
+                </div>
               </div>
             </>
           )}

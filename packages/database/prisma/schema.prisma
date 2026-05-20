@@ -134,6 +134,7 @@ model Asset {
   positions     PaperPosition[]
   watchlistItem WatchlistItem?
   newsItems     NewsItem[]
+  events        Event[]
 
   @@unique([symbol, exchange, assetType])
   @@index([symbol])
@@ -250,17 +251,34 @@ model NewsItem {
 }
 
 model Event {
-  id               String   @id @default(cuid())
+  id               String    @id @default(cuid())
+  assetId          String?
+  symbol           String?
   eventType        String
   title            String
-  summary          String?
+  description      String?
   source           String
   sourceUrl        String?
-  publishedAt      DateTime
+  publishedAt      DateTime?
+  eventDate        DateTime?
+  eventTime        String?
+  fiscalQuarter    String?
+  fiscalYear       Int?
+  epsEstimate      Decimal?  @db.Decimal(20, 6)
+  epsActual        Decimal?  @db.Decimal(20, 6)
+  revenueEstimate  Decimal?  @db.Decimal(30, 6)
+  revenueActual    Decimal?  @db.Decimal(30, 6)
+  importance       String?
   credibilityScore Float?
-  rawJson          Json
-  createdAt        DateTime @default(now())
+  rawJson          Json?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  asset            Asset?    @relation(fields: [assetId], references: [id], onDelete: SetNull)
 
+  @@index([symbol])
+  @@index([eventType])
+  @@index([eventDate])
+  @@index([assetId])
   @@index([eventType, publishedAt])
   @@index([source, publishedAt])
 }
