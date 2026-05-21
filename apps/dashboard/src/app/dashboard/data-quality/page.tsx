@@ -147,6 +147,7 @@ export default async function DataQualityPage({ searchParams }: DataQualityPageP
                   <th>Signals</th>
                   <th>Evaluations</th>
                   <th>Skipped</th>
+                  <th>Events</th>
                   <th>Alerts</th>
                   <th>Latest Signal 1h</th>
                   <th>Warnings</th>
@@ -175,6 +176,13 @@ export default async function DataQualityPage({ searchParams }: DataQualityPageP
                     <td>{asset.signalCount}</td>
                     <td>{asset.evaluationCount}</td>
                     <td>{asset.skippedEvaluationCount}</td>
+                    <td>
+                      {asset.hasEventsInWindow === null
+                        ? "n/a"
+                        : asset.hasEventsInWindow
+                          ? "covered"
+                          : "missing"}
+                    </td>
                     <td>{asset.alertCount}</td>
                     <td>{formatDateTime(asset.latestSignalByTimeframe["1h"])}</td>
                     <td>{asset.warnings.join(" ") || "-"}</td>

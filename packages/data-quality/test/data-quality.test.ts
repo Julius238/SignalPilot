@@ -103,6 +103,35 @@ describe("data quality", () => {
     assert.ok(report.warnings.some((w) => w.includes("1h")));
     assert.ok(!report.warnings.some((w) => w.includes("4h")));
   });
+
+  it("adds a STOCK event coverage warning without penalizing ETFs", () => {
+    const report = buildDataQualityReport({
+      ...baseInput(),
+      assets: [
+        {
+          id: "asset-4",
+          symbol: "AAPL",
+          assetType: "STOCK",
+          isActive: true,
+          candleCountsByTimeframe: { "1h": 250, "4h": 0, "1d": 250 },
+          hasEventsInWindow: false
+        },
+        {
+          id: "asset-5",
+          symbol: "SPY",
+          assetType: "ETF",
+          isActive: true,
+          candleCountsByTimeframe: { "1h": 250, "4h": 0, "1d": 250 },
+          hasEventsInWindow: false
+        }
+      ]
+    });
+
+    assert.equal(report.assetCoverage[0].hasEventsInWindow, false);
+    assert.equal(report.assetCoverage[1].hasEventsInWindow, null);
+    assert.ok(report.warnings.some((w) => w.includes("AAPL has no stored events")));
+    assert.ok(!report.warnings.some((w) => w.includes("SPY has no stored events")));
+  });
 });
 
 function baseInput() {

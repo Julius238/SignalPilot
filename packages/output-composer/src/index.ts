@@ -49,7 +49,7 @@ type TechnicalSummary = {
 
 const defaultNewsSummary = "Keine relevante neue Meldung im Scan-Fenster gefunden.";
 const defaultSocialSummary = "noch nicht aktiv verbunden.";
-const defaultEventSummary = "Keine Event-Daten in diesem Scan.";
+const defaultEventSummary = "Kein relevantes Earnings/Event im Beobachtungsfenster gefunden.";
 const defaultImpactSummary = "Signal basiert primär auf technischen Daten.";
 
 export function composeSignalOutput(input: ComposeSignalOutputInput): SignalOutputDraft {
@@ -304,7 +304,7 @@ function emojiForSignalType(signalType: SignalDecision["signalType"]): string {
 
 function buildEventSummaryLine(eventContext?: EventContextLike | null): string {
   if (!eventContext) {
-    return "Keine Event-Daten in diesem Scan.";
+    return defaultEventSummary;
   }
   return eventContext.summary;
 }

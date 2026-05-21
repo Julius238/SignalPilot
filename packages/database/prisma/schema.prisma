@@ -256,6 +256,7 @@ model Event {
   symbol           String?
   eventType        String
   title            String
+  summary          String?
   description      String?
   source           String
   sourceUrl        String?

@@ -15,6 +15,7 @@ export type AssetQualityInput = {
   alertCount?: number;
   successfulAlertCount?: number;
   alertStateCount?: number;
+  hasEventsInWindow?: boolean;
 };
 
 export type AssetCoverage = {
@@ -29,6 +30,7 @@ export type AssetCoverage = {
   evaluationCount: number;
   skippedEvaluationCount: number;
   alertCount: number;
+  hasEventsInWindow: boolean | null;
   qualityScore: number;
   warnings: string[];
 };
@@ -174,6 +176,7 @@ export function buildAssetCoverage(asset: AssetQualityInput): AssetCoverage {
     evaluationCount: asset.evaluationCount ?? 0,
     skippedEvaluationCount: asset.skippedEvaluationCount ?? 0,
     alertCount: asset.alertCount ?? 0,
+    hasEventsInWindow: asset.assetType === "STOCK" ? asset.hasEventsInWindow === true : null,
     qualityScore,
     warnings
   };
@@ -220,6 +223,10 @@ function buildAssetWarnings(
 
     if (asset.assetType === "CRYPTO" && (asset.recentSignalCount ?? 0) === 0) {
       warnings.push(`${asset.symbol} has no crypto signals in the last 24h.`);
+    }
+
+    if (asset.assetType === "STOCK" && asset.hasEventsInWindow !== true) {
+      warnings.push(`${asset.symbol} has no stored events in the +/- 60 day window.`);
     }
   }
 

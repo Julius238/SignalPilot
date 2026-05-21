@@ -176,11 +176,24 @@ function computeRiskLevel(
 
   if (recent.length > 0) {
     const item = recent[0];
+    if (hasLargeSurprise(item)) return "HIGH";
     const hasActuals = item.epsActual !== null || item.revenueActual !== null;
     return hasActuals ? "MEDIUM" : "LOW";
   }
 
   return "NONE";
+}
+
+function hasLargeSurprise(item: EventContextItem): boolean {
+  return (
+    hasLargeRelativeSurprise(item.epsActual, item.epsEstimate) ||
+    hasLargeRelativeSurprise(item.revenueActual, item.revenueEstimate)
+  );
+}
+
+function hasLargeRelativeSurprise(actual: number | null, estimate: number | null): boolean {
+  if (actual === null || estimate === null || estimate === 0) return false;
+  return Math.abs((actual - estimate) / estimate) >= 0.15;
 }
 
 function buildSummary(

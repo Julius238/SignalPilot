@@ -313,6 +313,7 @@ export type AssetCoverage = {
   evaluationCount: number;
   skippedEvaluationCount: number;
   alertCount: number;
+  hasEventsInWindow: boolean | null;
   qualityScore: number;
   warnings: string[];
 };

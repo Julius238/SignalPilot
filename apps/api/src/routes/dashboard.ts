@@ -1870,6 +1870,8 @@ async function loadPerformanceEvaluations(input: {
 async function loadDataQualityReport(input: { assetType?: AssetType; symbol?: string }) {
   const now = new Date();
   const since = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  const eventWindowFrom = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000);
+  const eventWindowTo = new Date(now.getTime() + 60 * 24 * 60 * 60 * 1000);
   const assets = await database.asset.findMany({
     where: {
       assetType: input.assetType,
@@ -1881,6 +1883,7 @@ async function loadDataQualityReport(input: { assetType?: AssetType; symbol?: st
     select: assetSelect
   });
   const assetIds = assets.map((asset) => asset.id);
+  const assetSymbols = assets.map((asset) => asset.symbol);
   const assetWhere =
     assetIds.length > 0
       ? {
@@ -1895,6 +1898,7 @@ async function loadDataQualityReport(input: { assetType?: AssetType; symbol?: st
     recentSignalGroups,
     evaluationGroups,
     skippedReasonGroups,
+    eventCoverageRows,
     alertStates,
     alerts,
     totalSignals,
@@ -1936,6 +1940,22 @@ async function loadDataQualityReport(input: { assetType?: AssetType; symbol?: st
         evaluationStatus: PaperEvaluationStatus.SKIPPED
       },
       _count: { _all: true }
+    }),
+    database.event.findMany({
+      where: {
+        eventDate: {
+          gte: eventWindowFrom,
+          lte: eventWindowTo
+        },
+        OR: [
+          { assetId: { in: assetIds } },
+          { symbol: { in: assetSymbols } }
+        ]
+      },
+      select: {
+        assetId: true,
+        symbol: true
+      }
     }),
     database.alertState.findMany({
       where: assetWhere,
@@ -1986,6 +2006,8 @@ async function loadDataQualityReport(input: { assetType?: AssetType; symbol?: st
   const candleCountsByAsset = new Map<string, Record<string, number>>();
   const latestCandleByAsset = new Map<string, Record<string, Date | null>>();
   const latestSignalByAsset = new Map<string, Record<string, Date | null>>();
+  const eventCoverageByAsset = new Set<string>();
+  const assetIdBySymbol = new Map(assets.map((asset) => [asset.symbol, asset.id]));
 
   for (const group of candleGroups) {
     const counts = candleCountsByAsset.get(group.assetId) ?? {};
@@ -2034,6 +2056,18 @@ async function loadDataQualityReport(input: { assetType?: AssetType; symbol?: st
     }
   }
 
+  for (const event of eventCoverageRows) {
+    if (event.assetId) {
+      eventCoverageByAsset.add(event.assetId);
+      continue;
+    }
+
+    if (event.symbol) {
+      const assetId = assetIdBySymbol.get(event.symbol);
+      if (assetId) eventCoverageByAsset.add(assetId);
+    }
+  }
+
   const skippedByReason = Object.fromEntries(
     skippedReasonGroups.map((group) => [group.skipReason ?? "Unspecified", group._count._all])
   );
@@ -2062,7 +2096,8 @@ async function loadDataQualityReport(input: { assetType?: AssetType; symbol?: st
       skippedEvaluationCount: skippedEvaluationCountsByAsset.get(asset.id) ?? 0,
       alertCount: alertCountsByAsset.get(asset.id) ?? 0,
       successfulAlertCount: successfulAlertCountsByAsset.get(asset.id) ?? 0,
-      alertStateCount: alertStateCountsByAsset.get(asset.id) ?? 0
+      alertStateCount: alertStateCountsByAsset.get(asset.id) ?? 0,
+      hasEventsInWindow: eventCoverageByAsset.has(asset.id)
     })),
     totalSignals,
     signalsLast24h,

@@ -221,4 +221,13 @@ describe("composeSignalOutput", () => {
     assert.match(output.telegramText, /News: Keine relevante neue Meldung/);
     assert.equal(output.dashboardJson.newsContext, newsContext);
   });
+
+  it("uses the no-events fallback when no eventContext is provided", () => {
+    const output = composeSignalOutput({ decision: baseDecision });
+
+    assert.match(
+      output.telegramText,
+      /Events: Kein relevantes Earnings\/Event im Beobachtungsfenster gefunden\./
+    );
+  });
 });

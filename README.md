@@ -113,6 +113,33 @@ ENABLE_EQUITY_ALERTS=false   # default — signals written, no n8n dispatch
 ENABLE_EQUITY_ALERTS=true    # enables n8n alert routing for equity signals
 ```
 
+## Equity Earnings & Events
+
+Fetch stored earnings events for active STOCK assets via Finnhub Earnings Calendar:
+
+```bash
+pnpm worker:fetch-equity-events
+```
+
+Requires `FINNHUB_API_KEY`. ETFs are not queried for earnings and are treated as not applicable in event intelligence. Crypto events are not connected in this phase.
+
+Events environment:
+
+```bash
+ENABLE_EQUITY_EVENTS=true      # default — fetch events before signal analysis
+EVENTS_LOOKBACK_DAYS=14        # default lookback window
+EVENTS_LOOKAHEAD_DAYS=60       # default lookahead window
+EVENTS_WATCHLIST_ONLY=false    # only fetch events for watchlist stocks
+```
+
+When enabled, the equity pipeline runs candles, optional news, events, signal analysis, and optional Paper Evaluation. Event context is embedded in `SignalOutput.dashboardJson` and in the Telegram Events block using only stored Event rows.
+
+Dashboard pages:
+
+- `/dashboard/events` lists stored events with symbol/type/date filters.
+- `/dashboard/assets/:symbol` shows Upcoming / Recent Events.
+- `/dashboard/signals/:id` shows the computed Event Context.
+
 ## Worker Scheduler
 
 Run the crypto signal pipeline scheduler:

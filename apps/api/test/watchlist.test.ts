@@ -401,6 +401,9 @@ function createDatabase(state: {
       count: async () => 0,
       findMany: async () => []
     },
+    event: {
+      findMany: async () => []
+    },
     alertState: {
       findMany: async ({ where, take }: { where: { symbol?: string; status?: SignalStatus }; take: number }) =>
         state.alertStates

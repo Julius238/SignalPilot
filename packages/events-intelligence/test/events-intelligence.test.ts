@@ -116,6 +116,23 @@ describe("buildEventContextForSignal", () => {
     assert.equal(ctx.daysSinceRecentEvent, 1);
   });
 
+  it("returns HIGH for recent earnings with a large calculable surprise", () => {
+    const ctx = buildEventContextForSignal({
+      asset: { symbol: "AAPL", assetType: "STOCK" },
+      signal: { createdAt: baseNow },
+      events: [
+        makeEvent({
+          eventDate: daysFromNow(-1, baseNow),
+          epsEstimate: "1.00",
+          epsActual: "1.25"
+        })
+      ],
+      now: baseNow
+    });
+
+    assert.equal(ctx.eventRiskLevel, "HIGH");
+  });
+
   it("does not include events outside the window", () => {
     const ctx = buildEventContextForSignal({
       asset: { symbol: "AAPL", assetType: "STOCK" },
