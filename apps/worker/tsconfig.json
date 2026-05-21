@@ -9,6 +9,7 @@
   "references": [
     { "path": "../../packages/alerts" },
     { "path": "../../packages/market-data" },
+    { "path": "../../packages/market-regime" },
     { "path": "../../packages/indicators" },
     { "path": "../../packages/multi-timeframe" },
     { "path": "../../packages/output-composer" },

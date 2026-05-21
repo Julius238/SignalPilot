@@ -22,6 +22,11 @@ import {
   type MultiTimeframeSignalInput,
   type MultiTimeframeSummary
 } from "@signalpilot/multi-timeframe";
+import {
+  buildSignalRegimeContext,
+  type MarketRegimeReport,
+  type SignalRegimeContext
+} from "@signalpilot/market-regime";
 import { composeSignalOutput } from "@signalpilot/output-composer";
 import { scoreSignal } from "@signalpilot/scoring-engine";
 import type { AssetClass, IntelligenceContext, SignalDecision } from "@signalpilot/shared";
@@ -210,6 +215,7 @@ export async function analyzeCryptoSignals(
         }
       }
     });
+    const marketRegimeReport = await loadLatestMarketRegimeReport(database);
 
     for (const asset of assets) {
       const latestSignalsByTimeframe = await loadLatestSignalsByTimeframe(database, asset.id);
@@ -274,7 +280,14 @@ export async function analyzeCryptoSignals(
               assetType: mapAssetType(asset.assetType)
             },
             intelligence: neutralIntelligenceContext,
-            multiTimeframeSummary
+            multiTimeframeSummary,
+            marketRegimeContext: buildMarketRegimeContext({
+              report: marketRegimeReport,
+              symbol: asset.symbol,
+              assetType: mapAssetType(asset.assetType),
+              signalDirection: decision.direction,
+              signalStatus: decision.status
+            })
           });
 
           const signal = await database.signal.create({
@@ -1049,6 +1062,32 @@ function mapAssetType(assetType: AssetType): AssetClass {
   }
 
   return "crypto";
+}
+
+async function loadLatestMarketRegimeReport(database: PrismaClient): Promise<MarketRegimeReport | null> {
+  const snapshot = await database.marketRegimeSnapshot?.findFirst({
+    orderBy: { generatedAt: "desc" }
+  });
+
+  return snapshot?.reportJson as MarketRegimeReport | null;
+}
+
+function buildMarketRegimeContext(input: {
+  report: MarketRegimeReport | null;
+  symbol: string;
+  assetType: AssetClass;
+  signalDirection: SignalDirection;
+  signalStatus: SignalStatus;
+}): SignalRegimeContext | null {
+  if (!input.report) return null;
+
+  return buildSignalRegimeContext({
+    symbol: input.symbol,
+    assetType: input.assetType,
+    signalDirection: input.signalDirection,
+    signalStatus: input.signalStatus,
+    report: input.report
+  });
 }
 
 async function writeBotLog(

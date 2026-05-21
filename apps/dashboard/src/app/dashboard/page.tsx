@@ -10,6 +10,7 @@ import {
   type Alert,
   type Asset,
   type BotRun,
+  type MarketRegimeSnapshot,
   type PublicConfig,
   type ScannerResponse,
   type SignalListItem,
@@ -17,7 +18,7 @@ import {
 } from "../../lib/signalpilot-api";
 
 export default async function DashboardPage() {
-  const [health, config, assets, signals, alerts, pipelineRuns, scanner, watchlist] = await Promise.all([
+  const [health, config, assets, signals, alerts, pipelineRuns, scanner, watchlist, marketRegime] = await Promise.all([
     fetchApi<{ status: string }>("/health"),
     fetchApi<PublicConfig>("/config/public"),
     fetchApi<Asset[]>("/assets?limit=500"),
@@ -25,10 +26,11 @@ export default async function DashboardPage() {
     fetchApi<Alert[]>("/alerts?limit=200"),
     fetchApi<BotRun[]>("/bot-runs?jobName=runCryptoSignalPipeline&limit=1"),
     fetchApi<ScannerResponse>("/scanner"),
-    fetchApi<WatchlistItem[]>("/watchlist?limit=500")
+    fetchApi<WatchlistItem[]>("/watchlist?limit=500"),
+    fetchApi<MarketRegimeSnapshot | null>("/market-regime/latest")
   ]);
 
-  const errors = [health, config, assets, signals, alerts, pipelineRuns, scanner, watchlist]
+  const errors = [health, config, assets, signals, alerts, pipelineRuns, scanner, watchlist, marketRegime]
     .map((result) => result.error)
     .filter(Boolean);
   const latestSignals = signals.data?.slice(0, 5) ?? [];
@@ -98,6 +100,18 @@ export default async function DashboardPage() {
         <div className="card">
           <span className="metric-label">Watchlist Alerts</span>
           <span className="metric-value">{alertEnabledCount}</span>
+        </div>
+        <div className="card">
+          <span className="metric-label">Market Regime</span>
+          <span className="metric-value metric-value-text">
+            {marketRegime.data?.overallRegime ?? "Unavailable"}
+          </span>
+        </div>
+        <div className="card">
+          <span className="metric-label">Risk Mode</span>
+          <span className="metric-value metric-value-text">
+            {marketRegime.data?.riskMode ?? "Unavailable"}
+          </span>
         </div>
         <div className="card">
           <span className="metric-label">Bullish Aligned</span>

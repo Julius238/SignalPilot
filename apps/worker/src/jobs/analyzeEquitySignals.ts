@@ -21,6 +21,11 @@ import {
   type MultiTimeframeSummary
 } from "@signalpilot/multi-timeframe";
 import {
+  buildSignalRegimeContext,
+  type MarketRegimeReport,
+  type SignalRegimeContext
+} from "@signalpilot/market-regime";
+import {
   buildEventContextForSignal,
   type EventContext,
   type EventInput
@@ -146,6 +151,7 @@ export async function analyzeEquitySignals(
     const equityNewsEnabled = parseBooleanEnv(process.env.ENABLE_EQUITY_NEWS, true);
     const equityEventsEnabled = parseBooleanEnv(process.env.ENABLE_EQUITY_EVENTS, true);
     const now = new Date();
+    const marketRegimeReport = await loadLatestMarketRegimeReport(database);
 
     for (const asset of assets) {
       const latestSignalsByTimeframe = await loadLatestEquitySignalsByTimeframe(database, asset.id);
@@ -208,6 +214,13 @@ export async function analyzeEquitySignals(
             asset: { symbol: asset.symbol, assetType: mapAssetType(asset.assetType) },
             intelligence: neutralIntelligenceContext,
             multiTimeframeSummary,
+            marketRegimeContext: buildMarketRegimeContext({
+              report: marketRegimeReport,
+              symbol: asset.symbol,
+              assetType: mapAssetType(asset.assetType),
+              signalDirection: decision.direction,
+              signalStatus: decision.status
+            }),
             newsContext,
             eventContext
           });
@@ -640,6 +653,32 @@ function mapAssetType(assetType: AssetType): AssetClass {
   if (assetType === AssetType.STOCK) return "stock";
   if (assetType === AssetType.ETF) return "etf";
   return "crypto";
+}
+
+async function loadLatestMarketRegimeReport(database: PrismaClient): Promise<MarketRegimeReport | null> {
+  const snapshot = await database.marketRegimeSnapshot?.findFirst({
+    orderBy: { generatedAt: "desc" }
+  });
+
+  return snapshot?.reportJson as MarketRegimeReport | null;
+}
+
+function buildMarketRegimeContext(input: {
+  report: MarketRegimeReport | null;
+  symbol: string;
+  assetType: AssetClass;
+  signalDirection: SignalDirection;
+  signalStatus: SignalStatus;
+}): SignalRegimeContext | null {
+  if (!input.report) return null;
+
+  return buildSignalRegimeContext({
+    symbol: input.symbol,
+    assetType: input.assetType,
+    signalDirection: input.signalDirection,
+    signalStatus: input.signalStatus,
+    report: input.report
+  });
 }
 
 function parseAlertMode(value: string | null | undefined): AlertMode {

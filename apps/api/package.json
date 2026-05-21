@@ -15,6 +15,7 @@
     "@signalpilot/data-quality": "workspace:*",
     "@signalpilot/database": "workspace:*",
     "@signalpilot/events-intelligence": "workspace:*",
+    "@signalpilot/market-regime": "workspace:*",
     "@signalpilot/multi-timeframe": "workspace:*",
     "@signalpilot/news-intelligence": "workspace:*",
     "@signalpilot/performance-intelligence": "workspace:*",

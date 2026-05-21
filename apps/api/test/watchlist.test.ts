@@ -291,6 +291,19 @@ describe("watchlist routes", () => {
 
     await server.close();
   });
+
+  it("returns latest market regime snapshot", async () => {
+    const { server } = await createServerWithState();
+
+    const response = await server.inject("/market-regime/latest");
+
+    assert.equal(response.statusCode, 200);
+    const body = response.json();
+    assert.equal(body.id, "market-regime-1");
+    assert.equal(body.report.overallRegime, "NEUTRAL");
+
+    await server.close();
+  });
 });
 
 async function createServer() {
@@ -304,6 +317,7 @@ async function createServerWithState() {
     watchlistItems: [] as ReturnType<typeof createWatchlistItem>[],
     alertStates: [] as ReturnType<typeof createAlertState>[],
     paperEvaluations: [] as ReturnType<typeof createPaperEvaluation>[],
+    marketRegimeSnapshots: [createMarketRegimeSnapshot()],
     signalFindManyWhere: [] as unknown[]
   };
   const server = Fastify({ logger: false });
@@ -319,6 +333,7 @@ function createDatabase(state: {
   watchlistItems: ReturnType<typeof createWatchlistItem>[];
   alertStates: ReturnType<typeof createAlertState>[];
   paperEvaluations: ReturnType<typeof createPaperEvaluation>[];
+  marketRegimeSnapshots: ReturnType<typeof createMarketRegimeSnapshot>[];
   signalFindManyWhere: unknown[];
 }) {
   return {
@@ -446,7 +461,40 @@ function createDatabase(state: {
     },
     botRun: {
       findFirst: async () => null
+    },
+    marketRegimeSnapshot: {
+      findFirst: async () => state.marketRegimeSnapshots[0] ?? null,
+      findMany: async ({ take }: { take: number }) => state.marketRegimeSnapshots.slice(0, take)
     }
+  };
+}
+
+function createMarketRegimeSnapshot() {
+  const report = {
+    generatedAt: "2026-01-01T00:00:00.000Z",
+    equityRegime: "UNKNOWN",
+    cryptoRegime: "RISK_ON",
+    overallRegime: "NEUTRAL",
+    riskMode: "NORMAL",
+    confidence: 70,
+    benchmarkSummaries: [],
+    summary: "Crypto RISK_ON, Equity UNKNOWN.",
+    riskNote: "Market Regime als Kontext nutzen.",
+    recommendations: ["Regime als Kontext nutzen."]
+  };
+
+  return {
+    id: "market-regime-1",
+    generatedAt: new Date(report.generatedAt),
+    equityRegime: report.equityRegime,
+    cryptoRegime: report.cryptoRegime,
+    overallRegime: report.overallRegime,
+    riskMode: report.riskMode,
+    confidence: report.confidence,
+    summary: report.summary,
+    riskNote: report.riskNote,
+    reportJson: report,
+    createdAt: new Date(report.generatedAt)
   };
 }
 

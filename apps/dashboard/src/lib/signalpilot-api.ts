@@ -25,6 +25,65 @@ export type MultiTimeframeAlignment =
   | "HIGHER_TIMEFRAME_CONFIRMATION"
   | "CONFLICT"
   | "NO_EDGE";
+export type MarketRegime = "RISK_ON" | "RISK_OFF" | "MIXED" | "NEUTRAL" | "UNKNOWN";
+export type RiskMode = "AGGRESSIVE" | "NORMAL" | "DEFENSIVE" | "HIGH_RISK" | "UNKNOWN";
+
+export type BenchmarkSummary = {
+  symbol: string;
+  assetType: string;
+  timeframe: string;
+  trendDirection: string;
+  momentumState: string;
+  volatilityState: string;
+  priceVsSma50: number | null;
+  priceVsSma200: number | null;
+  rsi: number | null;
+  score: number;
+  summary: string;
+};
+
+export type MarketRegimeReport = {
+  generatedAt: string;
+  equityRegime: MarketRegime;
+  cryptoRegime: MarketRegime;
+  overallRegime: MarketRegime;
+  riskMode: RiskMode;
+  confidence: number;
+  benchmarkSummaries: BenchmarkSummary[];
+  summary: string;
+  riskNote: string;
+  recommendations: string[];
+};
+
+export type MarketRegimeSnapshot = {
+  id: string;
+  generatedAt: string;
+  equityRegime: MarketRegime;
+  cryptoRegime: MarketRegime;
+  overallRegime: MarketRegime;
+  riskMode: RiskMode;
+  confidence: number;
+  summary: string;
+  riskNote: string;
+  reportJson: MarketRegimeReport;
+  report: MarketRegimeReport;
+  createdAt: string;
+};
+
+export type SignalRegimeContext = {
+  signalId?: string;
+  symbol: string;
+  assetType: string;
+  signalDirection: string;
+  signalStatus: string;
+  marketRegime: MarketRegime;
+  overallRegime: MarketRegime;
+  riskMode: RiskMode;
+  isAlignedWithRegime: boolean;
+  conflictLevel: "NONE" | "LOW" | "MEDIUM" | "HIGH";
+  summary: string;
+  riskNote: string;
+};
 
 export type Asset = {
   id: string;

@@ -88,6 +88,25 @@ pnpm worker:run-equity-pipeline
 
 Alert gate: set `ENABLE_EQUITY_ALERTS=true` to allow equity signals to trigger n8n webhooks. The default is `false` — signals and outputs are always written, but no webhooks are sent.
 
+## Market Regime Intelligence
+
+Calculate and store the latest benchmark market regime:
+
+```bash
+pnpm worker:calculate-market-regime
+```
+
+The job uses stored `1d` candles for `SPY`, `QQQ`, `IWM`, `BTCUSDT`, and `ETHUSDT`. Missing assets or missing candles are handled as `UNKNOWN`/lower confidence; no external provider is required by this step.
+
+Environment:
+
+```bash
+ENABLE_MARKET_REGIME=true              # default — run inside crypto/equity pipelines
+MARKET_REGIME_MAX_AGE_MINUTES=60       # default — reuse recent snapshots
+```
+
+Signal outputs include `dashboardJson.marketRegimeContext` and a Telegram `Market Regime` block when a snapshot exists. The dashboard page is available at `/dashboard/market-regime`, and the scanner shows a Market Regime banner.
+
 ## Equity News
 
 Fetch equity and ETF news via Finnhub Company News:

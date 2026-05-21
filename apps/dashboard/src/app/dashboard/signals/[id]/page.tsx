@@ -2,7 +2,13 @@ import { CandlestickChart } from "../../../../components/CandlestickChart";
 import { DirectionBadge, RiskBadge, StatusBadge } from "../../../../components/badges";
 import { ErrorState } from "../../../../components/empty-state";
 import { formatDateTime, formatJson, formatScore } from "../../../../lib/format";
-import { fetchApi, type EventContext, type NewsContext, type SignalDetail } from "../../../../lib/signalpilot-api";
+import {
+  fetchApi,
+  type EventContext,
+  type NewsContext,
+  type SignalDetail,
+  type SignalRegimeContext
+} from "../../../../lib/signalpilot-api";
 
 type SignalDetailPageProps = {
   params: Promise<{ id: string }>;
@@ -22,10 +28,11 @@ const scoreKeys = [
 
 export default async function SignalDetailPage({ params }: SignalDetailPageProps) {
   const { id } = await params;
-  const [signal, newsContext, eventContext] = await Promise.all([
+  const [signal, newsContext, eventContext, marketRegimeContext] = await Promise.all([
     fetchApi<SignalDetail>(`/signals/${encodeURIComponent(id)}`),
     fetchApi<NewsContext>(`/signals/${encodeURIComponent(id)}/news-context`),
-    fetchApi<EventContext>(`/signals/${encodeURIComponent(id)}/event-context`)
+    fetchApi<EventContext>(`/signals/${encodeURIComponent(id)}/event-context`),
+    fetchApi<SignalRegimeContext | null>(`/signals/${encodeURIComponent(id)}/market-regime-context`)
   ]);
 
   if (signal.error) {
@@ -72,6 +79,23 @@ export default async function SignalDetailPage({ params }: SignalDetailPageProps
             <RiskBadge value={data.signal.riskLevel} />
           </span>
         </div>
+      </section>
+
+      <section className="card" style={{ marginTop: 16 }}>
+        <h2>Market Regime Context</h2>
+        {marketRegimeContext.data ? (
+          <div className="stack-list">
+            <div className="list-row">
+              <strong>{marketRegimeContext.data.overallRegime}</strong>
+              <span>{marketRegimeContext.data.riskMode}</span>
+              <span>{marketRegimeContext.data.conflictLevel}</span>
+            </div>
+            <p>{marketRegimeContext.data.summary}</p>
+            <p>{marketRegimeContext.data.riskNote}</p>
+          </div>
+        ) : (
+          <p>Market Regime: Noch nicht berechnet.</p>
+        )}
       </section>
 
       <CandlestickChart

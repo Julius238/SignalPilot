@@ -6,6 +6,7 @@ import { config } from "dotenv";
 import pino from "pino";
 
 import { analyzeCryptoSignals, type AnalyzeCryptoSignalsSummary } from "./analyzeCryptoSignals.js";
+import { calculateMarketRegime, type CalculateMarketRegimeSummary } from "./calculateMarketRegime.js";
 import { fetchCryptoCandles, type FetchCryptoCandlesSummary } from "./fetchCryptoCandles.js";
 import {
   createPaperEvaluationsForSignals,
@@ -28,15 +29,18 @@ export type CryptoSignalPipelineSummary = {
   startedAt: string;
   finishedAt: string;
   fetchCryptoCandles?: FetchCryptoCandlesSummary;
+  calculateMarketRegime?: CalculateMarketRegimeSummary;
   analyzeCryptoSignals?: AnalyzeCryptoSignalsSummary;
   createPaperEvaluationsForSignals?: CreatePaperEvaluationsSummary;
   evaluatePaperSignals?: EvaluatePaperSignalsSummary;
   paperEvaluationEnabled: boolean;
+  marketRegimeEnabled: boolean;
   error?: string;
 };
 
 type PipelineJobs = {
   fetchCryptoCandles: (database: PrismaClient) => Promise<FetchCryptoCandlesSummary>;
+  calculateMarketRegime?: (database: PrismaClient) => Promise<CalculateMarketRegimeSummary>;
   analyzeCryptoSignals: (database: PrismaClient) => Promise<AnalyzeCryptoSignalsSummary>;
   createPaperEvaluationsForSignals: (database: PrismaClient) => Promise<CreatePaperEvaluationsSummary>;
   evaluatePaperSignals: (database: PrismaClient) => Promise<EvaluatePaperSignalsSummary>;
@@ -44,6 +48,7 @@ type PipelineJobs = {
 
 const defaultJobs: PipelineJobs = {
   fetchCryptoCandles,
+  calculateMarketRegime,
   analyzeCryptoSignals,
   createPaperEvaluationsForSignals,
   evaluatePaperSignals
@@ -55,7 +60,9 @@ export async function runCryptoSignalPipeline(
 ): Promise<CryptoSignalPipelineSummary> {
   const startedAt = new Date();
   const paperEvaluationEnabled = parseBooleanEnv(process.env.ENABLE_PAPER_EVALUATION, true);
+  const marketRegimeEnabled = parseBooleanEnv(process.env.ENABLE_MARKET_REGIME, true);
   let fetchSummary: FetchCryptoCandlesSummary | undefined;
+  let marketRegimeSummary: CalculateMarketRegimeSummary | undefined;
   let analyzeSummary: AnalyzeCryptoSignalsSummary | undefined;
   let createPaperEvaluationsSummary: CreatePaperEvaluationsSummary | undefined;
   let evaluatePaperSignalsSummary: EvaluatePaperSignalsSummary | undefined;
@@ -68,7 +75,8 @@ export async function runCryptoSignalPipeline(
       metadataJson: {
         startedAt: startedAt.toISOString(),
         status: BotRunStatus.RUNNING,
-        paperEvaluationEnabled
+        paperEvaluationEnabled,
+        marketRegimeEnabled
       }
     }
   });
@@ -87,6 +95,15 @@ export async function runCryptoSignalPipeline(
       botRunId: botRun.id,
       fetchCryptoCandles: fetchSummary
     });
+
+    if (marketRegimeEnabled && jobs.calculateMarketRegime) {
+      await writeBotLog(database, "info", "Market Regime Berechnung gestartet", { botRunId: botRun.id });
+      marketRegimeSummary = await jobs.calculateMarketRegime(database);
+      await writeBotLog(database, "info", "Market Regime Berechnung beendet", {
+        botRunId: botRun.id,
+        calculateMarketRegime: marketRegimeSummary
+      });
+    }
 
     await writeBotLog(database, "info", "Signal Analyse gestartet", {
       botRunId: botRun.id
@@ -123,7 +140,9 @@ export async function runCryptoSignalPipeline(
       startedAt,
       finishedAt,
       paperEvaluationEnabled,
+      marketRegimeEnabled,
       fetchSummary,
+      marketRegimeSummary,
       analyzeSummary,
       createPaperEvaluationsSummary,
       evaluatePaperSignalsSummary
@@ -154,7 +173,9 @@ export async function runCryptoSignalPipeline(
       startedAt,
       finishedAt,
       paperEvaluationEnabled,
+      marketRegimeEnabled,
       fetchSummary,
+      marketRegimeSummary,
       analyzeSummary,
       createPaperEvaluationsSummary,
       evaluatePaperSignalsSummary,
@@ -186,7 +207,9 @@ function buildPipelineSummary(input: {
   startedAt: Date;
   finishedAt: Date;
   paperEvaluationEnabled: boolean;
+  marketRegimeEnabled: boolean;
   fetchSummary?: FetchCryptoCandlesSummary;
+  marketRegimeSummary?: CalculateMarketRegimeSummary;
   analyzeSummary?: AnalyzeCryptoSignalsSummary;
   createPaperEvaluationsSummary?: CreatePaperEvaluationsSummary;
   evaluatePaperSignalsSummary?: EvaluatePaperSignalsSummary;
@@ -196,11 +219,16 @@ function buildPipelineSummary(input: {
     status: input.status,
     startedAt: input.startedAt.toISOString(),
     finishedAt: input.finishedAt.toISOString(),
-    paperEvaluationEnabled: input.paperEvaluationEnabled
+    paperEvaluationEnabled: input.paperEvaluationEnabled,
+    marketRegimeEnabled: input.marketRegimeEnabled
   };
 
   if (input.fetchSummary) {
     summary.fetchCryptoCandles = input.fetchSummary;
+  }
+
+  if (input.marketRegimeSummary) {
+    summary.calculateMarketRegime = input.marketRegimeSummary;
   }
 
   if (input.analyzeSummary) {

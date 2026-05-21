@@ -16,6 +16,11 @@ import {
 } from "@signalpilot/database";
 import { buildDataQualityReport } from "@signalpilot/data-quality";
 import { buildEventContextForSignal, type EventInput } from "@signalpilot/events-intelligence";
+import {
+  buildSignalRegimeContext,
+  type MarketRegimeReport,
+  type SignalRegimeContext
+} from "@signalpilot/market-regime";
 import { buildNewsContextForSignal } from "@signalpilot/news-intelligence";
 import {
   calculateMultiTimeframeSummary,
@@ -574,6 +579,39 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
     return filteredRows.slice(0, limit);
   });
 
+  server.get("/market-regime/latest", async () => {
+    const snapshot = await database.marketRegimeSnapshot.findFirst({
+      orderBy: { generatedAt: "desc" }
+    });
+
+    return snapshot ? toMarketRegimeSnapshot(snapshot) : null;
+  });
+
+  server.get("/market-regime/history", async (request, reply) => {
+    const query = asQueryRecord(request.query);
+    const limit = parseLimit(query.limit, 50, 500, reply);
+    const from = parseOptionalIsoDate(query.from);
+    const to = parseOptionalIsoDate(query.to);
+
+    if (reply.sent) return reply;
+
+    const snapshots = await database.marketRegimeSnapshot.findMany({
+      where: {
+        generatedAt:
+          from || to
+            ? {
+                gte: from,
+                lte: to
+              }
+            : undefined
+      },
+      orderBy: { generatedAt: "desc" },
+      take: limit
+    });
+
+    return snapshots.map(toMarketRegimeSnapshot);
+  });
+
   server.get("/signals/:id", async (request, reply) => {
     const { id } = request.params as { id: string };
     const signal = await database.signal.findUnique({
@@ -615,6 +653,34 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
       paperEvaluation: paperEvaluation ? toPaperEvaluation(paperEvaluation) : null,
       candles: candles.reverse().map(toCandle)
     };
+  });
+
+  server.get("/signals/:id/market-regime-context", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const signal = await database.signal.findUnique({
+      where: { id },
+      include: { asset: { select: { assetType: true } }, output: true }
+    });
+
+    if (!signal) return notFound(reply, "Signal not found");
+
+    const storedContext = extractMarketRegimeContext(signal.output?.dashboardJson);
+    if (storedContext) return storedContext;
+
+    const snapshot = await database.marketRegimeSnapshot.findFirst({
+      orderBy: { generatedAt: "desc" }
+    });
+
+    if (!snapshot) return null;
+
+    return buildSignalRegimeContext({
+      signalId: signal.id,
+      symbol: signal.symbol,
+      assetType: mapAssetTypeForMarketRegime(signal.asset?.assetType ?? AssetType.STOCK),
+      signalDirection: signal.direction,
+      signalStatus: signal.status,
+      report: snapshot.reportJson as MarketRegimeReport
+    });
   });
 
   server.get("/news", async (request, reply) => {
@@ -1711,6 +1777,38 @@ function toSignalOutput(
   };
 }
 
+function toMarketRegimeSnapshot(snapshot: Prisma.MarketRegimeSnapshotGetPayload<Record<string, never>>) {
+  return {
+    id: snapshot.id,
+    generatedAt: snapshot.generatedAt,
+    equityRegime: snapshot.equityRegime,
+    cryptoRegime: snapshot.cryptoRegime,
+    overallRegime: snapshot.overallRegime,
+    riskMode: snapshot.riskMode,
+    confidence: snapshot.confidence,
+    summary: snapshot.summary,
+    riskNote: snapshot.riskNote,
+    reportJson: snapshot.reportJson,
+    report: snapshot.reportJson,
+    createdAt: snapshot.createdAt
+  };
+}
+
+function extractMarketRegimeContext(dashboardJson: unknown): SignalRegimeContext | null {
+  if (!dashboardJson || typeof dashboardJson !== "object" || !("marketRegimeContext" in dashboardJson)) {
+    return null;
+  }
+
+  const context = (dashboardJson as { marketRegimeContext?: unknown }).marketRegimeContext;
+  return context && typeof context === "object" ? (context as SignalRegimeContext) : null;
+}
+
+function mapAssetTypeForMarketRegime(assetType: AssetType) {
+  if (assetType === AssetType.CRYPTO) return "crypto";
+  if (assetType === AssetType.ETF) return "etf";
+  return "stock";
+}
+
 function toCandle(candle: Prisma.CandleGetPayload<Record<string, never>>) {
   return {
     id: candle.id,
@@ -1904,7 +2002,8 @@ async function loadDataQualityReport(input: { assetType?: AssetType; symbol?: st
     totalSignals,
     signalsLast24h,
     signalsWithoutEvaluation,
-    totalEvaluations
+    totalEvaluations,
+    latestMarketRegimeSnapshot
   ] = await Promise.all([
     database.candle.groupBy({
       by: ["assetId", "timeframe"],
@@ -1993,7 +2092,8 @@ async function loadDataQualityReport(input: { assetType?: AssetType; symbol?: st
         }
       }
     }),
-    database.paperSignalEvaluation.count({ where: assetWhere })
+    database.paperSignalEvaluation.count({ where: assetWhere }),
+    database.marketRegimeSnapshot.findFirst({ orderBy: { generatedAt: "desc" } })
   ]);
 
   const signalCountsByAsset = new Map<string, number>();
@@ -2081,7 +2181,7 @@ async function loadDataQualityReport(input: { assetType?: AssetType; symbol?: st
     .filter((group) => group.evaluationStatus === PaperEvaluationStatus.SKIPPED)
     .reduce((sum, group) => sum + group._count._all, 0);
 
-  return buildDataQualityReport({
+  const report = buildDataQualityReport({
     assets: assets.map((asset) => ({
       id: asset.id,
       symbol: asset.symbol,
@@ -2111,6 +2211,42 @@ async function loadDataQualityReport(input: { assetType?: AssetType; symbol?: st
     successfulAlertCount: alerts.filter((alert) => alert.status === AlertStatus.SENT).length,
     alertCount: alerts.length
   });
+  const marketRegimeWarnings = buildMarketRegimeCoverageWarnings(
+    assets,
+    candleCountsByAsset,
+    latestMarketRegimeSnapshot?.generatedAt ?? null,
+    now
+  );
+
+  return {
+    ...report,
+    warnings: [...report.warnings, ...marketRegimeWarnings]
+  };
+}
+
+function buildMarketRegimeCoverageWarnings(
+  assets: Array<{ symbol: string; id: string }>,
+  candleCountsByAsset: Map<string, Record<string, number>>,
+  latestGeneratedAt: Date | null,
+  now: Date
+) {
+  const assetIdBySymbol = new Map(assets.map((asset) => [asset.symbol, asset.id]));
+  const warnings: string[] = [];
+
+  for (const symbol of ["SPY", "QQQ", "IWM", "BTCUSDT", "ETHUSDT"]) {
+    const assetId = assetIdBySymbol.get(symbol);
+    if (!assetId || (candleCountsByAsset.get(assetId)?.["1d"] ?? 0) < 200) {
+      warnings.push(`Market Regime Benchmark ${symbol} hat weniger als 200 1d Candles.`);
+    }
+  }
+
+  if (!latestGeneratedAt) {
+    warnings.push("MarketRegimeSnapshot wurde noch nicht berechnet.");
+  } else if (now.getTime() - latestGeneratedAt.getTime() > 2 * 60 * 60 * 1000) {
+    warnings.push("MarketRegimeSnapshot ist aelter als 2 Stunden.");
+  }
+
+  return warnings;
 }
 
 function asQueryRecord(query: unknown): QueryRecord {

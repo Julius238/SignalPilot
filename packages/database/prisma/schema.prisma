@@ -225,6 +225,24 @@ model SignalOutput {
   signal                 Signal   @relation(fields: [signalId], references: [id], onDelete: Cascade)
 }
 
+model MarketRegimeSnapshot {
+  id            String   @id @default(cuid())
+  generatedAt   DateTime
+  equityRegime  String
+  cryptoRegime  String
+  overallRegime String
+  riskMode      String
+  confidence    Float
+  summary       String
+  riskNote      String
+  reportJson    Json
+  createdAt     DateTime @default(now())
+
+  @@index([generatedAt])
+  @@index([overallRegime])
+  @@index([riskMode])
+}
+
 model NewsItem {
   id             String   @id @default(cuid())
   assetId        String?

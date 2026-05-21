@@ -95,6 +95,7 @@ export default async function AssetDetailPage({ params }: AssetDetailPageProps) 
               </div>
               <p>{data.latestSignalOutput?.shortConclusion ?? "-"}</p>
               <p>{data.latestSignalOutput?.nextTrigger ?? "-"}</p>
+              <MarketRegimeContextBlock dashboardJson={data.latestSignalOutput?.dashboardJson} />
             </div>
           ) : (
             <p>No latest signal found.</p>
@@ -280,4 +281,27 @@ function SignalSnapshot({
       <strong>{signal ? `${signal.timeframe} · ${signal.status} · ${formatScore(signal.score)}` : "-"}</strong>
     </div>
   );
+}
+
+function MarketRegimeContextBlock({ dashboardJson }: { dashboardJson: unknown }) {
+  const context = extractMarketRegimeContext(dashboardJson);
+  if (!context) return null;
+
+  return (
+    <div>
+      <strong>Market Regime</strong>
+      <p>
+        Overall: {context.overallRegime} · Risk Mode: {context.riskMode} · {context.summary}
+      </p>
+    </div>
+  );
+}
+
+function extractMarketRegimeContext(dashboardJson: unknown) {
+  if (!dashboardJson || typeof dashboardJson !== "object" || !("marketRegimeContext" in dashboardJson)) {
+    return null;
+  }
+
+  return (dashboardJson as { marketRegimeContext?: { overallRegime: string; riskMode: string; summary: string } })
+    .marketRegimeContext ?? null;
 }

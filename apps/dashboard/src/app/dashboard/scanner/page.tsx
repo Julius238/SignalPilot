@@ -2,7 +2,7 @@ import { ErrorState } from "../../../components/empty-state";
 import { ScannerFilters } from "../../../components/scanner-filters";
 import { ScannerGroups } from "../../../components/scanner-groups";
 import { formatDateTime } from "../../../lib/format";
-import { buildQuery, fetchApi, type ScannerResponse } from "../../../lib/signalpilot-api";
+import { buildQuery, fetchApi, type MarketRegimeSnapshot, type ScannerResponse } from "../../../lib/signalpilot-api";
 
 type ScannerPageProps = {
   searchParams: Promise<{
@@ -23,7 +23,10 @@ export default async function ScannerPage({ searchParams }: ScannerPageProps) {
     showOnlyAlertWorthy: params.showOnlyAlertWorthy,
     watchlistOnly: params.watchlistOnly
   });
-  const scanner = await fetchApi<ScannerResponse>(`/scanner${query}`);
+  const [scanner, marketRegime] = await Promise.all([
+    fetchApi<ScannerResponse>(`/scanner${query}`),
+    fetchApi<MarketRegimeSnapshot | null>("/market-regime/latest")
+  ]);
   const summary = scanner.data?.summary;
 
   return (
@@ -36,6 +39,18 @@ export default async function ScannerPage({ searchParams }: ScannerPageProps) {
       </div>
 
       <ScannerFilters />
+
+      <section className="card" style={{ marginTop: 16 }}>
+        <h2>Market Regime</h2>
+        {marketRegime.data ? (
+          <p>
+            Overall: {marketRegime.data.overallRegime} · Risk Mode: {marketRegime.data.riskMode} ·{" "}
+            {marketRegime.data.summary}
+          </p>
+        ) : (
+          <p>Market Regime: Noch nicht berechnet.</p>
+        )}
+      </section>
 
       {scanner.error ? (
         <ErrorState title="Could not load scanner" message={scanner.error} />

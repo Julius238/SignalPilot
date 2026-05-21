@@ -1,4 +1,5 @@
 import type { MultiTimeframeSummary } from "@signalpilot/multi-timeframe";
+import type { SignalRegimeContext } from "@signalpilot/market-regime";
 import type {
   AssetClass,
   IntelligenceContext,
@@ -35,6 +36,7 @@ export type ComposeSignalOutputInput = {
   };
   intelligence?: Partial<IntelligenceContext>;
   multiTimeframeSummary?: MultiTimeframeSummary | null;
+  marketRegimeContext?: SignalRegimeContext | null;
   newsContext?: NewsContextLike | null;
   eventContext?: EventContextLike | null;
 };
@@ -60,6 +62,7 @@ export function composeSignalOutput(input: ComposeSignalOutputInput): SignalOutp
   const technical = buildTechnicalSummary(decision);
   const confirmations = buildConfirmations(decision);
   const multiTimeframeLines = buildMultiTimeframeLines(input.multiTimeframeSummary);
+  const marketRegimeLines = buildMarketRegimeLines(input.marketRegimeContext);
   const counterArgument =
     decision.counterArguments[0] ?? "Kein dominantes Gegenargument im aktuellen technischen Scan.";
   const shortConclusion = buildShortConclusion(decision);
@@ -97,6 +100,9 @@ export function composeSignalOutput(input: ComposeSignalOutputInput): SignalOutp
     "",
     "Multi-Timeframe:",
     ...multiTimeframeLines,
+    "",
+    "Market Regime:",
+    ...marketRegimeLines,
     "",
     "Gegenargument:",
     counterArgument,
@@ -145,9 +151,11 @@ export function composeSignalOutput(input: ComposeSignalOutputInput): SignalOutp
       intelligence,
       confirmations,
       multiTimeframeSummary: input.multiTimeframeSummary ?? null,
+      marketRegimeContext: input.marketRegimeContext ?? null,
       newsContext: input.newsContext ?? null,
       eventContext: eventContextForDashboard,
       impactNote: impactNoteForDashboard,
+      riskNote: input.marketRegimeContext?.riskNote ?? null,
       counterArgument,
       nextTrigger: decision.nextTrigger,
       generatedSections: [
@@ -156,11 +164,25 @@ export function composeSignalOutput(input: ComposeSignalOutputInput): SignalOutp
         "News/X/Event",
         "Marktbestätigung",
         "Multi-Timeframe",
+        "Market Regime",
         "Gegenargument",
         "Nächster Trigger"
       ]
     }
   };
+}
+
+function buildMarketRegimeLines(context?: SignalRegimeContext | null): string[] {
+  if (!context) {
+    return ["• Noch nicht berechnet."];
+  }
+
+  return [
+    `• Overall: ${context.overallRegime}`,
+    `• Risk Mode: ${context.riskMode}`,
+    `• Kontext: ${context.summary}`,
+    `• Konflikt: ${context.conflictLevel}`
+  ];
 }
 
 function buildShortConclusion(decision: SignalDecision): string {

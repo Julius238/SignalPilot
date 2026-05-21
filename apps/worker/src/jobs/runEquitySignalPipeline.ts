@@ -6,6 +6,7 @@ import { config } from "dotenv";
 import pino from "pino";
 
 import { analyzeEquitySignals, type AnalyzeEquitySignalsSummary } from "./analyzeEquitySignals.js";
+import { calculateMarketRegime, type CalculateMarketRegimeSummary } from "./calculateMarketRegime.js";
 import { fetchEquityCandles, type FetchEquityCandlesSummary } from "./fetchEquityCandles.js";
 import { fetchEquityEvents, type FetchEquityEventsSummary } from "./fetchEquityEvents.js";
 import { fetchEquityNews, type FetchEquityNewsSummary } from "./fetchEquityNews.js";
@@ -29,12 +30,14 @@ export type EquitySignalPipelineSummary = {
   fetchEquityCandles?: FetchEquityCandlesSummary;
   fetchEquityNews?: FetchEquityNewsSummary;
   fetchEquityEvents?: FetchEquityEventsSummary;
+  calculateMarketRegime?: CalculateMarketRegimeSummary;
   analyzeEquitySignals?: AnalyzeEquitySignalsSummary;
   createPaperEvaluationsForSignals?: CreatePaperEvaluationsSummary;
   evaluatePaperSignals?: EvaluatePaperSignalsSummary;
   paperEvaluationEnabled: boolean;
   equityNewsEnabled: boolean;
   equityEventsEnabled: boolean;
+  marketRegimeEnabled: boolean;
   error?: string;
 };
 
@@ -42,6 +45,7 @@ type PipelineJobs = {
   fetchEquityCandles: (database: PrismaClient) => Promise<FetchEquityCandlesSummary>;
   fetchEquityNews: (database: PrismaClient) => Promise<FetchEquityNewsSummary>;
   fetchEquityEvents: (database: PrismaClient) => Promise<FetchEquityEventsSummary>;
+  calculateMarketRegime?: (database: PrismaClient) => Promise<CalculateMarketRegimeSummary>;
   analyzeEquitySignals: (database: PrismaClient) => Promise<AnalyzeEquitySignalsSummary>;
   createPaperEvaluationsForSignals: (database: PrismaClient) => Promise<CreatePaperEvaluationsSummary>;
   evaluatePaperSignals: (database: PrismaClient) => Promise<EvaluatePaperSignalsSummary>;
@@ -51,6 +55,7 @@ const defaultJobs: PipelineJobs = {
   fetchEquityCandles,
   fetchEquityNews,
   fetchEquityEvents,
+  calculateMarketRegime,
   analyzeEquitySignals,
   createPaperEvaluationsForSignals,
   evaluatePaperSignals
@@ -64,9 +69,11 @@ export async function runEquitySignalPipeline(
   const paperEvaluationEnabled = parseBooleanEnv(process.env.ENABLE_PAPER_EVALUATION, true);
   const equityNewsEnabled = parseBooleanEnv(process.env.ENABLE_EQUITY_NEWS, true);
   const equityEventsEnabled = parseBooleanEnv(process.env.ENABLE_EQUITY_EVENTS, true);
+  const marketRegimeEnabled = parseBooleanEnv(process.env.ENABLE_MARKET_REGIME, true);
   let fetchSummary: FetchEquityCandlesSummary | undefined;
   let fetchNewsSummary: FetchEquityNewsSummary | undefined;
   let fetchEventsSummary: FetchEquityEventsSummary | undefined;
+  let marketRegimeSummary: CalculateMarketRegimeSummary | undefined;
   let analyzeSummary: AnalyzeEquitySignalsSummary | undefined;
   let createPaperEvaluationsSummary: CreatePaperEvaluationsSummary | undefined;
   let evaluatePaperSignalsSummary: EvaluatePaperSignalsSummary | undefined;
@@ -81,7 +88,8 @@ export async function runEquitySignalPipeline(
         status: BotRunStatus.RUNNING,
         paperEvaluationEnabled,
         equityNewsEnabled,
-        equityEventsEnabled
+        equityEventsEnabled,
+        marketRegimeEnabled
       }
     }
   });
@@ -117,6 +125,15 @@ export async function runEquitySignalPipeline(
       });
     }
 
+    if (marketRegimeEnabled && jobs.calculateMarketRegime) {
+      await writeBotLog(database, "info", "Market Regime Berechnung gestartet", { botRunId: botRun.id });
+      marketRegimeSummary = await jobs.calculateMarketRegime(database);
+      await writeBotLog(database, "info", "Market Regime Berechnung beendet", {
+        botRunId: botRun.id,
+        calculateMarketRegime: marketRegimeSummary
+      });
+    }
+
     await writeBotLog(database, "info", "Equity Signal Analyse gestartet", { botRunId: botRun.id });
     analyzeSummary = await jobs.analyzeEquitySignals(database);
     await writeBotLog(database, "info", "Equity Signal Analyse beendet", {
@@ -148,9 +165,11 @@ export async function runEquitySignalPipeline(
       paperEvaluationEnabled,
       equityNewsEnabled,
       equityEventsEnabled,
+      marketRegimeEnabled,
       fetchSummary,
       fetchNewsSummary,
       fetchEventsSummary,
+      marketRegimeSummary,
       analyzeSummary,
       createPaperEvaluationsSummary,
       evaluatePaperSignalsSummary
@@ -177,9 +196,11 @@ export async function runEquitySignalPipeline(
       paperEvaluationEnabled,
       equityNewsEnabled,
       equityEventsEnabled,
+      marketRegimeEnabled,
       fetchSummary,
       fetchNewsSummary,
       fetchEventsSummary,
+      marketRegimeSummary,
       analyzeSummary,
       createPaperEvaluationsSummary,
       evaluatePaperSignalsSummary,
@@ -207,9 +228,11 @@ function buildPipelineSummary(input: {
   paperEvaluationEnabled: boolean;
   equityNewsEnabled: boolean;
   equityEventsEnabled: boolean;
+  marketRegimeEnabled: boolean;
   fetchSummary?: FetchEquityCandlesSummary;
   fetchNewsSummary?: FetchEquityNewsSummary;
   fetchEventsSummary?: FetchEquityEventsSummary;
+  marketRegimeSummary?: CalculateMarketRegimeSummary;
   analyzeSummary?: AnalyzeEquitySignalsSummary;
   createPaperEvaluationsSummary?: CreatePaperEvaluationsSummary;
   evaluatePaperSignalsSummary?: EvaluatePaperSignalsSummary;
@@ -221,12 +244,14 @@ function buildPipelineSummary(input: {
     finishedAt: input.finishedAt.toISOString(),
     paperEvaluationEnabled: input.paperEvaluationEnabled,
     equityNewsEnabled: input.equityNewsEnabled,
-    equityEventsEnabled: input.equityEventsEnabled
+    equityEventsEnabled: input.equityEventsEnabled,
+    marketRegimeEnabled: input.marketRegimeEnabled
   };
 
   if (input.fetchSummary) summary.fetchEquityCandles = input.fetchSummary;
   if (input.fetchNewsSummary) summary.fetchEquityNews = input.fetchNewsSummary;
   if (input.fetchEventsSummary) summary.fetchEquityEvents = input.fetchEventsSummary;
+  if (input.marketRegimeSummary) summary.calculateMarketRegime = input.marketRegimeSummary;
   if (input.analyzeSummary) summary.analyzeEquitySignals = input.analyzeSummary;
   if (input.createPaperEvaluationsSummary) summary.createPaperEvaluationsForSignals = input.createPaperEvaluationsSummary;
   if (input.evaluatePaperSignalsSummary) summary.evaluatePaperSignals = input.evaluatePaperSignalsSummary;
