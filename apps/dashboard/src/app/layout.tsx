@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 
+import { LogoutButton } from "../components/logout-button";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -10,11 +11,19 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
-  // TODO: Add dashboard authentication before production exposure.
+  const authDisabled =
+    process.env.API_AUTH_ENABLED === "false" ||
+    process.env.DASHBOARD_AUTH_ENABLED === "false";
+
   return (
     <html lang="en">
       <body>
         <div className="app-shell">
+          {authDisabled ? (
+            <div className="auth-warning">
+              Auth disabled — do not expose this dashboard publicly.
+            </div>
+          ) : null}
           <header className="top-nav">
             <Link className="brand" href="/dashboard">
               SignalPilot
@@ -36,7 +45,11 @@ export default function RootLayout({ children }: { children: ReactNode }) {
               <Link href="/dashboard/data-quality">Data Quality</Link>
               <Link href="/dashboard/assets">Assets</Link>
               <Link href="/dashboard/logs">Logs</Link>
+              <Link href="/dashboard/audit-logs">Audit Logs</Link>
             </nav>
+            <div className="nav-actions">
+              <LogoutButton />
+            </div>
           </header>
           <main className="page">{children}</main>
         </div>

@@ -750,6 +750,18 @@ export type WatchlistItem = {
   multiTimeframeSummary: MultiTimeframeSummary | null;
 };
 
+export type AuditLog = {
+  id: string;
+  action: string;
+  actor: string;
+  ip: string;
+  userAgent: string;
+  targetType: string | null;
+  targetId: string | null;
+  metadataJson: unknown;
+  createdAt: string;
+};
+
 export type ApiResult<T> =
   | {
       data: T;
@@ -761,41 +773,58 @@ export type ApiResult<T> =
     };
 
 const apiUrl = process.env.NEXT_PUBLIC_SIGNALPILOT_API_URL ?? "http://localhost:3100";
+const SESSION_COOKIE = process.env.AUTH_COOKIE_NAME ?? "signalpilot_session";
 
 export async function fetchApi<T>(
   path: string,
   init: RequestInit = {}
 ): Promise<ApiResult<T>> {
+  const isServer = typeof window === "undefined";
+  const extraHeaders: Record<string, string> = {};
+
+  if (isServer) {
+    try {
+      const { cookies } = await import("next/headers");
+      const cookieStore = await cookies();
+      const sessionCookie = cookieStore.get(SESSION_COOKIE);
+      if (sessionCookie) {
+        extraHeaders["Cookie"] = `${SESSION_COOKIE}=${sessionCookie.value}`;
+      }
+    } catch {
+      // Not in a Next.js request context (e.g. during build)
+    }
+  }
+
   try {
     const response = await fetch(`${apiUrl}${path}`, {
       ...init,
-      cache: "no-store"
+      cache: "no-store",
+      ...(!isServer && { credentials: "include" as const }),
+      headers: {
+        ...init.headers,
+        ...extraHeaders
+      }
     });
 
     if (!response.ok) {
+      if (response.status === 401) {
+        return { data: null, error: "Unauthorized" };
+      }
+
       const body = await response.json().catch(() => null);
       const message =
         typeof body?.message === "string"
           ? body.message
           : `SignalPilot API returned HTTP ${response.status}`;
 
-      return {
-        data: null,
-        error: message
-      };
+      return { data: null, error: message };
     }
 
     if (response.status === 204) {
-      return {
-        data: null as T,
-        error: null
-      };
+      return { data: null as T, error: null };
     }
 
-    return {
-      data: (await response.json()) as T,
-      error: null
-    };
+    return { data: (await response.json()) as T, error: null };
   } catch (error) {
     return {
       data: null,
@@ -810,6 +839,7 @@ export async function mutateApi<T>(
 ): Promise<ApiResult<T>> {
   return fetchApi<T>(path, {
     ...init,
+    credentials: "include",
     headers: {
       "Content-Type": "application/json",
       ...init.headers

@@ -32,7 +32,8 @@
     "worker:run-equity-pipeline": "pnpm --filter @signalpilot/worker run:equity-pipeline",
     "worker:run-crypto-pipeline": "pnpm --filter @signalpilot/worker run:crypto-pipeline",
     "worker:scheduler": "pnpm --filter @signalpilot/worker scheduler",
-    "prisma:generate": "pnpm --filter @signalpilot/database prisma:generate"
+    "prisma:generate": "pnpm --filter @signalpilot/database prisma:generate",
+    "auth:hash-password": "tsx apps/api/scripts/hash-password.ts"
   },
   "devDependencies": {
     "@eslint/js": "^9.18.0",

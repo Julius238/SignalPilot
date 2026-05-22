@@ -5,7 +5,7 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    ignores: ["**/.next/**", "**/dist/**", "**/next-env.d.ts", "**/node_modules/**", "**/generated/**"]
+    ignores: ["**/.next/**", "**/dist/**", "**/next-env.d.ts", "**/node_modules/**", "**/generated/**", "**/scripts/**"]
   },
   {
     languageOptions: {

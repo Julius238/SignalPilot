@@ -635,3 +635,19 @@ model PaperPosition {
   @@index([paperAccountId, status])
   @@index([assetId])
 }
+
+model AuditLog {
+  id           String   @id @default(cuid())
+  action       String
+  actor        String
+  ip           String
+  userAgent    String
+  targetType   String?
+  targetId     String?
+  metadataJson Json?
+  createdAt    DateTime @default(now())
+
+  @@index([action])
+  @@index([actor])
+  @@index([createdAt])
+}

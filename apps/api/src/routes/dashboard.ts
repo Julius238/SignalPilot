@@ -18,6 +18,7 @@ import {
   StrategyComparisonStatus,
   WatchlistPriority
 } from "@signalpilot/database";
+import { extractRequestContext, logAudit } from "../auth/audit.js";
 import { buildDataQualityReport } from "@signalpilot/data-quality";
 import { buildEventContextForSignal, type EventInput } from "@signalpilot/events-intelligence";
 import {
@@ -219,6 +220,7 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
       });
 
       reply.code(201);
+      void logAudit({ action: "watchlist_create", actor: "admin", targetType: "WatchlistItem", targetId: item.id, ...extractRequestContext(request) });
       return (await buildWatchlistItems([item]))[0];
     } catch (error) {
       if (isUniqueConstraintError(error)) {
@@ -274,6 +276,7 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
         }
       });
 
+      void logAudit({ action: "watchlist_update", actor: "admin", targetType: "WatchlistItem", targetId: id, ...extractRequestContext(request) });
       return (await buildWatchlistItems([item]))[0];
     } catch (error) {
       if (isRecordNotFoundError(error)) {
@@ -295,6 +298,7 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
       });
 
       reply.code(204);
+      void logAudit({ action: "watchlist_delete", actor: "admin", targetType: "WatchlistItem", targetId: id, ...extractRequestContext(request) });
       return null;
     } catch (error) {
       if (isRecordNotFoundError(error)) {
@@ -823,6 +827,7 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
 
     if (reply.sent) return reply;
 
+    void logAudit({ action: "backtest_run_request", actor: "admin", metadata: { name, assetType }, ...extractRequestContext(request) });
     return {
       accepted: false,
       message: "Backtest API v1 validiert die Konfiguration. Starte den Lauf synchron per Worker Script.",
@@ -910,6 +915,7 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
 
     if (reply.sent) return reply;
 
+    void logAudit({ action: "strategy_comparison_run_request", actor: "admin", metadata: { name, assetType }, ...extractRequestContext(request) });
     return {
       accepted: false,
       message: "Use pnpm worker:run-strategy-comparison for a local run.",

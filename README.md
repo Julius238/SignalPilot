@@ -355,3 +355,84 @@ API endpoints:
 curl "http://localhost:3100/data-quality/report?assetType=CRYPTO"
 curl "http://localhost:3100/data-quality/assets?assetType=CRYPTO&minQualityScore=70"
 ```
+
+## Auth & Security
+
+SignalPilot v1 uses a single-admin cookie-based session. No multi-user, no OAuth.
+
+### Setup
+
+**1. Generate a password hash**
+
+```bash
+ADMIN_PASSWORD=yourpassword pnpm auth:hash-password
+# or interactive:
+pnpm auth:hash-password
+```
+
+Copy the output hash into `ADMIN_PASSWORD_HASH` in your `.env`.
+
+**2. Generate a session secret**
+
+```bash
+openssl rand -hex 32
+```
+
+Copy the output into `AUTH_SESSION_SECRET` in your `.env`.
+
+**3. Set credentials in `.env`**
+
+```env
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD_HASH=<hash from step 1>
+AUTH_SESSION_SECRET=<secret from step 2>
+AUTH_COOKIE_SECURE=false          # true behind HTTPS
+AUTH_COOKIE_NAME=signalpilot_session
+AUTH_SESSION_TTL_HOURS=12
+API_AUTH_ENABLED=true
+DASHBOARD_AUTH_ENABLED=true
+```
+
+**4. Run database migration** (adds AuditLog table)
+
+```bash
+pnpm --filter @signalpilot/database prisma:migrate
+```
+
+### Local Dev Mode (no login)
+
+Set both flags to false to bypass auth entirely:
+
+```env
+API_AUTH_ENABLED=false
+DASHBOARD_AUTH_ENABLED=false
+```
+
+The dashboard shows a visible warning banner when auth is disabled.
+
+### Public endpoints (no auth required)
+
+- `GET /health`
+- `GET /config/public`
+- `GET /auth/status`
+- `POST /auth/login`
+- `POST /auth/logout`
+
+All other API endpoints require a valid session cookie.
+
+### Production checklist
+
+- `AUTH_COOKIE_SECURE=true` — required behind HTTPS
+- `AUTH_SESSION_SECRET` — use a strong random value (`openssl rand -hex 32`)
+- `API_AUTH_ENABLED=true`
+- `DASHBOARD_AUTH_ENABLED=true`
+- `DASHBOARD_ORIGIN` — set to your actual dashboard domain
+
+### Audit Logs
+
+Admin actions (login, logout, watchlist mutations, backtest/strategy run requests) are recorded in the `AuditLog` table.
+
+```bash
+curl -b "signalpilot_session=<token>" http://localhost:3100/audit-logs
+curl -b "signalpilot_session=<token>" "http://localhost:3100/audit-logs?action=login_failed"
+```

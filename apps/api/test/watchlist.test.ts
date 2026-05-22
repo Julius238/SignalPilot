@@ -30,12 +30,14 @@ describe("watchlist routes", () => {
   const originalDashboardOrigin = process.env.DASHBOARD_ORIGIN;
   const originalEnableLiveTrading = process.env.ENABLE_LIVE_TRADING;
   const originalWebhookUrl = process.env.N8N_WEBHOOK_SIGNAL_URL;
+  const originalApiAuthEnabled = process.env.API_AUTH_ENABLED;
 
   afterEach(() => {
     restoreEnv("ALERT_MODE", originalAlertMode);
     restoreEnv("DASHBOARD_ORIGIN", originalDashboardOrigin);
     restoreEnv("ENABLE_LIVE_TRADING", originalEnableLiveTrading);
     restoreEnv("N8N_WEBHOOK_SIGNAL_URL", originalWebhookUrl);
+    restoreEnv("API_AUTH_ENABLED", originalApiAuthEnabled);
   });
 
   it("creates a watchlist item and returns asset data", async () => {
@@ -397,6 +399,8 @@ async function createServer() {
 }
 
 async function createServerWithState() {
+  process.env.API_AUTH_ENABLED = "false";
+
   const state = {
     assets: [createAsset()],
     watchlistItems: [] as ReturnType<typeof createWatchlistItem>[],
