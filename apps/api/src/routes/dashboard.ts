@@ -15,6 +15,7 @@ import {
   SignalDirection,
   SignalStatus,
   SignalType,
+  StrategyComparisonStatus,
   WatchlistPriority
 } from "@signalpilot/database";
 import { buildDataQualityReport } from "@signalpilot/data-quality";
@@ -50,6 +51,7 @@ const alertStatuses = Object.values(AlertStatus);
 const alertChannels = Object.values(AlertChannel);
 const backtestRunStatuses = Object.values(BacktestRunStatus);
 const backtestOutcomes = Object.values(BacktestOutcome);
+const strategyComparisonStatuses = Object.values(StrategyComparisonStatus);
 const paperEvaluationStatuses = Object.values(PaperEvaluationStatus);
 const paperEvaluationOutcomes = Object.values(PaperEvaluationOutcome);
 const paperEvaluationKinds = Object.values(PaperEvaluationKind);
@@ -836,6 +838,83 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
         useSignalRules,
         maxSignalsPerAssetTimeframe
       }
+    };
+  });
+
+  server.get("/strategy/configs", async () => {
+    const configs = await database.strategyConfig.findMany({ orderBy: [{ isDefault: "desc" }, { name: "asc" }] });
+    return configs.map(toStrategyConfig);
+  });
+
+  server.get("/strategy/comparisons", async (request, reply) => {
+    const query = asQueryRecord(request.query);
+    const status = parseEnum(query.status, strategyComparisonStatuses as StrategyComparisonStatus[], "status", reply);
+    const limit = parseLimit(query.limit, 50, 200, reply);
+
+    if (reply.sent) return reply;
+
+    const runs = await database.strategyComparisonRun.findMany({
+      where: { status },
+      orderBy: { startedAt: "desc" },
+      take: limit,
+      include: { results: { include: { strategyConfig: true }, orderBy: { rank: "asc" } } }
+    });
+
+    return runs.map(toStrategyComparisonRun);
+  });
+
+  server.get("/strategy/comparisons/:id", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const run = await database.strategyComparisonRun.findUnique({
+      where: { id },
+      include: { results: { include: { strategyConfig: true }, orderBy: { rank: "asc" } } }
+    });
+
+    if (!run) return notFound(reply, "Strategy comparison run not found");
+    return toStrategyComparisonRun(run);
+  });
+
+  server.get("/strategy/comparisons/:id/results", async (request) => {
+    const { id } = request.params as { id: string };
+    const results = await database.strategyBacktestResult.findMany({
+      where: { comparisonRunId: id },
+      orderBy: [{ rank: "asc" }, { createdAt: "asc" }],
+      include: { strategyConfig: true, backtestRun: true }
+    });
+
+    return results.map(toStrategyBacktestResult);
+  });
+
+  server.get("/strategy/comparisons/:id/summary", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const run = await database.strategyComparisonRun.findUnique({ where: { id } });
+
+    if (!run) return notFound(reply, "Strategy comparison run not found");
+    return run.summaryJson ?? { totalStrategies: 0, bestStrategy: null, bestWinRate: null, warnings: [] };
+  });
+
+  server.post("/strategy/comparisons/run", async (request, reply) => {
+    const body = asBodyRecord(request.body);
+    const assetType = parseOptionalBodyEnum(body.assetType, assetTypes as AssetType[], "assetType", reply);
+    const from = parseOptionalBodyDate(body.from, "from", reply);
+    const to = parseOptionalBodyDate(body.to, "to", reply);
+    const maxSignalsPerAssetTimeframe = parseOptionalBodyNumber(
+      body.maxSignalsPerAssetTimeframe,
+      "maxSignalsPerAssetTimeframe",
+      reply
+    );
+    const name = typeof body.name === "string" ? body.name.trim() : undefined;
+    const symbols = parseOptionalBodyStringArray(body.symbols, "symbols", reply);
+    const timeframes = parseOptionalBodyStringArray(body.timeframes, "timeframes", reply);
+    const strategyConfigIds = parseOptionalBodyStringArray(body.strategyConfigIds, "strategyConfigIds", reply);
+
+    if (reply.sent) return reply;
+
+    return {
+      accepted: false,
+      message: "Use pnpm worker:run-strategy-comparison for a local run.",
+      command: "pnpm worker:run-strategy-comparison",
+      config: { name, symbols, assetType, timeframes, from, to, strategyConfigIds, maxSignalsPerAssetTimeframe }
     };
   });
 
@@ -2005,6 +2084,74 @@ function toBacktestSignal(signal: Prisma.BacktestSignalGetPayload<Record<string,
     maxAdverseMove: signal.maxAdverseMove,
     contextJson: signal.contextJson,
     createdAt: signal.createdAt
+  };
+}
+
+function toStrategyConfig(config: Prisma.StrategyConfigGetPayload<Record<string, never>>) {
+  return {
+    id: config.id,
+    name: config.name,
+    description: config.description,
+    isDefault: config.isDefault,
+    configJson: config.configJson,
+    createdAt: config.createdAt,
+    updatedAt: config.updatedAt
+  };
+}
+
+function toStrategyComparisonRun(
+  run: Prisma.StrategyComparisonRunGetPayload<{
+    include: { results: { include: { strategyConfig: true } } };
+  }>
+) {
+  const summary = isRecord(run.summaryJson) ? run.summaryJson : {};
+  const bestResult = run.results.find((result) => result.rank === 1) ?? run.results[0] ?? null;
+  return {
+    id: run.id,
+    name: run.name,
+    status: run.status,
+    from: run.from,
+    to: run.to,
+    symbols: Array.isArray(run.symbols) ? run.symbols : [],
+    assetType: run.assetType,
+    timeframes: Array.isArray(run.timeframes) ? run.timeframes : [],
+    configJson: run.configJson,
+    summaryJson: run.summaryJson,
+    startedAt: run.startedAt,
+    finishedAt: run.finishedAt,
+    createdAt: run.createdAt,
+    updatedAt: run.updatedAt,
+    bestStrategy: typeof summary.bestStrategy === "string" ? summary.bestStrategy : bestResult?.strategyConfig.name ?? null,
+    bestWinRate: numberFromRecord(summary, "bestWinRate") ?? bestResult?.winRate ?? null,
+    resultCount: run.results.length
+  };
+}
+
+function toStrategyBacktestResult(
+  result: Prisma.StrategyBacktestResultGetPayload<{
+    include: { strategyConfig: true; backtestRun: true };
+  }>
+) {
+  return {
+    id: result.id,
+    comparisonRunId: result.comparisonRunId,
+    strategyConfigId: result.strategyConfigId,
+    strategyName: result.strategyConfig.name,
+    strategyConfig: toStrategyConfig(result.strategyConfig),
+    backtestRunId: result.backtestRunId,
+    backtestRunName: result.backtestRun?.name ?? null,
+    totalSignals: result.totalSignals,
+    evaluatedCount: result.evaluatedCount,
+    winRate: result.winRate,
+    avgReturnAfter1d: result.avgReturnAfter1d,
+    targetReachedCount: result.targetReachedCount,
+    invalidatedCount: result.invalidatedCount,
+    positiveCount: result.positiveCount,
+    negativeCount: result.negativeCount,
+    neutralCount: result.neutralCount,
+    summaryJson: result.summaryJson,
+    rank: result.rank,
+    createdAt: result.createdAt
   };
 }
 

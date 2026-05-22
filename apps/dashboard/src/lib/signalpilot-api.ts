@@ -208,6 +208,71 @@ export type BacktestSignal = {
   createdAt: string;
 };
 
+export type StrategyComparisonStatus = "RUNNING" | "SUCCESS" | "FAILED" | "CANCELLED";
+
+export type StrategyConfig = {
+  id: string;
+  name: string;
+  description: string | null;
+  isDefault: boolean;
+  configJson: unknown;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type StrategyComparisonRun = {
+  id: string;
+  name: string;
+  status: StrategyComparisonStatus;
+  from: string;
+  to: string;
+  symbols: unknown[];
+  assetType: AssetType | null;
+  timeframes: unknown[];
+  configJson: unknown;
+  summaryJson: StrategyComparisonSummary | null;
+  startedAt: string;
+  finishedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  bestStrategy: string | null;
+  bestWinRate: number | null;
+  resultCount: number;
+};
+
+export type StrategyBacktestResult = {
+  id: string;
+  comparisonRunId: string;
+  strategyConfigId: string;
+  strategyName: string;
+  strategyConfig: StrategyConfig;
+  backtestRunId: string | null;
+  backtestRunName: string | null;
+  totalSignals: number;
+  evaluatedCount: number;
+  winRate: number | null;
+  avgReturnAfter1d: number | null;
+  targetReachedCount: number;
+  invalidatedCount: number;
+  positiveCount: number;
+  negativeCount: number;
+  neutralCount: number;
+  summaryJson: BacktestSummary & { warnings?: string[]; rankingScore?: number };
+  rank: number | null;
+  createdAt: string;
+};
+
+export type StrategyComparisonSummary = {
+  totalStrategies: number;
+  bestStrategy: string | null;
+  bestStrategyId: string | null;
+  bestWinRate: number | null;
+  highestAvgReturnStrategy: string | null;
+  highestAvgReturnAfter1d: number | null;
+  warnings: string[];
+  rankedResults: unknown[];
+};
+
 export type Asset = {
   id: string;
   symbol: string;

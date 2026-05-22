@@ -22,6 +22,7 @@ export default async function BacktestsPage() {
           <h1>Backtests</h1>
           <p>Hypothetical historical outcome analysis for technical SignalPilot signals.</p>
         </div>
+        <Link href="/dashboard/strategy-lab">Open Strategy Lab</Link>
       </div>
 
       {runs.error ? <ErrorState title="Could not load backtests" message={runs.error} /> : null}

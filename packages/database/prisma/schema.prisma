@@ -139,6 +139,13 @@ enum BacktestOutcome {
   TARGET_REACHED
 }
 
+enum StrategyComparisonStatus {
+  RUNNING
+  SUCCESS
+  FAILED
+  CANCELLED
+}
+
 model Asset {
   id            String          @id @default(cuid())
   symbol        String
@@ -301,9 +308,70 @@ model BacktestRun {
   createdAt    DateTime          @default(now())
   updatedAt    DateTime          @updatedAt
   signals      BacktestSignal[]
+  strategyResults StrategyBacktestResult[]
 
   @@index([status])
   @@index([startedAt])
+}
+
+model StrategyConfig {
+  id          String                   @id @default(cuid())
+  name        String
+  description String?
+  isDefault   Boolean                  @default(false)
+  configJson  Json
+  createdAt   DateTime                 @default(now())
+  updatedAt   DateTime                 @updatedAt
+  results     StrategyBacktestResult[]
+
+  @@index([name])
+}
+
+model StrategyComparisonRun {
+  id          String                   @id @default(cuid())
+  name        String
+  status      StrategyComparisonStatus
+  from        DateTime
+  to          DateTime
+  symbols     Json?
+  assetType   AssetType?
+  timeframes  Json
+  configJson  Json
+  summaryJson Json?
+  startedAt   DateTime                 @default(now())
+  finishedAt  DateTime?
+  createdAt   DateTime                 @default(now())
+  updatedAt   DateTime                 @updatedAt
+  results     StrategyBacktestResult[]
+
+  @@index([status])
+  @@index([startedAt])
+}
+
+model StrategyBacktestResult {
+  id               String                @id @default(cuid())
+  comparisonRunId  String
+  comparisonRun    StrategyComparisonRun @relation(fields: [comparisonRunId], references: [id], onDelete: Cascade)
+  strategyConfigId String
+  strategyConfig   StrategyConfig        @relation(fields: [strategyConfigId], references: [id], onDelete: Cascade)
+  backtestRunId    String?
+  backtestRun      BacktestRun?          @relation(fields: [backtestRunId], references: [id], onDelete: SetNull)
+  totalSignals     Int
+  evaluatedCount   Int
+  winRate          Float?
+  avgReturnAfter1d Float?
+  targetReachedCount Int
+  invalidatedCount Int
+  positiveCount    Int
+  negativeCount    Int
+  neutralCount     Int
+  summaryJson      Json
+  rank             Int?
+  createdAt        DateTime              @default(now())
+
+  @@index([comparisonRunId])
+  @@index([strategyConfigId])
+  @@index([rank])
 }
 
 model BacktestSignal {

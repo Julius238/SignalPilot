@@ -139,6 +139,9 @@ importers:
       '@signalpilot/signal-rules':
         specifier: workspace:*
         version: link:../../packages/signal-rules
+      '@signalpilot/strategy-lab':
+        specifier: workspace:*
+        version: link:../../packages/strategy-lab
       dotenv:
         specifier: ^16.4.7
         version: 16.6.1
@@ -180,6 +183,9 @@ importers:
       '@signalpilot/signal-rules':
         specifier: workspace:*
         version: link:../signal-rules
+      '@signalpilot/strategy-lab':
+        specifier: workspace:*
+        version: link:../strategy-lab
     devDependencies:
       tsx:
         specifier: ^4.19.2
@@ -297,6 +303,16 @@ importers:
   packages/shared: {}
 
   packages/signal-rules:
+    dependencies:
+      '@signalpilot/shared':
+        specifier: workspace:*
+        version: link:../shared
+    devDependencies:
+      tsx:
+        specifier: ^4.19.2
+        version: 4.21.0
+
+  packages/strategy-lab:
     dependencies:
       '@signalpilot/shared':
         specifier: workspace:*

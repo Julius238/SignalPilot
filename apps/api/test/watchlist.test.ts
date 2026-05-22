@@ -16,6 +16,7 @@ import {
   SignalDirection,
   SignalStatus,
   SignalType,
+  StrategyComparisonStatus,
   WatchlistPriority
 } from "@signalpilot/database";
 
@@ -371,6 +372,23 @@ describe("watchlist routes", () => {
 
     await server.close();
   });
+
+  it("returns strategy configs, comparisons and summary", async () => {
+    const { server } = await createServerWithState();
+
+    const configsResponse = await server.inject("/strategy/configs");
+    const comparisonsResponse = await server.inject("/strategy/comparisons");
+    const summaryResponse = await server.inject("/strategy/comparisons/comparison-1/summary");
+
+    assert.equal(configsResponse.statusCode, 200);
+    assert.equal(comparisonsResponse.statusCode, 200);
+    assert.equal(summaryResponse.statusCode, 200);
+    assert.equal(configsResponse.json()[0].name, "Baseline 50");
+    assert.equal(comparisonsResponse.json()[0].bestStrategy, "Baseline 50");
+    assert.equal(summaryResponse.json().bestWinRate, 50);
+
+    await server.close();
+  });
 });
 
 async function createServer() {
@@ -388,6 +406,9 @@ async function createServerWithState() {
     signalRuleApplications: [createSignalRuleApplication()],
     backtestRuns: [createBacktestRun()],
     backtestSignals: createBacktestSignals(),
+    strategyConfigs: [createStrategyConfig()],
+    strategyComparisonRuns: [createStrategyComparisonRun()],
+    strategyBacktestResults: [createStrategyBacktestResult()],
     signalFindManyWhere: [] as unknown[]
   };
   const server = Fastify({ logger: false });
@@ -407,6 +428,9 @@ function createDatabase(state: {
   signalRuleApplications: ReturnType<typeof createSignalRuleApplication>[];
   backtestRuns: ReturnType<typeof createBacktestRun>[];
   backtestSignals: ReturnType<typeof createBacktestSignals>;
+  strategyConfigs: ReturnType<typeof createStrategyConfig>[];
+  strategyComparisonRuns: ReturnType<typeof createStrategyComparisonRun>[];
+  strategyBacktestResults: ReturnType<typeof createStrategyBacktestResult>[];
   signalFindManyWhere: unknown[];
 }) {
   return {
@@ -573,6 +597,26 @@ function createDatabase(state: {
           .filter((signal) => !where.status || signal.status === where.status)
           .filter((signal) => !where.signalType || signal.signalType === where.signalType)
           .slice(0, take ?? state.backtestSignals.length)
+    },
+    strategyConfig: {
+      findMany: async () => state.strategyConfigs
+    },
+    strategyComparisonRun: {
+      findMany: async ({ where, take }: { where?: { status?: StrategyComparisonStatus }; take: number }) =>
+        state.strategyComparisonRuns
+          .filter((run) => !where?.status || run.status === where.status)
+          .slice(0, take)
+          .map((run) => ({ ...run, results: state.strategyBacktestResults.map(withStrategyIncludes) })),
+      findUnique: async ({ where }: { where: { id: string } }) => {
+        const run = state.strategyComparisonRuns.find((candidate) => candidate.id === where.id);
+        return run ? { ...run, results: state.strategyBacktestResults.map(withStrategyIncludes) } : null;
+      }
+    },
+    strategyBacktestResult: {
+      findMany: async ({ where }: { where: { comparisonRunId: string } }) =>
+        state.strategyBacktestResults
+          .filter((result) => result.comparisonRunId === where.comparisonRunId)
+          .map(withStrategyAndBacktestIncludes)
     }
   };
 }
@@ -796,6 +840,81 @@ function createBaseBacktestSignal() {
     maxAdverseMove: 0.5,
     contextJson: {},
     createdAt: new Date("2026-01-03T00:00:00.000Z")
+  };
+}
+
+function createStrategyConfig() {
+  return {
+    id: "strategy-1",
+    name: "Baseline 50",
+    description: "Base scoring threshold 50",
+    isDefault: true,
+    configJson: { useSignalRules: false, minScoreToRecord: 50 },
+    createdAt: new Date("2026-01-03T00:00:00.000Z"),
+    updatedAt: new Date("2026-01-03T00:00:00.000Z")
+  };
+}
+
+function createStrategyComparisonRun() {
+  return {
+    id: "comparison-1",
+    name: "Strategy Comparison",
+    status: StrategyComparisonStatus.SUCCESS,
+    from: new Date("2026-01-01T00:00:00.000Z"),
+    to: new Date("2026-01-03T00:00:00.000Z"),
+    symbols: ["BTCUSDT"],
+    assetType: AssetType.CRYPTO,
+    timeframes: ["1h"],
+    configJson: {},
+    summaryJson: {
+      totalStrategies: 1,
+      bestStrategy: "Baseline 50",
+      bestStrategyId: "strategy-1",
+      bestWinRate: 50,
+      highestAvgReturnStrategy: "Baseline 50",
+      highestAvgReturnAfter1d: 0.4,
+      warnings: [],
+      rankedResults: []
+    },
+    startedAt: new Date("2026-01-03T00:00:00.000Z"),
+    finishedAt: new Date("2026-01-03T00:01:00.000Z"),
+    createdAt: new Date("2026-01-03T00:00:00.000Z"),
+    updatedAt: new Date("2026-01-03T00:01:00.000Z")
+  };
+}
+
+function createStrategyBacktestResult() {
+  return {
+    id: "strategy-result-1",
+    comparisonRunId: "comparison-1",
+    strategyConfigId: "strategy-1",
+    backtestRunId: "backtest-1",
+    totalSignals: 2,
+    evaluatedCount: 2,
+    winRate: 50,
+    avgReturnAfter1d: 0.4,
+    targetReachedCount: 0,
+    invalidatedCount: 0,
+    positiveCount: 1,
+    negativeCount: 1,
+    neutralCount: 0,
+    summaryJson: createBacktestRun().summaryJson,
+    rank: 1,
+    createdAt: new Date("2026-01-03T00:01:00.000Z")
+  };
+}
+
+function withStrategyIncludes(result: ReturnType<typeof createStrategyBacktestResult>) {
+  return {
+    ...result,
+    strategyConfig: createStrategyConfig()
+  };
+}
+
+function withStrategyAndBacktestIncludes(result: ReturnType<typeof createStrategyBacktestResult>) {
+  return {
+    ...withStrategyIncludes(result),
+    backtestRun: createBacktestRun()
   };
 }
 

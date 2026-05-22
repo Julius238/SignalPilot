@@ -57,6 +57,31 @@ describe("backtesting", () => {
     assert.equal(limited.length, 2);
   });
 
+  it("applies strategy config original versus adjusted scores", () => {
+    const baseline = generateBacktestSignals({
+      assets: [asset()],
+      candles: candles(8),
+      config: baseConfig({
+        minCandlesBeforeSignal: 3,
+        strategyConfig: { useSignalRules: false, minScoreToRecord: 80 }
+      }),
+      scoreSignalFn: () => decision({ score: 70, status: "WAIT", signalType: "NO_SIGNAL" })
+    });
+    const adaptive = generateBacktestSignals({
+      assets: [asset()],
+      candles: candles(8),
+      config: baseConfig({
+        minCandlesBeforeSignal: 3,
+        strategyConfig: { useSignalRules: true, minScoreToRecord: 80 }
+      }),
+      scoreSignalFn: () => decision({ score: 80, status: "WATCH", signalType: "TREND_ALERT" })
+    });
+
+    assert.equal(baseline.length, 0);
+    assert.equal(adaptive.length > 0, true);
+    assert.equal(adaptive[0].adjustedScore !== undefined, true);
+  });
+
   it("evaluates bullish outcomes as positive when price rises", () => {
     const [signal] = generateBacktestSignals({
       assets: [asset()],

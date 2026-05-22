@@ -168,7 +168,8 @@ function buildConfig(options: RunBacktestOptions): BacktestConfig {
     useSignalRules: options.useSignalRules ?? parseBoolean(process.env.BACKTEST_USE_SIGNAL_RULES, true),
     maxSignalsPerAssetTimeframe:
       options.maxSignalsPerAssetTimeframe ?? parseNumber(process.env.BACKTEST_MAX_SIGNALS_PER_ASSET_TIMEFRAME, 500),
-    includeNoEdge: options.includeNoEdge ?? false
+    includeNoEdge: options.includeNoEdge ?? false,
+    strategyConfig: options.strategyConfig
   };
 }
 

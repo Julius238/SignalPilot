@@ -22,6 +22,7 @@ export {
   SignalDirection,
   SignalStatus,
   SignalType,
+  StrategyComparisonStatus,
   WatchlistPriority
 } from "@prisma/client";
 

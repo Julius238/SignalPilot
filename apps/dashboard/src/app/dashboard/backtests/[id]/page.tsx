@@ -31,7 +31,7 @@ export default async function BacktestDetailPage({ params }: BacktestDetailPageP
       <div className="page-header">
         <div>
           <h1>{run.data?.name ?? "Backtest"}</h1>
-          <p>Hypothetical historical outcome. No live execution or broker integration.</p>
+          <p>Hypothetical historical outcome with no live market connectivity.</p>
         </div>
       </div>
 

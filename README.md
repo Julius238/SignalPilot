@@ -2,7 +2,7 @@
 
 SignalPilot is a multi-asset market intelligence platform for stocks, ETFs, and crypto.
 
-The initial scope is market analysis infrastructure, dashboards, Telegram alerts, and paper-trading preparation. It does not execute real trades.
+The initial scope is market analysis infrastructure, dashboards, Telegram alerts, and paper-trading preparation. It does not run real market actions.
 
 ## Local Setup
 
@@ -109,7 +109,7 @@ Signal outputs include `dashboardJson.marketRegimeContext` and a Telegram `Marke
 
 ## Signal Rules Tuning
 
-`packages/signal-rules` applies explainable rule-based score adjustments after the base scoring engine. It uses stored performance buckets, market regime context, news/events, and data quality signals. It does not execute trades and does not emit order instructions.
+`packages/signal-rules` applies explainable rule-based score adjustments after the base scoring engine. It uses stored performance buckets, market regime context, news/events, and data quality signals. It does not emit market action instructions.
 
 Environment:
 
@@ -126,7 +126,7 @@ Dashboard:
 
 ## Backtesting Engine
 
-`packages/backtesting` generates hypothetical historical signals from stored candles, evaluates future candle outcomes, and summarizes the results. This is historical analysis only: no broker integration and no live execution.
+`packages/backtesting` generates hypothetical historical signals from stored candles, evaluates future candle outcomes, and summarizes the results. This is historical analysis only, with no live market connectivity.
 
 Run a default crypto backtest:
 
@@ -148,6 +148,33 @@ BACKTEST_MAX_SIGNALS_PER_ASSET_TIMEFRAME=500
 ```
 
 Backtest runs are stored in `BacktestRun`; generated hypothetical historical signals and their outcomes are stored in `BacktestSignal`. The dashboard pages are available at `/dashboard/backtests` and `/dashboard/backtests/:id`.
+
+## Strategy Lab
+
+`packages/strategy-lab` compares explainable rule sets on top of the backtesting engine. It creates default `StrategyConfig` records, runs a historical hypothetical comparison for each selected config, ranks the results, and stores `StrategyComparisonRun` plus `StrategyBacktestResult` records.
+
+Run the default comparison:
+
+```bash
+pnpm worker:run-strategy-comparison
+```
+
+Environment:
+
+```bash
+STRATEGY_SYMBOLS=BTCUSDT,ETHUSDT
+STRATEGY_ASSET_TYPE=CRYPTO
+STRATEGY_TIMEFRAMES=1h,4h,1d
+STRATEGY_FROM=2026-01-01T00:00:00.000Z
+STRATEGY_TO=2026-05-22T00:00:00.000Z
+STRATEGY_MAX_SIGNALS_PER_ASSET_TIMEFRAME=300
+STRATEGY_CONFIGS=Baseline 50,Adaptive 50
+```
+
+Dashboard pages:
+
+- `/dashboard/strategy-lab` lists strategy configs and comparison runs.
+- `/dashboard/strategy-lab/:id` shows ranking, sample warnings, grouped historical results, and strategy config details.
 
 ## Equity News
 
@@ -281,7 +308,7 @@ and alignment and links each row to the asset detail page.
 ## Paper Evaluation Maintenance
 
 Paper Evaluations are hypothetical signal-quality measurements only. SignalPilot does not
-execute real trades, does not place paper orders, and does not integrate with brokers.
+run real market actions and does not integrate with brokers.
 
 Reclassify older Paper Evaluations with the current eligibility rules:
 

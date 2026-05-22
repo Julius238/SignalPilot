@@ -10,6 +10,7 @@ import type {
   SignalDecisionType
 } from "@signalpilot/shared";
 import { applySignalRules } from "@signalpilot/signal-rules";
+import { applyStrategyFilter, type StrategyRuleConfig } from "@signalpilot/strategy-lab";
 
 export type BacktestAssetType = "STOCK" | "ETF" | "CRYPTO";
 export type BacktestOutcomeStatus = "OPEN" | "EVALUATED" | "EXPIRED" | "SKIPPED";
@@ -50,6 +51,7 @@ export type BacktestConfig = {
   useSignalRules?: boolean;
   minScoreToRecord?: number;
   includeNoEdge?: boolean;
+  strategyConfig?: StrategyRuleConfig;
 };
 
 export type BacktestGeneratedSignal = {
@@ -71,6 +73,7 @@ export type BacktestGeneratedSignal = {
   context: {
     decision: SignalDecision;
     indicatorSnapshot: IndicatorSnapshot;
+    marketRegimeContext?: { marketRegime: string; overallRegime: string; riskMode: string; isAlignedWithRegime?: boolean };
     signalRules?: unknown;
     generatedWithoutLookahead: true;
   };
@@ -167,7 +170,8 @@ export function generateBacktestSignals(input: GenerateBacktestSignalsInput): Ba
           indicators: indicatorSnapshot,
           context: { newsScore: 50, socialScore: 50, eventScore: 50 }
         });
-        const ruleResult = config.useSignalRules
+        const effectiveUseRules = config.strategyConfig?.useSignalRules ?? config.useSignalRules;
+        const ruleResult = effectiveUseRules
           ? applySignalRules({
               asset: { symbol: asset.symbol, assetType: mapAssetClass(asset.assetType) },
               signalDecision: decision,
@@ -186,7 +190,14 @@ export function generateBacktestSignals(input: GenerateBacktestSignalsInput): Ba
             }
           : decision;
 
-        if (!shouldRecord(finalDecision, config)) continue;
+        const marketRegimeContext = {
+          marketRegime: "UNKNOWN",
+          overallRegime: "UNKNOWN",
+          riskMode: "UNKNOWN",
+          isAlignedWithRegime: false
+        };
+
+        if (!shouldRecord(finalDecision, config, decision, ruleResult?.adjustedScore, marketRegimeContext)) continue;
 
         const entryPrice = toNumber(candle.close);
         if (entryPrice === null || entryPrice <= 0) continue;
@@ -211,6 +222,7 @@ export function generateBacktestSignals(input: GenerateBacktestSignalsInput): Ba
           context: {
             decision: finalDecision,
             indicatorSnapshot,
+            marketRegimeContext,
             signalRules: ruleResult ?? undefined,
             generatedWithoutLookahead: true
           }
@@ -285,19 +297,43 @@ export function summarizeBacktestRun(input: { signals: BacktestEvaluatedSignal[]
 }
 
 function normalizeConfig(config: BacktestConfig) {
+  const strategyConfig = config.strategyConfig;
   return {
     ...config,
+    strategyConfig,
     symbols: (config.symbols ?? []).map((symbol) => symbol.toUpperCase()),
     minCandlesBeforeSignal: config.minCandlesBeforeSignal ?? defaultMinCandlesBeforeSignal,
-    maxSignalsPerAssetTimeframe: config.maxSignalsPerAssetTimeframe ?? defaultMaxSignalsPerAssetTimeframe,
-    useSignalRules: config.useSignalRules ?? true,
-    minScoreToRecord: config.minScoreToRecord ?? defaultMinScoreToRecord,
+    maxSignalsPerAssetTimeframe:
+      strategyConfig?.maxSignalsPerAssetTimeframe ?? config.maxSignalsPerAssetTimeframe ?? defaultMaxSignalsPerAssetTimeframe,
+    useSignalRules: strategyConfig?.useSignalRules ?? config.useSignalRules ?? true,
+    minScoreToRecord: strategyConfig?.minScoreToRecord ?? config.minScoreToRecord ?? defaultMinScoreToRecord,
     includeNoEdge: config.includeNoEdge ?? false
   };
 }
 
-function shouldRecord(decision: SignalDecision, config: ReturnType<typeof normalizeConfig>) {
+function shouldRecord(
+  decision: SignalDecision,
+  config: ReturnType<typeof normalizeConfig>,
+  originalDecision: SignalDecision,
+  adjustedScore: number | undefined,
+  marketRegimeContext: { isAlignedWithRegime: boolean; riskMode: string }
+) {
   if (!config.includeNoEdge && decision.status === "NO_EDGE") return false;
+
+  if (config.strategyConfig) {
+    return applyStrategyFilter(
+      {
+        score: decision.score,
+        originalScore: originalDecision.score,
+        adjustedScore,
+        status: decision.status,
+        signalType: decision.signalType,
+        marketRegimeContext
+      },
+      config.strategyConfig
+    );
+  }
+
   if (decision.score >= config.minScoreToRecord) return true;
   if (decision.status === "WATCH" || decision.status === "STRONG_WATCH" || decision.status === "AVOID") return true;
   return decision.signalType === "BREAKOUT_ALERT" || decision.signalType === "VOLUME_SPIKE" || decision.signalType === "VOLATILITY_SPIKE";

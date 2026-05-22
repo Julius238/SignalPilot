@@ -17,6 +17,7 @@
     { "path": "../../packages/performance-intelligence" },
     { "path": "../../packages/scoring-engine" },
     { "path": "../../packages/signal-rules" },
+    { "path": "../../packages/strategy-lab" },
     { "path": "../../packages/shared" }
   ]
 }

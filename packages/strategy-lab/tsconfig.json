@@ -7,11 +7,5 @@
     "tsBuildInfoFile": "dist/tsconfig.tsbuildinfo"
   },
   "include": ["src/**/*.ts"],
-  "references": [
-    { "path": "../indicators" },
-    { "path": "../scoring-engine" },
-    { "path": "../shared" },
-    { "path": "../signal-rules" },
-    { "path": "../strategy-lab" }
-  ]
+  "references": [{ "path": "../shared" }]
 }

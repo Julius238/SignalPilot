@@ -1,5 +1,5 @@
 {
-  "name": "@signalpilot/backtesting",
+  "name": "@signalpilot/strategy-lab",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -15,14 +15,10 @@
     "build": "tsc -p tsconfig.json",
     "dev": "tsc -p tsconfig.json --watch",
     "lint": "eslint .",
-    "test": "tsx --test test/backtesting.test.ts"
+    "test": "tsx --test test/strategy-lab.test.ts"
   },
   "dependencies": {
-    "@signalpilot/indicators": "workspace:*",
-    "@signalpilot/scoring-engine": "workspace:*",
-    "@signalpilot/shared": "workspace:*",
-    "@signalpilot/signal-rules": "workspace:*",
-    "@signalpilot/strategy-lab": "workspace:*"
+    "@signalpilot/shared": "workspace:*"
   },
   "devDependencies": {
     "tsx": "^4.19.2"
