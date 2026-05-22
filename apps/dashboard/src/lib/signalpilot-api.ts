@@ -85,6 +85,40 @@ export type SignalRegimeContext = {
   riskNote: string;
 };
 
+export type SignalRuleAdjustment = {
+  reason: string;
+  category: string;
+  scoreDelta: number;
+  confidence?: string;
+  explanation?: string;
+};
+
+export type SignalRuleApplication = {
+  id: string;
+  signalId: string;
+  symbol: string;
+  timeframe: string;
+  originalScore: number;
+  adjustedScore: number;
+  originalStatus: SignalStatus;
+  adjustedStatus: SignalStatus;
+  finalRiskLevel: RiskLevel;
+  adjustments: SignalRuleAdjustment[];
+  warnings: unknown[];
+  summary: string;
+  createdAt: string;
+};
+
+export type RulesSummary = {
+  totalApplications: number;
+  avgDelta: number;
+  positiveAdjustmentCount: number;
+  negativeAdjustmentCount: number;
+  noAdjustmentCount: number;
+  topAdjustmentReasons: Array<{ key: string; count: number }>;
+  groupedByCategory: Array<{ key: string; count: number }>;
+};
+
 export type Asset = {
   id: string;
   symbol: string;

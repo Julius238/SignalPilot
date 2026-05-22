@@ -107,6 +107,23 @@ MARKET_REGIME_MAX_AGE_MINUTES=60       # default — reuse recent snapshots
 
 Signal outputs include `dashboardJson.marketRegimeContext` and a Telegram `Market Regime` block when a snapshot exists. The dashboard page is available at `/dashboard/market-regime`, and the scanner shows a Market Regime banner.
 
+## Signal Rules Tuning
+
+`packages/signal-rules` applies explainable rule-based score adjustments after the base scoring engine. It uses stored performance buckets, market regime context, news/events, and data quality signals. It does not execute trades and does not emit order instructions.
+
+Environment:
+
+```bash
+SIGNAL_RULES_MAX_DELTA=15       # default maximum absolute total score adjustment
+```
+
+Each application is stored as `SignalRuleApplication` with original vs adjusted score/status, adjustment reasons, warnings, and summary. Signal outputs include `originalScore`, `adjustedScore`, `signalRuleAdjustments`, and `ruleWarnings`; Telegram text includes a `Score Adjustments` block.
+
+Dashboard:
+
+- `/dashboard/rules` lists rule applications and summary metrics.
+- `/dashboard/signals/:id` shows the score adjustment card.
+
 ## Equity News
 
 Fetch equity and ETF news via Finnhub Company News:

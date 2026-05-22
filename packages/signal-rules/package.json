@@ -1,5 +1,5 @@
 {
-  "name": "@signalpilot/output-composer",
+  "name": "@signalpilot/signal-rules",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -15,12 +15,9 @@
     "build": "tsc -p tsconfig.json",
     "dev": "tsc -p tsconfig.json --watch",
     "lint": "eslint .",
-    "test": "tsx --test test/output-composer.test.ts"
+    "test": "tsx --test test/signal-rules.test.ts"
   },
   "dependencies": {
-    "@signalpilot/market-regime": "workspace:*",
-    "@signalpilot/multi-timeframe": "workspace:*",
-    "@signalpilot/signal-rules": "workspace:*",
     "@signalpilot/shared": "workspace:*"
   },
   "devDependencies": {

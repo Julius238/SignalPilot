@@ -125,6 +125,9 @@ function SignalScannerRow({
         <div className={`scanner-score ${isHighRisk ? "scanner-score-risk" : ""}`}>
           <span>Score</span>
           <strong>{formatScore(signal.score)}</strong>
+          {getOriginalScore(signal.signalOutput?.dashboardJson) !== null ? (
+            <span>Adjusted · Original {formatScore(getOriginalScore(signal.signalOutput?.dashboardJson))}</span>
+          ) : null}
         </div>
       </div>
 
@@ -166,4 +169,12 @@ function alignmentRank(summary: MultiTimeframeSummary | undefined) {
     default:
       return 7;
   }
+}
+
+function getOriginalScore(dashboardJson: unknown) {
+  if (!dashboardJson || typeof dashboardJson !== "object" || !("originalScore" in dashboardJson)) {
+    return null;
+  }
+  const value = (dashboardJson as { originalScore?: unknown }).originalScore;
+  return typeof value === "number" ? value : null;
 }

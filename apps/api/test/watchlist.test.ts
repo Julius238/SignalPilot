@@ -304,6 +304,41 @@ describe("watchlist routes", () => {
 
     await server.close();
   });
+
+  it("returns a signal rule application for a signal", async () => {
+    const { server } = await createServerWithState();
+
+    const response = await server.inject("/signals/signal-1/rule-application");
+
+    assert.equal(response.statusCode, 200);
+    const body = response.json();
+    assert.equal(body.signalId, "signal-1");
+    assert.equal(body.symbol, "BTCUSDT");
+    assert.equal(body.originalScore, 72);
+    assert.equal(body.adjustedScore, 67);
+    assert.equal(body.adjustments[0].category, "MARKET_REGIME");
+    assert.equal(body.warnings[0], "Signal läuft gegen das Marktumfeld.");
+
+    await server.close();
+  });
+
+  it("returns rule applications and summary metrics", async () => {
+    const { server } = await createServerWithState();
+
+    const listResponse = await server.inject("/rules/applications?category=MARKET_REGIME");
+    const summaryResponse = await server.inject("/rules/summary");
+
+    assert.equal(listResponse.statusCode, 200);
+    assert.equal(summaryResponse.statusCode, 200);
+    assert.equal(listResponse.json().length, 1);
+    const summary = summaryResponse.json();
+    assert.equal(summary.totalApplications, 1);
+    assert.equal(summary.avgDelta, -5);
+    assert.equal(summary.negativeAdjustmentCount, 1);
+    assert.equal(summary.groupedByCategory[0].key, "MARKET_REGIME");
+
+    await server.close();
+  });
 });
 
 async function createServer() {
@@ -318,6 +353,7 @@ async function createServerWithState() {
     alertStates: [] as ReturnType<typeof createAlertState>[],
     paperEvaluations: [] as ReturnType<typeof createPaperEvaluation>[],
     marketRegimeSnapshots: [createMarketRegimeSnapshot()],
+    signalRuleApplications: [createSignalRuleApplication()],
     signalFindManyWhere: [] as unknown[]
   };
   const server = Fastify({ logger: false });
@@ -334,6 +370,7 @@ function createDatabase(state: {
   alertStates: ReturnType<typeof createAlertState>[];
   paperEvaluations: ReturnType<typeof createPaperEvaluation>[];
   marketRegimeSnapshots: ReturnType<typeof createMarketRegimeSnapshot>[];
+  signalRuleApplications: ReturnType<typeof createSignalRuleApplication>[];
   signalFindManyWhere: unknown[];
 }) {
   return {
@@ -465,6 +502,18 @@ function createDatabase(state: {
     marketRegimeSnapshot: {
       findFirst: async () => state.marketRegimeSnapshots[0] ?? null,
       findMany: async ({ take }: { take: number }) => state.marketRegimeSnapshots.slice(0, take)
+    },
+    signalRuleApplication: {
+      findUnique: async ({ where }: { where: { signalId: string } }) => {
+        const application = state.signalRuleApplications.find((candidate) => candidate.signalId === where.signalId);
+        return application ? withSignalSelect(application) : null;
+      },
+      findMany: async ({ where, take }: { where?: { adjustedStatus?: SignalStatus; signal?: { symbol: string } }; take: number }) =>
+        state.signalRuleApplications
+          .filter((application) => !where?.adjustedStatus || application.adjustedStatus === where.adjustedStatus)
+          .filter((application) => !where?.signal?.symbol || application.signal.symbol === where.signal.symbol)
+          .slice(0, take)
+          .map(withSignalSelect)
     }
   };
 }
@@ -560,6 +609,41 @@ function createSignal() {
       createdAt: new Date("2026-01-01T00:00:00.000Z")
     }
   };
+}
+
+function createSignalRuleApplication() {
+  const adjustments = [
+    {
+      id: "market-regime-risk-off",
+      reason: "Bullish Signal im RISK_OFF Umfeld",
+      category: "MARKET_REGIME",
+      scoreDelta: -5,
+      confidence: "HIGH",
+      explanation: "Das Marktumfeld ist gegenläufig, daher wird das Signal niedriger priorisiert."
+    }
+  ];
+
+  return {
+    id: "rule-application-1",
+    signalId: "signal-1",
+    originalScore: 72,
+    adjustedScore: 67,
+    originalStatus: SignalStatus.WATCH,
+    adjustedStatus: SignalStatus.WATCH,
+    finalRiskLevel: RiskLevel.MEDIUM,
+    adjustmentsJson: adjustments,
+    warningsJson: ["Signal läuft gegen das Marktumfeld."],
+    summary: "1 regelbasierte Anpassung, Gesamtdelta -5.",
+    createdAt: new Date("2026-01-01T00:00:00.000Z"),
+    signal: {
+      symbol: "BTCUSDT",
+      timeframe: "1d"
+    }
+  };
+}
+
+function withSignalSelect(application: ReturnType<typeof createSignalRuleApplication>) {
+  return application;
 }
 
 function createAlertState(overrides: Partial<ReturnType<typeof createBaseAlertState>> = {}) {

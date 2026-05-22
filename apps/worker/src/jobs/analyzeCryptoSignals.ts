@@ -28,7 +28,9 @@ import {
   type SignalRegimeContext
 } from "@signalpilot/market-regime";
 import { composeSignalOutput } from "@signalpilot/output-composer";
+import { buildPerformanceReport, type PerformanceIntelligenceReport } from "@signalpilot/performance-intelligence";
 import { scoreSignal } from "@signalpilot/scoring-engine";
+import { applySignalRules, type SignalRulesResult } from "@signalpilot/signal-rules";
 import type { AssetClass, IntelligenceContext, SignalDecision } from "@signalpilot/shared";
 import { config } from "dotenv";
 import pino from "pino";
@@ -216,6 +218,7 @@ export async function analyzeCryptoSignals(
       }
     });
     const marketRegimeReport = await loadLatestMarketRegimeReport(database);
+    const performanceReport = await loadPerformanceReport(database);
 
     for (const asset of assets) {
       const latestSignalsByTimeframe = await loadLatestSignalsByTimeframe(database, asset.id);
@@ -273,21 +276,37 @@ export async function analyzeCryptoSignals(
             currentSignalInput
           );
 
+          const marketRegimeContext = buildMarketRegimeContext({
+            report: marketRegimeReport,
+            symbol: asset.symbol,
+            assetType: mapAssetType(asset.assetType),
+            signalDirection: decision.direction,
+            signalStatus: decision.status
+          });
+          const signalRulesResult = applySignalRules({
+            asset: { symbol: asset.symbol, assetType: mapAssetType(asset.assetType) },
+            signalDecision: decision,
+            multiTimeframeSummary,
+            marketRegimeContext,
+            performanceReport,
+            dataQuality: {
+              qualityScore: snapshot.candleCount >= 200 ? 80 : 55,
+              hasMinimumCandles: snapshot.candleCount >= 200,
+              missingMarketRegimeContext: marketRegimeContext === null
+            }
+          });
+          const adjustedDecision = applyRuleResultToDecision(decision, signalRulesResult);
+
           const outputDraft = composeSignalOutput({
-            decision,
+            decision: adjustedDecision,
             asset: {
               symbol: asset.symbol,
               assetType: mapAssetType(asset.assetType)
             },
             intelligence: neutralIntelligenceContext,
             multiTimeframeSummary,
-            marketRegimeContext: buildMarketRegimeContext({
-              report: marketRegimeReport,
-              symbol: asset.symbol,
-              assetType: mapAssetType(asset.assetType),
-              signalDirection: decision.direction,
-              signalStatus: decision.status
-            })
+            marketRegimeContext,
+            signalRulesResult
           });
 
           const signal = await database.signal.create({
@@ -296,10 +315,10 @@ export async function analyzeCryptoSignals(
               symbol: asset.symbol,
               timeframe,
               signalType: decision.signalType,
-              status: decision.status,
+              status: signalRulesResult.finalStatus,
               direction: decision.direction,
-              score: decision.score,
-              riskLevel: decision.riskLevel,
+              score: signalRulesResult.adjustedScore,
+              riskLevel: signalRulesResult.finalRiskLevel,
               trendScore: decision.trendScore,
               momentumScore: decision.momentumScore,
               volumeScore: decision.volumeScore,
@@ -309,6 +328,9 @@ export async function analyzeCryptoSignals(
               socialScore: decision.socialScore,
               eventScore: decision.eventScore,
               riskScore: decision.riskScore,
+              ruleApplication: {
+                create: buildRuleApplicationCreate(decision, signalRulesResult)
+              },
               output: {
                 create: {
                   shortConclusion: outputDraft.shortConclusion,
@@ -332,12 +354,12 @@ export async function analyzeCryptoSignals(
           savedSignalCount += 1;
           latestSignalsByTimeframe.set(
             timeframe,
-            toMultiTimeframeSignalInput(decision, signal.createdAt)
+            toMultiTimeframeSignalInput(adjustedDecision, signal.createdAt)
           );
 
           const signalOutput = signal.output;
 
-          if (!signalOutput || !shouldSendSignalAlert(decision, signalOutput.telegramText, multiTimeframeSummary)) {
+          if (!signalOutput || !shouldSendSignalAlert(adjustedDecision, signalOutput.telegramText, multiTimeframeSummary)) {
             skippedAlertCount += 1;
           } else {
             const routeDecision = shouldRouteAlertForAsset({
@@ -1088,6 +1110,54 @@ function buildMarketRegimeContext(input: {
     signalStatus: input.signalStatus,
     report: input.report
   });
+}
+
+async function loadPerformanceReport(database: PrismaClient): Promise<PerformanceIntelligenceReport | null> {
+  const evaluations = await database.paperSignalEvaluation?.findMany();
+  if (!evaluations || evaluations.length === 0) return null;
+
+  return buildPerformanceReport(
+    evaluations.map((evaluation) => ({
+      symbol: evaluation.symbol,
+      timeframe: evaluation.timeframe,
+      status: evaluation.status,
+      signalType: evaluation.signalType,
+      score: evaluation.score,
+      riskLevel: evaluation.riskLevel,
+      evaluationKind: evaluation.evaluationKind,
+      skipReason: evaluation.skipReason,
+      evaluationStatus: evaluation.evaluationStatus,
+      outcome: evaluation.outcome,
+      returnAfter1h: evaluation.returnAfter1h,
+      returnAfter4h: evaluation.returnAfter4h,
+      returnAfter1d: evaluation.returnAfter1d,
+      returnAfter3d: evaluation.returnAfter3d,
+      maxFavorableMove: evaluation.maxFavorableMove,
+      maxAdverseMove: evaluation.maxAdverseMove
+    }))
+  );
+}
+
+function applyRuleResultToDecision(decision: SignalDecision, rules: SignalRulesResult): SignalDecision {
+  return {
+    ...decision,
+    score: rules.adjustedScore,
+    status: rules.finalStatus,
+    riskLevel: rules.finalRiskLevel
+  };
+}
+
+function buildRuleApplicationCreate(decision: SignalDecision, rules: SignalRulesResult) {
+  return {
+    originalScore: rules.originalScore,
+    adjustedScore: rules.adjustedScore,
+    originalStatus: decision.status,
+    adjustedStatus: rules.finalStatus,
+    finalRiskLevel: rules.finalRiskLevel,
+    adjustmentsJson: rules.adjustments as unknown as Prisma.InputJsonArray,
+    warningsJson: rules.warnings as unknown as Prisma.InputJsonArray,
+    summary: rules.summary
+  };
 }
 
 async function writeBotLog(

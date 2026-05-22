@@ -13,7 +13,9 @@
     { "path": "../../packages/indicators" },
     { "path": "../../packages/multi-timeframe" },
     { "path": "../../packages/output-composer" },
+    { "path": "../../packages/performance-intelligence" },
     { "path": "../../packages/scoring-engine" },
+    { "path": "../../packages/signal-rules" },
     { "path": "../../packages/shared" }
   ]
 }

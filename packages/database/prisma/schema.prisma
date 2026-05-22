@@ -204,10 +204,29 @@ model Signal {
   alerts          Alert[]
   paperOrders     PaperOrder[]
   paperEvaluation PaperSignalEvaluation?
+  ruleApplication SignalRuleApplication?
 
   @@index([assetId, timeframe, createdAt])
   @@index([symbol, createdAt])
   @@index([signalType, status])
+}
+
+model SignalRuleApplication {
+  id              String       @id @default(cuid())
+  signalId        String       @unique
+  signal          Signal       @relation(fields: [signalId], references: [id], onDelete: Cascade)
+  originalScore   Float
+  adjustedScore   Float
+  originalStatus  SignalStatus
+  adjustedStatus  SignalStatus
+  finalRiskLevel  RiskLevel
+  adjustmentsJson Json
+  warningsJson    Json
+  summary         String
+  createdAt       DateTime     @default(now())
+
+  @@index([adjustedStatus])
+  @@index([createdAt])
 }
 
 model SignalOutput {

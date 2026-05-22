@@ -1,5 +1,6 @@
 import type { MultiTimeframeSummary } from "@signalpilot/multi-timeframe";
 import type { SignalRegimeContext } from "@signalpilot/market-regime";
+import type { SignalRulesResult } from "@signalpilot/signal-rules";
 import type {
   AssetClass,
   IntelligenceContext,
@@ -37,6 +38,7 @@ export type ComposeSignalOutputInput = {
   intelligence?: Partial<IntelligenceContext>;
   multiTimeframeSummary?: MultiTimeframeSummary | null;
   marketRegimeContext?: SignalRegimeContext | null;
+  signalRulesResult?: SignalRulesResult | null;
   newsContext?: NewsContextLike | null;
   eventContext?: EventContextLike | null;
 };
@@ -63,6 +65,7 @@ export function composeSignalOutput(input: ComposeSignalOutputInput): SignalOutp
   const confirmations = buildConfirmations(decision);
   const multiTimeframeLines = buildMultiTimeframeLines(input.multiTimeframeSummary);
   const marketRegimeLines = buildMarketRegimeLines(input.marketRegimeContext);
+  const signalRulesLines = buildSignalRulesLines(input.signalRulesResult);
   const counterArgument =
     decision.counterArguments[0] ?? "Kein dominantes Gegenargument im aktuellen technischen Scan.";
   const shortConclusion = buildShortConclusion(decision);
@@ -103,6 +106,9 @@ export function composeSignalOutput(input: ComposeSignalOutputInput): SignalOutp
     "",
     "Market Regime:",
     ...marketRegimeLines,
+    "",
+    "Score Adjustments:",
+    ...signalRulesLines,
     "",
     "Gegenargument:",
     counterArgument,
@@ -152,6 +158,12 @@ export function composeSignalOutput(input: ComposeSignalOutputInput): SignalOutp
       confirmations,
       multiTimeframeSummary: input.multiTimeframeSummary ?? null,
       marketRegimeContext: input.marketRegimeContext ?? null,
+      originalScore: input.signalRulesResult?.originalScore ?? decision.score,
+      originalStatus: input.signalRulesResult?.originalStatus ?? decision.status,
+      adjustedScore: input.signalRulesResult?.adjustedScore ?? decision.score,
+      signalRuleAdjustments: input.signalRulesResult?.adjustments ?? [],
+      ruleWarnings: input.signalRulesResult?.warnings ?? [],
+      signalRulesSummary: input.signalRulesResult?.summary ?? "Keine regelbasierte Anpassung.",
       newsContext: input.newsContext ?? null,
       eventContext: eventContextForDashboard,
       impactNote: impactNoteForDashboard,
@@ -165,11 +177,29 @@ export function composeSignalOutput(input: ComposeSignalOutputInput): SignalOutp
         "Marktbestätigung",
         "Multi-Timeframe",
         "Market Regime",
+        "Score Adjustments",
         "Gegenargument",
         "Nächster Trigger"
       ]
     }
   };
+}
+
+function buildSignalRulesLines(result?: SignalRulesResult | null): string[] {
+  if (!result || result.adjustments.length === 0) {
+    return ["• Keine regelbasierte Anpassung."];
+  }
+
+  const main = result.adjustments.reduce(
+    (best, adjustment) => Math.abs(adjustment.scoreDelta) > Math.abs(best.scoreDelta) ? adjustment : best,
+    result.adjustments[0]
+  );
+
+  return [
+    `• Original: ${formatScore(result.originalScore)}`,
+    `• Adjusted: ${formatScore(result.adjustedScore)}`,
+    `• Hauptgrund: ${main.reason}`
+  ];
 }
 
 function buildMarketRegimeLines(context?: SignalRegimeContext | null): string[] {

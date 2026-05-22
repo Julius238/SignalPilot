@@ -7,6 +7,7 @@ import {
   type EventContext,
   type NewsContext,
   type SignalDetail,
+  type SignalRuleApplication,
   type SignalRegimeContext
 } from "../../../../lib/signalpilot-api";
 
@@ -28,11 +29,12 @@ const scoreKeys = [
 
 export default async function SignalDetailPage({ params }: SignalDetailPageProps) {
   const { id } = await params;
-  const [signal, newsContext, eventContext, marketRegimeContext] = await Promise.all([
+  const [signal, newsContext, eventContext, marketRegimeContext, ruleApplication] = await Promise.all([
     fetchApi<SignalDetail>(`/signals/${encodeURIComponent(id)}`),
     fetchApi<NewsContext>(`/signals/${encodeURIComponent(id)}/news-context`),
     fetchApi<EventContext>(`/signals/${encodeURIComponent(id)}/event-context`),
-    fetchApi<SignalRegimeContext | null>(`/signals/${encodeURIComponent(id)}/market-regime-context`)
+    fetchApi<SignalRegimeContext | null>(`/signals/${encodeURIComponent(id)}/market-regime-context`),
+    fetchApi<SignalRuleApplication>(`/signals/${encodeURIComponent(id)}/rule-application`)
   ]);
 
   if (signal.error) {
@@ -95,6 +97,33 @@ export default async function SignalDetailPage({ params }: SignalDetailPageProps
           </div>
         ) : (
           <p>Market Regime: Noch nicht berechnet.</p>
+        )}
+      </section>
+
+      <section className="card" style={{ marginTop: 16 }}>
+        <h2>Score Adjustments</h2>
+        {ruleApplication.data ? (
+          <div className="stack-list">
+            <div className="list-row">
+              <strong>
+                {formatScore(ruleApplication.data.originalScore)} → {formatScore(ruleApplication.data.adjustedScore)}
+              </strong>
+              <span>{ruleApplication.data.originalStatus} → {ruleApplication.data.adjustedStatus}</span>
+            </div>
+            <p>{ruleApplication.data.summary}</p>
+            {ruleApplication.data.adjustments.map((adjustment) => (
+              <div className="list-row" key={`${adjustment.category}-${adjustment.reason}`}>
+                <div>
+                  <strong>{adjustment.reason}</strong>
+                  <span>{adjustment.category}</span>
+                </div>
+                <span>{formatScore(adjustment.scoreDelta)}</span>
+              </div>
+            ))}
+            {ruleApplication.data.warnings.length > 0 ? <p>{ruleApplication.data.warnings.join(" | ")}</p> : null}
+          </div>
+        ) : (
+          <p>Score Adjustments: Keine Rule Application gefunden.</p>
         )}
       </section>
 

@@ -683,6 +683,61 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
     });
   });
 
+  server.get("/signals/:id/rule-application", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const application = await database.signalRuleApplication.findUnique({
+      where: { signalId: id },
+      include: { signal: { select: { symbol: true, timeframe: true } } }
+    });
+
+    if (!application) return notFound(reply, "Signal rule application not found");
+    return toSignalRuleApplication(application);
+  });
+
+  server.get("/rules/applications", async (request, reply) => {
+    const query = asQueryRecord(request.query);
+    const adjustedStatus = parseEnum(query.adjustedStatus, signalStatuses as SignalStatus[], "adjustedStatus", reply);
+    const limit = parseLimit(query.limit, 100, 500, reply);
+    const symbol = parseOptionalString(query.symbol)?.toUpperCase();
+    const category = parseOptionalString(query.category)?.toUpperCase();
+
+    if (reply.sent) return reply;
+
+    const applications = await database.signalRuleApplication.findMany({
+      where: {
+        adjustedStatus,
+        signal: symbol ? { symbol } : undefined
+      },
+      orderBy: { createdAt: "desc" },
+      take: limit,
+      include: { signal: { select: { symbol: true, timeframe: true } } }
+    });
+    const rows = applications.map(toSignalRuleApplication);
+
+    return category
+      ? rows.filter((row) => row.adjustments.some((adjustment) => adjustment.category === category))
+      : rows;
+  });
+
+  server.get("/rules/summary", async () => {
+    const applications = await database.signalRuleApplication.findMany({
+      orderBy: { createdAt: "desc" },
+      take: 1000
+    });
+    const deltas = applications.map((application) => application.adjustedScore - application.originalScore);
+    const adjustmentRows = applications.flatMap((application) => parseAdjustments(application.adjustmentsJson));
+
+    return {
+      totalApplications: applications.length,
+      avgDelta: average(deltas),
+      positiveAdjustmentCount: deltas.filter((delta) => delta > 0).length,
+      negativeAdjustmentCount: deltas.filter((delta) => delta < 0).length,
+      noAdjustmentCount: deltas.filter((delta) => delta === 0).length,
+      topAdjustmentReasons: topCounts(adjustmentRows.map((adjustment) => adjustment.reason)),
+      groupedByCategory: topCounts(adjustmentRows.map((adjustment) => adjustment.category))
+    };
+  });
+
   server.get("/news", async (request, reply) => {
     const query = asQueryRecord(request.query);
     const symbol = parseOptionalString(query.symbol)?.toUpperCase();
@@ -1792,6 +1847,50 @@ function toMarketRegimeSnapshot(snapshot: Prisma.MarketRegimeSnapshotGetPayload<
     report: snapshot.reportJson,
     createdAt: snapshot.createdAt
   };
+}
+
+function toSignalRuleApplication(
+  application: Prisma.SignalRuleApplicationGetPayload<{
+    include: { signal: { select: { symbol: true; timeframe: true } } };
+  }>
+) {
+  return {
+    id: application.id,
+    signalId: application.signalId,
+    symbol: application.signal.symbol,
+    timeframe: application.signal.timeframe,
+    originalScore: application.originalScore,
+    adjustedScore: application.adjustedScore,
+    originalStatus: application.originalStatus,
+    adjustedStatus: application.adjustedStatus,
+    finalRiskLevel: application.finalRiskLevel,
+    adjustments: parseAdjustments(application.adjustmentsJson),
+    warnings: Array.isArray(application.warningsJson) ? application.warningsJson : [],
+    summary: application.summary,
+    createdAt: application.createdAt
+  };
+}
+
+function parseAdjustments(value: unknown): Array<{ reason: string; category: string; scoreDelta: number }> {
+  if (!Array.isArray(value)) return [];
+  return value.filter(isRecord).map((item) => ({
+    reason: typeof item.reason === "string" ? item.reason : "Unspecified",
+    category: typeof item.category === "string" ? item.category : "UNKNOWN",
+    scoreDelta: typeof item.scoreDelta === "number" ? item.scoreDelta : 0
+  }));
+}
+
+function topCounts(values: string[]) {
+  const counts = new Map<string, number>();
+  for (const value of values) counts.set(value, (counts.get(value) ?? 0) + 1);
+  return [...counts.entries()]
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .slice(0, 10)
+    .map(([key, count]) => ({ key, count }));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function extractMarketRegimeContext(dashboardJson: unknown): SignalRegimeContext | null {
