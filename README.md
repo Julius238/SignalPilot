@@ -124,6 +124,31 @@ Dashboard:
 - `/dashboard/rules` lists rule applications and summary metrics.
 - `/dashboard/signals/:id` shows the score adjustment card.
 
+## Backtesting Engine
+
+`packages/backtesting` generates hypothetical historical signals from stored candles, evaluates future candle outcomes, and summarizes the results. This is historical analysis only: no broker integration and no live execution.
+
+Run a default crypto backtest:
+
+```bash
+pnpm worker:run-backtest
+```
+
+Environment:
+
+```bash
+BACKTEST_SYMBOLS=BTCUSDT,ETHUSDT
+BACKTEST_ASSET_TYPE=CRYPTO
+BACKTEST_TIMEFRAMES=1h,4h,1d
+BACKTEST_FROM=2026-01-01T00:00:00.000Z
+BACKTEST_TO=2026-05-22T00:00:00.000Z
+BACKTEST_MIN_SCORE_TO_RECORD=50
+BACKTEST_USE_SIGNAL_RULES=true
+BACKTEST_MAX_SIGNALS_PER_ASSET_TIMEFRAME=500
+```
+
+Backtest runs are stored in `BacktestRun`; generated hypothetical historical signals and their outcomes are stored in `BacktestSignal`. The dashboard pages are available at `/dashboard/backtests` and `/dashboard/backtests/:id`.
+
 ## Equity News
 
 Fetch equity and ETF news via Finnhub Company News:

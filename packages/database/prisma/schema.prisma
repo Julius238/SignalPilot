@@ -117,6 +117,28 @@ enum PaperExpectedMoveDirection {
   NONE
 }
 
+enum BacktestRunStatus {
+  RUNNING
+  SUCCESS
+  FAILED
+  CANCELLED
+}
+
+enum BacktestOutcomeStatus {
+  OPEN
+  EVALUATED
+  EXPIRED
+  SKIPPED
+}
+
+enum BacktestOutcome {
+  POSITIVE
+  NEGATIVE
+  NEUTRAL
+  INVALIDATED
+  TARGET_REACHED
+}
+
 model Asset {
   id            String          @id @default(cuid())
   symbol        String
@@ -135,6 +157,7 @@ model Asset {
   watchlistItem WatchlistItem?
   newsItems     NewsItem[]
   events        Event[]
+  backtestSignals BacktestSignal[]
 
   @@unique([symbol, exchange, assetType])
   @@index([symbol])
@@ -260,6 +283,68 @@ model MarketRegimeSnapshot {
   @@index([generatedAt])
   @@index([overallRegime])
   @@index([riskMode])
+}
+
+model BacktestRun {
+  id           String            @id @default(cuid())
+  name         String
+  assetType    AssetType?
+  symbols      Json?
+  timeframes   Json
+  from         DateTime
+  to           DateTime
+  status       BacktestRunStatus
+  configJson   Json
+  summaryJson  Json?
+  startedAt    DateTime          @default(now())
+  finishedAt   DateTime?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+  signals      BacktestSignal[]
+
+  @@index([status])
+  @@index([startedAt])
+}
+
+model BacktestSignal {
+  id                String                @id @default(cuid())
+  backtestRunId     String
+  backtestRun       BacktestRun           @relation(fields: [backtestRunId], references: [id], onDelete: Cascade)
+  assetId           String
+  asset             Asset                 @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  symbol            String
+  assetType         AssetType
+  timeframe         String
+  signalTime        DateTime
+  signalType        SignalType
+  status            SignalStatus
+  direction         SignalDirection
+  riskLevel         RiskLevel
+  score             Float
+  originalScore     Float?
+  adjustedScore     Float?
+  entryPrice        Decimal               @db.Decimal(30, 12)
+  targetPrice       Decimal?              @db.Decimal(30, 12)
+  invalidationPrice Decimal?              @db.Decimal(30, 12)
+  outcome           BacktestOutcome?
+  outcomeStatus     BacktestOutcomeStatus @default(OPEN)
+  evaluatedAt       DateTime?
+  returnAfter1h     Float?
+  returnAfter4h     Float?
+  returnAfter1d     Float?
+  returnAfter3d     Float?
+  maxFavorableMove  Float?
+  maxAdverseMove    Float?
+  contextJson       Json?
+  createdAt         DateTime              @default(now())
+
+  @@index([backtestRunId])
+  @@index([symbol])
+  @@index([timeframe])
+  @@index([signalTime])
+  @@index([outcome])
+  @@index([status])
+  @@index([signalType])
 }
 
 model NewsItem {

@@ -26,6 +26,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
               <Link href="/dashboard/multi-timeframe">Multi-Timeframe</Link>
               <Link href="/dashboard/market-regime">Market Regime</Link>
               <Link href="/dashboard/rules">Rules</Link>
+              <Link href="/dashboard/backtests">Backtests</Link>
               <Link href="/dashboard/signals">Signals</Link>
               <Link href="/dashboard/paper">Paper Eval</Link>
               <Link href="/dashboard/performance">Performance</Link>

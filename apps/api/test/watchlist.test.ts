@@ -4,6 +4,9 @@ import { afterEach, describe, it } from "node:test";
 import Fastify from "fastify";
 import {
   AssetType,
+  BacktestOutcome,
+  BacktestOutcomeStatus,
+  BacktestRunStatus,
   PaperEvaluationKind,
   PaperEvaluationOutcome,
   PaperEvaluationStatus,
@@ -339,6 +342,35 @@ describe("watchlist routes", () => {
 
     await server.close();
   });
+
+  it("returns backtest runs and summary", async () => {
+    const { server } = await createServerWithState();
+
+    const runsResponse = await server.inject("/backtests");
+    const summaryResponse = await server.inject("/backtests/backtest-1/summary");
+
+    assert.equal(runsResponse.statusCode, 200);
+    assert.equal(summaryResponse.statusCode, 200);
+    assert.equal(runsResponse.json()[0].id, "backtest-1");
+    assert.equal(summaryResponse.json().totalSignals, 2);
+    assert.equal(summaryResponse.json().winRate, 50);
+
+    await server.close();
+  });
+
+  it("returns backtest signals", async () => {
+    const { server } = await createServerWithState();
+
+    const response = await server.inject("/backtests/backtest-1/signals?symbol=BTCUSDT");
+
+    assert.equal(response.statusCode, 200);
+    const body = response.json();
+    assert.equal(body.length, 2);
+    assert.equal(body[0].symbol, "BTCUSDT");
+    assert.equal(body[0].outcomeStatus, "EVALUATED");
+
+    await server.close();
+  });
 });
 
 async function createServer() {
@@ -354,6 +386,8 @@ async function createServerWithState() {
     paperEvaluations: [] as ReturnType<typeof createPaperEvaluation>[],
     marketRegimeSnapshots: [createMarketRegimeSnapshot()],
     signalRuleApplications: [createSignalRuleApplication()],
+    backtestRuns: [createBacktestRun()],
+    backtestSignals: createBacktestSignals(),
     signalFindManyWhere: [] as unknown[]
   };
   const server = Fastify({ logger: false });
@@ -371,6 +405,8 @@ function createDatabase(state: {
   paperEvaluations: ReturnType<typeof createPaperEvaluation>[];
   marketRegimeSnapshots: ReturnType<typeof createMarketRegimeSnapshot>[];
   signalRuleApplications: ReturnType<typeof createSignalRuleApplication>[];
+  backtestRuns: ReturnType<typeof createBacktestRun>[];
+  backtestSignals: ReturnType<typeof createBacktestSignals>;
   signalFindManyWhere: unknown[];
 }) {
   return {
@@ -514,6 +550,29 @@ function createDatabase(state: {
           .filter((application) => !where?.signal?.symbol || application.signal.symbol === where.signal.symbol)
           .slice(0, take)
           .map(withSignalSelect)
+    },
+    backtestRun: {
+      findMany: async ({ where, take }: { where?: { status?: BacktestRunStatus }; take: number }) =>
+        state.backtestRuns
+          .filter((run) => !where?.status || run.status === where.status)
+          .slice(0, take)
+          .map(withBacktestCount),
+      findUnique: async ({ where }: { where: { id: string } }) => {
+        const run = state.backtestRuns.find((candidate) => candidate.id === where.id);
+        return run ? withBacktestCount(run) : null;
+      },
+      findFirst: async () => state.backtestRuns[0] ?? null
+    },
+    backtestSignal: {
+      findMany: async ({ where, take }: { where: { backtestRunId?: string; symbol?: string; timeframe?: string; outcome?: BacktestOutcome; status?: SignalStatus; signalType?: SignalType }; take?: number }) =>
+        state.backtestSignals
+          .filter((signal) => !where.backtestRunId || signal.backtestRunId === where.backtestRunId)
+          .filter((signal) => !where.symbol || signal.symbol === where.symbol)
+          .filter((signal) => !where.timeframe || signal.timeframe === where.timeframe)
+          .filter((signal) => !where.outcome || signal.outcome === where.outcome)
+          .filter((signal) => !where.status || signal.status === where.status)
+          .filter((signal) => !where.signalType || signal.signalType === where.signalType)
+          .slice(0, take ?? state.backtestSignals.length)
     }
   };
 }
@@ -644,6 +703,100 @@ function createSignalRuleApplication() {
 
 function withSignalSelect(application: ReturnType<typeof createSignalRuleApplication>) {
   return application;
+}
+
+function createBacktestRun() {
+  const summary = {
+    totalSignals: 2,
+    evaluatedCount: 2,
+    positiveCount: 1,
+    negativeCount: 1,
+    neutralCount: 0,
+    targetReachedCount: 0,
+    invalidatedCount: 0,
+    winRate: 50,
+    avgReturnAfter1h: 0.2,
+    avgReturnAfter4h: 0.5,
+    avgReturnAfter1d: 0.4,
+    avgReturnAfter3d: 0,
+    groupedBySymbol: [{ key: "BTCUSDT", totalSignals: 2, evaluatedCount: 2, winRate: 50, avgReturnAfter1d: 0.4 }],
+    groupedByTimeframe: [{ key: "1h", totalSignals: 2, evaluatedCount: 2, winRate: 50, avgReturnAfter1d: 0.4 }],
+    groupedBySignalType: [{ key: "TREND_ALERT", totalSignals: 2, evaluatedCount: 2, winRate: 50, avgReturnAfter1d: 0.4 }],
+    groupedByStatus: [{ key: "WATCH", totalSignals: 2, evaluatedCount: 2, winRate: 50, avgReturnAfter1d: 0.4 }],
+    groupedByScoreBucket: [{ key: "65-79", totalSignals: 2, evaluatedCount: 2, winRate: 50, avgReturnAfter1d: 0.4 }],
+    warnings: []
+  };
+
+  return {
+    id: "backtest-1",
+    name: "Crypto Backtest",
+    assetType: AssetType.CRYPTO,
+    symbols: ["BTCUSDT"],
+    timeframes: ["1h"],
+    from: new Date("2026-01-01T00:00:00.000Z"),
+    to: new Date("2026-01-03T00:00:00.000Z"),
+    status: BacktestRunStatus.SUCCESS,
+    configJson: {},
+    summaryJson: summary,
+    startedAt: new Date("2026-01-03T00:00:00.000Z"),
+    finishedAt: new Date("2026-01-03T00:01:00.000Z"),
+    createdAt: new Date("2026-01-03T00:00:00.000Z"),
+    updatedAt: new Date("2026-01-03T00:01:00.000Z")
+  };
+}
+
+function withBacktestCount(run: ReturnType<typeof createBacktestRun>) {
+  return {
+    ...run,
+    _count: { signals: 2 }
+  };
+}
+
+function createBacktestSignals() {
+  return [
+    createBacktestSignal({ outcome: BacktestOutcome.POSITIVE, returnAfter1d: 1.2 }),
+    createBacktestSignal({ id: "backtest-signal-2", outcome: BacktestOutcome.NEGATIVE, returnAfter1d: -0.4 })
+  ];
+}
+
+function createBacktestSignal(overrides: Partial<ReturnType<typeof createBaseBacktestSignal>> = {}) {
+  return {
+    ...createBaseBacktestSignal(),
+    ...overrides
+  };
+}
+
+function createBaseBacktestSignal() {
+  return {
+    id: "backtest-signal-1",
+    backtestRunId: "backtest-1",
+    assetId: "asset-1",
+    symbol: "BTCUSDT",
+    assetType: AssetType.CRYPTO,
+    timeframe: "1h",
+    signalTime: new Date("2026-01-01T01:00:00.000Z"),
+    signalType: SignalType.TREND_ALERT,
+    status: SignalStatus.WATCH,
+    direction: SignalDirection.BULLISH,
+    riskLevel: RiskLevel.MEDIUM,
+    score: 72,
+    originalScore: 70,
+    adjustedScore: 72,
+    entryPrice: { toString: () => "100" },
+    targetPrice: { toString: () => "104" },
+    invalidationPrice: { toString: () => "98" },
+    outcome: BacktestOutcome.POSITIVE,
+    outcomeStatus: BacktestOutcomeStatus.EVALUATED,
+    evaluatedAt: new Date("2026-01-02T01:00:00.000Z"),
+    returnAfter1h: 0.2,
+    returnAfter4h: 0.5,
+    returnAfter1d: 1.2,
+    returnAfter3d: null,
+    maxFavorableMove: 2,
+    maxAdverseMove: 0.5,
+    contextJson: {},
+    createdAt: new Date("2026-01-03T00:00:00.000Z")
+  };
 }
 
 function createAlertState(overrides: Partial<ReturnType<typeof createBaseAlertState>> = {}) {

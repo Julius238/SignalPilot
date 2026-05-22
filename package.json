@@ -26,6 +26,7 @@
     "worker:fetch-equity-news": "pnpm --filter @signalpilot/worker fetch:equity-news",
     "worker:fetch-equity-events": "pnpm --filter @signalpilot/worker fetch:equity-events",
     "worker:calculate-market-regime": "pnpm --filter @signalpilot/worker calculate:market-regime",
+    "worker:run-backtest": "pnpm --filter @signalpilot/worker run:backtest",
     "worker:analyze-equity-signals": "pnpm --filter @signalpilot/worker analyze:equity-signals",
     "worker:run-equity-pipeline": "pnpm --filter @signalpilot/worker run:equity-pipeline",
     "worker:run-crypto-pipeline": "pnpm --filter @signalpilot/worker run:crypto-pipeline",

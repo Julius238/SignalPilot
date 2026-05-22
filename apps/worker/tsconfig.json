@@ -8,6 +8,7 @@
   "include": ["src/**/*.ts"],
   "references": [
     { "path": "../../packages/alerts" },
+    { "path": "../../packages/backtesting" },
     { "path": "../../packages/market-data" },
     { "path": "../../packages/market-regime" },
     { "path": "../../packages/indicators" },

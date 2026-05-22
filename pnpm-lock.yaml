@@ -100,6 +100,9 @@ importers:
       '@signalpilot/alerts':
         specifier: workspace:*
         version: link:../../packages/alerts
+      '@signalpilot/backtesting':
+        specifier: workspace:*
+        version: link:../../packages/backtesting
       '@signalpilot/database':
         specifier: workspace:*
         version: link:../../packages/database
@@ -158,6 +161,25 @@ importers:
       dotenv:
         specifier: ^16.4.7
         version: 16.6.1
+    devDependencies:
+      tsx:
+        specifier: ^4.19.2
+        version: 4.21.0
+
+  packages/backtesting:
+    dependencies:
+      '@signalpilot/indicators':
+        specifier: workspace:*
+        version: link:../indicators
+      '@signalpilot/scoring-engine':
+        specifier: workspace:*
+        version: link:../scoring-engine
+      '@signalpilot/shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@signalpilot/signal-rules':
+        specifier: workspace:*
+        version: link:../signal-rules
     devDependencies:
       tsx:
         specifier: ^4.19.2

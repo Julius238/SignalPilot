@@ -2,6 +2,9 @@ import {
   AlertChannel,
   AlertStatus,
   AssetType,
+  BacktestOutcome,
+  BacktestOutcomeStatus,
+  BacktestRunStatus,
   BotRunStatus,
   PaperEvaluationKind,
   PaperEvaluationOutcome,
@@ -45,6 +48,8 @@ const watchlistPriorities = Object.values(WatchlistPriority);
 const botRunStatuses = Object.values(BotRunStatus);
 const alertStatuses = Object.values(AlertStatus);
 const alertChannels = Object.values(AlertChannel);
+const backtestRunStatuses = Object.values(BacktestRunStatus);
+const backtestOutcomes = Object.values(BacktestOutcome);
 const paperEvaluationStatuses = Object.values(PaperEvaluationStatus);
 const paperEvaluationOutcomes = Object.values(PaperEvaluationOutcome);
 const paperEvaluationKinds = Object.values(PaperEvaluationKind);
@@ -735,6 +740,102 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
       noAdjustmentCount: deltas.filter((delta) => delta === 0).length,
       topAdjustmentReasons: topCounts(adjustmentRows.map((adjustment) => adjustment.reason)),
       groupedByCategory: topCounts(adjustmentRows.map((adjustment) => adjustment.category))
+    };
+  });
+
+  server.get("/backtests", async (request, reply) => {
+    const query = asQueryRecord(request.query);
+    const status = parseEnum(query.status, backtestRunStatuses as BacktestRunStatus[], "status", reply);
+    const limit = parseLimit(query.limit, 50, 200, reply);
+
+    if (reply.sent) return reply;
+
+    const runs = await database.backtestRun.findMany({
+      where: { status },
+      orderBy: { startedAt: "desc" },
+      take: limit,
+      include: { _count: { select: { signals: true } } }
+    });
+
+    return runs.map(toBacktestRunListItem);
+  });
+
+  server.get("/backtests/:id", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const run = await database.backtestRun.findUnique({
+      where: { id },
+      include: { _count: { select: { signals: true } } }
+    });
+
+    if (!run) return notFound(reply, "Backtest run not found");
+    return toBacktestRunListItem(run);
+  });
+
+  server.get("/backtests/:id/signals", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const query = asQueryRecord(request.query);
+    const symbol = parseOptionalString(query.symbol)?.toUpperCase();
+    const timeframe = parseOptionalString(query.timeframe);
+    const outcome = parseEnum(query.outcome, backtestOutcomes as BacktestOutcome[], "outcome", reply);
+    const status = parseEnum(query.status, signalStatuses as SignalStatus[], "status", reply);
+    const signalType = parseEnum(query.signalType, signalTypes as SignalType[], "signalType", reply);
+    const limit = parseLimit(query.limit, 100, 500, reply);
+
+    if (reply.sent) return reply;
+
+    const signals = await database.backtestSignal.findMany({
+      where: { backtestRunId: id, symbol, timeframe, outcome, status, signalType },
+      orderBy: { signalTime: "desc" },
+      take: limit
+    });
+
+    return signals.map(toBacktestSignal);
+  });
+
+  server.get("/backtests/:id/summary", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const run = await database.backtestRun.findUnique({ where: { id } });
+
+    if (!run) return notFound(reply, "Backtest run not found");
+    if (run.summaryJson && isRecord(run.summaryJson)) return run.summaryJson;
+
+    const signals = await database.backtestSignal.findMany({ where: { backtestRunId: id } });
+    return buildBacktestSummaryFromRows(signals);
+  });
+
+  server.post("/backtests/run", async (request, reply) => {
+    const body = asBodyRecord(request.body);
+    const assetType = parseOptionalBodyEnum(body.assetType, assetTypes as AssetType[], "assetType", reply);
+    const useSignalRules = parseOptionalBodyBoolean(body.useSignalRules, "useSignalRules", reply);
+    const from = parseOptionalBodyDate(body.from, "from", reply);
+    const to = parseOptionalBodyDate(body.to, "to", reply);
+    const minScoreToRecord = parseOptionalBodyNumber(body.minScoreToRecord, "minScoreToRecord", reply);
+    const maxSignalsPerAssetTimeframe = parseOptionalBodyNumber(
+      body.maxSignalsPerAssetTimeframe,
+      "maxSignalsPerAssetTimeframe",
+      reply
+    );
+    const name = typeof body.name === "string" ? body.name.trim() : undefined;
+    const symbols = parseOptionalBodyStringArray(body.symbols, "symbols", reply);
+    const timeframes = parseOptionalBodyStringArray(body.timeframes, "timeframes", reply);
+
+    if (reply.sent) return reply;
+
+    return {
+      accepted: false,
+      message: "Backtest API v1 validiert die Konfiguration. Starte den Lauf synchron per Worker Script.",
+      command: "pnpm worker:run-backtest",
+      config: {
+        name,
+        assetType,
+        symbols,
+        timeframes,
+        from,
+        to,
+        minScoreToRecord,
+        useSignalRules,
+        maxSignalsPerAssetTimeframe
+      }
     };
   });
 
@@ -1849,6 +1950,123 @@ function toMarketRegimeSnapshot(snapshot: Prisma.MarketRegimeSnapshotGetPayload<
   };
 }
 
+function toBacktestRunListItem(
+  run: Prisma.BacktestRunGetPayload<{ include: { _count: { select: { signals: true } } } }>
+) {
+  const summary = isRecord(run.summaryJson) ? run.summaryJson : {};
+  return {
+    id: run.id,
+    name: run.name,
+    assetType: run.assetType,
+    symbols: Array.isArray(run.symbols) ? run.symbols : [],
+    timeframes: Array.isArray(run.timeframes) ? run.timeframes : [],
+    from: run.from,
+    to: run.to,
+    status: run.status,
+    configJson: run.configJson,
+    summaryJson: run.summaryJson,
+    totalSignals: numberFromRecord(summary, "totalSignals") ?? run._count.signals,
+    winRate: numberFromRecord(summary, "winRate"),
+    avgReturnAfter1d: numberFromRecord(summary, "avgReturnAfter1d"),
+    startedAt: run.startedAt,
+    finishedAt: run.finishedAt,
+    createdAt: run.createdAt,
+    updatedAt: run.updatedAt
+  };
+}
+
+function toBacktestSignal(signal: Prisma.BacktestSignalGetPayload<Record<string, never>>) {
+  return {
+    id: signal.id,
+    backtestRunId: signal.backtestRunId,
+    assetId: signal.assetId,
+    symbol: signal.symbol,
+    assetType: signal.assetType,
+    timeframe: signal.timeframe,
+    signalTime: signal.signalTime,
+    signalType: signal.signalType,
+    status: signal.status,
+    direction: signal.direction,
+    riskLevel: signal.riskLevel,
+    score: signal.score,
+    originalScore: signal.originalScore,
+    adjustedScore: signal.adjustedScore,
+    entryPrice: signal.entryPrice.toString(),
+    targetPrice: signal.targetPrice?.toString() ?? null,
+    invalidationPrice: signal.invalidationPrice?.toString() ?? null,
+    outcome: signal.outcome,
+    outcomeStatus: signal.outcomeStatus,
+    evaluatedAt: signal.evaluatedAt,
+    returnAfter1h: signal.returnAfter1h,
+    returnAfter4h: signal.returnAfter4h,
+    returnAfter1d: signal.returnAfter1d,
+    returnAfter3d: signal.returnAfter3d,
+    maxFavorableMove: signal.maxFavorableMove,
+    maxAdverseMove: signal.maxAdverseMove,
+    contextJson: signal.contextJson,
+    createdAt: signal.createdAt
+  };
+}
+
+function buildBacktestSummaryFromRows(signals: Prisma.BacktestSignalGetPayload<Record<string, never>>[]) {
+  const evaluated = signals.filter((signal) => signal.outcomeStatus === BacktestOutcomeStatus.EVALUATED);
+  const wins = evaluated.filter((signal) => signal.outcome === BacktestOutcome.POSITIVE || signal.outcome === BacktestOutcome.TARGET_REACHED);
+  return {
+    totalSignals: signals.length,
+    evaluatedCount: evaluated.length,
+    positiveCount: evaluated.filter((signal) => signal.outcome === BacktestOutcome.POSITIVE).length,
+    negativeCount: evaluated.filter((signal) => signal.outcome === BacktestOutcome.NEGATIVE).length,
+    neutralCount: evaluated.filter((signal) => signal.outcome === BacktestOutcome.NEUTRAL).length,
+    targetReachedCount: evaluated.filter((signal) => signal.outcome === BacktestOutcome.TARGET_REACHED).length,
+    invalidatedCount: evaluated.filter((signal) => signal.outcome === BacktestOutcome.INVALIDATED).length,
+    winRate: evaluated.length === 0 ? 0 : (wins.length / evaluated.length) * 100,
+    avgReturnAfter1h: average(evaluated.map((signal) => signal.returnAfter1h)),
+    avgReturnAfter4h: average(evaluated.map((signal) => signal.returnAfter4h)),
+    avgReturnAfter1d: average(evaluated.map((signal) => signal.returnAfter1d)),
+    avgReturnAfter3d: average(evaluated.map((signal) => signal.returnAfter3d)),
+    groupedBySymbol: buildBacktestGroups(evaluated, (signal) => signal.symbol),
+    groupedByTimeframe: buildBacktestGroups(evaluated, (signal) => signal.timeframe),
+    groupedBySignalType: buildBacktestGroups(evaluated, (signal) => signal.signalType),
+    groupedByStatus: buildBacktestGroups(evaluated, (signal) => signal.status),
+    groupedByScoreBucket: buildBacktestGroups(evaluated, (signal) => scoreBucket(signal.score)),
+    warnings: []
+  };
+}
+
+function buildBacktestGroups(
+  signals: Prisma.BacktestSignalGetPayload<Record<string, never>>[],
+  getKey: (signal: Prisma.BacktestSignalGetPayload<Record<string, never>>) => string
+) {
+  const groups = new Map<string, Prisma.BacktestSignalGetPayload<Record<string, never>>[]>();
+  for (const signal of signals) {
+    const key = getKey(signal);
+    groups.set(key, [...(groups.get(key) ?? []), signal]);
+  }
+
+  return [...groups.entries()].map(([key, rows]) => {
+    const wins = rows.filter((row) => row.outcome === BacktestOutcome.POSITIVE || row.outcome === BacktestOutcome.TARGET_REACHED);
+    return {
+      key,
+      totalSignals: rows.length,
+      evaluatedCount: rows.length,
+      winRate: rows.length === 0 ? 0 : (wins.length / rows.length) * 100,
+      avgReturnAfter1d: average(rows.map((row) => row.returnAfter1d))
+    };
+  });
+}
+
+function numberFromRecord(record: Record<string, unknown>, key: string) {
+  const value = record[key];
+  return typeof value === "number" ? value : null;
+}
+
+function scoreBucket(score: number) {
+  if (score < 50) return "0-49";
+  if (score < 65) return "50-64";
+  if (score < 80) return "65-79";
+  return "80-100";
+}
+
 function toSignalRuleApplication(
   application: Prisma.SignalRuleApplicationGetPayload<{
     include: { signal: { select: { symbol: true; timeframe: true } } };
@@ -2102,7 +2320,8 @@ async function loadDataQualityReport(input: { assetType?: AssetType; symbol?: st
     signalsLast24h,
     signalsWithoutEvaluation,
     totalEvaluations,
-    latestMarketRegimeSnapshot
+    latestMarketRegimeSnapshot,
+    latestBacktestRun
   ] = await Promise.all([
     database.candle.groupBy({
       by: ["assetId", "timeframe"],
@@ -2192,7 +2411,8 @@ async function loadDataQualityReport(input: { assetType?: AssetType; symbol?: st
       }
     }),
     database.paperSignalEvaluation.count({ where: assetWhere }),
-    database.marketRegimeSnapshot.findFirst({ orderBy: { generatedAt: "desc" } })
+    database.marketRegimeSnapshot.findFirst({ orderBy: { generatedAt: "desc" } }),
+    database.backtestRun.findFirst({ orderBy: { startedAt: "desc" } })
   ]);
 
   const signalCountsByAsset = new Map<string, number>();
@@ -2316,10 +2536,11 @@ async function loadDataQualityReport(input: { assetType?: AssetType; symbol?: st
     latestMarketRegimeSnapshot?.generatedAt ?? null,
     now
   );
+  const backtestWarnings = buildBacktestCoverageWarnings(latestBacktestRun?.startedAt ?? null, now);
 
   return {
     ...report,
-    warnings: [...report.warnings, ...marketRegimeWarnings]
+    warnings: [...report.warnings, ...marketRegimeWarnings, ...backtestWarnings]
   };
 }
 
@@ -2346,6 +2567,19 @@ function buildMarketRegimeCoverageWarnings(
   }
 
   return warnings;
+}
+
+function buildBacktestCoverageWarnings(latestStartedAt: Date | null, now: Date) {
+  if (!latestStartedAt) {
+    return ["BacktestRun wurde noch nicht berechnet."];
+  }
+
+  const maxAgeDays = 7;
+  if (now.getTime() - latestStartedAt.getTime() > maxAgeDays * 24 * 60 * 60 * 1000) {
+    return [`Letzter BacktestRun ist aelter als ${maxAgeDays} Tage.`];
+  }
+
+  return [];
 }
 
 function asQueryRecord(query: unknown): QueryRecord {
@@ -2549,6 +2783,63 @@ function parseOptionalBodyBoolean(
   }
 
   return value;
+}
+
+function parseOptionalBodyNumber(
+  value: unknown,
+  name: string,
+  reply: FastifyReply
+): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    badRequest(reply, `${name} must be a non-negative number`);
+    return undefined;
+  }
+
+  return value;
+}
+
+function parseOptionalBodyDate(
+  value: unknown,
+  name: string,
+  reply: FastifyReply
+): Date | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (typeof value !== "string") {
+    badRequest(reply, `${name} must be a valid ISO date`);
+    return undefined;
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    badRequest(reply, `${name} must be a valid ISO date`);
+    return undefined;
+  }
+
+  return parsed;
+}
+
+function parseOptionalBodyStringArray(
+  value: unknown,
+  name: string,
+  reply: FastifyReply
+): string[] | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
+    badRequest(reply, `${name} must be an array of strings`);
+    return undefined;
+  }
+
+  return value.map((item) => item.trim()).filter(Boolean);
 }
 
 function parseOptionalBodyEnum<T extends string>(

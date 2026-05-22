@@ -119,6 +119,95 @@ export type RulesSummary = {
   groupedByCategory: Array<{ key: string; count: number }>;
 };
 
+export type BacktestRunStatus = "RUNNING" | "SUCCESS" | "FAILED" | "CANCELLED";
+export type BacktestOutcomeStatus = "OPEN" | "EVALUATED" | "EXPIRED" | "SKIPPED";
+export type BacktestOutcome =
+  | "POSITIVE"
+  | "NEGATIVE"
+  | "NEUTRAL"
+  | "INVALIDATED"
+  | "TARGET_REACHED";
+
+export type BacktestGroupSummary = {
+  key: string;
+  totalSignals: number;
+  evaluatedCount: number;
+  winRate: number;
+  avgReturnAfter1d: number;
+};
+
+export type BacktestSummary = {
+  totalSignals: number;
+  evaluatedCount: number;
+  positiveCount: number;
+  negativeCount: number;
+  neutralCount: number;
+  targetReachedCount: number;
+  invalidatedCount: number;
+  winRate: number;
+  avgReturnAfter1h: number;
+  avgReturnAfter4h: number;
+  avgReturnAfter1d: number;
+  avgReturnAfter3d: number;
+  groupedBySymbol: BacktestGroupSummary[];
+  groupedByTimeframe: BacktestGroupSummary[];
+  groupedBySignalType: BacktestGroupSummary[];
+  groupedByStatus: BacktestGroupSummary[];
+  groupedByScoreBucket: BacktestGroupSummary[];
+  warnings: string[];
+};
+
+export type BacktestRun = {
+  id: string;
+  name: string;
+  assetType: AssetType | null;
+  symbols: unknown[];
+  timeframes: unknown[];
+  from: string;
+  to: string;
+  status: BacktestRunStatus;
+  configJson: unknown;
+  summaryJson: BacktestSummary | null;
+  totalSignals: number;
+  winRate: number | null;
+  avgReturnAfter1d: number | null;
+  startedAt: string;
+  finishedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type BacktestSignal = {
+  id: string;
+  backtestRunId: string;
+  assetId: string;
+  symbol: string;
+  assetType: AssetType;
+  timeframe: string;
+  signalTime: string;
+  signalType: string;
+  status: SignalStatus;
+  direction: SignalDirection;
+  riskLevel: RiskLevel;
+  score: number;
+  originalScore: number | null;
+  adjustedScore: number | null;
+  entryPrice: string;
+  targetPrice: string | null;
+  invalidationPrice: string | null;
+  outcome: BacktestOutcome | null;
+  outcomeStatus: BacktestOutcomeStatus;
+  evaluatedAt: string | null;
+  returnAfter1h: number | null;
+  returnAfter4h: number | null;
+  returnAfter1d: number | null;
+  returnAfter3d: number | null;
+  maxFavorableMove: number | null;
+  maxAdverseMove: number | null;
+  contextJson: unknown;
+  createdAt: string;
+};
+
 export type Asset = {
   id: string;
   symbol: string;
