@@ -1,6 +1,12 @@
 .env
 .env.*
 !.env.example
+!.env.production.example
+
+# Production backups — keep the directory, not the dumps
+backups/*.dump
+backups/*.sql
+backups/*.gz
 
 node_modules/
 dist/

@@ -365,12 +365,11 @@ SignalPilot v1 uses a single-admin cookie-based session. No multi-user, no OAuth
 **1. Generate a password hash**
 
 ```bash
-ADMIN_PASSWORD=yourpassword pnpm auth:hash-password
-# or interactive:
-pnpm auth:hash-password
+ADMIN_PASSWORD='choose-a-cleartext-password' pnpm auth:hash-password
 ```
 
-Copy the output hash into `ADMIN_PASSWORD_HASH` in your `.env`.
+Copy the generated `ADMIN_PASSWORD_HASH=...` value into your `.env`. Do not store
+`ADMIN_PASSWORD` in `.env`; it is only used temporarily by the hash generator.
 
 **2. Generate a session secret**
 
@@ -384,13 +383,29 @@ Copy the output into `AUTH_SESSION_SECRET` in your `.env`.
 
 ```env
 ADMIN_USERNAME=admin
-ADMIN_PASSWORD_HASH=<hash from step 1>
-AUTH_SESSION_SECRET=<secret from step 2>
+ADMIN_PASSWORD_HASH=$2b$12$...
+AUTH_SESSION_SECRET=<random secret from openssl rand -hex 32>
 AUTH_COOKIE_SECURE=false          # true behind HTTPS
 AUTH_COOKIE_NAME=signalpilot_session
 AUTH_SESSION_TTL_HOURS=12
 API_AUTH_ENABLED=true
 DASHBOARD_AUTH_ENABLED=true
+```
+
+Login with:
+
+```text
+username: admin
+password: choose-a-cleartext-password
+```
+
+`ADMIN_PASSWORD_HASH` is not the login password. `AUTH_SESSION_SECRET` is only for
+signing sessions and is not the login password.
+
+To verify a password/hash pair without printing secrets:
+
+```bash
+ADMIN_PASSWORD='choose-a-cleartext-password' ADMIN_PASSWORD_HASH='$2b$12$...' pnpm auth:verify-password
 ```
 
 **4. Run database migration** (adds AuditLog table)
@@ -399,7 +414,26 @@ DASHBOARD_AUTH_ENABLED=true
 pnpm --filter @signalpilot/database prisma:migrate
 ```
 
-### Local Dev Mode (no login)
+### Local Dev Login
+
+For local development with API auth still enabled, turn on the explicit dev-login button:
+
+```env
+DEV_LOGIN_ENABLED=true
+DEV_LOGIN_USERNAME=dev-admin
+API_AUTH_ENABLED=true
+DASHBOARD_AUTH_ENABLED=true
+```
+
+Then open `/login` and click **Continue in Dev Mode**. This creates the same
+HttpOnly admin session cookie as the normal login and records an AuditLog entry with
+`action=dev_login`.
+
+Never enable this in production. API startup is blocked when `DEV_LOGIN_ENABLED=true`
+and `NODE_ENV=production` (also production `APP_ENV` or `VERCEL_ENV`) with:
+`DEV_LOGIN_ENABLED must not be true in production.`
+
+### Local Dev Mode (no auth)
 
 Set both flags to false to bypass auth entirely:
 
@@ -416,6 +450,7 @@ The dashboard shows a visible warning banner when auth is disabled.
 - `GET /config/public`
 - `GET /auth/status`
 - `POST /auth/login`
+- `POST /auth/dev-login` (local development only, when `DEV_LOGIN_ENABLED=true`)
 - `POST /auth/logout`
 
 All other API endpoints require a valid session cookie.

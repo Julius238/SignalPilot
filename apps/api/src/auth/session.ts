@@ -2,6 +2,8 @@ import { SignJWT, jwtVerify } from "jose";
 
 export type AdminSessionPayload = {
   role: "admin";
+  username?: string;
+  devLogin?: boolean;
 };
 
 const ALGORITHM = "HS256";
@@ -20,9 +22,9 @@ export function isAuthEnabled(): boolean {
   return process.env.API_AUTH_ENABLED !== "false";
 }
 
-export async function signSession(): Promise<string> {
+export async function signSession(payload: AdminSessionPayload = { role: "admin" }): Promise<string> {
   const ttlHours = Number(process.env.AUTH_SESSION_TTL_HOURS ?? 12);
-  return new SignJWT({ role: "admin" })
+  return new SignJWT(payload)
     .setProtectedHeader({ alg: ALGORITHM })
     .setIssuedAt()
     .setExpirationTime(`${ttlHours}h`)
@@ -33,7 +35,11 @@ export async function verifySession(token: string): Promise<AdminSessionPayload 
   try {
     const { payload } = await jwtVerify(token, getSecret());
     if (payload.role !== "admin") return null;
-    return { role: "admin" };
+    return {
+      role: "admin",
+      username: typeof payload.username === "string" ? payload.username : undefined,
+      devLogin: payload.devLogin === true
+    };
   } catch {
     return null;
   }

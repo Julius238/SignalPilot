@@ -1,14 +1,44 @@
 "use client";
 
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
 const apiUrl = process.env.NEXT_PUBLIC_SIGNALPILOT_API_URL ?? "http://localhost:3100";
+
+type AuthStatus = {
+  devLoginEnabled?: boolean;
+};
 
 export default function LoginPage() {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [devPending, setDevPending] = useState(false);
+  const [devLoginEnabled, setDevLoginEnabled] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadAuthStatus() {
+      try {
+        const response = await fetch(`${apiUrl}/auth/status`, {
+          credentials: "include",
+          cache: "no-store"
+        });
+        if (!response.ok) return;
+        const status = (await response.json()) as AuthStatus;
+        if (!cancelled) setDevLoginEnabled(status.devLoginEnabled === true);
+      } catch {
+        if (!cancelled) setDevLoginEnabled(false);
+      }
+    }
+
+    void loadAuthStatus();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -38,6 +68,29 @@ export default function LoginPage() {
     } catch {
       setError("Unable to reach API. Please check your connection.");
       setPending(false);
+    }
+  }
+
+  async function handleDevLogin() {
+    setDevPending(true);
+    setError(null);
+
+    try {
+      const response = await fetch(`${apiUrl}/auth/dev-login`, {
+        method: "POST",
+        credentials: "include"
+      });
+
+      if (!response.ok) {
+        setError("Dev login is not available.");
+        setDevPending(false);
+        return;
+      }
+
+      router.replace("/dashboard");
+    } catch {
+      setError("Unable to reach API. Please check your connection.");
+      setDevPending(false);
     }
   }
 
@@ -73,6 +126,16 @@ export default function LoginPage() {
             {pending ? "Signing in…" : "Sign in"}
           </button>
         </form>
+        {devLoginEnabled ? (
+          <button
+            className="dev-login-button"
+            disabled={pending || devPending}
+            onClick={handleDevLogin}
+            type="button"
+          >
+            {devPending ? "Continuing…" : "Continue in Dev Mode"}
+          </button>
+        ) : null}
       </div>
     </div>
   );

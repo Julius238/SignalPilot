@@ -699,6 +699,9 @@ export type PublicConfig = {
   alertCooldownMinutes: number;
   alertScoreImprovementThreshold: number;
   dashboardOrigin?: string;
+  authEnabled: boolean;
+  devLoginEnabled: boolean;
+  environment: string;
   liveTradingEnabled: boolean;
   paperTradingOnly: boolean;
 };

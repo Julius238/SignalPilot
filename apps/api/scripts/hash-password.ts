@@ -1,28 +1,23 @@
-import { createInterface } from "node:readline";
 import bcrypt from "bcryptjs";
+
+const BCRYPT_HASH_PATTERN = /^\$2[aby]\$\d\d\$/;
 
 async function main() {
   const envPassword = process.env.ADMIN_PASSWORD;
 
-  if (envPassword) {
-    const hash = await bcrypt.hash(envPassword, 12);
-    process.stdout.write(hash + "\n");
-    return;
+  if (!envPassword) {
+    throw new Error(
+      "ADMIN_PASSWORD is required. Generate a hash with ADMIN_PASSWORD='your-cleartext-password' pnpm auth:hash-password"
+    );
   }
 
-  const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: true });
+  if (BCRYPT_HASH_PATTERN.test(envPassword)) {
+    throw new Error("ADMIN_PASSWORD must be the cleartext password, not an existing bcrypt hash.");
+  }
 
-  rl.question("Password: ", async (input) => {
-    rl.close();
-
-    if (!input.trim()) {
-      process.stderr.write("Error: Password cannot be empty\n");
-      process.exit(1);
-    }
-
-    const hash = await bcrypt.hash(input.trim(), 12);
-    process.stdout.write(hash + "\n");
-  });
+  const hash = await bcrypt.hash(envPassword, 12);
+  process.stdout.write(`ADMIN_PASSWORD_HASH=${hash}\n`);
+  process.stdout.write("Use this hash in .env, then login with the original cleartext password.\n");
 }
 
 main().catch((error) => {

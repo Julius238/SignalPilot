@@ -1,5 +1,15 @@
+import Link from "next/link";
+
 import { CandlestickChart } from "../../../../components/CandlestickChart";
-import { DirectionBadge, RiskBadge, StatusBadge } from "../../../../components/badges";
+import {
+  ContextBadge,
+  DirectionBadge,
+  RegimeBadge,
+  RiskBadge,
+  RiskModeBadge,
+  ScoreBadge,
+  StatusBadge
+} from "../../../../components/badges";
 import { ErrorState } from "../../../../components/empty-state";
 import { formatDateTime, formatJson, formatScore } from "../../../../lib/format";
 import {
@@ -16,398 +26,637 @@ type SignalDetailPageProps = {
 };
 
 const scoreKeys = [
-  "trendScore",
-  "momentumScore",
-  "volumeScore",
-  "volatilityScore",
-  "rsiScore",
-  "newsScore",
-  "socialScore",
-  "eventScore",
-  "riskScore"
-] as const;
+  { key: "trendScore" as const, label: "Trend" },
+  { key: "momentumScore" as const, label: "Momentum" },
+  { key: "volumeScore" as const, label: "Volumen" },
+  { key: "volatilityScore" as const, label: "Volatilität" },
+  { key: "rsiScore" as const, label: "RSI" },
+  { key: "newsScore" as const, label: "News" },
+  { key: "socialScore" as const, label: "Social" },
+  { key: "eventScore" as const, label: "Events" },
+  { key: "riskScore" as const, label: "Risiko" }
+];
 
 export default async function SignalDetailPage({ params }: SignalDetailPageProps) {
   const { id } = await params;
-  const [signal, newsContext, eventContext, marketRegimeContext, ruleApplication] = await Promise.all([
-    fetchApi<SignalDetail>(`/signals/${encodeURIComponent(id)}`),
-    fetchApi<NewsContext>(`/signals/${encodeURIComponent(id)}/news-context`),
-    fetchApi<EventContext>(`/signals/${encodeURIComponent(id)}/event-context`),
-    fetchApi<SignalRegimeContext | null>(`/signals/${encodeURIComponent(id)}/market-regime-context`),
-    fetchApi<SignalRuleApplication>(`/signals/${encodeURIComponent(id)}/rule-application`)
-  ]);
+  const [signal, newsContext, eventContext, marketRegimeContext, ruleApplication] =
+    await Promise.all([
+      fetchApi<SignalDetail>(`/signals/${encodeURIComponent(id)}`),
+      fetchApi<NewsContext>(`/signals/${encodeURIComponent(id)}/news-context`),
+      fetchApi<EventContext>(`/signals/${encodeURIComponent(id)}/event-context`),
+      fetchApi<SignalRegimeContext | null>(
+        `/signals/${encodeURIComponent(id)}/market-regime-context`
+      ),
+      fetchApi<SignalRuleApplication>(
+        `/signals/${encodeURIComponent(id)}/rule-application`
+      )
+    ]);
 
   if (signal.error) {
-    return <ErrorState title="Could not load signal" message={signal.error} />;
+    return <ErrorState title="Signal konnte nicht geladen werden" message={signal.error} />;
   }
 
   const data = signal.data;
-
   if (!data) {
-    return <ErrorState title="Signal missing" message="The API returned no signal payload." />;
+    return (
+      <ErrorState title="Signal fehlt" message="Die API hat keine Signal-Daten zurückgegeben." />
+    );
   }
+
+  const s = data.signal;
+  const out = data.signalOutput;
+  const rule = ruleApplication.data;
+  const isAdjusted = rule && Math.abs(rule.originalScore - rule.adjustedScore) > 0.05;
+
+  const newsLevel =
+    !newsContext.data?.hasRecentNews
+      ? "none"
+      : (newsContext.data.relevanceScore ?? 0) >= 7
+        ? "high"
+        : "relevant";
+  const eventLevel =
+    !eventContext.data?.hasUpcomingEvent
+      ? "none"
+      : eventContext.data.eventRiskLevel === "HIGH"
+        ? "high"
+        : "upcoming";
+  const regimeLevel =
+    !marketRegimeContext.data
+      ? "neutral"
+      : marketRegimeContext.data.conflictLevel === "HIGH" ||
+          marketRegimeContext.data.conflictLevel === "MEDIUM"
+        ? "conflict"
+        : marketRegimeContext.data.isAlignedWithRegime
+          ? "aligned"
+          : "neutral";
+  const rulesLevel = isAdjusted ? "adjusted" : "none";
 
   return (
     <>
+      {/* ── Breadcrumb & Header ── */}
       <div className="page-header">
-        <h1>
-          {data.signal.symbol} · {data.signal.timeframe}
-        </h1>
-        <p>
-          {data.signal.signalType} · {formatDateTime(data.signal.createdAt)}
-        </p>
+        <div>
+          <p className="page-header-breadcrumb">
+            <Link href={`/dashboard/assets/${encodeURIComponent(s.symbol)}`}>
+              {s.symbol}
+            </Link>
+            {" / "}
+            <Link href="/dashboard/signals">Signals</Link>
+            {" / "}
+            {s.timeframe} · {s.signalType}
+          </p>
+          <h1>
+            {s.symbol} · {s.timeframe}
+          </h1>
+          <p className="muted small">{s.signalType} · {formatDateTime(s.createdAt)}</p>
+        </div>
+        <div className="page-actions">
+          <Link
+            className="primary-link secondary-link"
+            href={`/dashboard/assets/${encodeURIComponent(s.symbol)}`}
+          >
+            Asset-Profil
+          </Link>
+          <Link className="primary-link secondary-link" href="/dashboard/scanner">
+            Scanner
+          </Link>
+        </div>
       </div>
 
-      <section className="grid metrics">
-        <div className="card">
+      {/* ── Status row ── */}
+      <section className="grid metrics" style={{ marginBottom: 20 }}>
+        <div className="card" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <span className="metric-label">Status</span>
           <span className="metric-value">
-            <StatusBadge value={data.signal.status} />
+            <StatusBadge value={s.status} />
           </span>
         </div>
-        <div className="card">
-          <span className="metric-label">Direction</span>
+        <div className="card" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <span className="metric-label">Richtung</span>
           <span className="metric-value">
-            <DirectionBadge value={data.signal.direction} />
+            <DirectionBadge value={s.direction} />
           </span>
         </div>
         <div className="card">
-          <span className="metric-label">Score</span>
-          <span className="metric-value">{formatScore(data.signal.score)}</span>
+          <span className="metric-label">Signalqualität</span>
+          <ScoreBadge
+            value={rule ? rule.adjustedScore : s.score}
+            originalValue={rule && isAdjusted ? rule.originalScore : undefined}
+          />
         </div>
-        <div className="card">
-          <span className="metric-label">Risk</span>
+        <div className="card" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <span className="metric-label">Risiko</span>
           <span className="metric-value">
-            <RiskBadge value={data.signal.riskLevel} />
+            <RiskBadge value={s.riskLevel} />
           </span>
         </div>
-      </section>
-
-      <section className="card" style={{ marginTop: 16 }}>
-        <h2>Market Regime Context</h2>
-        {marketRegimeContext.data ? (
-          <div className="stack-list">
-            <div className="list-row">
-              <strong>{marketRegimeContext.data.overallRegime}</strong>
-              <span>{marketRegimeContext.data.riskMode}</span>
-              <span>{marketRegimeContext.data.conflictLevel}</span>
-            </div>
-            <p>{marketRegimeContext.data.summary}</p>
-            <p>{marketRegimeContext.data.riskNote}</p>
+        <div className="card">
+          <span className="metric-label">Kontext</span>
+          <div className="signal-card-badges" style={{ marginTop: 8 }}>
+            <ContextBadge type="news" level={newsLevel} />
+            <ContextBadge type="events" level={eventLevel} />
+            <ContextBadge type="regime" level={regimeLevel} />
+            <ContextBadge type="rules" level={rulesLevel} />
           </div>
-        ) : (
-          <p>Market Regime: Noch nicht berechnet.</p>
-        )}
+        </div>
       </section>
 
-      <section className="card" style={{ marginTop: 16 }}>
-        <h2>Score Adjustments</h2>
-        {ruleApplication.data ? (
-          <div className="stack-list">
-            <div className="list-row">
-              <strong>
-                {formatScore(ruleApplication.data.originalScore)} → {formatScore(ruleApplication.data.adjustedScore)}
-              </strong>
-              <span>{ruleApplication.data.originalStatus} → {ruleApplication.data.adjustedStatus}</span>
-            </div>
-            <p>{ruleApplication.data.summary}</p>
-            {ruleApplication.data.adjustments.map((adjustment) => (
-              <div className="list-row" key={`${adjustment.category}-${adjustment.reason}`}>
-                <div>
-                  <strong>{adjustment.reason}</strong>
-                  <span>{adjustment.category}</span>
-                </div>
-                <span>{formatScore(adjustment.scoreDelta)}</span>
+      {/* ── Main conclusion ── */}
+      <div className="grid two">
+        <div className="card">
+          <div className="section-header">
+            <h2 className="section-title">Schlussfolgerung</h2>
+          </div>
+          {out?.shortConclusion ? (
+            <p style={{ lineHeight: 1.6, marginTop: 0, marginBottom: 12 }}>{out.shortConclusion}</p>
+          ) : (
+            <p className="muted small">Keine Schlussfolgerung vorhanden.</p>
+          )}
+
+          {out?.counterArgument ? (
+            <>
+              <h3 style={{ fontSize: 13, fontWeight: 700, color: "var(--warn)", margin: "0 0 6px" }}>
+                Gegenargument
+              </h3>
+              <p className="signal-card-counter">{out.counterArgument}</p>
+            </>
+          ) : null}
+
+          {out?.nextTrigger ? (
+            <>
+              <h3 style={{ fontSize: 13, fontWeight: 700, color: "var(--muted)", margin: "12px 0 4px" }}>
+                Nächster Auslöser / Beobachtung
+              </h3>
+              <p className="signal-card-trigger">{out.nextTrigger}</p>
+            </>
+          ) : null}
+        </div>
+
+        {/* Score adjustments */}
+        <div className="card">
+          <div className="section-header">
+            <h2 className="section-title">Score-Anpassungen</h2>
+          </div>
+          {rule ? (
+            <div className="score-breakdown">
+              <div className="health-row">
+                <span className="health-row-label">Original-Score</span>
+                <span className="health-row-value">{formatScore(rule.originalScore)}</span>
               </div>
-            ))}
-            {ruleApplication.data.warnings.length > 0 ? <p>{ruleApplication.data.warnings.join(" | ")}</p> : null}
-          </div>
-        ) : (
-          <p>Score Adjustments: Keine Rule Application gefunden.</p>
-        )}
-      </section>
+              <div className="health-row">
+                <span className="health-row-label">Angepasster Score</span>
+                <span className="health-row-value" style={{ color: isAdjusted ? "var(--accent)" : undefined }}>
+                  {formatScore(rule.adjustedScore)}
+                  {isAdjusted ? (
+                    <span className="muted small" style={{ marginLeft: 6 }}>
+                      ({rule.adjustedScore > rule.originalScore ? "+" : ""}
+                      {(rule.adjustedScore - rule.originalScore).toFixed(1)})
+                    </span>
+                  ) : null}
+                </span>
+              </div>
+              <div className="health-row">
+                <span className="health-row-label">Status-Änderung</span>
+                <span className="health-row-value muted small">
+                  {rule.originalStatus} → {rule.adjustedStatus}
+                </span>
+              </div>
+              {rule.summary ? (
+                <p className="muted small" style={{ marginTop: 8 }}>
+                  {rule.summary}
+                </p>
+              ) : null}
+              {rule.adjustments.length > 0 ? (
+                <div style={{ marginTop: 8 }}>
+                  <h3 className="context-block-title">Einzelne Anpassungen</h3>
+                  <div className="stack-list">
+                    {rule.adjustments.map((adj) => (
+                      <div
+                        key={`${adj.category}-${adj.reason}`}
+                        className="list-row"
+                        style={{ padding: "8px 10px" }}
+                      >
+                        <div>
+                          <strong style={{ fontSize: 13 }}>{adj.reason}</strong>
+                          <span className="muted small" style={{ display: "block" }}>
+                            {adj.category}
+                            {adj.explanation ? ` · ${adj.explanation}` : ""}
+                          </span>
+                        </div>
+                        <span
+                          className="health-row-value"
+                          style={{
+                            color:
+                              adj.scoreDelta > 0
+                                ? "var(--good)"
+                                : adj.scoreDelta < 0
+                                  ? "var(--bad)"
+                                  : undefined
+                          }}
+                        >
+                          {adj.scoreDelta > 0 ? "+" : ""}
+                          {adj.scoreDelta.toFixed(1)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <p className="muted small" style={{ marginTop: 8 }}>
+                  Keine Rule-Anpassungen.
+                </p>
+              )}
+            </div>
+          ) : (
+            <p className="muted small">Keine Rule-Application gefunden.</p>
+          )}
+        </div>
+      </div>
 
+      {/* ── Chart ── */}
       <CandlestickChart
-        candles={data.candles.map((candle) => ({
-          time: candle.openTime,
-          open: candle.open,
-          high: candle.high,
-          low: candle.low,
-          close: candle.close,
-          volume: candle.volume
+        candles={data.candles.map((c) => ({
+          time: c.openTime,
+          open: c.open,
+          high: c.high,
+          low: c.low,
+          close: c.close,
+          volume: c.volume
         }))}
         signalMarker={{
-          time: data.candles.at(-1)?.openTime ?? data.signal.createdAt,
-          direction: data.signal.direction,
-          status: data.signal.status,
-          label: data.signal.signalType
+          time: data.candles.at(-1)?.openTime ?? s.createdAt,
+          direction: s.direction,
+          status: s.status,
+          label: s.signalType
         }}
-        title={`Candles · ${data.signal.symbol} · ${data.signal.timeframe}`}
+        title={`Kerzen · ${s.symbol} · ${s.timeframe}`}
       />
 
-      <section className="card">
-        <h2>Signal Scores</h2>
-        <div className="score-grid">
-          {scoreKeys.map((key) => (
-            <div className="score-item" key={key}>
-              <span>{key}</span>
-              <strong>{formatScore(data.signal[key])}</strong>
-            </div>
-          ))}
+      {/* ── Score breakdown ── */}
+      <section className="card" style={{ marginTop: 16 }}>
+        <div className="section-header">
+          <h2 className="section-title">Score-Aufschlüsselung</h2>
+        </div>
+        <div className="score-breakdown">
+          {scoreKeys.map(({ key, label }) => {
+            const val = s[key];
+            const pct = typeof val === "number" ? Math.min(100, (val / 10) * 100) : 0;
+            return (
+              <div key={key} className="score-bar-row">
+                <span className="score-bar-label">{label}</span>
+                <div className="progress-track">
+                  <div className="score-bar-fill progress-fill" style={{ width: `${pct}%` }} />
+                </div>
+                <span className="score-bar-value">{formatScore(val)}</span>
+              </div>
+            );
+          })}
         </div>
       </section>
 
+      {/* ── Context sections ── */}
+      <section style={{ marginTop: 16 }}>
+        <div className="section-header">
+          <h2 className="section-title">Kontext-Analyse</h2>
+        </div>
+        <div className="context-grid">
+
+          {/* Market Regime */}
+          <div className="context-block">
+            <h3 className="context-block-title">Markt-Regime</h3>
+            {marketRegimeContext.data ? (
+              <div className="context-stats">
+                <div className="context-stat-row">
+                  <span className="context-stat-label">Gesamt-Regime</span>
+                  <RegimeBadge value={marketRegimeContext.data.overallRegime} />
+                </div>
+                <div className="context-stat-row">
+                  <span className="context-stat-label">Risiko-Modus</span>
+                  <RiskModeBadge value={marketRegimeContext.data.riskMode} />
+                </div>
+                <div className="context-stat-row">
+                  <span className="context-stat-label">Ausrichtung</span>
+                  <span
+                    className="context-stat-value"
+                    style={{ color: marketRegimeContext.data.isAlignedWithRegime ? "var(--good)" : "var(--warn)" }}
+                  >
+                    {marketRegimeContext.data.isAlignedWithRegime ? "Bestätigt" : "Nicht ausgerichtet"}
+                  </span>
+                </div>
+                <div className="context-stat-row">
+                  <span className="context-stat-label">Konflikt-Level</span>
+                  <span
+                    className="context-stat-value"
+                    style={{
+                      color:
+                        marketRegimeContext.data.conflictLevel === "HIGH"
+                          ? "var(--bad)"
+                          : marketRegimeContext.data.conflictLevel === "MEDIUM"
+                            ? "var(--warn)"
+                            : undefined
+                    }}
+                  >
+                    {marketRegimeContext.data.conflictLevel}
+                  </span>
+                </div>
+                {marketRegimeContext.data.summary ? (
+                  <p className="muted small" style={{ marginTop: 6 }}>
+                    {marketRegimeContext.data.summary}
+                  </p>
+                ) : null}
+                {marketRegimeContext.data.riskNote ? (
+                  <p className="muted small" style={{ color: "var(--warn)", marginTop: 4 }}>
+                    {marketRegimeContext.data.riskNote}
+                  </p>
+                ) : null}
+              </div>
+            ) : (
+              <p className="muted small">Noch nicht berechnet.</p>
+            )}
+          </div>
+
+          {/* News Context */}
+          <div className="context-block">
+            <h3 className="context-block-title">News-Kontext</h3>
+            {newsContext.data ? (
+              <div className="context-stats">
+                <div className="context-stat-row">
+                  <span className="context-stat-label">Aktuelle News</span>
+                  <span className="context-stat-value">
+                    {newsContext.data.hasRecentNews
+                      ? `${newsContext.data.recentNewsCount} gefunden`
+                      : "Keine"}
+                  </span>
+                </div>
+                <div className="context-stat-row">
+                  <span className="context-stat-label">Relevanz</span>
+                  <span className="context-stat-value">
+                    {newsContext.data.relevantNewsCount} relevant
+                  </span>
+                </div>
+                <div className="context-stat-row">
+                  <span className="context-stat-label">Sentiment</span>
+                  <span
+                    className="context-stat-value"
+                    style={{
+                      color:
+                        newsContext.data.sentiment === "POSITIVE"
+                          ? "var(--good)"
+                          : newsContext.data.sentiment === "NEGATIVE"
+                            ? "var(--bad)"
+                            : undefined
+                    }}
+                  >
+                    {newsContext.data.sentiment}
+                  </span>
+                </div>
+                {newsContext.data.summary ? (
+                  <p className="muted small" style={{ marginTop: 6 }}>
+                    {newsContext.data.summary}
+                  </p>
+                ) : null}
+                {newsContext.data.topNews.length > 0 ? (
+                  <details style={{ marginTop: 8 }}>
+                    <summary>Top-News anzeigen ({newsContext.data.topNews.length})</summary>
+                    <div className="stack-list">
+                      {newsContext.data.topNews.map((item, i) => (
+                        <div key={i} className="list-row" style={{ padding: "6px 10px" }}>
+                          <div>
+                            {item.url ? (
+                              <a href={item.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13 }}>
+                                {item.headline}
+                              </a>
+                            ) : (
+                              <span style={{ fontSize: 13 }}>{item.headline}</span>
+                            )}
+                          </div>
+                          <span className="muted small nowrap">
+                            {item.source} · {item.sentiment}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                ) : null}
+              </div>
+            ) : (
+              <p className="muted small">Keine News-Daten verfügbar.</p>
+            )}
+          </div>
+
+          {/* Event Context */}
+          <div className="context-block">
+            <h3 className="context-block-title">Event-Kontext</h3>
+            {eventContext.data ? (
+              <div className="context-stats">
+                <div className="context-stat-row">
+                  <span className="context-stat-label">Event-Risiko</span>
+                  <span
+                    className="context-stat-value"
+                    style={{
+                      color:
+                        eventContext.data.eventRiskLevel === "HIGH"
+                          ? "var(--bad)"
+                          : eventContext.data.eventRiskLevel === "MEDIUM"
+                            ? "var(--warn)"
+                            : undefined
+                    }}
+                  >
+                    {eventContext.data.eventRiskLevel}
+                  </span>
+                </div>
+                <div className="context-stat-row">
+                  <span className="context-stat-label">Kommendes Event</span>
+                  <span className="context-stat-value">
+                    {eventContext.data.hasUpcomingEvent
+                      ? `in ${eventContext.data.daysToNearestEvent}d`
+                      : "Keines"}
+                  </span>
+                </div>
+                {eventContext.data.nearestEvent ? (
+                  <div className="context-stat-row">
+                    <span className="context-stat-label">Nächstes Event</span>
+                    <span className="context-stat-value small">
+                      {eventContext.data.nearestEvent.title}
+                    </span>
+                  </div>
+                ) : null}
+                {eventContext.data.summary ? (
+                  <p className="muted small" style={{ marginTop: 6 }}>
+                    {eventContext.data.summary}
+                  </p>
+                ) : null}
+                {eventContext.data.riskNote ? (
+                  <p className="muted small" style={{ color: "var(--warn)", marginTop: 4 }}>
+                    {eventContext.data.riskNote}
+                  </p>
+                ) : null}
+              </div>
+            ) : (
+              <p className="muted small">Keine Event-Daten verfügbar.</p>
+            )}
+          </div>
+        </div>
+      </section>
+
+      {/* ── Paper Evaluation ── */}
       {data.paperEvaluation ? (
         <section className="card" style={{ marginTop: 16 }}>
-          <h2>Paper Evaluation</h2>
-          <div className="table-wrap">
-            <table>
-              <tbody>
-                <tr>
-                  <th>Hypothetical outcome</th>
-                  <td>{data.paperEvaluation.outcome ?? data.paperEvaluation.evaluationStatus}</td>
-                </tr>
-                <tr>
-                  <th>Evaluation Kind</th>
-                  <td>{data.paperEvaluation.evaluationKind}</td>
-                </tr>
-                <tr>
-                  <th>Expected Move</th>
-                  <td>{data.paperEvaluation.expectedMoveDirection}</td>
-                </tr>
+          <div className="section-header">
+            <h2 className="section-title">Hypothetische Auswertung (Paper)</h2>
+          </div>
+          <div className="context-grid">
+            <div className="context-block">
+              <h3 className="context-block-title">Ergebnis</h3>
+              <div className="context-stats">
+                <div className="context-stat-row">
+                  <span className="context-stat-label">Outcome</span>
+                  <span
+                    className="context-stat-value"
+                    style={{
+                      color:
+                        data.paperEvaluation.outcome === "POSITIVE" ||
+                        data.paperEvaluation.outcome === "TARGET_REACHED"
+                          ? "var(--good)"
+                          : data.paperEvaluation.outcome === "NEGATIVE"
+                            ? "var(--bad)"
+                            : undefined
+                    }}
+                  >
+                    {data.paperEvaluation.outcome ?? data.paperEvaluation.evaluationStatus}
+                  </span>
+                </div>
+                <div className="context-stat-row">
+                  <span className="context-stat-label">Art</span>
+                  <span className="context-stat-value">{data.paperEvaluation.evaluationKind}</span>
+                </div>
+                <div className="context-stat-row">
+                  <span className="context-stat-label">Erwartete Bewegung</span>
+                  <span className="context-stat-value">
+                    {data.paperEvaluation.expectedMoveDirection}
+                  </span>
+                </div>
                 {data.paperEvaluation.skipReason ? (
-                  <tr>
-                    <th>Skip Reason</th>
-                    <td>{data.paperEvaluation.skipReason}</td>
-                  </tr>
+                  <div className="context-stat-row">
+                    <span className="context-stat-label">Übersprungen wegen</span>
+                    <span className="context-stat-value muted small">
+                      {data.paperEvaluation.skipReason}
+                    </span>
+                  </div>
                 ) : null}
-                <tr>
-                  <th>Entry Price</th>
-                  <td>{data.paperEvaluation.entryPrice}</td>
-                </tr>
-                <tr>
-                  <th>Target Price</th>
-                  <td>{data.paperEvaluation.targetPrice ?? "-"}</td>
-                </tr>
-                <tr>
-                  <th>Invalidation Price</th>
-                  <td>{data.paperEvaluation.invalidationPrice ?? "-"}</td>
-                </tr>
-                <tr>
-                  <th>Return 1h</th>
-                  <td>
-                    {data.paperEvaluation.returnAfter1h === null
-                      ? "-"
-                      : `${data.paperEvaluation.returnAfter1h.toFixed(2)}%`}
-                  </td>
-                </tr>
-                <tr>
-                  <th>Return 4h</th>
-                  <td>
-                    {data.paperEvaluation.returnAfter4h === null
-                      ? "-"
-                      : `${data.paperEvaluation.returnAfter4h.toFixed(2)}%`}
-                  </td>
-                </tr>
-                <tr>
-                  <th>Return 1d</th>
-                  <td>
-                    {data.paperEvaluation.returnAfter1d === null
-                      ? "-"
-                      : `${data.paperEvaluation.returnAfter1d.toFixed(2)}%`}
-                  </td>
-                </tr>
-                <tr>
-                  <th>Opened</th>
-                  <td>{formatDateTime(data.paperEvaluation.openedAt)}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
-      ) : null}
-
-      {newsContext.data && (
-        <section className="card" style={{ marginTop: 16 }}>
-          <h2>News Context</h2>
-          <div className="score-grid">
-            <div className="score-item">
-              <span>Recent News</span>
-              <strong>{newsContext.data.hasRecentNews ? "Yes" : "No"}</strong>
+              </div>
             </div>
-            <div className="score-item">
-              <span>News Count</span>
-              <strong>{newsContext.data.recentNewsCount}</strong>
-            </div>
-            <div className="score-item">
-              <span>Relevance Score</span>
-              <strong>{newsContext.data.relevanceScore}</strong>
-            </div>
-            <div className="score-item">
-              <span>Sentiment</span>
-              <strong>{newsContext.data.sentiment}</strong>
-            </div>
-          </div>
-          {newsContext.data.summary && (
-            <p style={{ marginTop: 8 }}>{newsContext.data.summary}</p>
-          )}
-          {newsContext.data.riskNote && (
-            <p className="muted small">{newsContext.data.riskNote}</p>
-          )}
-          {newsContext.data.sourceNote && (
-            <p className="muted small">{newsContext.data.sourceNote}</p>
-          )}
-          {newsContext.data.topNews.length > 0 && (
-            <>
-              <h3 style={{ marginTop: 12 }}>Top News</h3>
-              <div className="stack-list">
-                {newsContext.data.topNews.map((item, i) => (
-                  <div key={i} className="list-row">
-                    <div>
-                      {item.url ? (
-                        <a href={item.url} target="_blank" rel="noopener noreferrer">
-                          {item.headline}
-                        </a>
-                      ) : (
-                        <span>{item.headline}</span>
-                      )}
-                    </div>
-                    <div className="nowrap muted small">
-                      {item.source} · {formatDateTime(item.publishedAt)} · {item.sentiment}
-                    </div>
+            <div className="context-block">
+              <h3 className="context-block-title">Preise (hypothetisch)</h3>
+              <div className="context-stats">
+                {[
+                  { label: "Einstieg (hypothetisch)", val: data.paperEvaluation.entryPrice },
+                  { label: "Zielzone", val: data.paperEvaluation.targetPrice ?? "—" },
+                  { label: "Invalidierung", val: data.paperEvaluation.invalidationPrice ?? "—" }
+                ].map(({ label, val }) => (
+                  <div key={label} className="context-stat-row">
+                    <span className="context-stat-label">{label}</span>
+                    <span className="context-stat-value">{val}</span>
                   </div>
                 ))}
               </div>
-            </>
-          )}
-        </section>
-      )}
-
-      {eventContext.data && (
-        <section className="card" style={{ marginTop: 16 }}>
-          <h2>Event Context</h2>
-          <div className="score-grid">
-            <div className="score-item">
-              <span>Risk Level</span>
-              <strong
-                style={{
-                  color:
-                    eventContext.data.eventRiskLevel === "HIGH"
-                      ? "var(--color-danger, #e53e3e)"
-                      : eventContext.data.eventRiskLevel === "MEDIUM"
-                        ? "var(--color-warn, #dd6b20)"
-                        : undefined
-                }}
-              >
-                {eventContext.data.eventRiskLevel}
-              </strong>
             </div>
-            <div className="score-item">
-              <span>Upcoming Event</span>
-              <strong>{eventContext.data.hasUpcomingEvent ? "Yes" : "No"}</strong>
-            </div>
-            <div className="score-item">
-              <span>Recent Event</span>
-              <strong>{eventContext.data.hasRecentEvent ? "Yes" : "No"}</strong>
-            </div>
-            {eventContext.data.daysToNearestEvent !== null && (
-              <div className="score-item">
-                <span>Days to Event</span>
-                <strong>{eventContext.data.daysToNearestEvent}</strong>
+            <div className="context-block">
+              <h3 className="context-block-title">Rendite nach Zeit (hypothetisch)</h3>
+              <div className="context-stats">
+                {[
+                  { label: "Nach 1h", val: data.paperEvaluation.returnAfter1h },
+                  { label: "Nach 4h", val: data.paperEvaluation.returnAfter4h },
+                  { label: "Nach 1d", val: data.paperEvaluation.returnAfter1d },
+                  { label: "Nach 3d", val: data.paperEvaluation.returnAfter3d }
+                ].map(({ label, val }) => (
+                  <div key={label} className="context-stat-row">
+                    <span className="context-stat-label">{label}</span>
+                    <span
+                      className="context-stat-value"
+                      style={{
+                        color:
+                          typeof val === "number"
+                            ? val > 0
+                              ? "var(--good)"
+                              : val < 0
+                                ? "var(--bad)"
+                                : undefined
+                            : undefined
+                      }}
+                    >
+                      {typeof val === "number" ? `${val.toFixed(2)}%` : "—"}
+                    </span>
+                  </div>
+                ))}
               </div>
-            )}
-            {eventContext.data.daysSinceRecentEvent !== null && (
-              <div className="score-item">
-                <span>Days Since Event</span>
-                <strong>{eventContext.data.daysSinceRecentEvent}</strong>
-              </div>
-            )}
+            </div>
           </div>
-          {eventContext.data.summary && (
-            <p style={{ marginTop: 8 }}>{eventContext.data.summary}</p>
-          )}
-          {eventContext.data.riskNote && (
-            <p className="muted small">{eventContext.data.riskNote}</p>
-          )}
-          {eventContext.data.nearestEvent && (
-            <>
-              <h3 style={{ marginTop: 12 }}>Nearest Event</h3>
-              <div className="stack-list">
-                <div className="list-row">
-                  <div>
-                    <strong>{eventContext.data.nearestEvent.title}</strong>
-                    {eventContext.data.nearestEvent.fiscalQuarter && (
-                      <span className="muted small">
-                        {" "}
-                        · Q{eventContext.data.nearestEvent.fiscalQuarter}{" "}
-                        {eventContext.data.nearestEvent.fiscalYear}
-                      </span>
-                    )}
-                  </div>
-                  <div className="nowrap muted small">
-                    {formatDateTime(eventContext.data.nearestEvent.eventDate)}
-                    {eventContext.data.nearestEvent.daysFromNow > 0
-                      ? ` · in ${eventContext.data.nearestEvent.daysFromNow}d`
-                      : ` · ${Math.abs(eventContext.data.nearestEvent.daysFromNow)}d ago`}
-                  </div>
-                </div>
-              </div>
-            </>
-          )}
+          <p className="muted small" style={{ marginTop: 8 }}>
+            Eröffnet: {formatDateTime(data.paperEvaluation.openedAt)}
+            {data.paperEvaluation.evaluatedAt
+              ? ` · Ausgewertet: ${formatDateTime(data.paperEvaluation.evaluatedAt)}`
+              : ""}
+          </p>
         </section>
-      )}
+      ) : null}
 
-      <section className="detail-grid" style={{ marginTop: 16 }}>
-        <div className="card">
-          <h2>Signal Output</h2>
-          <h3>Short Conclusion</h3>
-          <p>{data.signalOutput?.shortConclusion ?? "-"}</p>
-          <h3>Counter Argument</h3>
-          <p>{data.signalOutput?.counterArgument ?? "-"}</p>
-          <h3>Next Trigger</h3>
-          <p>{data.signalOutput?.nextTrigger ?? "-"}</p>
-          <h3>Telegram Text</h3>
-          <pre className="telegram-text">{data.signalOutput?.telegramText ?? "-"}</pre>
+      {/* ── Structured output (collapsible) ── */}
+      <section className="card" style={{ marginTop: 16 }}>
+        <div className="section-header">
+          <h2 className="section-title">Strukturierte Signal-Ausgabe</h2>
         </div>
-        <div className="card">
-          <h2>Structured JSON</h2>
-          <h3>Technical</h3>
-          <pre>{formatJson(data.signalOutput?.technicalJson)}</pre>
-          <h3>Intelligence</h3>
-          <pre>{formatJson(data.signalOutput?.intelligenceJson)}</pre>
-          <h3>Market Confirmation</h3>
-          <pre>{formatJson(data.signalOutput?.marketConfirmationJson)}</pre>
-        </div>
+        <details>
+          <summary>Technical JSON anzeigen</summary>
+          <pre>{formatJson(out?.technicalJson)}</pre>
+        </details>
+        <details style={{ marginTop: 8 }}>
+          <summary>Intelligence JSON anzeigen</summary>
+          <pre>{formatJson(out?.intelligenceJson)}</pre>
+        </details>
+        <details style={{ marginTop: 8 }}>
+          <summary>Market Confirmation JSON anzeigen</summary>
+          <pre>{formatJson(out?.marketConfirmationJson)}</pre>
+        </details>
+        {out?.telegramText ? (
+          <details style={{ marginTop: 8 }}>
+            <summary>Alert-Text anzeigen</summary>
+            <pre className="telegram-text">{out.telegramText}</pre>
+          </details>
+        ) : null}
       </section>
 
+      {/* ── Candle table (collapsible) ── */}
       <section className="card" style={{ marginTop: 16 }}>
-        <h2>Latest 250 Candles</h2>
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Open Time</th>
-                <th>Open</th>
-                <th>High</th>
-                <th>Low</th>
-                <th>Close</th>
-                <th>Volume</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.candles.map((candle) => (
-                <tr key={candle.id}>
-                  <td>{formatDateTime(candle.openTime)}</td>
-                  <td>{candle.open}</td>
-                  <td>{candle.high}</td>
-                  <td>{candle.low}</td>
-                  <td>{candle.close}</td>
-                  <td>{candle.volume}</td>
+        <details>
+          <summary>Letzte {data.candles.length} Kerzen anzeigen</summary>
+          <div className="table-wrap" style={{ marginTop: 10 }}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Zeit (Open)</th>
+                  <th>Open</th>
+                  <th>High</th>
+                  <th>Low</th>
+                  <th>Close</th>
+                  <th>Volumen</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {data.candles.map((c) => (
+                  <tr key={c.id}>
+                    <td>{formatDateTime(c.openTime)}</td>
+                    <td>{c.open}</td>
+                    <td>{c.high}</td>
+                    <td>{c.low}</td>
+                    <td>{c.close}</td>
+                    <td>{c.volume}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </details>
       </section>
     </>
   );

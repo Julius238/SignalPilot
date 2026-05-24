@@ -31,6 +31,10 @@ describe("watchlist routes", () => {
   const originalEnableLiveTrading = process.env.ENABLE_LIVE_TRADING;
   const originalWebhookUrl = process.env.N8N_WEBHOOK_SIGNAL_URL;
   const originalApiAuthEnabled = process.env.API_AUTH_ENABLED;
+  const originalDevLoginEnabled = process.env.DEV_LOGIN_ENABLED;
+  const originalNodeEnv = process.env.NODE_ENV;
+  const originalAppEnv = process.env.APP_ENV;
+  const originalVercelEnv = process.env.VERCEL_ENV;
 
   afterEach(() => {
     restoreEnv("ALERT_MODE", originalAlertMode);
@@ -38,6 +42,10 @@ describe("watchlist routes", () => {
     restoreEnv("ENABLE_LIVE_TRADING", originalEnableLiveTrading);
     restoreEnv("N8N_WEBHOOK_SIGNAL_URL", originalWebhookUrl);
     restoreEnv("API_AUTH_ENABLED", originalApiAuthEnabled);
+    restoreEnv("DEV_LOGIN_ENABLED", originalDevLoginEnabled);
+    restoreEnv("NODE_ENV", originalNodeEnv);
+    restoreEnv("APP_ENV", originalAppEnv);
+    restoreEnv("VERCEL_ENV", originalVercelEnv);
   });
 
   it("creates a watchlist item and returns asset data", async () => {
@@ -151,6 +159,11 @@ describe("watchlist routes", () => {
     process.env.DASHBOARD_ORIGIN = "http://localhost:3000";
     process.env.ENABLE_LIVE_TRADING = "false";
     process.env.N8N_WEBHOOK_SIGNAL_URL = "https://secret.example.test/webhook";
+    process.env.API_AUTH_ENABLED = "true";
+    process.env.DEV_LOGIN_ENABLED = "true";
+    process.env.NODE_ENV = "development";
+    delete process.env.APP_ENV;
+    delete process.env.VERCEL_ENV;
 
     const server = await createServer();
     const response = await server.inject("/config/public");
@@ -162,6 +175,9 @@ describe("watchlist routes", () => {
       alertCooldownMinutes: 240,
       alertScoreImprovementThreshold: 8,
       dashboardOrigin: "http://localhost:3000",
+      authEnabled: false,
+      devLoginEnabled: false,
+      environment: "development",
       liveTradingEnabled: false,
       paperTradingOnly: true
     });

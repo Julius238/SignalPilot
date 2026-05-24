@@ -1,26 +1,26 @@
 import Link from "next/link";
 
-import { AlignmentBadge, DirectionBadge, RiskBadge, StatusBadge } from "./badges";
+import { AlignmentBadge, DirectionBadge, RiskBadge, ScoreBadge, StatusBadge } from "./badges";
 import { EmptyState } from "./empty-state";
-import { formatDateTime, formatScore } from "../lib/format";
+import { formatDateTime } from "../lib/format";
 import type { MultiTimeframeSummary, ScannerGroupKey, SignalListItem } from "../lib/signalpilot-api";
 
 const groupTitles: Record<ScannerGroupKey, string> = {
-  strongWatch: "Strong Watch",
-  watchlist: "Watchlist",
-  volumeSpikes: "Volume Spikes",
-  breakouts: "Breakouts",
-  highRisk: "High Risk / Avoid",
-  noEdge: "No Edge / Low Priority"
+  strongWatch: "Starke Beobachtung",
+  watchlist: "Beobachten",
+  volumeSpikes: "Volumen-Spike",
+  breakouts: "Ausbrüche",
+  highRisk: "Hohes Risiko",
+  noEdge: "Kein Vorteil"
 };
 
 const groupDescriptions: Record<ScannerGroupKey, string> = {
-  strongWatch: "Highest conviction signals sorted by score.",
-  watchlist: "Constructive setups worth monitoring.",
-  volumeSpikes: "Fresh activity shifts by signal timestamp.",
-  breakouts: "Breakout alerts sorted by signal strength.",
-  highRisk: "Avoid or high-risk signals sorted by risk score.",
-  noEdge: "Signals without a current edge."
+  strongWatch: "Höchste Überzeugung – sortiert nach Signalqualität.",
+  watchlist: "Konstruktive Setups – es ist Beobachtung angebracht.",
+  volumeSpikes: "Frische Aktivitätsverschiebungen nach Signalzeitpunkt.",
+  breakouts: "Ausbruch-Signale sortiert nach Stärke.",
+  highRisk: "Hohes Risiko – Kontext prüfen, Vorsicht geboten.",
+  noEdge: "Signals ohne klaren Vorteil – niedrige Priorität."
 };
 
 export function ScannerGroups({
@@ -65,8 +65,8 @@ function ScannerGroup({
   const sortedSignals = [...signals].sort((left, right) => {
     const leftSummary = multiTimeframeSummaries[left.symbol];
     const rightSummary = multiTimeframeSummaries[right.symbol];
-    const alignmentDifference = alignmentRank(leftSummary) - alignmentRank(rightSummary);
-    return alignmentDifference === 0 ? right.score - left.score : alignmentDifference;
+    const alignmentDiff = alignmentRank(leftSummary) - alignmentRank(rightSummary);
+    return alignmentDiff === 0 ? right.score - left.score : alignmentDiff;
   });
 
   return (
@@ -106,6 +106,7 @@ function SignalScannerRow({
   subdued: boolean;
   multiTimeframeSummary?: MultiTimeframeSummary;
 }) {
+  const originalScore = getOriginalScore(signal.signalOutput?.dashboardJson);
   const isHighRisk = signal.status === "AVOID" || signal.riskLevel === "HIGH";
 
   return (
@@ -121,30 +122,43 @@ function SignalScannerRow({
           >
             {signal.asset.assetType} · {signal.timeframe}
           </Link>
+          <span className="scanner-asset-link">{signal.signalType}</span>
         </div>
-        <div className={`scanner-score ${isHighRisk ? "scanner-score-risk" : ""}`}>
-          <span>Score</span>
-          <strong>{formatScore(signal.score)}</strong>
-          {getOriginalScore(signal.signalOutput?.dashboardJson) !== null ? (
-            <span>Adjusted · Original {formatScore(getOriginalScore(signal.signalOutput?.dashboardJson))}</span>
-          ) : null}
-        </div>
+        <ScoreBadge
+          value={signal.score}
+          originalValue={originalScore ?? undefined}
+          label={isHighRisk ? "⚠ Signalqualität" : "Signalqualität"}
+        />
       </div>
 
       <div className="scanner-badges">
-        {multiTimeframeSummary ? <AlignmentBadge value={multiTimeframeSummary.alignment} /> : null}
+        {multiTimeframeSummary ? (
+          <AlignmentBadge value={multiTimeframeSummary.alignment} />
+        ) : null}
         <StatusBadge value={signal.status} />
         <DirectionBadge value={signal.direction} />
         <RiskBadge value={signal.riskLevel} />
-        <span className="badge signal-type-badge">{signal.signalType}</span>
       </div>
 
-      <p className="scanner-conclusion">{signal.signalOutput?.shortConclusion ?? "-"}</p>
-      <p className="scanner-trigger">{signal.signalOutput?.nextTrigger ?? "-"}</p>
+      {signal.signalOutput?.shortConclusion ? (
+        <p className="scanner-conclusion">{signal.signalOutput.shortConclusion}</p>
+      ) : null}
+
+      {signal.signalOutput?.counterArgument ? (
+        <p className="scanner-conclusion muted small">
+          Gegenargument: {signal.signalOutput.counterArgument}
+        </p>
+      ) : null}
+
+      {signal.signalOutput?.nextTrigger ? (
+        <p className="scanner-trigger">
+          Nächster Auslöser: {signal.signalOutput.nextTrigger}
+        </p>
+      ) : null}
 
       <div className="scanner-meta">
         <span>{formatDateTime(signal.createdAt)}</span>
-        <Link href={`/dashboard/signals/${signal.id}`}>Signal öffnen</Link>
+        <Link href={`/dashboard/signals/${signal.id}`}>Signal öffnen →</Link>
       </div>
     </article>
   );
@@ -171,8 +185,12 @@ function alignmentRank(summary: MultiTimeframeSummary | undefined) {
   }
 }
 
-function getOriginalScore(dashboardJson: unknown) {
-  if (!dashboardJson || typeof dashboardJson !== "object" || !("originalScore" in dashboardJson)) {
+function getOriginalScore(dashboardJson: unknown): number | null {
+  if (
+    !dashboardJson ||
+    typeof dashboardJson !== "object" ||
+    !("originalScore" in dashboardJson)
+  ) {
     return null;
   }
   const value = (dashboardJson as { originalScore?: unknown }).originalScore;

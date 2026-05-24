@@ -33,7 +33,19 @@
     "worker:run-crypto-pipeline": "pnpm --filter @signalpilot/worker run:crypto-pipeline",
     "worker:scheduler": "pnpm --filter @signalpilot/worker scheduler",
     "prisma:generate": "pnpm --filter @signalpilot/database prisma:generate",
-    "auth:hash-password": "tsx apps/api/scripts/hash-password.ts"
+    "auth:hash-password": "tsx apps/api/scripts/hash-password.ts",
+    "auth:verify-password": "tsx apps/api/scripts/verify-password.ts",
+    "ops:prod:build": "bash scripts/ops/prod-build.sh",
+    "ops:prod:up": "bash scripts/ops/prod-up.sh",
+    "ops:prod:down": "bash scripts/ops/prod-down.sh",
+    "ops:prod:logs": "bash scripts/ops/prod-logs.sh",
+    "ops:prod:ps": "docker compose -f docker-compose.prod.yml ps",
+    "ops:prod:migrate": "bash scripts/ops/prod-migrate.sh",
+    "ops:prod:backup": "bash scripts/ops/backup-postgres.sh",
+    "ops:prod:restore": "bash scripts/ops/restore-postgres.sh",
+    "ops:prod:health": "bash scripts/ops/healthcheck.sh",
+    "ops:prod:reset-db-volume": "bash scripts/ops/prod-reset-db-volume.sh",
+    "ops:prod:prisma-smoke": "bash scripts/ops/prisma-smoke.sh"
   },
   "devDependencies": {
     "@eslint/js": "^9.18.0",

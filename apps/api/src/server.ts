@@ -3,14 +3,17 @@ import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
 import Fastify from "fastify";
-import type { HealthResponse } from "@signalpilot/shared";
 
+import { validateAuthConfig } from "./auth/config.js";
 import { requireAdmin } from "./auth/helpers.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerAuditLogRoutes } from "./routes/audit-logs.js";
 import { registerDashboardRoutes } from "./routes/dashboard.js";
+import { registerHealthRoutes } from "./routes/health.js";
 
 export async function buildServer() {
+  validateAuthConfig();
+
   const server = Fastify({ logger: true });
 
   await server.register(helmet, {
@@ -38,10 +41,7 @@ export async function buildServer() {
     });
   });
 
-  server.get("/health", async (): Promise<HealthResponse> => {
-    return { status: "ok", service: "signalpilot-api" };
-  });
-
+  await server.register(registerHealthRoutes);
   await server.register(registerAuthRoutes);
 
   await server.register(async (protectedScope) => {

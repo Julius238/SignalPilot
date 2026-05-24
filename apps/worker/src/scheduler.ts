@@ -6,6 +6,8 @@ import { config } from "dotenv";
 import cron, { type ScheduledTask } from "node-cron";
 import pino from "pino";
 
+import { assertProductionSafety } from "./lib/safety.js";
+
 import {
   runCryptoSignalPipeline,
   type CryptoSignalPipelineSummary
@@ -237,6 +239,8 @@ async function writeBotLog(
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  assertProductionSafety();
+
   try {
     await startScheduler();
   } catch (error) {

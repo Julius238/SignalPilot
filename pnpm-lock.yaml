@@ -44,6 +44,9 @@ importers:
       '@fastify/rate-limit':
         specifier: ^10.2.2
         version: 10.3.0
+      '@prisma/client':
+        specifier: ^6.19.3
+        version: 6.19.3(prisma@6.19.3(typescript@5.9.3))(typescript@5.9.3)
       '@signalpilot/data-quality':
         specifier: workspace:*
         version: link:../../packages/data-quality
@@ -83,6 +86,9 @@ importers:
       pino:
         specifier: ^9.6.0
         version: 9.14.0
+      prisma:
+        specifier: ^6.19.3
+        version: 6.19.3(typescript@5.9.3)
     devDependencies:
       '@types/bcryptjs':
         specifier: ^2.4.6
@@ -115,6 +121,9 @@ importers:
 
   apps/worker:
     dependencies:
+      '@prisma/client':
+        specifier: ^6.19.3
+        version: 6.19.3(prisma@6.19.3(typescript@5.9.3))(typescript@5.9.3)
       '@signalpilot/alerts':
         specifier: workspace:*
         version: link:../../packages/alerts
@@ -169,6 +178,9 @@ importers:
       pino:
         specifier: ^9.6.0
         version: 9.14.0
+      prisma:
+        specifier: ^6.19.3
+        version: 6.19.3(typescript@5.9.3)
     devDependencies:
       tsx:
         specifier: ^4.19.2
@@ -223,10 +235,10 @@ importers:
       dotenv:
         specifier: ^16.4.7
         version: 16.6.1
-    devDependencies:
       prisma:
-        specifier: ^6.2.1
+        specifier: ^6.19.3
         version: 6.19.3(typescript@5.9.3)
+    devDependencies:
       tsx:
         specifier: ^4.19.2
         version: 4.21.0

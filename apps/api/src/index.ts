@@ -8,6 +8,9 @@ const appDir = dirname(fileURLToPath(import.meta.url));
 config({ path: resolve(appDir, "../../../.env") });
 config();
 
+const { assertProductionSafety } = await import("./lib/safety.js");
+assertProductionSafety();
+
 const { buildServer } = await import("./server.js");
 
 const port = Number(process.env.PORT ?? 3100);

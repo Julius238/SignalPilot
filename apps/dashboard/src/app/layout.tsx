@@ -28,24 +28,39 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             <Link className="brand" href="/dashboard">
               SignalPilot
             </Link>
-            <nav>
-              <Link href="/dashboard">Overview</Link>
-              <Link href="/dashboard/watchlist">Watchlist</Link>
-              <Link href="/dashboard/scanner">Scanner</Link>
-              <Link href="/dashboard/multi-timeframe">Multi-Timeframe</Link>
-              <Link href="/dashboard/market-regime">Market Regime</Link>
-              <Link href="/dashboard/rules">Rules</Link>
-              <Link href="/dashboard/backtests">Backtests</Link>
-              <Link href="/dashboard/strategy-lab">Strategy Lab</Link>
-              <Link href="/dashboard/signals">Signals</Link>
-              <Link href="/dashboard/paper">Paper Eval</Link>
-              <Link href="/dashboard/performance">Performance</Link>
-              <Link href="/dashboard/news">News</Link>
-              <Link href="/dashboard/events">Events</Link>
-              <Link href="/dashboard/data-quality">Data Quality</Link>
-              <Link href="/dashboard/assets">Assets</Link>
-              <Link href="/dashboard/logs">Logs</Link>
-              <Link href="/dashboard/audit-logs">Audit Logs</Link>
+            <nav className="nav-groups">
+              <div className="nav-group">
+                <span className="nav-group-label">Command</span>
+                <Link href="/dashboard">Overview</Link>
+                <Link href="/dashboard/scanner">Scanner</Link>
+                <Link href="/dashboard/signals">Signals</Link>
+                <Link href="/dashboard/assets">Assets</Link>
+                <Link href="/dashboard/watchlist">Watchlist</Link>
+              </div>
+              <div className="nav-sep" aria-hidden="true" />
+              <div className="nav-group">
+                <span className="nav-group-label">Intelligence</span>
+                <Link href="/dashboard/market-regime">Regime</Link>
+                <Link href="/dashboard/news">News</Link>
+                <Link href="/dashboard/events">Events</Link>
+                <Link href="/dashboard/multi-timeframe">Multi-TF</Link>
+                <Link href="/dashboard/rules">Rules</Link>
+              </div>
+              <div className="nav-sep" aria-hidden="true" />
+              <div className="nav-group">
+                <span className="nav-group-label">Research</span>
+                <Link href="/dashboard/backtests">Backtests</Link>
+                <Link href="/dashboard/strategy-lab">Strategy Lab</Link>
+                <Link href="/dashboard/paper">Paper Eval</Link>
+                <Link href="/dashboard/performance">Performance</Link>
+              </div>
+              <div className="nav-sep" aria-hidden="true" />
+              <div className="nav-group">
+                <span className="nav-group-label">System</span>
+                <Link href="/dashboard/data-quality">Data Quality</Link>
+                <Link href="/dashboard/logs">Logs</Link>
+                <Link href="/dashboard/audit-logs">Audit</Link>
+              </div>
             </nav>
             <div className="nav-actions">
               <LogoutButton />

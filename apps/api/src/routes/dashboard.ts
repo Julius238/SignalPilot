@@ -38,6 +38,8 @@ import {
   type PerformanceGroupBy
 } from "@signalpilot/performance-intelligence";
 import type { FastifyInstance, FastifyReply } from "fastify";
+import { getPublicEnvironment, isDevLoginEnabled } from "../auth/config.js";
+import { isAuthEnabled } from "../auth/session.js";
 
 type QueryValue = string | string[] | undefined;
 type QueryRecord = Record<string, QueryValue>;
@@ -96,6 +98,7 @@ export function setDashboardDatabaseForTests(db: typeof prisma) {
 export async function registerDashboardRoutes(server: FastifyInstance) {
   server.get("/config/public", async () => {
     const liveTradingEnabled = process.env.ENABLE_LIVE_TRADING === "true";
+    const authEnabled = isAuthEnabled();
 
     return {
       alertMode: parsePublicAlertMode(process.env.ALERT_MODE),
@@ -105,6 +108,9 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
         8
       ),
       dashboardOrigin: process.env.DASHBOARD_ORIGIN,
+      authEnabled,
+      devLoginEnabled: authEnabled && isDevLoginEnabled(),
+      environment: getPublicEnvironment(),
       liveTradingEnabled,
       paperTradingOnly: !liveTradingEnabled
     };
