@@ -1,102 +1,113 @@
-import { AlertStatesTable } from "../../../components/alert-states-table";
-import { AlertsList } from "../../../components/alerts-list";
+import Link from "next/link";
+
 import { ErrorState, EmptyState } from "../../../components/empty-state";
-import { formatDateTime, formatJson } from "../../../lib/format";
-import {
-  fetchApi,
-  type Alert,
-  type AlertState,
-  type BotLog,
-  type BotRun
-} from "../../../lib/signalpilot-api";
+import { formatDateTime } from "../../../lib/format";
+import { fetchApi, type BotLog } from "../../../lib/signalpilot-api";
+
+type LogLevel = "ERROR" | "WARN" | "WARNING" | "INFO" | "DEBUG" | string;
+
+function LevelBadge({ level }: { level: LogLevel }) {
+  const upper = level.toUpperCase();
+  let cls = "";
+  if (upper === "ERROR") cls = "alert-failed";
+  else if (upper === "WARN" || upper === "WARNING") cls = "alert-pending";
+  else if (upper === "INFO") cls = "alert-sent";
+  else cls = "status-no_edge";
+  return <span className={`badge ${cls}`}>{upper}</span>;
+}
+
+function MetaCell({ value }: { value: unknown }) {
+  if (!value || (typeof value === "object" && Object.keys(value as object).length === 0)) {
+    return <span className="muted">—</span>;
+  }
+  try {
+    const str = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+    return <pre style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: 11 }}>{str}</pre>;
+  } catch {
+    return <span className="muted">—</span>;
+  }
+}
 
 export default async function LogsPage() {
-  const [botRuns, botLogs, alerts, alertStates] = await Promise.all([
-    fetchApi<BotRun[]>("/bot-runs?limit=50"),
-    fetchApi<BotLog[]>("/logs?limit=100"),
-    fetchApi<Alert[]>("/alerts?limit=50"),
-    fetchApi<AlertState[]>("/alerts/states?limit=100")
-  ]);
+  const botLogs = await fetchApi<BotLog[]>("/logs?limit=200");
+  const logs = botLogs.data ?? [];
+
+  const errorCount = logs.filter((l) => l.level.toUpperCase() === "ERROR").length;
+  const warnCount = logs.filter(
+    (l) => l.level.toUpperCase() === "WARN" || l.level.toUpperCase() === "WARNING"
+  ).length;
 
   return (
     <>
       <div className="page-header">
-        <h1>Operations</h1>
-        <p>Recent BotRuns, BotLogs and alert dispatch records.</p>
+        <div>
+          <h1>System Logs</h1>
+          <p className="muted">Bot-Logs und Debug-Ausgaben der letzten Läufe.</p>
+        </div>
+        <Link className="primary-link" href="/dashboard/operations">
+          Operations →
+        </Link>
       </div>
 
-      {botRuns.error ? <ErrorState title="Could not load bot runs" message={botRuns.error} /> : null}
-      {botLogs.error ? <ErrorState title="Could not load logs" message={botLogs.error} /> : null}
-      {alerts.error ? <ErrorState title="Could not load alerts" message={alerts.error} /> : null}
-      {alertStates.error ? (
-        <ErrorState title="Could not load alert states" message={alertStates.error} />
+      {botLogs.error ? (
+        <ErrorState title="Logs nicht verfügbar" message={botLogs.error} />
       ) : null}
 
-      <section className="grid two">
-        <div className="card">
-          <h2>BotRuns</h2>
-          {botRuns.data && botRuns.data.length > 0 ? (
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Started</th>
-                    <th>Job</th>
-                    <th>Status</th>
-                    <th>Finished</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {botRuns.data.map((run) => (
-                    <tr key={run.id}>
-                      <td>{formatDateTime(run.startedAt)}</td>
-                      <td>{run.jobName}</td>
-                      <td>{run.status}</td>
-                      <td>{formatDateTime(run.finishedAt)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <EmptyState title="Keine BotRuns gefunden." />
-          )}
+      {(errorCount > 0 || warnCount > 0) && (
+        <div className="warning-section" style={{ marginBottom: 16 }}>
+          <h3 className="warning-section-title">
+            Log-Auffälligkeiten
+          </h3>
+          <ul className="warning-list">
+            {errorCount > 0 && (
+              <li className="warning-item">
+                <span className="warning-icon">✕</span>
+                <span>
+                  <strong>{errorCount} ERROR</strong>-Einträge gefunden — Details in der Tabelle
+                  unten prüfen.
+                </span>
+              </li>
+            )}
+            {warnCount > 0 && (
+              <li className="warning-item">
+                <span className="warning-icon">⚠</span>
+                <span>
+                  <strong>{warnCount} WARN</strong>-Einträge — können auf
+                  Konfigurationsprobleme oder Datenlücken hinweisen.
+                </span>
+              </li>
+            )}
+          </ul>
         </div>
+      )}
 
-        <div className="card">
-          <h2>Alerts</h2>
-          <AlertsList alerts={alerts.data ?? []} />
-        </div>
-      </section>
-
-      <section className="card" style={{ marginTop: 16 }}>
-        <h2>Alert States</h2>
-        <AlertStatesTable alertStates={alertStates.data ?? []} />
-      </section>
-
-      <section className="card" style={{ marginTop: 16 }}>
-        <h2>BotLogs</h2>
-        {botLogs.data && botLogs.data.length > 0 ? (
+      <section className="card">
+        <h2>Log-Einträge ({logs.length})</h2>
+        {logs.length > 0 ? (
           <div className="table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th>Created</th>
+                  <th>Zeit</th>
                   <th>Level</th>
                   <th>Service</th>
-                  <th>Message</th>
-                  <th>Metadata</th>
+                  <th>Meldung</th>
+                  <th>Details</th>
                 </tr>
               </thead>
               <tbody>
-                {botLogs.data.map((log) => (
+                {logs.map((log) => (
                   <tr key={log.id}>
-                    <td>{formatDateTime(log.createdAt)}</td>
-                    <td>{log.level}</td>
-                    <td>{log.service}</td>
+                    <td style={{ whiteSpace: "nowrap" }}>{formatDateTime(log.createdAt)}</td>
+                    <td>
+                      <LevelBadge level={log.level} />
+                    </td>
+                    <td>
+                      <span className="muted small">{log.service}</span>
+                    </td>
                     <td>{log.message}</td>
                     <td className="wide-cell">
-                      <pre>{formatJson(log.metadataJson)}</pre>
+                      <MetaCell value={log.metadataJson} />
                     </td>
                   </tr>
                 ))}
@@ -104,7 +115,7 @@ export default async function LogsPage() {
             </table>
           </div>
         ) : (
-          <EmptyState title="Keine BotLogs gefunden." />
+          <EmptyState title="Keine Log-Einträge gefunden." />
         )}
       </section>
     </>

@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { AlignmentBadge, RiskBadge } from "../../../components/badges";
 import { EmptyState, ErrorState } from "../../../components/empty-state";
+import { PageHeader, SectionCard } from "../../../components/ui";
 import { formatScore } from "../../../lib/format";
 import {
   buildQuery,
@@ -10,16 +11,22 @@ import {
   type MultiTimeframeScannerItem
 } from "../../../lib/signalpilot-api";
 
-const assetTypes = ["", "CRYPTO", "STOCK", "ETF"];
-const alignments: Array<"" | MultiTimeframeAlignment> = [
-  "",
-  "BULLISH_ALIGNED",
-  "BEARISH_ALIGNED",
-  "MIXED",
-  "SHORT_TERM_ONLY",
-  "HIGHER_TIMEFRAME_CONFIRMATION",
-  "CONFLICT",
-  "NO_EDGE"
+const ASSET_TYPE_OPTIONS = [
+  { value: "", label: "Alle Asset-Typen" },
+  { value: "CRYPTO", label: "Krypto" },
+  { value: "STOCK", label: "Aktien" },
+  { value: "ETF", label: "ETF" }
+];
+
+const ALIGNMENT_OPTIONS: { value: "" | MultiTimeframeAlignment; label: string }[] = [
+  { value: "", label: "Alle Ausrichtungen" },
+  { value: "BULLISH_ALIGNED", label: "Multi-TF: Aufwärts" },
+  { value: "BEARISH_ALIGNED", label: "Multi-TF: Abwärts" },
+  { value: "MIXED", label: "Gemischt" },
+  { value: "SHORT_TERM_ONLY", label: "Nur kurzfristig" },
+  { value: "HIGHER_TIMEFRAME_CONFIRMATION", label: "HTF-Bestätigung" },
+  { value: "CONFLICT", label: "Konflikt" },
+  { value: "NO_EDGE", label: "Kein Vorteil" }
 ];
 
 type MultiTimeframePageProps = {
@@ -41,32 +48,30 @@ export default async function MultiTimeframePage({ searchParams }: MultiTimefram
     `/scanner/multi-timeframe${query}`
   );
   const rows = result.data ?? [];
+  const hasFilter = !!(params.assetType || params.alignment || params.watchlistOnly);
 
   return (
     <>
-      <div className="page-header">
-        <div>
-          <h1>Multi-Timeframe</h1>
-          <p>Asset-level alignment across 1h, 4h, and 1d signals.</p>
-        </div>
-        <Link className="primary-link" href="/dashboard/scanner">
-          Open Scanner
-        </Link>
-      </div>
+      <PageHeader
+        title="Multi-Timeframe"
+        subtitle="Ausrichtung von 1h-, 4h- und 1d-Signals pro Asset"
+        actions={
+          <Link className="primary-link secondary-link" href="/dashboard/scanner">
+            Scanner
+          </Link>
+        }
+      />
 
-      <form className="filter-bar multi-timeframe-filter-bar">
+      {/* Filter */}
+      <form className="filter-bar" method="GET" style={{ marginBottom: 16 }}>
         <select defaultValue={params.assetType ?? ""} name="assetType">
-          {assetTypes.map((value) => (
-            <option key={value} value={value}>
-              {value || "ALL Assets"}
-            </option>
+          {ASSET_TYPE_OPTIONS.map(({ value, label }) => (
+            <option key={value} value={value}>{label}</option>
           ))}
         </select>
         <select defaultValue={params.alignment ?? ""} name="alignment">
-          {alignments.map((value) => (
-            <option key={value} value={value}>
-              {value || "ALL Alignments"}
-            </option>
+          {ALIGNMENT_OPTIONS.map(({ value, label }) => (
+            <option key={value} value={value}>{label}</option>
           ))}
         </select>
         <label className="check-filter">
@@ -76,35 +81,44 @@ export default async function MultiTimeframePage({ searchParams }: MultiTimefram
             type="checkbox"
             value="true"
           />
-          Watchlist only
+          Nur Watchlist
         </label>
-        <button type="submit">Apply</button>
+        <button type="submit">Filtern</button>
+        {hasFilter ? (
+          <a href="/dashboard/multi-timeframe" className="section-link" style={{ alignSelf: "center" }}>
+            Zurücksetzen
+          </a>
+        ) : null}
       </form>
 
       {result.error ? (
-        <ErrorState title="Could not load multi-timeframe data" message={result.error} />
+        <ErrorState title="Multi-Timeframe-Daten konnten nicht geladen werden" message={result.error} />
       ) : null}
 
       {!result.error && rows.length === 0 ? (
-        <EmptyState title="Keine Multi-Timeframe Summaries gefunden." />
+        <EmptyState title="Keine Multi-Timeframe-Zusammenfassungen gefunden." />
       ) : null}
 
       {rows.length > 0 ? (
-        <section className="multi-timeframe-table-wrap">
+        <SectionCard>
+          <p className="muted small" style={{ marginBottom: 12 }}>
+            {rows.length} Asset{rows.length !== 1 ? "s" : ""}
+            {hasFilter ? " (gefiltert)" : ""}
+          </p>
           <div className="table-wrap">
             <table>
               <thead>
                 <tr>
                   <th>Symbol</th>
-                  <th>Asset</th>
-                  <th>Alignment</th>
+                  <th>Asset-Typ</th>
+                  <th>Ausrichtung</th>
                   <th>Score</th>
-                  <th>Risk</th>
-                  <th>Primary</th>
-                  <th>Confirming</th>
-                  <th>Conflicting</th>
-                  <th>Summary</th>
-                  <th>Next Focus</th>
+                  <th>Risiko</th>
+                  <th>Primär</th>
+                  <th>Bestätigend</th>
+                  <th>Konflikt</th>
+                  <th>Zusammenfassung</th>
+                  <th>Nächster Fokus</th>
                 </tr>
               </thead>
               <tbody>
@@ -112,7 +126,7 @@ export default async function MultiTimeframePage({ searchParams }: MultiTimefram
                   <tr key={row.asset.id}>
                     <td>
                       <Link href={`/dashboard/assets/${encodeURIComponent(row.asset.symbol)}`}>
-                        {row.asset.symbol}
+                        <strong>{row.asset.symbol}</strong>
                       </Link>
                     </td>
                     <td>{row.asset.assetType}</td>
@@ -123,9 +137,21 @@ export default async function MultiTimeframePage({ searchParams }: MultiTimefram
                     <td>
                       <RiskBadge value={row.multiTimeframeSummary.riskLevel} />
                     </td>
-                    <td>{row.multiTimeframeSummary.primaryTimeframe ?? "-"}</td>
-                    <td>{formatTimeframes(row.multiTimeframeSummary.confirmingTimeframes)}</td>
-                    <td>{formatTimeframes(row.multiTimeframeSummary.conflictingTimeframes)}</td>
+                    <td>{row.multiTimeframeSummary.primaryTimeframe ?? "—"}</td>
+                    <td>
+                      {row.multiTimeframeSummary.confirmingTimeframes.length > 0
+                        ? row.multiTimeframeSummary.confirmingTimeframes.join(", ")
+                        : "—"}
+                    </td>
+                    <td>
+                      {row.multiTimeframeSummary.conflictingTimeframes.length > 0 ? (
+                        <span style={{ color: "var(--bad)" }}>
+                          {row.multiTimeframeSummary.conflictingTimeframes.join(", ")}
+                        </span>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
                     <td className="wide-cell">{row.multiTimeframeSummary.summary}</td>
                     <td className="wide-cell">{row.multiTimeframeSummary.nextFocus}</td>
                   </tr>
@@ -133,12 +159,8 @@ export default async function MultiTimeframePage({ searchParams }: MultiTimefram
               </tbody>
             </table>
           </div>
-        </section>
+        </SectionCard>
       ) : null}
     </>
   );
-}
-
-function formatTimeframes(timeframes: string[]) {
-  return timeframes.length > 0 ? timeframes.join(", ") : "-";
 }

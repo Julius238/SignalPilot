@@ -43,7 +43,8 @@ textarea {
 
 .top-nav {
   align-items: center;
-  background: rgba(13, 17, 23, 0.92);
+  backdrop-filter: blur(12px) saturate(160%);
+  background: rgba(13, 17, 23, 0.94);
   border-bottom: 1px solid var(--line);
   display: flex;
   gap: 24px;
@@ -55,8 +56,11 @@ textarea {
 }
 
 .brand {
+  color: var(--text);
+  flex-shrink: 0;
   font-size: 18px;
   font-weight: 700;
+  letter-spacing: -0.02em;
 }
 
 .top-nav nav {
@@ -256,6 +260,12 @@ td a {
   color: #7ee787;
 }
 
+.badge-info {
+  background: rgba(88, 166, 255, 0.12);
+  border-color: rgba(88, 166, 255, 0.4);
+  color: #79c0ff;
+}
+
 .status-watch,
 .status-wait,
 .risk-medium,
@@ -359,6 +369,18 @@ td a {
 .watchlist-form button:disabled {
   cursor: wait;
   opacity: 0.7;
+}
+
+.filter-bar button[type="button"] {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.filter-bar button[type="button"]:hover {
+  border-color: var(--accent);
+  color: var(--text);
 }
 
 .watchlist-form .danger-button {
@@ -754,12 +776,22 @@ pre {
 }
 
 .empty-state,
-.error-state {
+.error-state,
+.loading-state {
   background: var(--panel-soft);
   border: 1px solid var(--line);
   border-radius: 8px;
   color: var(--muted);
   padding: 18px;
+}
+
+.loading-state {
+  animation: sp-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes sp-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
 }
 
 .error-state {
@@ -771,10 +803,58 @@ pre {
 
 @media (max-width: 860px) {
   .top-nav {
+    flex-wrap: wrap;
+    gap: 0;
+    height: auto;
+    min-height: 64px;
+    padding: 0 16px;
+  }
+
+  .brand {
+    flex: 1;
+    line-height: 64px;
+  }
+
+  .nav-groups {
+    display: none;
+    order: 10;
+    width: 100%;
+  }
+
+  .nav-groups.nav-groups--open {
+    border-top: 1px solid var(--line);
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    padding: 8px 0 14px;
+  }
+
+  .nav-groups.nav-groups--open .nav-group {
     align-items: flex-start;
     flex-direction: column;
-    height: auto;
-    padding: 16px;
+    gap: 0;
+    padding: 6px 0 2px;
+    width: 100%;
+  }
+
+  .nav-groups.nav-groups--open .nav-sep {
+    display: none;
+  }
+
+  .nav-groups.nav-groups--open .nav-group-label {
+    display: block;
+    padding: 4px 8px 6px;
+  }
+
+  .nav-groups.nav-groups--open .nav-link {
+    padding: 8px 10px;
+    width: 100%;
+  }
+
+  .nav-mobile-toggle {
+    display: flex;
+    margin: auto 0;
+    margin-right: 8px;
   }
 
   .page {
@@ -848,22 +928,64 @@ pre {
 }
 
 .nav-actions {
-  margin-left: auto;
-  display: flex;
   align-items: center;
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
 }
 
 .logout-button {
   background: transparent;
   border: 1px solid var(--line);
+  border-radius: 4px;
   color: var(--muted);
   cursor: pointer;
-  padding: 4px 12px;
-  border-radius: 4px;
   font-size: 13px;
+  padding: 4px 12px;
 }
 
 .logout-button:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+/* ── Nav link states ──────────────────────────────────── */
+.nav-link {
+  border-radius: 5px;
+  color: var(--muted);
+  font-size: 14px;
+  padding: 4px 8px;
+  transition: background 0.12s, color 0.12s;
+}
+
+.nav-link:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+}
+
+.nav-link.active {
+  background: rgba(88, 166, 255, 0.13);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ── Mobile hamburger toggle ──────────────────────────── */
+.nav-mobile-toggle {
+  align-items: center;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--muted);
+  cursor: pointer;
+  display: none;
+  font-size: 18px;
+  height: 32px;
+  justify-content: center;
+  line-height: 1;
+  width: 32px;
+}
+
+.nav-mobile-toggle:hover {
   border-color: var(--accent);
   color: var(--text);
 }
@@ -1508,6 +1630,53 @@ details[open] > summary {
   color: var(--accent);
 }
 
+/* ── Signal detail header card ────────────────────────── */
+.sig-header-card {
+  margin-bottom: 20px;
+}
+
+.sig-header-top {
+  align-items: flex-start;
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.sig-header-symbol {
+  color: var(--text);
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  margin: 0;
+}
+
+.sig-header-meta {
+  color: var(--muted);
+  font-size: 13px;
+  margin: 5px 0 0;
+}
+
+.sig-header-badges {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.sig-header-footer {
+  align-items: center;
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: space-between;
+  margin-top: 14px;
+  padding-top: 12px;
+}
+
 /* ── Scanner improvements ────────────────────────────── */
 .scanner-filter-row {
   display: flex;
@@ -1565,6 +1734,8 @@ details[open] > summary {
   .nav-sep {
     display: none;
   }
+
+  /* nav-group-label and nav-sep are re-shown via .nav-groups--open overrides above */
 
   .cmd-status-row {
     grid-template-columns: 1fr;

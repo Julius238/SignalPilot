@@ -1,6 +1,9 @@
-import { ErrorState } from "../../../components/empty-state";
+import Link from "next/link";
+
+import { EmptyState, ErrorState } from "../../../components/empty-state";
 import { SignalFilters } from "../../../components/signal-filters";
-import { SignalsTable } from "../../../components/signals-table";
+import { SignalCard } from "../../../components/signal-card";
+import { PageHeader } from "../../../components/ui";
 import { buildQuery, fetchApi, type SignalListItem } from "../../../lib/signalpilot-api";
 
 type SignalsPageProps = {
@@ -17,17 +20,42 @@ export default async function SignalsPage({ searchParams }: SignalsPageProps) {
     timeframe: getParam(params.timeframe),
     limit: getParam(params.limit) ?? "50"
   });
+
   const signals = await fetchApi<SignalListItem[]>(`/signals${query}`);
+  const list = signals.data ?? [];
 
   return (
     <>
-      <div className="page-header">
-        <h1>Signal Feed</h1>
-        <p>Stored technical signal decisions with output summaries for the dashboard.</p>
-      </div>
+      <PageHeader
+        title="Signal Feed"
+        subtitle="Gespeicherte Signalentscheidungen mit Analyse-Zusammenfassung"
+        actions={
+          <Link className="primary-link secondary-link" href="/dashboard/scanner">
+            Scanner →
+          </Link>
+        }
+      />
+
       <SignalFilters />
-      {signals.error ? <ErrorState title="Could not load signals" message={signals.error} /> : null}
-      <SignalsTable signals={signals.data ?? []} />
+
+      {signals.error ? (
+        <ErrorState title="Signals konnten nicht geladen werden" message={signals.error} />
+      ) : null}
+
+      {list.length === 0 ? (
+        <EmptyState title="Keine Signals gefunden." />
+      ) : (
+        <>
+          <p className="muted small" style={{ marginBottom: 10 }}>
+            {list.length} Signal{list.length !== 1 ? "s" : ""} geladen
+          </p>
+          <div className="signal-cards-list">
+            {list.map((signal) => (
+              <SignalCard key={signal.id} signal={signal} />
+            ))}
+          </div>
+        </>
+      )}
     </>
   );
 }

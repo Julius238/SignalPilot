@@ -1,17 +1,9 @@
 import Link from "next/link";
 
-import { ErrorState, EmptyState } from "../../../components/empty-state";
+import { EmptyState, ErrorState } from "../../../components/empty-state";
+import { MetricCard, PageHeader, SectionCard } from "../../../components/ui";
+import { buildQuery, fetchApi, type PaperSignalEvaluation, type PaperStats } from "../../../lib/signalpilot-api";
 import { formatDateTime, formatScore } from "../../../lib/format";
-import {
-  buildQuery,
-  fetchApi,
-  type PaperSignalEvaluation,
-  type PaperStats
-} from "../../../lib/signalpilot-api";
-
-function formatPercent(value: number | null | undefined) {
-  return typeof value === "number" ? `${value.toFixed(2)}%` : "-";
-}
 
 type PaperPageProps = {
   searchParams: Promise<{
@@ -20,13 +12,51 @@ type PaperPageProps = {
   }>;
 };
 
-const evaluationKinds = [
-  "DIRECTIONAL_BULLISH",
-  "DIRECTIONAL_BEARISH",
-  "RISK_WARNING",
-  "OBSERVATION",
-  "SKIPPED"
+function formatPercent(v: number | null | undefined): string {
+  return typeof v === "number" ? `${v > 0 ? "+" : ""}${v.toFixed(2)}%` : "—";
+}
+
+const KIND_OPTIONS = [
+  { value: "", label: "Alle Bewertungstypen" },
+  { value: "DIRECTIONAL_BULLISH", label: "Aufwärts-Beobachtung" },
+  { value: "DIRECTIONAL_BEARISH", label: "Abwärts-Beobachtung" },
+  { value: "RISK_WARNING", label: "Risikowarnung" },
+  { value: "OBSERVATION", label: "Beobachtung" },
+  { value: "SKIPPED", label: "Übersprungen" }
 ];
+
+const KIND_LABELS: Record<string, string> = {
+  DIRECTIONAL_BULLISH: "Aufwärts",
+  DIRECTIONAL_BEARISH: "Abwärts",
+  RISK_WARNING: "Risikowarnung",
+  OBSERVATION: "Beobachtung",
+  SKIPPED: "Übersprungen"
+};
+
+const DIRECTION_LABELS: Record<string, string> = {
+  BULLISH: "Aufwärts",
+  BEARISH: "Abwärts",
+  NEUTRAL: "Neutral",
+  MIXED: "Gemischt"
+};
+
+const OUTCOME_LABELS: Record<string, string> = {
+  POSITIVE: "Positiv",
+  NEGATIVE: "Negativ",
+  NEUTRAL: "Neutral",
+  TARGET_REACHED: "Beobachtungsziel",
+  INVALIDATED: "Invalidiert",
+  OPEN: "Offen",
+  EVALUATED: "Ausgewertet",
+  EXPIRED: "Abgelaufen",
+  SKIPPED: "Übersprungen"
+};
+
+function outcomeColor(s: string): string | undefined {
+  if (s === "POSITIVE" || s === "TARGET_REACHED") return "var(--good)";
+  if (s === "NEGATIVE" || s === "INVALIDATED") return "var(--bad)";
+  return undefined;
+}
 
 export default async function PaperPage({ searchParams }: PaperPageProps) {
   const params = await searchParams;
@@ -41,141 +71,163 @@ export default async function PaperPage({ searchParams }: PaperPageProps) {
   ]);
 
   const summary = stats.data;
+  const hasFilter = !!(params.evaluationKind || params.skipReason);
+  const posCount = (summary?.positiveCount ?? 0) + (summary?.targetReachedCount ?? 0);
+  const negCount = (summary?.negativeCount ?? 0) + (summary?.invalidatedCount ?? 0);
 
   return (
     <>
-      <div className="page-header">
-        <h1>Paper Evaluation</h1>
-        <p>Hypothetical outcome tracking for signal quality measurement.</p>
-        <Link className="primary-link" href="/dashboard/performance">
-          Performance Intelligence
-        </Link>
-      </div>
+      <PageHeader
+        title="Simulierte Auswertung"
+        subtitle="Beobachtungsbasierte Signal-Qualitätsmessung · keine echten Trades"
+        actions={
+          <Link className="primary-link secondary-link" href="/dashboard/performance">
+            Research-Performance →
+          </Link>
+        }
+      />
 
-      {stats.error ? <ErrorState title="Could not load paper stats" message={stats.error} /> : null}
+      {stats.error ? (
+        <ErrorState title="Statistiken konnten nicht geladen werden" message={stats.error} />
+      ) : null}
       {evaluations.error ? (
-        <ErrorState title="Could not load paper evaluations" message={evaluations.error} />
+        <ErrorState
+          title="Auswertungen konnten nicht geladen werden"
+          message={evaluations.error}
+        />
       ) : null}
 
-      <form className="filter-bar">
-        <label>
-          Evaluation Kind
-          <select name="evaluationKind" defaultValue={params.evaluationKind ?? ""}>
-            <option value="">All</option>
-            {evaluationKinds.map((kind) => (
-              <option key={kind} value={kind}>
-                {kind}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Skip Reason
-          <input name="skipReason" defaultValue={params.skipReason ?? ""} />
-        </label>
-        <button type="submit">Apply</button>
+      {/* Filter */}
+      <form className="filter-bar" method="GET" style={{ marginBottom: 20 }}>
+        <select name="evaluationKind" defaultValue={params.evaluationKind ?? ""}>
+          {KIND_OPTIONS.map(({ value, label }) => (
+            <option key={value} value={value}>{label}</option>
+          ))}
+        </select>
+        <input
+          name="skipReason"
+          placeholder="Übersprungen-Grund"
+          defaultValue={params.skipReason ?? ""}
+        />
+        <button type="submit">Filtern</button>
+        {hasFilter ? (
+          <a href="/dashboard/paper" className="section-link" style={{ alignSelf: "center" }}>
+            Zurücksetzen
+          </a>
+        ) : null}
       </form>
 
-      <section className="grid metrics">
-        <div className="card">
-          <span className="metric-label">Total</span>
-          <span className="metric-value">{summary?.totalEvaluations ?? 0}</span>
-        </div>
-        <div className="card">
-          <span className="metric-label">Open</span>
-          <span className="metric-value">{summary?.openCount ?? 0}</span>
-        </div>
-        <div className="card">
-          <span className="metric-label">Evaluated</span>
-          <span className="metric-value">{summary?.evaluatedCount ?? 0}</span>
-        </div>
-        <div className="card">
-          <span className="metric-label">WinRate</span>
-          <span className="metric-value">{formatPercent(summary?.winRate)}</span>
-        </div>
-        <div className="card">
-          <span className="metric-label">Avg 1h</span>
-          <span className="metric-value">{formatPercent(summary?.avgReturnAfter1h)}</span>
-        </div>
-        <div className="card">
-          <span className="metric-label">Avg 4h</span>
-          <span className="metric-value">{formatPercent(summary?.avgReturnAfter4h)}</span>
-        </div>
-        <div className="card">
-          <span className="metric-label">Avg 1d</span>
-          <span className="metric-value">{formatPercent(summary?.avgReturnAfter1d)}</span>
-        </div>
-        <div className="card">
-          <span className="metric-label">Positive</span>
-          <span className="metric-value">
-            {(summary?.positiveCount ?? 0) + (summary?.targetReachedCount ?? 0)}
-          </span>
-        </div>
-        <div className="card">
-          <span className="metric-label">Negative</span>
-          <span className="metric-value">
-            {(summary?.negativeCount ?? 0) + (summary?.invalidatedCount ?? 0)}
-          </span>
-        </div>
-      </section>
+      {/* Kennzahlen */}
+      <div className="grid metrics" style={{ marginBottom: 20 }}>
+        <MetricCard
+          label="Auswertungen gesamt"
+          value={summary?.totalEvaluations ?? 0}
+        />
+        <MetricCard
+          label="Offen"
+          value={summary?.openCount ?? 0}
+        />
+        <MetricCard
+          label="Ausgewertet"
+          value={summary?.evaluatedCount ?? 0}
+        />
+        <MetricCard
+          label={`Trefferquote (n=${summary?.evaluatedCount ?? 0})`}
+          value={formatPercent(summary?.winRate)}
+          sub={
+            (summary?.evaluatedCount ?? 0) < 30
+              ? "⚠ Kleine Datenbasis"
+              : (summary?.evaluatedCount ?? 0) < 100
+                ? "Begrenzte Stichprobe"
+                : undefined
+          }
+        />
+        <MetricCard
+          label="Positiv (inkl. Ziel)"
+          value={<span style={{ color: "var(--good)" }}>{posCount}</span>}
+        />
+        <MetricCard
+          label="Negativ (inkl. Inv.)"
+          value={<span style={{ color: "var(--bad)" }}>{negCount}</span>}
+        />
+        <MetricCard label="Ø 1h Kursänd." value={formatPercent(summary?.avgReturnAfter1h)} />
+        <MetricCard label="Ø 4h Kursänd." value={formatPercent(summary?.avgReturnAfter4h)} />
+        <MetricCard label="Ø 1d Kursänd." value={formatPercent(summary?.avgReturnAfter1d)} />
+      </div>
 
-      <section className="card" style={{ marginTop: 16 }}>
-        <h2>Evaluations</h2>
+      {/* Auswertungstabelle */}
+      <SectionCard title="Einzelauswertungen (simuliert)">
         {evaluations.data && evaluations.data.length > 0 ? (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Symbol</th>
-                  <th>TF</th>
-                  <th>Status</th>
-                  <th>Kind</th>
-                  <th>Signal</th>
-                  <th>Direction</th>
-                  <th>Score</th>
-                  <th>Entry</th>
-                  <th>1h</th>
-                  <th>4h</th>
-                  <th>1d</th>
-                  <th>Hypothetical outcome</th>
-                  <th>Skip Reason</th>
-                  <th>Opened</th>
-                </tr>
-              </thead>
-              <tbody>
-                {evaluations.data.map((evaluation) => (
-                  <tr key={evaluation.id}>
-                    <td>
-                      <Link href={`/dashboard/assets/${encodeURIComponent(evaluation.symbol)}`}>
-                        {evaluation.symbol}
-                      </Link>
-                    </td>
-                    <td>{evaluation.timeframe}</td>
-                    <td>{evaluation.status}</td>
-                    <td>{evaluation.evaluationKind}</td>
-                    <td>
-                      <Link href={`/dashboard/signals/${encodeURIComponent(evaluation.signalId)}`}>
-                        {evaluation.signalType}
-                      </Link>
-                    </td>
-                    <td>{evaluation.direction}</td>
-                    <td>{formatScore(evaluation.score)}</td>
-                    <td>{evaluation.entryPrice}</td>
-                    <td>{formatPercent(evaluation.returnAfter1h)}</td>
-                    <td>{formatPercent(evaluation.returnAfter4h)}</td>
-                    <td>{formatPercent(evaluation.returnAfter1d)}</td>
-                    <td>{evaluation.outcome ?? evaluation.evaluationStatus}</td>
-                    <td>{evaluation.skipReason ?? "-"}</td>
-                    <td>{formatDateTime(evaluation.openedAt)}</td>
+          <>
+            <p className="muted small" style={{ marginBottom: 12 }}>
+              {evaluations.data.length} Einträge
+              {hasFilter ? " (gefiltert)" : ""}
+              {" · "}Alle Kursveränderungen sind hypothetisch.
+            </p>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Symbol</th>
+                    <th>TF</th>
+                    <th>Status</th>
+                    <th>Bewertungstyp</th>
+                    <th>Signal</th>
+                    <th>Richtung</th>
+                    <th>Score</th>
+                    <th>Referenzpreis</th>
+                    <th>Kursänd. 1h</th>
+                    <th>Kursänd. 4h</th>
+                    <th>Kursänd. 1d</th>
+                    <th>Ergebnis</th>
+                    <th>Geöffnet</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {evaluations.data.map((ev) => {
+                    const outcome = ev.outcome ?? ev.evaluationStatus;
+                    return (
+                      <tr key={ev.id}>
+                        <td>
+                          <Link
+                            href={`/dashboard/assets/${encodeURIComponent(ev.symbol)}`}
+                          >
+                            {ev.symbol}
+                          </Link>
+                        </td>
+                        <td>{ev.timeframe}</td>
+                        <td>{ev.status}</td>
+                        <td>{KIND_LABELS[ev.evaluationKind] ?? ev.evaluationKind}</td>
+                        <td>
+                          <Link
+                            href={`/dashboard/signals/${encodeURIComponent(ev.signalId)}`}
+                          >
+                            {ev.signalType}
+                          </Link>
+                        </td>
+                        <td>
+                          {DIRECTION_LABELS[ev.direction] ?? ev.direction}
+                        </td>
+                        <td>{formatScore(ev.score)}</td>
+                        <td>{ev.entryPrice}</td>
+                        <td>{formatPercent(ev.returnAfter1h)}</td>
+                        <td>{formatPercent(ev.returnAfter4h)}</td>
+                        <td>{formatPercent(ev.returnAfter1d)}</td>
+                        <td style={{ color: outcomeColor(outcome ?? "") }}>
+                          {OUTCOME_LABELS[outcome ?? ""] ?? outcome ?? "—"}
+                        </td>
+                        <td className="nowrap">{formatDateTime(ev.openedAt)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
         ) : (
-          <EmptyState title="Keine Paper Evaluations gefunden." />
+          <EmptyState title="Keine simulierten Auswertungen gefunden." />
         )}
-      </section>
+      </SectionCard>
     </>
   );
 }

@@ -1,4 +1,8 @@
-import { ErrorState, EmptyState } from "../../../../components/empty-state";
+import Link from "next/link";
+
+import { DebugJsonBlock } from "../../../../components/debug-json-block";
+import { EmptyState, ErrorState } from "../../../../components/empty-state";
+import { MetricCard, PageHeader, SectionCard } from "../../../../components/ui";
 import {
   fetchApi,
   type BacktestGroupSummary,
@@ -11,122 +15,30 @@ type StrategyLabDetailPageProps = {
   params: Promise<{ id: string }>;
 };
 
-function formatPercent(value: number | null | undefined) {
-  return typeof value === "number" ? `${value.toFixed(2)}%` : "-";
+function formatPercent(v: number | null | undefined): string {
+  return typeof v === "number" ? `${v.toFixed(2)}%` : "—";
 }
 
-export default async function StrategyLabDetailPage({ params }: StrategyLabDetailPageProps) {
-  const { id } = await params;
-  const [run, summary, results] = await Promise.all([
-    fetchApi<StrategyComparisonRun>(`/strategy/comparisons/${encodeURIComponent(id)}`),
-    fetchApi<StrategyComparisonSummary>(`/strategy/comparisons/${encodeURIComponent(id)}/summary`),
-    fetchApi<StrategyBacktestResult[]>(`/strategy/comparisons/${encodeURIComponent(id)}/results`)
-  ]);
-  const errors = [run.error, summary.error, results.error].filter(Boolean);
-
-  return (
-    <>
-      <div className="page-header">
-        <div>
-          <h1>{run.data?.name ?? "Strategy Comparison"}</h1>
-          <p>Historical hypothetical comparison of rule sets and strategy configs.</p>
-        </div>
-      </div>
-
-      {errors.length > 0 ? <ErrorState title="Could not load comparison" message={errors.join(" | ")} /> : null}
-
-      {summary.data ? (
-        <section className="grid metrics">
-          <Metric label="Best Strategy" value={summary.data.bestStrategy ?? "-"} />
-          <Metric label="Best WinRate" value={formatPercent(summary.data.bestWinRate)} />
-          <Metric label="Highest Avg 1d" value={summary.data.highestAvgReturnStrategy ?? "-"} />
-          <Metric label="Compared" value={String(summary.data.totalStrategies)} />
-        </section>
-      ) : null}
-
-      <section className="card" style={{ marginTop: 16 }}>
-        <h2>Results</h2>
-        {!results.data || results.data.length === 0 ? (
-          <EmptyState title="Keine Results gefunden." />
-        ) : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Rank</th>
-                  <th>Strategy</th>
-                  <th>Total</th>
-                  <th>Evaluated</th>
-                  <th>WinRate</th>
-                  <th>Avg 1d</th>
-                  <th>Positive</th>
-                  <th>Negative</th>
-                  <th>Neutral</th>
-                  <th>Target Reached</th>
-                  <th>Invalidated</th>
-                  <th>Warnings</th>
-                </tr>
-              </thead>
-              <tbody>
-                {results.data.map((result) => (
-                  <tr key={result.id}>
-                    <td>{result.rank ?? "-"}</td>
-                    <td>{result.strategyName}</td>
-                    <td>{result.totalSignals}</td>
-                    <td>{result.evaluatedCount}</td>
-                    <td>{formatPercent(result.winRate)}</td>
-                    <td>{formatPercent(result.avgReturnAfter1d)}</td>
-                    <td>{result.positiveCount}</td>
-                    <td>{result.negativeCount}</td>
-                    <td>{result.neutralCount}</td>
-                    <td>{result.targetReachedCount}</td>
-                    <td>{result.invalidatedCount}</td>
-                    <td>{(result.summaryJson.warnings ?? []).join(" | ") || "-"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-
-      {(results.data ?? []).map((result) => (
-        <section className="card" style={{ marginTop: 16 }} key={result.id}>
-          <h2>{result.strategyName}</h2>
-          <pre>{JSON.stringify(result.strategyConfig.configJson, null, 2)}</pre>
-          <GroupedTable title="By Symbol" rows={result.summaryJson.groupedBySymbol ?? []} />
-          <GroupedTable title="By Timeframe" rows={result.summaryJson.groupedByTimeframe ?? []} />
-          <GroupedTable title="By Signal Type" rows={result.summaryJson.groupedBySignalType ?? []} />
-          <GroupedTable title="By Score Bucket" rows={result.summaryJson.groupedByScoreBucket ?? []} />
-        </section>
-      ))}
-    </>
-  );
-}
-
-function Metric({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="card">
-      <span className="metric-label">{label}</span>
-      <span className="metric-value metric-value-text">{value}</span>
-    </div>
-  );
-}
-
-function GroupedTable({ title, rows }: { title: string; rows: BacktestGroupSummary[] }) {
+function GroupedSection({
+  title,
+  rows
+}: {
+  title: string;
+  rows: BacktestGroupSummary[];
+}) {
   if (rows.length === 0) return null;
   return (
-    <div style={{ marginTop: 16 }}>
-      <h3>{title}</h3>
+    <div style={{ marginTop: 12 }}>
+      <p className="context-block-title">{title}</p>
       <div className="table-wrap">
         <table>
           <thead>
             <tr>
-              <th>Bucket</th>
-              <th>Total</th>
-              <th>Evaluated</th>
-              <th>WinRate</th>
-              <th>Avg 1d</th>
+              <th>Gruppe</th>
+              <th>Datenpunkte</th>
+              <th>Ausgewertet</th>
+              <th>Trefferquote</th>
+              <th>Ø 1d Kursänd.</th>
             </tr>
           </thead>
           <tbody>
@@ -134,7 +46,19 @@ function GroupedTable({ title, rows }: { title: string; rows: BacktestGroupSumma
               <tr key={row.key}>
                 <td>{row.key}</td>
                 <td>{row.totalSignals}</td>
-                <td>{row.evaluatedCount}</td>
+                <td
+                  style={{
+                    color:
+                      row.evaluatedCount < 10
+                        ? "var(--bad)"
+                        : row.evaluatedCount < 30
+                          ? "var(--warn)"
+                          : undefined
+                  }}
+                >
+                  {row.evaluatedCount}
+                  {row.evaluatedCount < 30 ? " ⚠" : ""}
+                </td>
                 <td>{formatPercent(row.winRate)}</td>
                 <td>{formatPercent(row.avgReturnAfter1d)}</td>
               </tr>
@@ -143,5 +67,188 @@ function GroupedTable({ title, rows }: { title: string; rows: BacktestGroupSumma
         </table>
       </div>
     </div>
+  );
+}
+
+export default async function StrategyLabDetailPage({ params }: StrategyLabDetailPageProps) {
+  const { id } = await params;
+  const [run, summary, results] = await Promise.all([
+    fetchApi<StrategyComparisonRun>(`/strategy/comparisons/${encodeURIComponent(id)}`),
+    fetchApi<StrategyComparisonSummary>(
+      `/strategy/comparisons/${encodeURIComponent(id)}/summary`
+    ),
+    fetchApi<StrategyBacktestResult[]>(
+      `/strategy/comparisons/${encodeURIComponent(id)}/results`
+    )
+  ]);
+  const errors = [run.error, summary.error, results.error].filter(Boolean);
+  const runData = run.data;
+
+  return (
+    <>
+      {/* Breadcrumb */}
+      <p className="page-header-breadcrumb" style={{ marginBottom: 12 }}>
+        <Link href="/dashboard/strategy-lab">Strategy Lab</Link>
+        {" / "}
+        <span>{runData?.name ?? id}</span>
+      </p>
+
+      <PageHeader
+        title={runData?.name ?? "Strategie-Vergleich"}
+        subtitle="Hypothetischer Strategievergleich · keine echten Trades · reine Forschungsgrundlage"
+      />
+
+      {errors.length > 0 ? (
+        <ErrorState
+          title="Vergleich konnte nicht geladen werden"
+          message={errors.join(" | ")}
+        />
+      ) : null}
+
+      {/* Zusammenfassung */}
+      {summary.data ? (
+        <div className="grid metrics" style={{ marginBottom: 20 }}>
+          <MetricCard
+            label="Beste Strategie"
+            value={summary.data.bestStrategy ?? "—"}
+          />
+          <MetricCard
+            label="Trefferquote (beste)"
+            value={formatPercent(summary.data.bestWinRate)}
+            sub="hypothetisch · kleine Stichproben möglich"
+          />
+          <MetricCard
+            label="Höchste Ø 1d-Kursänd."
+            value={summary.data.highestAvgReturnStrategy ?? "—"}
+          />
+          <MetricCard
+            label="Verglichene Strategien"
+            value={summary.data.totalStrategies}
+          />
+        </div>
+      ) : null}
+
+      {/* Ergebnis-Übersicht */}
+      <SectionCard title="Ergebnis-Übersicht (hypothetisch)">
+        {!results.data || results.data.length === 0 ? (
+          <EmptyState title="Keine Ergebnisse gefunden." />
+        ) : (
+          <>
+            <p className="muted small" style={{ marginBottom: 12 }}>
+              Alle Werte sind hypothetisch. ⚠ zeigt Zeilen mit weniger als 30 Datenpunkten an.
+            </p>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Rang</th>
+                    <th>Strategie</th>
+                    <th>Datenpunkte</th>
+                    <th>Ausgewertet</th>
+                    <th>Trefferquote</th>
+                    <th>Ø 1d Kursänd.</th>
+                    <th>Positiv</th>
+                    <th>Negativ</th>
+                    <th>Neutral</th>
+                    <th>Beob.-Ziel</th>
+                    <th>Invalidiert</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {results.data.map((result) => (
+                    <tr key={result.id}>
+                      <td>{result.rank ?? "—"}</td>
+                      <td>{result.strategyName}</td>
+                      <td>
+                        {result.totalSignals}
+                        {result.totalSignals < 30 ? (
+                          <span style={{ color: "var(--bad)", marginLeft: 3 }} title="Kleine Datenbasis">⚠</span>
+                        ) : null}
+                      </td>
+                      <td
+                        style={{
+                          color:
+                            result.evaluatedCount < 10
+                              ? "var(--bad)"
+                              : result.evaluatedCount < 30
+                                ? "var(--warn)"
+                                : undefined
+                        }}
+                      >
+                        {result.evaluatedCount}
+                      </td>
+                      <td>{formatPercent(result.winRate)}</td>
+                      <td>{formatPercent(result.avgReturnAfter1d)}</td>
+                      <td style={{ color: "var(--good)" }}>{result.positiveCount}</td>
+                      <td style={{ color: "var(--bad)" }}>{result.negativeCount}</td>
+                      <td>{result.neutralCount}</td>
+                      <td>{result.targetReachedCount}</td>
+                      <td>{result.invalidatedCount}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </SectionCard>
+
+      {/* Pro-Strategie-Details (eingeklappt) */}
+      {(results.data ?? []).length > 0 ? (
+        <div style={{ marginTop: 16 }}>
+          <SectionCard title="Strategie-Details (aufklappbar)">
+            <p className="muted small" style={{ marginBottom: 12 }}>
+              Detaillierte Gruppenauswertungen pro Strategie. Bei kleiner Stichprobe eingeschränkte Belastbarkeit.
+            </p>
+            {(results.data ?? []).map((result) => (
+              <details key={result.id} style={{ marginBottom: 8 }}>
+                <summary>
+                  {result.rank != null ? `#${result.rank} · ` : ""}
+                  {result.strategyName}
+                  {" — "}
+                  <span className="muted small">
+                    {result.totalSignals} Datenpunkte · TQ: {formatPercent(result.winRate)}
+                  </span>
+                </summary>
+                <div style={{ paddingTop: 10 }}>
+                  {(result.summaryJson.warnings ?? []).length > 0 ? (
+                    <ul className="warning-list" style={{ marginBottom: 10 }}>
+                      {(result.summaryJson.warnings ?? []).map((w, i) => (
+                        <li key={i} className="warning-item">
+                          <span className="warning-icon">⚠</span>
+                          <span>{w}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  <GroupedSection
+                    title="Nach Symbol"
+                    rows={result.summaryJson.groupedBySymbol ?? []}
+                  />
+                  <GroupedSection
+                    title="Nach Zeitrahmen"
+                    rows={result.summaryJson.groupedByTimeframe ?? []}
+                  />
+                  <GroupedSection
+                    title="Nach Signaltyp"
+                    rows={result.summaryJson.groupedBySignalType ?? []}
+                  />
+                  <GroupedSection
+                    title="Nach Score-Gruppe"
+                    rows={result.summaryJson.groupedByScoreBucket ?? []}
+                  />
+                  <div style={{ marginTop: 12 }}>
+                    <DebugJsonBlock
+                      label="Strategiekonfiguration"
+                      data={result.strategyConfig.configJson}
+                    />
+                  </div>
+                </div>
+              </details>
+            ))}
+          </SectionCard>
+        </div>
+      ) : null}
+    </>
   );
 }

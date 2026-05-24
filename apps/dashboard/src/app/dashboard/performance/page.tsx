@@ -1,40 +1,71 @@
 import Link from "next/link";
 
-import { ErrorState, EmptyState } from "../../../components/empty-state";
+import { EmptyState, ErrorState } from "../../../components/empty-state";
+import { MetricCard, PageHeader, SectionCard } from "../../../components/ui";
 import {
   fetchApi,
   type PerformanceBucket,
   type PerformanceIntelligenceReport
 } from "../../../lib/signalpilot-api";
 
-function formatPercent(value: number | null | undefined) {
-  return typeof value === "number" ? `${value.toFixed(2)}%` : "-";
+function formatPercent(v: number | null | undefined): string {
+  return typeof v === "number" ? `${v.toFixed(2)}%` : "—";
 }
 
-function BucketTable({ title, buckets }: { title: string; buckets: PerformanceBucket[] }) {
+const CONFIDENCE_LABELS: Record<string, string> = {
+  HIGH: "Hoch",
+  MEDIUM: "Mittel",
+  LOW: "Niedrig"
+};
+
+const CONFIDENCE_COLORS: Record<string, string | undefined> = {
+  HIGH: "var(--good)",
+  MEDIUM: "var(--warn)",
+  LOW: "var(--bad)"
+};
+
+function BucketSection({
+  title,
+  buckets
+}: {
+  title: string;
+  buckets: PerformanceBucket[];
+}) {
+  if (buckets.length === 0) return null;
   return (
-    <section className="card">
-      <h2>{title}</h2>
-      {buckets.length > 0 ? (
+    <div style={{ marginBottom: 16 }}>
+      <SectionCard title={title}>
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>Bucket</th>
-                <th>Evaluated</th>
-                <th>Skipped</th>
-                <th>WinRate</th>
-                <th>Avg 1d</th>
-                <th>Confidence</th>
-                <th>Insight</th>
-                <th>Recommendation</th>
+                <th>Gruppe</th>
+                <th>Ausgewertet</th>
+                <th>Übersprungen</th>
+                <th>Trefferquote</th>
+                <th>Ø 1d Kursänd.</th>
+                <th>Belastbarkeit</th>
+                <th>Beobachtung</th>
+                <th>Einschätzung</th>
               </tr>
             </thead>
             <tbody>
               {buckets.map((bucket) => (
                 <tr key={bucket.key}>
                   <td>{bucket.label}</td>
-                  <td>{bucket.evaluatedCount}</td>
+                  <td
+                    style={{
+                      color:
+                        bucket.evaluatedCount < 10
+                          ? "var(--bad)"
+                          : bucket.evaluatedCount < 30
+                            ? "var(--warn)"
+                            : undefined
+                    }}
+                  >
+                    {bucket.evaluatedCount}
+                    {bucket.evaluatedCount < 30 ? " ⚠" : ""}
+                  </td>
                   <td>{bucket.skippedCount}</td>
                   <td>
                     <div className="progress-cell">
@@ -42,24 +73,30 @@ function BucketTable({ title, buckets }: { title: string; buckets: PerformanceBu
                       <div className="progress-track">
                         <div
                           className="progress-fill"
-                          style={{ width: `${Math.min(Math.max(bucket.winRate, 0), 100)}%` }}
+                          style={{
+                            width: `${Math.min(Math.max(bucket.winRate, 0), 100)}%`
+                          }}
                         />
                       </div>
                     </div>
                   </td>
                   <td>{formatPercent(bucket.avgReturnAfter1d)}</td>
-                  <td>{bucket.confidenceLevel}</td>
-                  <td>{bucket.insight}</td>
-                  <td>{bucket.recommendation}</td>
+                  <td
+                    style={{
+                      color: CONFIDENCE_COLORS[bucket.confidenceLevel]
+                    }}
+                  >
+                    {CONFIDENCE_LABELS[bucket.confidenceLevel] ?? bucket.confidenceLevel}
+                  </td>
+                  <td className="wide-cell">{bucket.insight}</td>
+                  <td className="wide-cell">{bucket.recommendation}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-      ) : (
-        <EmptyState title="Keine Buckets gefunden." />
-      )}
-    </section>
+      </SectionCard>
+    </div>
   );
 }
 
@@ -69,122 +106,156 @@ export default async function PerformancePage() {
 
   return (
     <>
-      <div className="page-header">
-        <h1>Performance Intelligence</h1>
-        <p>Paper Evaluation patterns by signal type, timeframe, asset, score and risk.</p>
-      </div>
+      <PageHeader
+        title="Research-Performance"
+        subtitle="Muster aus simulierten Auswertungen · keine echten Trades · kein Indikator für zukünftige Ergebnisse"
+        actions={
+          <Link className="primary-link secondary-link" href="/dashboard/paper">
+            Simulierte Auswertung →
+          </Link>
+        }
+      />
 
       {report.error ? (
-        <ErrorState title="Could not load performance report" message={report.error} />
+        <ErrorState
+          title="Performance-Report konnte nicht geladen werden"
+          message={report.error}
+        />
       ) : null}
 
-      <section className="grid metrics">
-        <div className="card">
-          <span className="metric-label">Total</span>
-          <span className="metric-value">{data?.totalEvaluations ?? 0}</span>
-        </div>
-        <div className="card">
-          <span className="metric-label">Evaluated</span>
-          <span className="metric-value">{data?.evaluatedCount ?? 0}</span>
-        </div>
-        <div className="card">
-          <span className="metric-label">Skipped</span>
-          <span className="metric-value">{data?.skippedCount ?? 0}</span>
-        </div>
-        <div className="card">
-          <span className="metric-label">WinRate</span>
-          <span className="metric-value">{formatPercent(data?.overallWinRate)}</span>
-        </div>
-        <div className="card">
-          <span className="metric-label">Avg Return 1d</span>
-          <span className="metric-value">{formatPercent(data?.overallAvgReturnAfter1d)}</span>
-        </div>
-      </section>
+      {/* Globale Kennzahlen */}
+      <div className="grid metrics" style={{ marginBottom: 20 }}>
+        <MetricCard label="Auswertungen gesamt" value={data?.totalEvaluations ?? 0} />
+        <MetricCard label="Ausgewertet" value={data?.evaluatedCount ?? 0} />
+        <MetricCard label="Übersprungen" value={data?.skippedCount ?? 0} />
+        <MetricCard
+          label={`Trefferquote gesamt (n=${data?.evaluatedCount ?? 0})`}
+          value={formatPercent(data?.overallWinRate)}
+          sub={
+            (data?.evaluatedCount ?? 0) < 30
+              ? "⚠ Kleine Datenbasis"
+              : (data?.evaluatedCount ?? 0) < 100
+                ? "Begrenzte Stichprobe"
+                : undefined
+          }
+        />
+        <MetricCard
+          label="Ø 1d Kursänd. (simuliert)"
+          value={formatPercent(data?.overallAvgReturnAfter1d)}
+        />
+      </div>
 
       {data ? (
         <>
-          <section className="card" style={{ marginTop: 16 }}>
-            <h2>Overall Summary</h2>
-            <p>{data.summary}</p>
-            {data.evaluatedCount < 10 || data.skippedCount > data.evaluatedCount ? (
-              <p>
-                Data coverage may be limiting this report.{" "}
-                <Link href="/dashboard/data-quality">Open Data Quality</Link>
-              </p>
-            ) : null}
-            {data.warnings.length > 0 ? (
-              <ul>
-                {data.warnings.map((warning) => (
-                  <li key={warning}>{warning}</li>
-                ))}
-              </ul>
-            ) : null}
-          </section>
+          {/* Zusammenfassung */}
+          <div style={{ marginBottom: 20 }}>
+            <SectionCard title="Zusammenfassung">
+              {data.summary ? (
+                <p style={{ fontSize: 13, lineHeight: 1.6, margin: 0 }}>
+                  {data.summary}
+                </p>
+              ) : null}
 
-          <section className="grid metrics" style={{ marginTop: 16 }}>
-            <div className="card">
-              <span className="metric-label">Observations</span>
-              <span className="metric-value">{data.observationStats.total}</span>
-            </div>
-            <div className="card">
-              <span className="metric-label">Observation Evaluated</span>
-              <span className="metric-value">{data.observationStats.evaluatedCount}</span>
-            </div>
-            <div className="card">
-              <span className="metric-label">Observation Movement</span>
-              <span className="metric-value">{data.observationStats.positiveMovementCount}</span>
-            </div>
-            <div className="card">
-              <span className="metric-label">Avg Abs 1d</span>
-              <span className="metric-value">
-                {formatPercent(data.observationStats.avgAbsReturnAfter1d)}
-              </span>
-            </div>
-          </section>
+              {(data.evaluatedCount < 10 || data.skippedCount > data.evaluatedCount) ? (
+                <div className="warning-section" style={{ marginTop: 12 }}>
+                  <h3 className="warning-section-title">Datenqualität eingeschränkt</h3>
+                  <p className="muted small" style={{ margin: 0 }}>
+                    Die Datenbasis ist für belastbare Aussagen zu gering.{" "}
+                    <Link href="/dashboard/data-quality" className="section-link">
+                      Datenqualität prüfen →
+                    </Link>
+                  </p>
+                </div>
+              ) : null}
 
-          <div className="grid two" style={{ marginTop: 16 }}>
-            <BucketTable title="Best Signal Types" buckets={data.bestSignalTypes} />
-            <BucketTable title="Worst Signal Types" buckets={data.worstSignalTypes} />
-            <BucketTable title="Best Timeframes" buckets={data.bestTimeframes} />
-            <BucketTable title="Worst Timeframes" buckets={data.worstTimeframes} />
-            <BucketTable title="Best Assets" buckets={data.bestAssets} />
-            <BucketTable title="Worst Assets" buckets={data.worstAssets} />
+              {data.warnings.length > 0 ? (
+                <ul className="warning-list" style={{ marginTop: 12 }}>
+                  {data.warnings.map((w) => (
+                    <li key={w} className="warning-item">
+                      <span className="warning-icon">⚠</span>
+                      <span>{w}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </SectionCard>
           </div>
 
-          <div className="grid two" style={{ marginTop: 16 }}>
-            <BucketTable title="Score Buckets" buckets={data.scoreBuckets} />
-            <BucketTable title="Risk Buckets" buckets={data.riskBuckets} />
-            <BucketTable title="Status Buckets" buckets={data.statusBuckets} />
-            <BucketTable title="Evaluation Kinds" buckets={data.groupedByEvaluationKind} />
+          {/* Beobachtungsstatistik */}
+          <div className="grid metrics" style={{ marginBottom: 20 }}>
+            <MetricCard
+              label="Beobachtungen"
+              value={data.observationStats.total}
+              sub="Beobachtungs-Signale"
+            />
+            <MetricCard
+              label="Beobachtungen ausgewertet"
+              value={data.observationStats.evaluatedCount}
+            />
+            <MetricCard
+              label="Positive Bewegungen"
+              value={
+                <span style={{ color: "var(--good)" }}>
+                  {data.observationStats.positiveMovementCount}
+                </span>
+              }
+            />
+            <MetricCard
+              label="Ø Abs. 1d-Kursänd."
+              value={formatPercent(data.observationStats.avgAbsReturnAfter1d)}
+              sub="hypothetisch"
+            />
           </div>
 
-          <section className="card" style={{ marginTop: 16 }}>
-            <h2>Skipped by Reason</h2>
-            {Object.keys(data.skippedByReason).length > 0 ? (
-              <div className="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Reason</th>
-                      <th>Count</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {Object.entries(data.skippedByReason).map(([reason, count]) => (
-                      <tr key={reason}>
-                        <td>{reason}</td>
-                        <td>{count}</td>
+          {/* Signaltyp-Analyse */}
+          <BucketSection title="Signaltypen · stärker" buckets={data.bestSignalTypes} />
+          <BucketSection title="Signaltypen · schwächer" buckets={data.worstSignalTypes} />
+
+          {/* Zeitrahmen-Analyse */}
+          <BucketSection title="Zeitrahmen · stärker" buckets={data.bestTimeframes} />
+          <BucketSection title="Zeitrahmen · schwächer" buckets={data.worstTimeframes} />
+
+          {/* Asset-Analyse */}
+          <BucketSection title="Assets · stärker" buckets={data.bestAssets} />
+          <BucketSection title="Assets · schwächer" buckets={data.worstAssets} />
+
+          {/* Weitere Gruppen */}
+          <div className="grid two">
+            <BucketSection title="Score-Gruppen" buckets={data.scoreBuckets} />
+            <BucketSection title="Risiko-Gruppen" buckets={data.riskBuckets} />
+            <BucketSection title="Status-Gruppen" buckets={data.statusBuckets} />
+            <BucketSection title="Bewertungstypen" buckets={data.groupedByEvaluationKind} />
+          </div>
+
+          {/* Übersprungen-Gründe */}
+          {Object.keys(data.skippedByReason).length > 0 ? (
+            <div style={{ marginTop: 16 }}>
+              <SectionCard title="Übersprungen nach Grund">
+                <div className="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Grund</th>
+                        <th>Anzahl</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <EmptyState title="Keine skipped Reasons gefunden." />
-            )}
-          </section>
+                    </thead>
+                    <tbody>
+                      {Object.entries(data.skippedByReason).map(([reason, count]) => (
+                        <tr key={reason}>
+                          <td>{reason}</td>
+                          <td>{count}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </SectionCard>
+            </div>
+          ) : null}
         </>
-      ) : null}
+      ) : (
+        <EmptyState title="Kein Performance-Report verfügbar." />
+      )}
     </>
   );
 }

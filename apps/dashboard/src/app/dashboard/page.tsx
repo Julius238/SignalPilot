@@ -1,8 +1,9 @@
 import Link from "next/link";
 
-import { HealthBadge, RegimeBadge, RiskModeBadge } from "../../components/badges";
+import { HealthBadge, RegimeBadge, RiskBadge, RiskModeBadge, StatusBadge } from "../../components/badges";
 import { SignalCard } from "../../components/signal-card";
-import { ErrorState } from "../../components/empty-state";
+import { EmptyState, ErrorState } from "../../components/empty-state";
+import { PageHeader, SectionCard, MetricCard } from "../../components/ui";
 import { formatDateTime } from "../../lib/format";
 import {
   fetchApi,
@@ -16,6 +17,12 @@ import {
   type SignalListItem,
   type WatchlistItem
 } from "../../lib/signalpilot-api";
+
+function pipelineStatusColor(status: BotRun["status"] | undefined): string | undefined {
+  if (status === "SUCCESS") return "var(--good)";
+  if (status === "FAILED") return "var(--bad)";
+  return undefined;
+}
 
 export default async function DashboardPage() {
   const [
@@ -44,13 +51,13 @@ export default async function DashboardPage() {
     fetchApi<BacktestRun[]>("/backtests?limit=5")
   ]);
 
-  const criticalErrors = [health, config, scanner].filter((r) => r.error);
   const watchlistItems = watchlist.data ?? [];
   const signalList = signals.data ?? [];
   const alertList = alerts.data ?? [];
   const lastCrypto = cryptoPipeline.data?.[0] ?? null;
   const lastEquity = equityPipeline.data?.[0] ?? null;
   const regime = marketRegime.data;
+  const scannerSummary = scanner.data?.summary;
 
   const highPrioritySignals = signalList
     .filter((s) => s.status === "STRONG_WATCH" || s.status === "WATCH")
@@ -59,11 +66,12 @@ export default async function DashboardPage() {
     .filter((w) => w.priority === "HIGH")
     .slice(0, 6);
 
-  const latestAlert = alertList[0] ?? null;
   const failedAlerts = alertList.filter((a) => a.status === "FAILED").length;
   const activeAlertCount = watchlistItems.filter((w) => w.alertEnabled).length;
-
+  const latestAlert = alertList[0] ?? null;
   const latestBacktest = backtests.data?.find((b) => b.status === "SUCCESS") ?? null;
+
+  const criticalErrors = [health, config, scanner].filter((r) => r.error);
 
   const systemWarnings: string[] = [];
   if (health.data?.status !== "ok") systemWarnings.push("API nicht erreichbar.");
@@ -74,41 +82,92 @@ export default async function DashboardPage() {
 
   return (
     <>
+      {/* ── Page header ── */}
+      <PageHeader
+        title="Command Center"
+        subtitle="Markt-Intelligence-Übersicht · SignalPilot"
+        actions={
+          <>
+            <Link className="primary-link" href="/dashboard/scanner">Scanner</Link>
+            <Link className="primary-link secondary-link" href="/dashboard/watchlist">Watchlist</Link>
+            <Link className="primary-link secondary-link" href="/dashboard/signals">Signals</Link>
+          </>
+        }
+      />
+
+      {/* ── API-Fehler ── */}
       {criticalErrors.length > 0 ? (
-        <ErrorState
-          title="API-Fehler"
-          message={criticalErrors.map((r) => r.error).join(" | ")}
-        />
+        <div style={{ marginBottom: 16 }}>
+          <ErrorState
+            title="API-Fehler"
+            message={criticalErrors.map((r) => r.error).join(" | ")}
+          />
+        </div>
       ) : null}
 
-      {/* ── Page header ── */}
-      <div className="page-header">
-        <div>
-          <h1>Command Center</h1>
-          <p className="muted">Markt-Intelligence-Übersicht · SignalPilot</p>
+      {/* ── System-Warnungen ── */}
+      {systemWarnings.length > 0 ? (
+        <div className="warning-section" style={{ marginBottom: 20 }}>
+          <h3 className="warning-section-title">
+            System-Warnungen ({systemWarnings.length})
+          </h3>
+          <ul className="warning-list">
+            {systemWarnings.map((w) => (
+              <li key={w} className="warning-item">
+                <span className="warning-icon">⚠</span>
+                <span>{w}</span>
+              </li>
+            ))}
+          </ul>
         </div>
-        <div className="page-actions">
-          <Link className="primary-link" href="/dashboard/scanner">
-            Scanner öffnen
-          </Link>
-          <Link className="primary-link secondary-link" href="/dashboard/watchlist">
-            Watchlist
-          </Link>
-          <Link className="primary-link secondary-link" href="/dashboard/signals">
-            Alle Signals
-          </Link>
-        </div>
+      ) : null}
+
+      {/* ── Scanner-Metriken ── */}
+      <div className="grid metrics">
+        <MetricCard
+          label="Starke Beobachtung"
+          value={scannerSummary?.strongWatchCount ?? 0}
+          sub="aktive Signals"
+        />
+        <MetricCard
+          label="Beobachten"
+          value={scannerSummary?.watchCount ?? 0}
+          sub="aktive Signals"
+        />
+        <MetricCard
+          label="Aufwärts-Ausrichtung"
+          value={scannerSummary?.bullishAlignedCount ?? 0}
+          sub="Multi-TF bestätigt"
+        />
+        <MetricCard
+          label="Abwärts-Ausrichtung"
+          value={scannerSummary?.bearishAlignedCount ?? 0}
+          sub="Multi-TF bestätigt"
+        />
+        <MetricCard
+          label="Konflikte"
+          value={scannerSummary?.conflictCount ?? 0}
+          sub="Multi-TF-Konflikt"
+        />
+        <MetricCard
+          label="Alerts heute"
+          value={scannerSummary?.alertsSentToday ?? 0}
+          sub="versandte Alerts"
+        />
       </div>
 
-      {/* ── Top status row ── */}
+      {/* ── Primäre Statuskarten ── */}
       <div className="cmd-status-row">
 
-        {/* Market Regime */}
-        <div className="card">
-          <div className="section-header">
-            <h2 className="section-title">Markt-Regime</h2>
-            <Link href="/dashboard/market-regime" className="section-link">Details →</Link>
-          </div>
+        {/* Markt-Regime */}
+        <SectionCard
+          title="Markt-Regime"
+          action={
+            <Link href="/dashboard/market-regime" className="section-link">
+              Details →
+            </Link>
+          }
+        >
           {regime ? (
             <div className="regime-card-content">
               <div className="regime-row">
@@ -138,7 +197,10 @@ export default async function DashboardPage() {
                 </div>
                 {regime.report?.riskNote ? (
                   <div className="health-row">
-                    <span className="health-row-label muted small" style={{ flex: 1, whiteSpace: "normal" }}>
+                    <span
+                      className="health-row-label muted small"
+                      style={{ flex: 1, whiteSpace: "normal" }}
+                    >
                       {regime.report.riskNote.slice(0, 120)}
                       {regime.report.riskNote.length > 120 ? "…" : ""}
                     </span>
@@ -148,16 +210,19 @@ export default async function DashboardPage() {
               <span className="muted small">{formatDateTime(regime.generatedAt)}</span>
             </div>
           ) : (
-            <p className="muted small">Noch nicht berechnet. Pipeline ausführen.</p>
+            <EmptyState title="Noch nicht berechnet. Pipeline ausführen." />
           )}
-        </div>
+        </SectionCard>
 
-        {/* Pipeline Health */}
-        <div className="card">
-          <div className="section-header">
-            <h2 className="section-title">Pipeline-Status</h2>
-            <Link href="/dashboard/logs" className="section-link">Logs →</Link>
-          </div>
+        {/* Pipeline-Status */}
+        <SectionCard
+          title="Pipeline-Status"
+          action={
+            <Link href="/dashboard/logs" className="section-link">
+              Logs →
+            </Link>
+          }
+        >
           <div className="health-rows">
             <div className="health-row">
               <span className="health-row-label">API</span>
@@ -166,8 +231,8 @@ export default async function DashboardPage() {
             <div className="health-row">
               <span className="health-row-label">Crypto Pipeline</span>
               <span
-                className={`health-row-value ${lastCrypto?.status === "SUCCESS" ? "" : lastCrypto?.status === "FAILED" ? "muted" : ""}`}
-                style={{ color: lastCrypto?.status === "FAILED" ? "var(--bad)" : lastCrypto?.status === "SUCCESS" ? "var(--good)" : undefined }}
+                className="health-row-value"
+                style={{ color: pipelineStatusColor(lastCrypto?.status) }}
               >
                 {lastCrypto?.status ?? "—"}
               </span>
@@ -182,7 +247,7 @@ export default async function DashboardPage() {
               <span className="health-row-label">Equity Pipeline</span>
               <span
                 className="health-row-value"
-                style={{ color: lastEquity?.status === "FAILED" ? "var(--bad)" : lastEquity?.status === "SUCCESS" ? "var(--good)" : undefined }}
+                style={{ color: pipelineStatusColor(lastEquity?.status) }}
               >
                 {lastEquity?.status ?? "—"}
               </span>
@@ -194,14 +259,17 @@ export default async function DashboardPage() {
               </span>
             </div>
           </div>
-        </div>
+        </SectionCard>
 
-        {/* System Status */}
-        <div className="card">
-          <div className="section-header">
-            <h2 className="section-title">System</h2>
-            <Link href="/dashboard/data-quality" className="section-link">Qualität →</Link>
-          </div>
+        {/* System & Alerts */}
+        <SectionCard
+          title="System & Alerts"
+          action={
+            <Link href="/dashboard/data-quality" className="section-link">
+              Datenqualität →
+            </Link>
+          }
+        >
           <div className="health-rows">
             <div className="health-row">
               <span className="health-row-label">Alert-Modus</span>
@@ -212,7 +280,7 @@ export default async function DashboardPage() {
               <span className="health-row-value">{assets.data?.length ?? 0}</span>
             </div>
             <div className="health-row">
-              <span className="health-row-label">Watchlist (aktiv)</span>
+              <span className="health-row-label">Watchlist</span>
               <span className="health-row-value">
                 {watchlistItems.length} · {activeAlertCount} mit Alert
               </span>
@@ -221,7 +289,7 @@ export default async function DashboardPage() {
               <span className="health-row-label">Letzter Alert</span>
               <span className="health-row-value muted small">
                 {latestAlert
-                  ? `${latestAlert.signal?.symbol ?? "—"} · ${latestAlert.status} · ${formatDateTime(latestAlert.createdAt)}`
+                  ? `${latestAlert.signal?.symbol ?? "—"} · ${formatDateTime(latestAlert.createdAt)}`
                   : "—"}
               </span>
             </div>
@@ -229,50 +297,16 @@ export default async function DashboardPage() {
               <span className="health-row-label">Fehlgeschlagene Alerts</span>
               <span
                 className="health-row-value"
-                style={{ color: failedAlerts > 0 ? "var(--bad)" : undefined }}
+                style={{ color: failedAlerts > 0 ? "var(--bad)" : "var(--good)" }}
               >
-                {failedAlerts}
+                {failedAlerts > 0 ? failedAlerts : "Keine"}
               </span>
             </div>
           </div>
-        </div>
+        </SectionCard>
       </div>
 
-      {/* ── Scanner summary strip ── */}
-      <div className="regime-banner">
-        <span className="regime-banner-label">Scanner</span>
-        <div className="regime-banner-block">
-          <span className="regime-banner-value">{scanner.data?.summary.strongWatchCount ?? 0}</span>
-          <span className="muted small">Starke Beobachtung</span>
-        </div>
-        <span className="regime-sep">·</span>
-        <div className="regime-banner-block">
-          <span className="regime-banner-value">{scanner.data?.summary.watchCount ?? 0}</span>
-          <span className="muted small">Beobachten</span>
-        </div>
-        <span className="regime-sep">·</span>
-        <div className="regime-banner-block">
-          <span className="regime-banner-value">{scanner.data?.summary.bullishAlignedCount ?? 0}</span>
-          <span className="muted small" style={{ color: "var(--good)" }}>Aufwärts</span>
-        </div>
-        <span className="regime-sep">·</span>
-        <div className="regime-banner-block">
-          <span className="regime-banner-value">{scanner.data?.summary.bearishAlignedCount ?? 0}</span>
-          <span className="muted small" style={{ color: "var(--bad)" }}>Abwärts</span>
-        </div>
-        <span className="regime-sep">·</span>
-        <div className="regime-banner-block">
-          <span className="regime-banner-value">{scanner.data?.summary.conflictCount ?? 0}</span>
-          <span className="muted small">Konflikte</span>
-        </div>
-        <span className="regime-sep">·</span>
-        <div className="regime-banner-block">
-          <span className="regime-banner-value">{scanner.data?.summary.alertsSentToday ?? 0}</span>
-          <span className="muted small">Alerts heute</span>
-        </div>
-      </div>
-
-      {/* ── Signal Highlights ── */}
+      {/* ── Signal-Highlights ── */}
       <div className="cmd-section">
         <div className="section-header">
           <h2 className="section-title">Signal-Highlights</h2>
@@ -281,7 +315,7 @@ export default async function DashboardPage() {
           </Link>
         </div>
         {highPrioritySignals.length === 0 ? (
-          <div className="empty-state">Keine aktiven Signals mit hoher Priorität.</div>
+          <EmptyState title="Keine aktiven Signals mit hoher Priorität." />
         ) : (
           <div className="signal-cards-list">
             {highPrioritySignals.map((signal) => (
@@ -291,16 +325,20 @@ export default async function DashboardPage() {
         )}
       </div>
 
-      {/* ── Watchlist Focus + Research Snapshot side by side ── */}
+      {/* ── Watchlist-Fokus + Research-Snapshot ── */}
       <div className="grid two">
-        {/* Watchlist Focus */}
-        <div className="card">
-          <div className="section-header">
-            <h2 className="section-title">Watchlist-Fokus</h2>
-            <Link href="/dashboard/watchlist" className="section-link">Alle →</Link>
-          </div>
+
+        {/* Watchlist-Fokus */}
+        <SectionCard
+          title="Watchlist-Fokus"
+          action={
+            <Link href="/dashboard/watchlist" className="section-link">
+              Alle →
+            </Link>
+          }
+        >
           {highPriorityWatchlist.length === 0 ? (
-            <div className="empty-state">Keine High-Priority-Einträge in der Watchlist.</div>
+            <EmptyState title="Keine High-Priority-Einträge in der Watchlist." />
           ) : (
             <div className="watchlist-focus-grid">
               {highPriorityWatchlist.map((item) => (
@@ -323,25 +361,12 @@ export default async function DashboardPage() {
                     <div className="signal-card-badges">
                       {item.latestSignal ? (
                         <>
-                          <span
-                            className={`badge status-${item.latestSignal.status.toLowerCase()}`}
-                            title={item.latestSignal.status}
-                          >
-                            {item.latestSignal.status === "STRONG_WATCH"
-                              ? "Stark"
-                              : item.latestSignal.status === "WATCH"
-                                ? "Beob."
-                                : item.latestSignal.status}
-                          </span>
-                          <span className={`badge risk-${item.latestSignal.riskLevel.toLowerCase()}`}>
-                            {item.latestSignal.riskLevel}
-                          </span>
+                          <StatusBadge value={item.latestSignal.status} />
+                          <RiskBadge value={item.latestSignal.riskLevel} />
                         </>
                       ) : null}
                       {item.alertEnabled ? (
-                        <span className="badge" style={{ borderColor: "rgba(88,166,255,0.4)", color: "#79c0ff" }}>
-                          Alert aktiv
-                        </span>
+                        <span className="badge badge-info">Alert aktiv</span>
                       ) : null}
                     </div>
                   </div>
@@ -349,21 +374,24 @@ export default async function DashboardPage() {
               ))}
             </div>
           )}
-        </div>
+        </SectionCard>
 
-        {/* Research Snapshot */}
-        <div className="card">
-          <div className="section-header">
-            <h2 className="section-title">Research-Snapshot</h2>
-            <Link href="/dashboard/backtests" className="section-link">Backtests →</Link>
-          </div>
+        {/* Research-Snapshot */}
+        <SectionCard
+          title="Research-Snapshot"
+          action={
+            <Link href="/dashboard/backtests" className="section-link">
+              Backtests →
+            </Link>
+          }
+        >
           <div className="research-snapshot-grid">
             <div className="research-stat">
-              <div className="research-stat-label">Signals (gesamt)</div>
+              <div className="research-stat-label">Signals gesamt</div>
               <div className="research-stat-value">{signalList.length}</div>
             </div>
             <div className="research-stat">
-              <div className="research-stat-label">Letzter Backtest</div>
+              <div className="research-stat-label">Backtest-Trefferquote</div>
               <div className="research-stat-value">
                 {latestBacktest
                   ? `${((latestBacktest.winRate ?? 0) * 100).toFixed(0)}%`
@@ -371,7 +399,7 @@ export default async function DashboardPage() {
               </div>
               {latestBacktest ? (
                 <div className="research-stat-sub">
-                  Trefferquote · {latestBacktest.totalSignals} Signals
+                  {latestBacktest.totalSignals} Signals
                   {latestBacktest.totalSignals < 30 ? (
                     <span style={{ color: "var(--warn)" }}> · kleine Stichprobe</span>
                   ) : null}
@@ -381,7 +409,7 @@ export default async function DashboardPage() {
             <div className="research-stat">
               <div className="research-stat-label">Strong Watch</div>
               <div className="research-stat-value">
-                {scanner.data?.summary.strongWatchCount ?? 0}
+                {scannerSummary?.strongWatchCount ?? 0}
               </div>
               <div className="research-stat-sub">aktuelle Signals</div>
             </div>
@@ -390,39 +418,30 @@ export default async function DashboardPage() {
               <div className="research-stat-value">
                 {watchlistItems.filter((w) => w.priority === "HIGH").length}
               </div>
-              <div className="research-stat-sub">von {watchlistItems.length} gesamt</div>
-            </div>
-          </div>
-          <div style={{ marginTop: 12 }}>
-            <div className="health-rows">
-              <div className="health-row">
-                <Link href="/dashboard/backtests" className="muted small">Backtest-Läufe →</Link>
-              </div>
-              <div className="health-row">
-                <Link href="/dashboard/strategy-lab" className="muted small">Strategy Lab →</Link>
-              </div>
-              <div className="health-row">
-                <Link href="/dashboard/performance" className="muted small">Performance →</Link>
+              <div className="research-stat-sub">
+                von {watchlistItems.length} gesamt
               </div>
             </div>
           </div>
-        </div>
+          <div className="health-rows" style={{ marginTop: 14 }}>
+            <div className="health-row">
+              <Link href="/dashboard/backtests" className="muted small">
+                Backtest-Läufe →
+              </Link>
+            </div>
+            <div className="health-row">
+              <Link href="/dashboard/strategy-lab" className="muted small">
+                Strategy Lab →
+              </Link>
+            </div>
+            <div className="health-row">
+              <Link href="/dashboard/performance" className="muted small">
+                Performance →
+              </Link>
+            </div>
+          </div>
+        </SectionCard>
       </div>
-
-      {/* ── System Warnings ── */}
-      {systemWarnings.length > 0 ? (
-        <div className="warning-section" style={{ marginTop: 20 }}>
-          <h3 className="warning-section-title">System-Warnungen</h3>
-          <ul className="warning-list">
-            {systemWarnings.map((w) => (
-              <li key={w} className="warning-item">
-                <span className="warning-icon">⚠</span>
-                <span>{w}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
     </>
   );
 }

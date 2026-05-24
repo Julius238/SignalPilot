@@ -11,6 +11,12 @@ import {
 
 const priorities: WatchlistPriority[] = ["LOW", "MEDIUM", "HIGH"];
 
+const PRIORITY_LABELS: Record<WatchlistPriority, string> = {
+  LOW: "Niedrig",
+  MEDIUM: "Mittel",
+  HIGH: "Hoch"
+};
+
 type FormStatus = {
   tone: "ok" | "error";
   message: string;
@@ -24,7 +30,7 @@ export function AssetWatchlistControls({
   watchlistItem: WatchlistItem | null;
 }) {
   if (watchlistItem) {
-    return <WatchlistItemEditor item={watchlistItem} submitLabel="Update Watchlist" />;
+    return <WatchlistItemEditor item={watchlistItem} submitLabel="Aktualisieren" />;
   }
 
   return <AddWatchlistForm symbol={symbol} />;
@@ -58,33 +64,33 @@ export function AddWatchlistForm({ symbol }: { symbol: string }) {
       return;
     }
 
-    setStatus({ tone: "ok", message: "Added to watchlist." });
+    setStatus({ tone: "ok", message: "Zur Watchlist hinzugefügt." });
     router.refresh();
   }
 
   return (
     <form className="watchlist-form" onSubmit={submit}>
-      <div className="watchlist-state">Add to Watchlist</div>
+      <div className="watchlist-state">Zur Watchlist hinzufügen</div>
       <label>
-        Priority
+        Priorität
         <select defaultValue="MEDIUM" name="priority">
           {priorities.map((priority) => (
             <option key={priority} value={priority}>
-              {priority}
+              {PRIORITY_LABELS[priority]}
             </option>
           ))}
         </select>
       </label>
       <label>
-        Notes
-        <textarea name="notes" placeholder="Context, trigger, invalidation..." rows={4} />
+        Notizen
+        <textarea name="notes" placeholder="Kontext, Notizen…" rows={4} />
       </label>
       <label className="check-filter">
         <input defaultChecked name="alertEnabled" type="checkbox" value="true" />
-        Alerts enabled
+        Alerts aktiviert
       </label>
       <button disabled={pending} type="submit">
-        {pending ? "Adding..." : "Add to Watchlist"}
+        {pending ? "Hinzufügen…" : "Hinzufügen"}
       </button>
       <FormMessage status={status} />
     </form>
@@ -93,7 +99,7 @@ export function AddWatchlistForm({ symbol }: { symbol: string }) {
 
 export function WatchlistItemEditor({
   item,
-  submitLabel = "Save"
+  submitLabel = "Speichern"
 }: {
   item: WatchlistItem;
   submitLabel?: string;
@@ -124,7 +130,7 @@ export function WatchlistItemEditor({
       return;
     }
 
-    setStatus({ tone: "ok", message: "Watchlist updated." });
+    setStatus({ tone: "ok", message: "Watchlist aktualisiert." });
     router.refresh();
   }
 
@@ -150,17 +156,17 @@ export function WatchlistItemEditor({
     <form className="watchlist-form" onSubmit={submit}>
       <div className="watchlist-state">In Watchlist</div>
       <label>
-        Priority
+        Priorität
         <select defaultValue={item.priority} name="priority">
           {priorities.map((priority) => (
             <option key={priority} value={priority}>
-              {priority}
+              {PRIORITY_LABELS[priority]}
             </option>
           ))}
         </select>
       </label>
       <label>
-        Notes
+        Notizen
         <textarea defaultValue={item.notes ?? ""} name="notes" rows={4} />
       </label>
       <label className="check-filter">
@@ -170,14 +176,14 @@ export function WatchlistItemEditor({
           type="checkbox"
           value="true"
         />
-        Alerts enabled
+        Alerts aktiviert
       </label>
       <div className="watchlist-actions">
         <button disabled={pending} type="submit">
-          {pending ? "Saving..." : submitLabel}
+          {pending ? "Speichern…" : submitLabel}
         </button>
         <button className="danger-button" disabled={pending} onClick={remove} type="button">
-          Remove
+          Entfernen
         </button>
       </div>
       <FormMessage status={status} />
@@ -186,9 +192,6 @@ export function WatchlistItemEditor({
 }
 
 function FormMessage({ status }: { status: FormStatus }) {
-  if (!status) {
-    return null;
-  }
-
+  if (!status) return null;
   return <p className={`form-message form-message-${status.tone}`}>{status.message}</p>;
 }

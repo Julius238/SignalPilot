@@ -10,3 +10,7 @@ export function ErrorState({ title, message }: { title: string; message: string 
     </div>
   );
 }
+
+export function LoadingState({ title = "Lädt…" }: { title?: string }) {
+  return <div className="loading-state">{title}</div>;
+}

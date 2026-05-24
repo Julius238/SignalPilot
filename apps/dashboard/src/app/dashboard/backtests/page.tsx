@@ -1,36 +1,47 @@
 import Link from "next/link";
 
-import { ErrorState, EmptyState } from "../../../components/empty-state";
-import { formatDateTime, formatScore } from "../../../lib/format";
+import { EmptyState, ErrorState } from "../../../components/empty-state";
+import { PageHeader, SectionCard } from "../../../components/ui";
+import { formatDateTime } from "../../../lib/format";
 import { fetchApi, type BacktestRun } from "../../../lib/signalpilot-api";
 
-function formatList(values: unknown[]) {
-  return values.length > 0 ? values.join(", ") : "-";
+function formatList(values: unknown[]): string {
+  return values.length > 0 ? values.join(", ") : "—";
 }
 
-function formatPercent(value: number | null | undefined) {
-  return typeof value === "number" ? `${value.toFixed(2)}%` : "-";
+function formatPercent(v: number | null | undefined): string {
+  return typeof v === "number" ? `${v.toFixed(2)}%` : "—";
 }
+
+const STATUS_LABELS: Record<string, string> = {
+  RUNNING: "Läuft",
+  SUCCESS: "Abgeschlossen",
+  FAILED: "Fehlgeschlagen",
+  CANCELLED: "Abgebrochen"
+};
 
 export default async function BacktestsPage() {
   const runs = await fetchApi<BacktestRun[]>("/backtests?limit=50");
 
   return (
     <>
-      <div className="page-header">
-        <div>
-          <h1>Backtests</h1>
-          <p>Hypothetical historical outcome analysis for technical SignalPilot signals.</p>
-        </div>
-        <Link href="/dashboard/strategy-lab">Open Strategy Lab</Link>
-      </div>
+      <PageHeader
+        title="Backtest-Analysen"
+        subtitle="Hypothetische historische Auswertungen · kein Indikator für zukünftige Ergebnisse"
+        actions={
+          <Link className="primary-link secondary-link" href="/dashboard/strategy-lab">
+            Strategy Lab →
+          </Link>
+        }
+      />
 
-      {runs.error ? <ErrorState title="Could not load backtests" message={runs.error} /> : null}
+      {runs.error ? (
+        <ErrorState title="Backtest-Läufe konnten nicht geladen werden" message={runs.error} />
+      ) : null}
 
-      <section className="card">
-        <h2>Backtest Runs</h2>
+      <SectionCard title="Backtest-Läufe">
         {!runs.data || runs.data.length === 0 ? (
-          <EmptyState title="Keine Backtest Runs gefunden." />
+          <EmptyState title="Keine Backtest-Läufe gefunden." />
         ) : (
           <div className="table-wrap">
             <table>
@@ -38,40 +49,51 @@ export default async function BacktestsPage() {
                 <tr>
                   <th>Name</th>
                   <th>Status</th>
-                  <th>Period</th>
-                  <th>Symbols</th>
-                  <th>Timeframes</th>
-                  <th>Signals</th>
-                  <th>WinRate</th>
-                  <th>Avg 1d</th>
-                  <th>Started</th>
-                  <th>Finished</th>
+                  <th>Zeitraum</th>
+                  <th>Symbole</th>
+                  <th>Zeitrahmen</th>
+                  <th>Datenpunkte</th>
+                  <th>Trefferquote</th>
+                  <th>Ø 1d Kursänd.</th>
+                  <th>Gestartet</th>
+                  <th>Abgeschlossen</th>
                 </tr>
               </thead>
               <tbody>
                 {runs.data.map((run) => (
                   <tr key={run.id}>
                     <td>
-                      <Link href={`/dashboard/backtests/${encodeURIComponent(run.id)}`}>{run.name}</Link>
+                      <Link href={`/dashboard/backtests/${encodeURIComponent(run.id)}`}>
+                        {run.name}
+                      </Link>
                     </td>
-                    <td>{run.status}</td>
-                    <td>
-                      {formatDateTime(run.from)} - {formatDateTime(run.to)}
+                    <td>{STATUS_LABELS[run.status] ?? run.status}</td>
+                    <td className="nowrap">
+                      {formatDateTime(run.from)} – {formatDateTime(run.to)}
                     </td>
                     <td>{formatList(run.symbols)}</td>
                     <td>{formatList(run.timeframes)}</td>
-                    <td>{run.totalSignals}</td>
+                    <td>
+                      {run.totalSignals}
+                      {run.totalSignals < 30 ? (
+                        <span style={{ color: "var(--bad)", marginLeft: 4 }} title="Kleine Datenbasis">⚠</span>
+                      ) : run.totalSignals < 100 ? (
+                        <span style={{ color: "var(--warn)", marginLeft: 4 }} title="Begrenzte Datenbasis">△</span>
+                      ) : null}
+                    </td>
                     <td>{formatPercent(run.winRate)}</td>
-                    <td>{formatScore(run.avgReturnAfter1d)}</td>
-                    <td>{formatDateTime(run.startedAt)}</td>
-                    <td>{run.finishedAt ? formatDateTime(run.finishedAt) : "-"}</td>
+                    <td>{formatPercent(run.avgReturnAfter1d)}</td>
+                    <td className="nowrap">{formatDateTime(run.startedAt)}</td>
+                    <td className="nowrap">
+                      {run.finishedAt ? formatDateTime(run.finishedAt) : "—"}
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
         )}
-      </section>
+      </SectionCard>
     </>
   );
 }
