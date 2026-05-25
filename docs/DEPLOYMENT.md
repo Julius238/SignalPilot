@@ -13,6 +13,75 @@ Private alpha deployment using Docker Compose. No cloud lock-in.
 
 ## Quick Start
 
+### Hostinger VPS with n8n/Traefik
+
+This production path assumes the Hostinger VPS already runs n8n through Docker/Traefik and Traefik owns ports `80` and `443`.
+
+SignalPilot must stay on its own Compose project and Docker network:
+
+```bash
+cd /opt/signalpilot
+git pull
+docker compose -f docker-compose.prod.yml build
+docker compose -f docker-compose.prod.yml up -d postgres redis
+./scripts/ops/prod-migrate-docker.sh
+./scripts/ops/prod-seed-docker.sh
+docker compose -f docker-compose.prod.yml up -d
+```
+
+The migration and seed scripts start a temporary `node:22-bookworm` container on the `signalpilot_internal` network, mount the current repo at `/app`, enable Corepack, install the repo with the pinned pnpm version, and run the root `db:*` scripts. They do not run `migrate dev`, reset, drop, or print secrets.
+
+Override defaults only when the VPS differs:
+
+```bash
+SIGNALPILOT_DOCKER_NETWORK=signalpilot_internal \
+SIGNALPILOT_ENV_FILE=.env.production \
+SIGNALPILOT_NODE_IMAGE=node:22-bookworm \
+./scripts/ops/prod-migrate-docker.sh
+```
+
+Check that migrations created tables:
+
+```bash
+docker compose -f docker-compose.prod.yml exec postgres \
+  sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "\dt"'
+```
+
+Check service health and logs:
+
+```bash
+docker compose -f docker-compose.prod.yml ps
+curl -fsS http://127.0.0.1:3100/health
+curl -fsS http://127.0.0.1:3000/
+docker compose -f docker-compose.prod.yml logs --tail=100 api
+docker compose -f docker-compose.prod.yml logs --tail=100 worker-scheduler
+```
+
+Manually verify the worker image can start:
+
+```bash
+docker compose -f docker-compose.prod.yml run --rm --no-deps worker-scheduler node dist/index.js
+docker compose -f docker-compose.prod.yml up -d worker-scheduler
+docker compose -f docker-compose.prod.yml logs --tail=100 worker-scheduler
+```
+
+Cron examples for routine operations:
+
+```cron
+0 3 * * * cd /opt/signalpilot && pnpm ops:prod:backup >> /var/log/signalpilot-backup.log 2>&1
+*/10 * * * * cd /opt/signalpilot && docker compose -f docker-compose.prod.yml ps >/dev/null 2>&1
+```
+
+n8n stays separate. SignalPilot sends alerts only through `N8N_WEBHOOK_SIGNAL_URL`; do not merge it into the n8n Traefik stack unless you intentionally add routing later.
+
+Never commit `.env.production`. Because bcrypt hashes contain `$`, set `ADMIN_PASSWORD_HASH` in `.env.production` as a quoted value, for example:
+
+```env
+ADMIN_PASSWORD_HASH='$2b$12$...'
+```
+
+By default Postgres and Redis are internal only. The API is bound to `127.0.0.1:3100`, and the dashboard is bound to `3000` for quick IP testing. Do not bind SignalPilot to `80` or `443` on this VPS while n8n Traefik owns those ports.
+
 ### 1. Clone and prepare
 
 ```bash
@@ -47,10 +116,16 @@ Subsequent builds use Docker layer cache.
 ### 4. Run database migrations
 
 ```bash
-pnpm ops:prod:migrate
+./scripts/ops/prod-migrate-docker.sh
 ```
 
-This starts the postgres container and runs `prisma migrate deploy` in an isolated container. Safe to run multiple times.
+This runs `prisma migrate deploy` with `--schema=packages/database/prisma/schema.prisma` in a temporary Node container. Safe to run multiple times.
+
+Seed initial watchlist data after the migrations:
+
+```bash
+./scripts/ops/prod-seed-docker.sh
+```
 
 ### 5. Start all services
 
@@ -147,10 +222,11 @@ Keep backups off-site (S3, rsync, etc.).
 
 ```bash
 git pull
-pnpm ops:prod:build           # rebuild images
-pnpm ops:prod:migrate         # run new migrations (safe, idempotent)
-pnpm ops:prod:down
-pnpm ops:prod:up
+docker compose -f docker-compose.prod.yml build
+docker compose -f docker-compose.prod.yml up -d postgres redis
+./scripts/ops/prod-migrate-docker.sh
+./scripts/ops/prod-seed-docker.sh
+docker compose -f docker-compose.prod.yml up -d
 ```
 
 ---

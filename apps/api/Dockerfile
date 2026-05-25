@@ -52,7 +52,7 @@ FROM builder AS migrate
 WORKDIR /repo
 ENV NODE_ENV=production
 
-CMD ["pnpm", "--filter", "@signalpilot/database", "run", "prisma:migrate:deploy"]
+CMD ["pnpm", "db:migrate:deploy"]
 
 # ── Runtime ───────────────────────────────────────────────────────────────────
 FROM node:22-alpine AS runtime
