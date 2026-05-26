@@ -47,6 +47,28 @@ const equitySchedulerState: SchedulerState = {
   isShuttingDown: false
 };
 
+export type SchedulerSettings = {
+  cryptoCron: string;
+  runOnStart: boolean;
+  environment: string;
+  schedulerEnabled: boolean;
+  equityEnabled: boolean;
+  equityCron: string;
+  runEquityOnStart: boolean;
+};
+
+export function resolveSchedulerSettings(env: NodeJS.ProcessEnv = process.env): SchedulerSettings {
+  return {
+    cryptoCron: env.CRYPTO_PIPELINE_CRON ?? defaultCryptoCron,
+    runOnStart: env.WORKER_RUN_ON_START === "true",
+    environment: env.NODE_ENV ?? "development",
+    schedulerEnabled: true,
+    equityEnabled: env.ENABLE_EQUITY_PIPELINE === "true",
+    equityCron: env.EQUITY_PIPELINE_CRON ?? defaultEquityCron,
+    runEquityOnStart: env.RUN_EQUITY_PIPELINE_ON_START === "true"
+  };
+}
+
 export async function runScheduledCryptoPipeline(
   database: PrismaClient,
   state: SchedulerState,
@@ -140,11 +162,16 @@ export async function runScheduledEquityPipeline(
 }
 
 async function startScheduler() {
-  const cryptoCron = process.env.CRYPTO_PIPELINE_CRON ?? defaultCryptoCron;
-  const runOnStart = process.env.RUN_PIPELINE_ON_START === "true";
-  const equityEnabled = process.env.ENABLE_EQUITY_PIPELINE === "true";
-  const equityCron = process.env.EQUITY_PIPELINE_CRON ?? defaultEquityCron;
-  const runEquityOnStart = process.env.RUN_EQUITY_PIPELINE_ON_START === "true";
+  const settings = resolveSchedulerSettings();
+  const {
+    cryptoCron,
+    runOnStart,
+    environment,
+    schedulerEnabled,
+    equityEnabled,
+    equityCron,
+    runEquityOnStart
+  } = settings;
 
   if (!cron.validate(cryptoCron)) {
     throw new Error(`Invalid CRYPTO_PIPELINE_CRON expression: ${cryptoCron}`);
@@ -157,9 +184,14 @@ async function startScheduler() {
   await writeBotLog(prisma, "info", "Crypto pipeline scheduler started", {
     cronExpression: cryptoCron,
     runOnStart,
+    environment,
+    schedulerEnabled,
     startedAt: new Date().toISOString()
   });
-  logger.info({ cronExpression: cryptoCron, runOnStart }, "Crypto pipeline scheduler started");
+  logger.info(
+    { cronExpression: cryptoCron, runOnStart, environment, schedulerEnabled },
+    "Crypto pipeline scheduler started"
+  );
 
   const cryptoTask = cron.schedule(cryptoCron, () => {
     void runScheduledCryptoPipeline(prisma, schedulerState);

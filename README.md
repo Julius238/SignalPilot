@@ -240,13 +240,13 @@ Scheduler environment:
 
 ```bash
 CRYPTO_PIPELINE_CRON="0 * * * *"
-RUN_PIPELINE_ON_START=false
+WORKER_RUN_ON_START=false
 ENABLE_EQUITY_PIPELINE=false
 EQUITY_PIPELINE_CRON="30 * * * *"
 RUN_EQUITY_PIPELINE_ON_START=false
 ```
 
-The crypto cron runs hourly at the top of the hour by default. Set `RUN_PIPELINE_ON_START=true` to run the crypto pipeline immediately when the scheduler starts.
+The crypto cron runs hourly at the top of the hour by default. Set `WORKER_RUN_ON_START=true` to run the crypto pipeline immediately when the scheduler starts.
 
 Set `ENABLE_EQUITY_PIPELINE=true` to activate the equity signal pipeline on its own cron (default: 30 minutes past each hour). Set `RUN_EQUITY_PIPELINE_ON_START=true` to run it once immediately on scheduler start. The crypto pipeline is unaffected by equity settings.
 

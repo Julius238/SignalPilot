@@ -57,6 +57,21 @@ enum BotRunStatus {
   RUNNING
 }
 
+enum RadarEventType {
+  MOVEMENT_SPIKE
+  VOLUME_SPIKE
+  VOLATILITY_SPIKE
+  SCORE_CHANGE
+  REGIME_CHANGE
+}
+
+enum RadarEventSeverity {
+  INFO
+  WATCH
+  IMPORTANT
+  CRITICAL
+}
+
 enum AlertChannel {
   TELEGRAM
   EMAIL
@@ -165,6 +180,7 @@ model Asset {
   newsItems     NewsItem[]
   events        Event[]
   backtestSignals BacktestSignal[]
+  radarEvents   RadarEvent[]
 
   @@unique([symbol, exchange, assetType])
   @@index([symbol])
@@ -496,6 +512,30 @@ model BotLog {
 
   @@index([service, createdAt])
   @@index([level])
+}
+
+model RadarEvent {
+  id             String             @id @default(cuid())
+  assetId        String?
+  symbol         String
+  assetType      AssetType
+  eventType      RadarEventType
+  severity       RadarEventSeverity
+  timeframe      String
+  score          Float?
+  movePercent    Float?
+  relativeVolume Float?
+  rangePercent   Float?
+  shortMessage   String
+  metadataJson   Json?
+  createdAt      DateTime           @default(now())
+  asset          Asset?             @relation(fields: [assetId], references: [id], onDelete: SetNull)
+
+  @@index([symbol, createdAt])
+  @@index([assetType, createdAt])
+  @@index([eventType, createdAt])
+  @@index([severity, createdAt])
+  @@index([createdAt])
 }
 
 model Alert {

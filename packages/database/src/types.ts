@@ -25,6 +25,8 @@ export {
   PaperEvaluationOutcome,
   PaperEvaluationStatus,
   PaperExpectedMoveDirection,
+  RadarEventSeverity,
+  RadarEventType,
   RiskLevel,
   SignalDirection,
   SignalStatus,

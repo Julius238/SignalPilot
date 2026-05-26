@@ -402,6 +402,23 @@ export type BotLog = {
   createdAt: string;
 };
 
+export type RadarEvent = {
+  id: string;
+  assetId: string | null;
+  symbol: string;
+  assetType: AssetType;
+  eventType: "MOVEMENT_SPIKE" | "VOLUME_SPIKE" | "VOLATILITY_SPIKE" | "SCORE_CHANGE" | "REGIME_CHANGE";
+  severity: "INFO" | "WATCH" | "IMPORTANT" | "CRITICAL";
+  timeframe: string;
+  score: number | null;
+  movePercent: number | null;
+  relativeVolume: number | null;
+  rangePercent: number | null;
+  shortMessage: string;
+  metadataJson: unknown;
+  createdAt: string;
+};
+
 export type Alert = {
   id: string;
   signalId: string | null;

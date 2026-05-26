@@ -10,6 +10,8 @@ import {
   PaperEvaluationOutcome,
   PaperEvaluationStatus,
   Prisma,
+  RadarEventSeverity,
+  RadarEventType,
   RiskLevel,
   prisma,
   SignalDirection,
@@ -50,6 +52,8 @@ const signalDirections = Object.values(SignalDirection);
 const signalTypes = Object.values(SignalType);
 const watchlistPriorities = Object.values(WatchlistPriority);
 const botRunStatuses = Object.values(BotRunStatus);
+const radarEventTypes = Object.values(RadarEventType);
+const radarEventSeverities = Object.values(RadarEventSeverity);
 const alertStatuses = Object.values(AlertStatus);
 const alertChannels = Object.values(AlertChannel);
 const backtestRunStatuses = Object.values(BacktestRunStatus);
@@ -1412,6 +1416,32 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
       where: {
         level: parseOptionalString(query.level),
         service: parseOptionalString(query.service)
+      },
+      orderBy: {
+        createdAt: "desc"
+      },
+      take: limit
+    });
+  });
+
+  server.get("/radar/events", async (request, reply) => {
+    const query = asQueryRecord(request.query);
+    const eventType = parseEnum(query.eventType, radarEventTypes as RadarEventType[], "eventType", reply);
+    const severity = parseEnum(query.severity, radarEventSeverities as RadarEventSeverity[], "severity", reply);
+    const assetType = parseEnum(query.assetType, assetTypes as AssetType[], "assetType", reply);
+    const limit = parseLimit(query.limit, 50, 200, reply);
+
+    if (reply.sent) {
+      return reply;
+    }
+
+    return database.radarEvent.findMany({
+      where: {
+        symbol: parseOptionalString(query.symbol),
+        timeframe: parseOptionalString(query.timeframe),
+        eventType,
+        severity,
+        assetType
       },
       orderBy: {
         createdAt: "desc"

@@ -143,6 +143,176 @@ Services started:
 | `dashboard` | `3000` | Exposed publicly |
 | `worker-scheduler` | — | Background cron |
 
+### Worker scheduling
+
+The worker scheduler reads its cadence from `.env.production`.
+
+Recommended VPS frequencies:
+
+| Worker task | Suggested cadence | Cron example |
+|---|---:|---|
+| Crypto Full Pipeline | every 15 minutes | `*/15 * * * *` |
+| Quick Radar later | every 5 minutes | `*/5 * * * *` |
+| Market Regime | hourly | `0 * * * *` |
+| Paper Evaluation | every 2 hours | `0 */2 * * *` |
+| Equity Pipeline | every 4 hours | `0 */4 * * *` |
+
+Do not run the Crypto Full Pipeline every minute. Use a faster lightweight task later for high-frequency dashboard activity.
+
+Cron uses five time fields: minute, hour, day of month, month, day of week. For example, `*/15 * * * *` means every 15 minutes, and `*/5` in the minute field means every 5 minutes.
+
+Production scheduler variables:
+
+```env
+CRYPTO_PIPELINE_CRON=*/15 * * * *
+WORKER_RUN_ON_START=false
+QUICK_RADAR_ENABLED=false
+QUICK_RADAR_TIMEFRAME=1h
+QUICK_RADAR_MAX_ASSETS=10
+QUICK_RADAR_ALERTS_ENABLED=false
+QUICK_RADAR_ALERT_COOLDOWN_MINUTES=60
+QUICK_RADAR_MIN_ALERT_SEVERITY=IMPORTANT
+RADAR_SUMMARY_ENABLED=false
+RADAR_SUMMARY_CRON=0 * * * *
+RADAR_SUMMARY_MIN_EVENT_COUNT=1
+RADAR_SUMMARY_WEBHOOK_ENABLED=false
+```
+
+Set `WORKER_RUN_ON_START=true` only when the worker should run the Crypto Full Pipeline once immediately after startup. The scheduler logs the cron expression, run-on-start setting, environment, and scheduler enabled state at startup without logging secrets.
+
+Quick Crypto Radar is a lightweight observation job for watchlist crypto assets. It stores Beobachtung summaries in `BotRun.metadataJson`, writes BotLogs, and persists structured `RadarEvent` rows for auffällige Bewegung, Volumenanstieg, and erhöhte Volatilität. It does not create user-facing recommendations. The API exposes recent rows at `GET /radar/events`.
+
+Optional Radar alerts use the existing `N8N_WEBHOOK_SIGNAL_URL` only. There is no direct Telegram integration. Keep `QUICK_RADAR_ALERTS_ENABLED=false` unless the n8n flow is ready for `type: radar_event` payloads. When enabled, SignalPilot sends only events at or above `QUICK_RADAR_MIN_ALERT_SEVERITY` and suppresses repeated alerts for the same symbol/event type within `QUICK_RADAR_ALERT_COOLDOWN_MINUTES`.
+
+Radar Summary is a compact research update for the latest Radar Events and market-regime context. It is manual/cron driven via `worker:radar-summary`, disabled by default, and sends `type: radar_summary` payloads only when `RADAR_SUMMARY_ENABLED=true`, `RADAR_SUMMARY_WEBHOOK_ENABLED=true`, and at least `RADAR_SUMMARY_MIN_EVENT_COUNT` events exist in the lookback window. Repeated manual runs do not resend when no newer Radar Events exist.
+
+Run it manually:
+
+```bash
+pnpm worker:quick-crypto-radar
+pnpm worker:radar-summary
+```
+
+### Manual worker runs
+
+Use the production worker Docker runner for one-off worker jobs on the VPS. It starts a temporary Node container on the production Docker network, loads `.env.production`, installs dependencies, generates Prisma Client, builds the packages, builds the worker, and then runs the requested root worker script.
+
+Manual Crypto Full Pipeline test:
+
+```bash
+./scripts/ops/prod-run-worker-docker.sh worker:run-crypto-pipeline
+```
+
+Other examples:
+
+```bash
+./scripts/ops/prod-run-worker-docker.sh worker:fetch-crypto-candles
+./scripts/ops/prod-run-worker-docker.sh worker:calculate-market-regime
+./scripts/ops/prod-run-worker-docker.sh worker:quick-crypto-radar
+./scripts/ops/prod-run-worker-docker.sh worker:radar-summary
+pnpm ops:prod:run-worker:docker worker:run-crypto-pipeline
+```
+
+Override defaults only when the VPS differs:
+
+```bash
+SIGNALPILOT_DOCKER_NETWORK=signalpilot_internal \
+SIGNALPILOT_ENV_FILE=.env.production \
+SIGNALPILOT_NODE_IMAGE=node:22-bookworm \
+./scripts/ops/prod-run-worker-docker.sh worker:run-crypto-pipeline
+```
+
+### Hostinger VPS cron plan
+
+Use cron for lightweight/manual worker runs through `scripts/ops/prod-run-worker-docker.sh`. This keeps the runtime containers slim while each scheduled job prepares a temporary Node container, generates Prisma Client, builds packages, builds the worker, and runs the requested root worker script.
+
+Create the log directory once:
+
+```bash
+cd /opt/signalpilot
+mkdir -p logs
+```
+
+Open the crontab:
+
+```bash
+crontab -e
+```
+
+Copy-paste this plan and adjust only if the deployment path differs:
+
+```cron
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# SignalPilot worker jobs. Logs stay inside the repo at /opt/signalpilot/logs.
+# Quick Crypto Radar: every 5 minutes
+*/5 * * * * cd /opt/signalpilot && ./scripts/ops/prod-run-worker-docker.sh worker:quick-crypto-radar >> /opt/signalpilot/logs/quick-crypto-radar.log 2>&1
+
+# Full Crypto Pipeline: every 15 minutes
+*/15 * * * * cd /opt/signalpilot && ./scripts/ops/prod-run-worker-docker.sh worker:run-crypto-pipeline >> /opt/signalpilot/logs/crypto-pipeline.log 2>&1
+
+# Market Regime: hourly
+0 * * * * cd /opt/signalpilot && ./scripts/ops/prod-run-worker-docker.sh worker:calculate-market-regime >> /opt/signalpilot/logs/market-regime.log 2>&1
+
+# Paper Evaluation: every 2 hours
+5 */2 * * * cd /opt/signalpilot && ./scripts/ops/prod-run-worker-docker.sh worker:evaluate-paper-signals >> /opt/signalpilot/logs/paper-evaluation.log 2>&1
+
+# Equity Pipeline: every 4 hours
+10 */4 * * * cd /opt/signalpilot && ./scripts/ops/prod-run-worker-docker.sh worker:run-equity-pipeline >> /opt/signalpilot/logs/equity-pipeline.log 2>&1
+
+# Radar Summary: hourly, still disabled unless RADAR_SUMMARY_ENABLED=true
+15 * * * * cd /opt/signalpilot && ./scripts/ops/prod-run-worker-docker.sh worker:radar-summary >> /opt/signalpilot/logs/radar-summary.log 2>&1
+
+# Backtests / Strategy Comparison: run manually, or schedule at night only after reviewing runtime.
+# 30 2 * * * cd /opt/signalpilot && ./scripts/ops/prod-run-worker-docker.sh worker:run-strategy-comparison >> /opt/signalpilot/logs/strategy-comparison.log 2>&1
+```
+
+Do not schedule the Crypto Full Pipeline every minute. Use Quick Crypto Radar for frequent observations. Watch API limits, Binance/Finnhub response behavior, Docker image pull/cache behavior, CPU, RAM, and disk growth on the VPS. If jobs overlap or logs show rate-limit pressure, widen the intervals.
+
+Backtests and Strategy Comparison should remain manual or run at night after you know their runtime:
+
+```bash
+cd /opt/signalpilot
+./scripts/ops/prod-run-worker-docker.sh worker:run-backtest
+./scripts/ops/prod-run-worker-docker.sh worker:run-strategy-comparison
+```
+
+The helper script `scripts/ops/install-cron.example.sh` prints the recommended crontab snippet but does not install or overwrite anything.
+
+Monitoring commands:
+
+```bash
+cd /opt/signalpilot
+
+# Tail cron worker logs
+tail -f logs/quick-crypto-radar.log
+tail -f logs/crypto-pipeline.log
+tail -f logs/market-regime.log
+tail -f logs/paper-evaluation.log
+tail -f logs/equity-pipeline.log
+tail -f logs/radar-summary.log
+
+# Check Compose services
+docker compose -f docker-compose.prod.yml ps
+docker compose -f docker-compose.prod.yml logs --tail=100 worker-scheduler
+docker compose -f docker-compose.prod.yml logs --tail=100 api
+docker compose -f docker-compose.prod.yml logs --tail=100 dashboard
+
+# Count recent activity in Postgres. These commands do not print secrets.
+docker compose -f docker-compose.prod.yml exec postgres \
+  psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+  -c 'select "jobName", status, count(*) from "BotRun" group by 1, 2 order by 1, 2;'
+
+docker compose -f docker-compose.prod.yml exec postgres \
+  psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+  -c 'select "eventType", severity, count(*) from "RadarEvent" group by 1, 2 order by 1, 2;'
+
+docker compose -f docker-compose.prod.yml exec postgres \
+  psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+  -c 'select channel, status, count(*) from "Alert" group by 1, 2 order by 1, 2;'
+```
+
 ### 6. Check health
 
 ```bash
@@ -299,7 +469,7 @@ Key groups:
 | Database | `DATABASE_URL`, `POSTGRES_*` |
 | Auth | `ADMIN_*`, `AUTH_*`, `API_AUTH_ENABLED`, `DASHBOARD_AUTH_ENABLED` |
 | Trading safety | `ENABLE_LIVE_TRADING=false`, `PAPER_TRADING_ONLY=true` |
-| Scheduling | `CRYPTO_PIPELINE_CRON`, `EQUITY_PIPELINE_CRON`, `RUN_*_ON_START` |
+| Scheduling | `CRYPTO_PIPELINE_CRON`, `WORKER_RUN_ON_START`, `EQUITY_PIPELINE_CRON`, `RUN_EQUITY_PIPELINE_ON_START` |
 | Feature flags | `ENABLE_MARKET_REGIME`, `ENABLE_EQUITY_*`, `ENABLE_EQUITY_PIPELINE` |
 | Alerts | `ALERT_MODE`, `ALERT_COOLDOWN_MINUTES` |
 

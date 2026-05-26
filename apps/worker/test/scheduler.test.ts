@@ -3,9 +3,35 @@ import { describe, it } from "node:test";
 
 import { BotRunStatus } from "@signalpilot/database";
 
-import { runScheduledCryptoPipeline, runScheduledEquityPipeline, type SchedulerState } from "../src/scheduler.js";
+import {
+  resolveSchedulerSettings,
+  runScheduledCryptoPipeline,
+  runScheduledEquityPipeline,
+  type SchedulerState
+} from "../src/scheduler.js";
 
 describe("scheduler", () => {
+  it("uses conservative crypto scheduler defaults", () => {
+    const settings = resolveSchedulerSettings({});
+
+    assert.equal(settings.cryptoCron, "0 * * * *");
+    assert.equal(settings.runOnStart, false);
+    assert.equal(settings.environment, "development");
+    assert.equal(settings.schedulerEnabled, true);
+  });
+
+  it("uses WORKER_RUN_ON_START for startup crypto pipeline runs", () => {
+    const settings = resolveSchedulerSettings({
+      CRYPTO_PIPELINE_CRON: "*/15 * * * *",
+      WORKER_RUN_ON_START: "true",
+      NODE_ENV: "production"
+    });
+
+    assert.equal(settings.cryptoCron, "*/15 * * * *");
+    assert.equal(settings.runOnStart, true);
+    assert.equal(settings.environment, "production");
+  });
+
   it("skips a scheduled pipeline run when a previous run is active", async () => {
     const botLogs: Array<{ data: { message: string; level: string } }> = [];
     const state: SchedulerState = {

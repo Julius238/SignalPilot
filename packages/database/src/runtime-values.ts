@@ -3,7 +3,6 @@ import { createRequire } from "node:module";
 // Load @prisma/client as CJS. Its default.js spreads require() output which
 // Node.js cannot statically analyze for named ESM bindings. createRequire
 // bypasses static analysis entirely, so there is no "Named export not found" error.
-// eslint-disable-next-line @typescript-eslint/no-require-imports
 const p = createRequire(import.meta.url)("@prisma/client") as typeof import("@prisma/client");
 
 // ── Enum runtime constants ────────────────────────────────────────────────
@@ -24,6 +23,8 @@ export const PaperEvaluationKind = p.PaperEvaluationKind;
 export const PaperEvaluationOutcome = p.PaperEvaluationOutcome;
 export const PaperEvaluationStatus = p.PaperEvaluationStatus;
 export const PaperExpectedMoveDirection = p.PaperExpectedMoveDirection;
+export const RadarEventSeverity = p.RadarEventSeverity;
+export const RadarEventType = p.RadarEventType;
 export const RiskLevel = p.RiskLevel;
 export const SignalDirection = p.SignalDirection;
 export const SignalStatus = p.SignalStatus;

@@ -14,6 +14,8 @@
     "reclassify:paper-evaluations": "tsx src/jobs/paperSignalEvaluations.ts reclassify",
     "backfill:paper-evaluations": "tsx src/jobs/paperSignalEvaluations.ts backfill",
     "fetch:crypto-candles": "tsx src/jobs/fetchCryptoCandles.ts",
+    "quick:crypto-radar": "tsx src/jobs/quickCryptoRadar.ts",
+    "radar:summary": "tsx src/jobs/radarSummary.ts",
     "fetch:equity-candles": "tsx src/jobs/fetchEquityCandles.ts",
     "fetch:equity-news": "tsx src/jobs/fetchEquityNews.ts",
     "fetch:equity-events": "tsx src/jobs/fetchEquityEvents.ts",
