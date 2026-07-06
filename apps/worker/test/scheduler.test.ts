@@ -7,6 +7,8 @@ import {
   resolveSchedulerSettings,
   runScheduledCryptoPipeline,
   runScheduledEquityPipeline,
+  runScheduledQuickRadar,
+  runScheduledRadarSummary,
   type SchedulerState
 } from "../src/scheduler.js";
 
@@ -18,6 +20,29 @@ describe("scheduler", () => {
     assert.equal(settings.runOnStart, false);
     assert.equal(settings.environment, "development");
     assert.equal(settings.schedulerEnabled, true);
+  });
+
+  it("keeps quick radar and radar summary schedules disabled by default", () => {
+    const settings = resolveSchedulerSettings({});
+
+    assert.equal(settings.quickRadarEnabled, false);
+    assert.equal(settings.quickRadarCron, "*/5 * * * *");
+    assert.equal(settings.radarSummaryEnabled, false);
+    assert.equal(settings.radarSummaryCron, "0 * * * *");
+  });
+
+  it("reads quick radar and radar summary schedules from the environment", () => {
+    const settings = resolveSchedulerSettings({
+      QUICK_RADAR_ENABLED: "true",
+      QUICK_RADAR_CRON: "*/10 * * * *",
+      RADAR_SUMMARY_ENABLED: "true",
+      RADAR_SUMMARY_CRON: "0 7,19 * * *"
+    });
+
+    assert.equal(settings.quickRadarEnabled, true);
+    assert.equal(settings.quickRadarCron, "*/10 * * * *");
+    assert.equal(settings.radarSummaryEnabled, true);
+    assert.equal(settings.radarSummaryCron, "0 7,19 * * *");
   });
 
   it("uses WORKER_RUN_ON_START for startup crypto pipeline runs", () => {
@@ -148,6 +173,80 @@ describe("equity scheduler", () => {
     assert.equal(state.isRunning, false);
     assert.ok(botLogs.some((log) => log.data.message === "Scheduled equity pipeline run started"));
     assert.ok(botLogs.some((log) => log.data.message === "Scheduled equity pipeline run finished"));
+  });
+});
+
+describe("quick radar scheduler", () => {
+  it("skips a quick radar run when the previous run is still active", async () => {
+    const botLogs: Array<{ data: { message: string; level: string } }> = [];
+    const state: SchedulerState = { isRunning: true, isShuttingDown: false };
+    const database = createSchedulerDatabase(botLogs);
+    let jobCalled = false;
+
+    const result = await runScheduledQuickRadar(database as never, state, async () => {
+      jobCalled = true;
+      throw new Error("should not run");
+    });
+
+    assert.equal(result, "skipped");
+    assert.equal(jobCalled, false);
+    assert.ok(
+      botLogs.some(
+        (log) =>
+          log.data.level === "warn" &&
+          log.data.message === "Skipped scheduled quick radar run because previous run is still active"
+      )
+    );
+  });
+
+  it("runs the quick radar and logs success", async () => {
+    const botLogs: Array<{ data: { message: string; level: string } }> = [];
+    const state: SchedulerState = { isRunning: false, isShuttingDown: false };
+    const database = createSchedulerDatabase(botLogs);
+
+    const result = await runScheduledQuickRadar(database as never, state, async () =>
+      ({ status: BotRunStatus.SUCCESS, enabled: true }) as never
+    );
+
+    assert.equal(result, "success");
+    assert.equal(state.isRunning, false);
+    assert.ok(botLogs.some((log) => log.data.message === "Scheduled quick radar run started"));
+    assert.ok(botLogs.some((log) => log.data.message === "Scheduled quick radar run finished"));
+  });
+
+  it("logs quick radar failures and releases the run guard", async () => {
+    const botLogs: Array<{ data: { message: string; level: string } }> = [];
+    const state: SchedulerState = { isRunning: false, isShuttingDown: false };
+    const database = createSchedulerDatabase(botLogs);
+
+    const result = await runScheduledQuickRadar(database as never, state, async () => {
+      throw new Error("radar failed");
+    });
+
+    assert.equal(result, "failed");
+    assert.equal(state.isRunning, false);
+    assert.ok(
+      botLogs.some(
+        (log) => log.data.level === "error" && log.data.message === "Scheduled quick radar run failed"
+      )
+    );
+  });
+});
+
+describe("radar summary scheduler", () => {
+  it("runs the radar summary and logs success", async () => {
+    const botLogs: Array<{ data: { message: string; level: string } }> = [];
+    const state: SchedulerState = { isRunning: false, isShuttingDown: false };
+    const database = createSchedulerDatabase(botLogs);
+
+    const result = await runScheduledRadarSummary(database as never, state, async () =>
+      ({ status: BotRunStatus.SUCCESS, enabled: true }) as never
+    );
+
+    assert.equal(result, "success");
+    assert.equal(state.isRunning, false);
+    assert.ok(botLogs.some((log) => log.data.message === "Scheduled radar summary run started"));
+    assert.ok(botLogs.some((log) => log.data.message === "Scheduled radar summary run finished"));
   });
 });
 

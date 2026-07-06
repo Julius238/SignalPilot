@@ -16,6 +16,8 @@ import {
   runEquitySignalPipeline,
   type EquitySignalPipelineSummary
 } from "./jobs/runEquitySignalPipeline.js";
+import { quickCryptoRadar, type QuickCryptoRadarSummary } from "./jobs/quickCryptoRadar.js";
+import { radarSummary, type RadarSummaryResult } from "./jobs/radarSummary.js";
 
 const logger = pino({
   name: "signalpilot-worker-scheduler"
@@ -35,14 +37,26 @@ export type ScheduledRunResult = "skipped" | "success" | "failed";
 
 type RunCryptoPipeline = (database: PrismaClient) => Promise<CryptoSignalPipelineSummary>;
 type RunEquityPipeline = (database: PrismaClient) => Promise<EquitySignalPipelineSummary>;
+type RunQuickRadar = (database: PrismaClient) => Promise<QuickCryptoRadarSummary>;
+type RunRadarSummary = (database: PrismaClient) => Promise<RadarSummaryResult>;
 
 const defaultCryptoCron = "0 * * * *";
 const defaultEquityCron = "30 * * * *";
+const defaultQuickRadarCron = "*/5 * * * *";
+const defaultRadarSummaryCron = "0 * * * *";
 const schedulerState: SchedulerState = {
   isRunning: false,
   isShuttingDown: false
 };
 const equitySchedulerState: SchedulerState = {
+  isRunning: false,
+  isShuttingDown: false
+};
+const quickRadarSchedulerState: SchedulerState = {
+  isRunning: false,
+  isShuttingDown: false
+};
+const radarSummarySchedulerState: SchedulerState = {
   isRunning: false,
   isShuttingDown: false
 };
@@ -55,6 +69,10 @@ export type SchedulerSettings = {
   equityEnabled: boolean;
   equityCron: string;
   runEquityOnStart: boolean;
+  quickRadarEnabled: boolean;
+  quickRadarCron: string;
+  radarSummaryEnabled: boolean;
+  radarSummaryCron: string;
 };
 
 export function resolveSchedulerSettings(env: NodeJS.ProcessEnv = process.env): SchedulerSettings {
@@ -65,20 +83,25 @@ export function resolveSchedulerSettings(env: NodeJS.ProcessEnv = process.env): 
     schedulerEnabled: true,
     equityEnabled: env.ENABLE_EQUITY_PIPELINE === "true",
     equityCron: env.EQUITY_PIPELINE_CRON ?? defaultEquityCron,
-    runEquityOnStart: env.RUN_EQUITY_PIPELINE_ON_START === "true"
+    runEquityOnStart: env.RUN_EQUITY_PIPELINE_ON_START === "true",
+    quickRadarEnabled: env.QUICK_RADAR_ENABLED === "true",
+    quickRadarCron: env.QUICK_RADAR_CRON ?? defaultQuickRadarCron,
+    radarSummaryEnabled: env.RADAR_SUMMARY_ENABLED === "true",
+    radarSummaryCron: env.RADAR_SUMMARY_CRON ?? defaultRadarSummaryCron
   };
 }
 
-export async function runScheduledCryptoPipeline(
+async function runScheduledJob<Summary>(
   database: PrismaClient,
   state: SchedulerState,
-  runPipeline: RunCryptoPipeline = runCryptoSignalPipeline
+  jobLabel: string,
+  runJob: (database: PrismaClient) => Promise<Summary>
 ): Promise<ScheduledRunResult> {
   if (state.isRunning) {
     await writeBotLog(
       database,
       "warn",
-      "Skipped scheduled crypto pipeline run because previous run is still active",
+      `Skipped scheduled ${jobLabel} run because previous run is still active`,
       {
         skippedAt: new Date().toISOString()
       }
@@ -88,16 +111,16 @@ export async function runScheduledCryptoPipeline(
 
   state.isRunning = true;
 
-  await writeBotLog(database, "info", "Scheduled crypto pipeline run started", {
+  await writeBotLog(database, "info", `Scheduled ${jobLabel} run started`, {
     startedAt: new Date().toISOString()
   });
 
   try {
-    const summary = await runPipeline(database);
+    const summary = await runJob(database);
 
-    await writeBotLog(database, "info", "Scheduled crypto pipeline run finished", {
+    await writeBotLog(database, "info", `Scheduled ${jobLabel} run finished`, {
       finishedAt: new Date().toISOString(),
-      summary
+      summary: summary as unknown as Prisma.InputJsonValue
     });
 
     return "success";
@@ -105,7 +128,7 @@ export async function runScheduledCryptoPipeline(
     const message = error instanceof Error ? error.message : "Unknown scheduled pipeline error";
 
     logger.error({ error }, message);
-    await writeBotLog(database, "error", "Scheduled crypto pipeline run failed", {
+    await writeBotLog(database, "error", `Scheduled ${jobLabel} run failed`, {
       failedAt: new Date().toISOString(),
       error: message
     });
@@ -116,49 +139,36 @@ export async function runScheduledCryptoPipeline(
   }
 }
 
+export async function runScheduledCryptoPipeline(
+  database: PrismaClient,
+  state: SchedulerState,
+  runPipeline: RunCryptoPipeline = runCryptoSignalPipeline
+): Promise<ScheduledRunResult> {
+  return runScheduledJob(database, state, "crypto pipeline", runPipeline);
+}
+
 export async function runScheduledEquityPipeline(
   database: PrismaClient,
   state: SchedulerState,
   runPipeline: RunEquityPipeline = runEquitySignalPipeline
 ): Promise<ScheduledRunResult> {
-  if (state.isRunning) {
-    await writeBotLog(
-      database,
-      "warn",
-      "Skipped scheduled equity pipeline run because previous run is still active",
-      { skippedAt: new Date().toISOString() }
-    );
-    return "skipped";
-  }
+  return runScheduledJob(database, state, "equity pipeline", runPipeline);
+}
 
-  state.isRunning = true;
+export async function runScheduledQuickRadar(
+  database: PrismaClient,
+  state: SchedulerState,
+  runJob: RunQuickRadar = quickCryptoRadar
+): Promise<ScheduledRunResult> {
+  return runScheduledJob(database, state, "quick radar", runJob);
+}
 
-  await writeBotLog(database, "info", "Scheduled equity pipeline run started", {
-    startedAt: new Date().toISOString()
-  });
-
-  try {
-    const summary = await runPipeline(database);
-
-    await writeBotLog(database, "info", "Scheduled equity pipeline run finished", {
-      finishedAt: new Date().toISOString(),
-      summary
-    });
-
-    return "success";
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown scheduled pipeline error";
-
-    logger.error({ error }, message);
-    await writeBotLog(database, "error", "Scheduled equity pipeline run failed", {
-      failedAt: new Date().toISOString(),
-      error: message
-    });
-
-    return "failed";
-  } finally {
-    state.isRunning = false;
-  }
+export async function runScheduledRadarSummary(
+  database: PrismaClient,
+  state: SchedulerState,
+  runJob: RunRadarSummary = radarSummary
+): Promise<ScheduledRunResult> {
+  return runScheduledJob(database, state, "radar summary", runJob);
 }
 
 async function startScheduler() {
@@ -170,7 +180,11 @@ async function startScheduler() {
     schedulerEnabled,
     equityEnabled,
     equityCron,
-    runEquityOnStart
+    runEquityOnStart,
+    quickRadarEnabled,
+    quickRadarCron,
+    radarSummaryEnabled,
+    radarSummaryCron
   } = settings;
 
   if (!cron.validate(cryptoCron)) {
@@ -179,6 +193,14 @@ async function startScheduler() {
 
   if (equityEnabled && !cron.validate(equityCron)) {
     throw new Error(`Invalid EQUITY_PIPELINE_CRON expression: ${equityCron}`);
+  }
+
+  if (quickRadarEnabled && !cron.validate(quickRadarCron)) {
+    throw new Error(`Invalid QUICK_RADAR_CRON expression: ${quickRadarCron}`);
+  }
+
+  if (radarSummaryEnabled && !cron.validate(radarSummaryCron)) {
+    throw new Error(`Invalid RADAR_SUMMARY_CRON expression: ${radarSummaryCron}`);
   }
 
   await writeBotLog(prisma, "info", "Crypto pipeline scheduler started", {
@@ -217,6 +239,32 @@ async function startScheduler() {
     }
   }
 
+  if (quickRadarEnabled) {
+    await writeBotLog(prisma, "info", "Quick radar scheduler started", {
+      cronExpression: quickRadarCron,
+      startedAt: new Date().toISOString()
+    });
+    logger.info({ cronExpression: quickRadarCron }, "Quick radar scheduler started");
+
+    const quickRadarTask = cron.schedule(quickRadarCron, () => {
+      void runScheduledQuickRadar(prisma, quickRadarSchedulerState);
+    });
+    tasks.push(quickRadarTask);
+  }
+
+  if (radarSummaryEnabled) {
+    await writeBotLog(prisma, "info", "Radar summary scheduler started", {
+      cronExpression: radarSummaryCron,
+      startedAt: new Date().toISOString()
+    });
+    logger.info({ cronExpression: radarSummaryCron }, "Radar summary scheduler started");
+
+    const radarSummaryTask = cron.schedule(radarSummaryCron, () => {
+      void runScheduledRadarSummary(prisma, radarSummarySchedulerState);
+    });
+    tasks.push(radarSummaryTask);
+  }
+
   registerShutdownHandlers(tasks);
 
   if (runOnStart) {
@@ -232,6 +280,8 @@ function registerShutdownHandlers(tasks: ScheduledTask[]) {
 
     schedulerState.isShuttingDown = true;
     equitySchedulerState.isShuttingDown = true;
+    quickRadarSchedulerState.isShuttingDown = true;
+    radarSummarySchedulerState.isShuttingDown = true;
     tasks.forEach((task) => task.stop());
 
     logger.info({ signal, isRunning: schedulerState.isRunning }, "Pipeline schedulers shutdown");

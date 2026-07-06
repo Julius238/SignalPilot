@@ -4,7 +4,7 @@ import { HealthBadge, RegimeBadge, RiskBadge, RiskModeBadge, StatusBadge } from 
 import { SignalCard } from "../../components/signal-card";
 import { EmptyState, ErrorState } from "../../components/empty-state";
 import { PageHeader, SectionCard, MetricCard } from "../../components/ui";
-import { formatDateTime } from "../../lib/format";
+import { formatDateTime, formatRelativeTime } from "../../lib/format";
 import {
   fetchApi,
   type Alert,
@@ -31,6 +31,13 @@ function radarSeverityColor(severity: RadarEvent["severity"] | undefined): strin
   if (severity === "IMPORTANT") return "var(--warn)";
   if (severity === "WATCH") return "var(--accent)";
   return undefined;
+}
+
+function radarSeverityLabel(severity: RadarEvent["severity"] | undefined): string {
+  if (severity === "CRITICAL") return "Hochrelevant";
+  if (severity === "IMPORTANT") return "Wichtig";
+  if (severity === "WATCH") return "Beobachten";
+  return "Nur Information";
 }
 
 function formatEventType(eventType: RadarEvent["eventType"] | string | undefined) {
@@ -174,6 +181,7 @@ export default async function DashboardPage() {
     .slice(0, 8);
   const expectedNextCrypto = addMinutes(lastCrypto?.finishedAt ?? lastCrypto?.startedAt, 15);
   const expectedNextQuickRadar = addMinutes(lastQuickRadar?.finishedAt ?? lastQuickRadar?.startedAt, 5);
+  const renderedAt = new Date();
 
   const criticalErrors = [health, config, scanner].filter((r) => r.error);
 
@@ -190,7 +198,7 @@ export default async function DashboardPage() {
       {/* ── Page header ── */}
       <PageHeader
         title="Command Center"
-        subtitle="Markt-Intelligence-Übersicht · SignalPilot"
+        subtitle={`Markt-Intelligence-Übersicht · SignalPilot · Stand: ${formatDateTime(renderedAt.toISOString())}`}
         actions={
           <>
             <Link className="primary-link" href="/dashboard/scanner">Scanner</Link>
@@ -274,9 +282,12 @@ export default async function DashboardPage() {
           <div className="health-rows">
             <div className="health-row">
               <span className="health-row-label">Letzte Beobachtung</span>
-              <span className="health-row-value muted small">
+              <span
+                className="health-row-value muted small"
+                title={latestRadarEvent ? formatDateTime(latestRadarEvent.createdAt) : undefined}
+              >
                 {latestRadarEvent
-                  ? `${latestRadarEvent.symbol} · ${formatDateTime(latestRadarEvent.createdAt)}`
+                  ? `${latestRadarEvent.symbol} · ${formatRelativeTime(latestRadarEvent.createdAt, renderedAt)}`
                   : "—"}
               </span>
             </div>
@@ -311,7 +322,11 @@ export default async function DashboardPage() {
                   <div key={event.id} className="health-row">
                     <div>
                       <div className="health-row-value" style={{ textAlign: "left" }}>
-                        {event.symbol} · {formatEventType(event.eventType)}
+                        <Link href={`/dashboard/assets/${encodeURIComponent(event.symbol)}`}>
+                          {event.symbol}
+                        </Link>{" "}
+                        · {formatEventType(event.eventType)}
+                        <span className="muted small"> · {formatRelativeTime(event.createdAt, renderedAt)}</span>
                       </div>
                       <div className="muted small">{event.shortMessage}</div>
                     </div>
@@ -319,7 +334,7 @@ export default async function DashboardPage() {
                       className="badge badge-info"
                       style={{ color: radarSeverityColor(event.severity) }}
                     >
-                      {event.severity}
+                      {radarSeverityLabel(event.severity)}
                     </span>
                   </div>
                 ))}
@@ -344,7 +359,9 @@ export default async function DashboardPage() {
                     </div>
                     <div className="muted small">{item.detail}</div>
                   </div>
-                  <span className="muted small">{formatDateTime(item.time)}</span>
+                  <span className="muted small" title={formatDateTime(item.time)}>
+                    {formatRelativeTime(item.time, renderedAt)}
+                  </span>
                 </div>
               ))}
             </div>
@@ -364,12 +381,18 @@ export default async function DashboardPage() {
           <div className="grid metrics">
             {topMovers.map((event) => (
               <div key={event.id} className="card">
-                <span className="metric-label">{event.symbol}</span>
+                <Link
+                  href={`/dashboard/assets/${encodeURIComponent(event.symbol)}`}
+                  className="metric-label"
+                >
+                  {event.symbol}
+                </Link>
                 <strong className="metric-value-text">{formatPercent(event.movePercent)}</strong>
                 <span className="muted small">
                   {event.timeframe} · Volumen {formatRelativeVolume(event.relativeVolume)} · Range{" "}
                   {formatPercent(event.rangePercent)}
                 </span>
+                <span className="muted small">{formatRelativeTime(event.createdAt, renderedAt)}</span>
               </div>
             ))}
           </div>

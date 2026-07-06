@@ -103,6 +103,7 @@ type QuickCryptoRadarOptions = {
 type PersistedRadarEvent = {
   id: string;
   symbol: string;
+  assetType: AssetType;
   eventType: RadarEventType;
   severity: RadarEventSeverity;
   timeframe: string;
@@ -521,6 +522,7 @@ async function persistRadarEvents(
     persistedEvents.push({
       id: radarEvent.id,
       symbol: radarEvent.symbol,
+      assetType: radarEvent.assetType,
       eventType: radarEvent.eventType,
       severity: radarEvent.severity,
       timeframe: radarEvent.timeframe,
