@@ -7,6 +7,7 @@ import {
   buildMarketEventAlertPayload,
   buildRadarEventPayload,
   researchAlertDisclaimer,
+  sendMarketEventAlertToN8n,
   sendSignalAlertToN8n
 } from "../src/index.js";
 
@@ -98,6 +99,74 @@ describe("sendSignalAlertToN8n", () => {
     assert.equal(database.alertUpdates[0].data.status, AlertStatus.FAILED);
     assert.match(database.alertUpdates[0].data.error, /HTTP 500/);
     assert.equal(database.botLogCreates[0].data.level, "error");
+  });
+});
+
+describe("sendMarketEventAlertToN8n", () => {
+  it("posts the market event payload and marks the alert sent", async () => {
+    const database = createFakeDatabase();
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    const fetchClient = async (url: string | URL, init?: RequestInit) => {
+      requests.push({ url: String(url), init });
+      return new Response("ok", { status: 200 });
+    };
+
+    const result = await sendMarketEventAlertToN8n(
+      {
+        marketEvent: {
+          id: "event-1",
+          alertType: "macro_event",
+          severity: "IMPORTANT",
+          title: "US-Inflationsdaten über Erwartung",
+          summary: "CPI stieg stärker als erwartet.",
+          confidence: 0.5,
+          sourceName: "Finnhub Market News"
+        },
+        dashboardUrl: "https://dashboard.example/dashboard"
+      },
+      {
+        database: database as never,
+        fetchClient: fetchClient as never,
+        webhookUrl: "https://n8n.example/webhook/signal",
+        retryDelayMs: 0
+      }
+    );
+
+    assert.equal(result.status, AlertStatus.SENT);
+    assert.equal(requests.length, 1);
+
+    const payload = JSON.parse(String(requests[0].init?.body));
+    assert.equal(payload.type, "market_event");
+    assert.equal(payload.marketEventId, "event-1");
+    assert.equal(payload.alertType, "macro_event");
+    assert.match(payload.telegramText, /Keine Handlungsempfehlung/);
+    assert.equal(database.alertUpdates[0].data.status, AlertStatus.SENT);
+    assert.equal(database.botLogCreates[0].data.level, "info");
+  });
+
+  it("stores a failed alert when the webhook URL is missing", async () => {
+    const database = createFakeDatabase();
+
+    const result = await sendMarketEventAlertToN8n(
+      {
+        marketEvent: {
+          id: "event-2",
+          alertType: "geopolitical_event",
+          severity: "CRITICAL",
+          title: "Eskalation",
+          summary: "Test."
+        }
+      },
+      {
+        database: database as never,
+        webhookUrl: "",
+        retryDelayMs: 0
+      }
+    );
+
+    assert.equal(result.status, AlertStatus.FAILED);
+    assert.equal(result.error, "missing N8N_WEBHOOK_SIGNAL_URL");
+    assert.equal(database.alertUpdates[0].data.status, AlertStatus.FAILED);
   });
 });
 

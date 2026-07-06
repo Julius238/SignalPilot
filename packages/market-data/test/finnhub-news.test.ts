@@ -112,3 +112,55 @@ describe("FinnhubNewsAdapter", () => {
     assert.equal(result.items[0].source, "Reuters");
   });
 });
+
+describe("fetchGeneralNews", () => {
+  const generalPayload = [
+    {
+      category: "general",
+      datetime: 1783330000,
+      headline: "Fed signals possible rate cut in September",
+      id: 987654,
+      image: "",
+      related: "",
+      source: "Reuters",
+      summary: "Federal Reserve officials hinted at monetary easing.",
+      url: "https://reuters.com/fed-rate-cut"
+    }
+  ];
+
+  it("normalizes general news with externalId for dedup", async () => {
+    const requestedUrls: string[] = [];
+    const mockFetch = async (input: string | URL) => {
+      requestedUrls.push(String(input));
+      return { ok: true, status: 200, json: async () => generalPayload } as Response;
+    };
+    const adapter = new FinnhubNewsAdapter({ apiKey: "test-key", fetchClient: mockFetch });
+
+    const result = await adapter.fetchGeneralNews("general");
+
+    assert.equal(result.kind, "ok");
+    if (result.kind !== "ok") return;
+    assert.equal(result.items.length, 1);
+    assert.equal(result.items[0].externalId, "987654");
+    assert.equal(result.items[0].headline, "Fed signals possible rate cut in September");
+    assert.equal(result.items[0].url, "https://reuters.com/fed-rate-cut");
+    assert.ok(result.items[0].publishedAt instanceof Date);
+    assert.match(requestedUrls[0], /\/api\/v1\/news\?category=general/);
+  });
+
+  it("returns rate_limit for HTTP 429", async () => {
+    const mockFetch = async () => ({ ok: false, status: 429, json: async () => ({}) }) as Response;
+    const adapter = new FinnhubNewsAdapter({ apiKey: "test-key", fetchClient: mockFetch });
+
+    const result = await adapter.fetchGeneralNews();
+    assert.equal(result.kind, "rate_limit");
+  });
+
+  it("returns no_news for an empty array", async () => {
+    const mockFetch = async () => ({ ok: true, status: 200, json: async () => [] }) as Response;
+    const adapter = new FinnhubNewsAdapter({ apiKey: "test-key", fetchClient: mockFetch });
+
+    const result = await adapter.fetchGeneralNews();
+    assert.equal(result.kind, "no_news");
+  });
+});

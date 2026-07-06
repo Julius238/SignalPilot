@@ -17,7 +17,9 @@ import {
   type EquitySignalPipelineSummary
 } from "./jobs/runEquitySignalPipeline.js";
 import { quickCryptoRadar, type QuickCryptoRadarSummary } from "./jobs/quickCryptoRadar.js";
+import { quickEquityRadar, type QuickEquityRadarSummary } from "./jobs/quickEquityRadar.js";
 import { radarSummary, type RadarSummaryResult } from "./jobs/radarSummary.js";
+import { globalEventMonitor, type GlobalEventMonitorSummary } from "./jobs/globalEventMonitor.js";
 
 const logger = pino({
   name: "signalpilot-worker-scheduler"
@@ -38,12 +40,16 @@ export type ScheduledRunResult = "skipped" | "success" | "failed";
 type RunCryptoPipeline = (database: PrismaClient) => Promise<CryptoSignalPipelineSummary>;
 type RunEquityPipeline = (database: PrismaClient) => Promise<EquitySignalPipelineSummary>;
 type RunQuickRadar = (database: PrismaClient) => Promise<QuickCryptoRadarSummary>;
+type RunEquityRadar = (database: PrismaClient) => Promise<QuickEquityRadarSummary>;
 type RunRadarSummary = (database: PrismaClient) => Promise<RadarSummaryResult>;
+type RunGlobalEventMonitor = (database: PrismaClient) => Promise<GlobalEventMonitorSummary>;
 
 const defaultCryptoCron = "0 * * * *";
 const defaultEquityCron = "30 * * * *";
 const defaultQuickRadarCron = "*/5 * * * *";
+const defaultEquityRadarCron = "15 */4 * * *";
 const defaultRadarSummaryCron = "0 * * * *";
+const defaultGlobalEventMonitorCron = "*/30 * * * *";
 const schedulerState: SchedulerState = {
   isRunning: false,
   isShuttingDown: false
@@ -56,7 +62,15 @@ const quickRadarSchedulerState: SchedulerState = {
   isRunning: false,
   isShuttingDown: false
 };
+const equityRadarSchedulerState: SchedulerState = {
+  isRunning: false,
+  isShuttingDown: false
+};
 const radarSummarySchedulerState: SchedulerState = {
+  isRunning: false,
+  isShuttingDown: false
+};
+const globalEventMonitorSchedulerState: SchedulerState = {
   isRunning: false,
   isShuttingDown: false
 };
@@ -71,8 +85,12 @@ export type SchedulerSettings = {
   runEquityOnStart: boolean;
   quickRadarEnabled: boolean;
   quickRadarCron: string;
+  equityRadarEnabled: boolean;
+  equityRadarCron: string;
   radarSummaryEnabled: boolean;
   radarSummaryCron: string;
+  globalEventMonitorEnabled: boolean;
+  globalEventMonitorCron: string;
 };
 
 export function resolveSchedulerSettings(env: NodeJS.ProcessEnv = process.env): SchedulerSettings {
@@ -86,8 +104,12 @@ export function resolveSchedulerSettings(env: NodeJS.ProcessEnv = process.env): 
     runEquityOnStart: env.RUN_EQUITY_PIPELINE_ON_START === "true",
     quickRadarEnabled: env.QUICK_RADAR_ENABLED === "true",
     quickRadarCron: env.QUICK_RADAR_CRON ?? defaultQuickRadarCron,
+    equityRadarEnabled: env.EQUITY_RADAR_ENABLED === "true",
+    equityRadarCron: env.EQUITY_RADAR_CRON ?? defaultEquityRadarCron,
     radarSummaryEnabled: env.RADAR_SUMMARY_ENABLED === "true",
-    radarSummaryCron: env.RADAR_SUMMARY_CRON ?? defaultRadarSummaryCron
+    radarSummaryCron: env.RADAR_SUMMARY_CRON ?? defaultRadarSummaryCron,
+    globalEventMonitorEnabled: env.GLOBAL_EVENT_MONITOR_ENABLED === "true",
+    globalEventMonitorCron: env.GLOBAL_EVENT_MONITOR_CRON ?? defaultGlobalEventMonitorCron
   };
 }
 
@@ -163,12 +185,28 @@ export async function runScheduledQuickRadar(
   return runScheduledJob(database, state, "quick radar", runJob);
 }
 
+export async function runScheduledEquityRadar(
+  database: PrismaClient,
+  state: SchedulerState,
+  runJob: RunEquityRadar = quickEquityRadar
+): Promise<ScheduledRunResult> {
+  return runScheduledJob(database, state, "equity radar", runJob);
+}
+
 export async function runScheduledRadarSummary(
   database: PrismaClient,
   state: SchedulerState,
   runJob: RunRadarSummary = radarSummary
 ): Promise<ScheduledRunResult> {
   return runScheduledJob(database, state, "radar summary", runJob);
+}
+
+export async function runScheduledGlobalEventMonitor(
+  database: PrismaClient,
+  state: SchedulerState,
+  runJob: RunGlobalEventMonitor = globalEventMonitor
+): Promise<ScheduledRunResult> {
+  return runScheduledJob(database, state, "global event monitor", runJob);
 }
 
 async function startScheduler() {
@@ -183,8 +221,12 @@ async function startScheduler() {
     runEquityOnStart,
     quickRadarEnabled,
     quickRadarCron,
+    equityRadarEnabled,
+    equityRadarCron,
     radarSummaryEnabled,
-    radarSummaryCron
+    radarSummaryCron,
+    globalEventMonitorEnabled,
+    globalEventMonitorCron
   } = settings;
 
   if (!cron.validate(cryptoCron)) {
@@ -199,8 +241,16 @@ async function startScheduler() {
     throw new Error(`Invalid QUICK_RADAR_CRON expression: ${quickRadarCron}`);
   }
 
+  if (equityRadarEnabled && !cron.validate(equityRadarCron)) {
+    throw new Error(`Invalid EQUITY_RADAR_CRON expression: ${equityRadarCron}`);
+  }
+
   if (radarSummaryEnabled && !cron.validate(radarSummaryCron)) {
     throw new Error(`Invalid RADAR_SUMMARY_CRON expression: ${radarSummaryCron}`);
+  }
+
+  if (globalEventMonitorEnabled && !cron.validate(globalEventMonitorCron)) {
+    throw new Error(`Invalid GLOBAL_EVENT_MONITOR_CRON expression: ${globalEventMonitorCron}`);
   }
 
   await writeBotLog(prisma, "info", "Crypto pipeline scheduler started", {
@@ -252,6 +302,19 @@ async function startScheduler() {
     tasks.push(quickRadarTask);
   }
 
+  if (equityRadarEnabled) {
+    await writeBotLog(prisma, "info", "Equity radar scheduler started", {
+      cronExpression: equityRadarCron,
+      startedAt: new Date().toISOString()
+    });
+    logger.info({ cronExpression: equityRadarCron }, "Equity radar scheduler started");
+
+    const equityRadarTask = cron.schedule(equityRadarCron, () => {
+      void runScheduledEquityRadar(prisma, equityRadarSchedulerState);
+    });
+    tasks.push(equityRadarTask);
+  }
+
   if (radarSummaryEnabled) {
     await writeBotLog(prisma, "info", "Radar summary scheduler started", {
       cronExpression: radarSummaryCron,
@@ -263,6 +326,19 @@ async function startScheduler() {
       void runScheduledRadarSummary(prisma, radarSummarySchedulerState);
     });
     tasks.push(radarSummaryTask);
+  }
+
+  if (globalEventMonitorEnabled) {
+    await writeBotLog(prisma, "info", "Global event monitor scheduler started", {
+      cronExpression: globalEventMonitorCron,
+      startedAt: new Date().toISOString()
+    });
+    logger.info({ cronExpression: globalEventMonitorCron }, "Global event monitor scheduler started");
+
+    const globalEventMonitorTask = cron.schedule(globalEventMonitorCron, () => {
+      void runScheduledGlobalEventMonitor(prisma, globalEventMonitorSchedulerState);
+    });
+    tasks.push(globalEventMonitorTask);
   }
 
   registerShutdownHandlers(tasks);
@@ -281,7 +357,9 @@ function registerShutdownHandlers(tasks: ScheduledTask[]) {
     schedulerState.isShuttingDown = true;
     equitySchedulerState.isShuttingDown = true;
     quickRadarSchedulerState.isShuttingDown = true;
+    equityRadarSchedulerState.isShuttingDown = true;
     radarSummarySchedulerState.isShuttingDown = true;
+    globalEventMonitorSchedulerState.isShuttingDown = true;
     tasks.forEach((task) => task.stop());
 
     logger.info({ signal, isRunning: schedulerState.isRunning }, "Pipeline schedulers shutdown");

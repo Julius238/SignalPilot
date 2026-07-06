@@ -1,3 +1,13 @@
+export {
+  classifyGlobalNews,
+  classifyGlobalNewsItem,
+  type ClassifyGlobalNewsOptions,
+  type GlobalNewsInput,
+  type MarketEventCandidate,
+  type MarketEventSeverityLiteral,
+  type MarketEventTypeLiteral
+} from "./marketEvents.js";
+
 export type EventTypeLiteral = "EARNINGS" | "DIVIDEND" | "SPLIT" | "MACRO" | "OTHER";
 
 export type EventRiskLevel = "LOW" | "MEDIUM" | "HIGH" | "NONE";

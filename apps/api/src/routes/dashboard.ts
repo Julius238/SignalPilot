@@ -10,6 +10,8 @@ import {
   PaperEvaluationOutcome,
   PaperEvaluationStatus,
   Prisma,
+  MarketEventSeverity,
+  MarketEventType,
   RadarEventSeverity,
   RadarEventType,
   RiskLevel,
@@ -54,6 +56,8 @@ const watchlistPriorities = Object.values(WatchlistPriority);
 const botRunStatuses = Object.values(BotRunStatus);
 const radarEventTypes = Object.values(RadarEventType);
 const radarEventSeverities = Object.values(RadarEventSeverity);
+const marketEventTypes = Object.values(MarketEventType);
+const marketEventSeverities = Object.values(MarketEventSeverity);
 const alertStatuses = Object.values(AlertStatus);
 const alertChannels = Object.values(AlertChannel);
 const backtestRunStatuses = Object.values(BacktestRunStatus);
@@ -1447,6 +1451,59 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
         createdAt: "desc"
       },
       take: limit
+    });
+  });
+
+  server.get("/market-events", async (request, reply) => {
+    const query = asQueryRecord(request.query);
+    const eventType = parseEnum(
+      query.eventType,
+      marketEventTypes as MarketEventType[],
+      "eventType",
+      reply
+    );
+    const severity = parseEnum(
+      query.severity,
+      marketEventSeverities as MarketEventSeverity[],
+      "severity",
+      reply
+    );
+    const limit = parseLimit(query.limit, 50, 200, reply);
+
+    if (reply.sent) {
+      return reply;
+    }
+
+    return database.marketEvent.findMany({
+      where: {
+        eventType,
+        severity,
+        region: parseOptionalString(query.region)
+      },
+      orderBy: {
+        detectedAt: "desc"
+      },
+      take: limit,
+      select: {
+        id: true,
+        eventType: true,
+        severity: true,
+        confidence: true,
+        title: true,
+        summary: true,
+        region: true,
+        source: true,
+        sourceUrl: true,
+        affectedAssetClasses: true,
+        affectedSectors: true,
+        affectedSymbols: true,
+        positiveImpact: true,
+        negativeImpact: true,
+        reasoning: true,
+        publishedAt: true,
+        detectedAt: true,
+        alertSentAt: true
+      }
     });
   });
 

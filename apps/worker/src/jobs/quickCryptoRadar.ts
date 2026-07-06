@@ -21,6 +21,16 @@ import {
 import { config } from "dotenv";
 import pino from "pino";
 
+import { evaluateChartPatterns, type ChartPatternObservation } from "../lib/chartPatterns.js";
+import {
+  buildDashboardUrl,
+  persistRadarEventCandidates,
+  radarSeverityRank,
+  toPatternCandidate,
+  type PersistedRadarEvent,
+  type RadarEventCandidate
+} from "../lib/radarPersistence.js";
+
 const logger = pino({
   name: "signalpilot-worker"
 });
@@ -37,11 +47,13 @@ const defaultSettings = {
   minRangePercent: 3,
   maxAssets: 10,
   timeframe: "1h" as BinanceInterval,
-  candleLimit: 25,
+  // 50 Kerzen, damit 20-Perioden-Extrema und RSI14 für das Pattern-Radar tragen
+  candleLimit: 50,
   eventCooldownMinutes: 60,
   alertsEnabled: false,
   alertCooldownMinutes: 60,
-  minAlertSeverity: RadarEventSeverity.IMPORTANT
+  minAlertSeverity: RadarEventSeverity.IMPORTANT,
+  patternsEnabled: true
 };
 
 type RadarAsset = {
@@ -64,6 +76,7 @@ export type QuickCryptoRadarSettings = {
   alertsEnabled: boolean;
   alertCooldownMinutes: number;
   minAlertSeverity: RadarEventSeverity;
+  patternsEnabled: boolean;
 };
 
 export type RadarObservation = {
@@ -88,6 +101,7 @@ export type QuickCryptoRadarSummary = {
   topMovers: RadarObservation[];
   volumeSpikes: RadarObservation[];
   volatilitySpikes: RadarObservation[];
+  patternObservationCount: number;
   missingDataCount: number;
   errorCount: number;
   persistedRadarEventCount: number;
@@ -99,21 +113,6 @@ type MarketDataAdapter = Pick<BinanceMarketDataAdapter, "fetchKlines">;
 type QuickCryptoRadarOptions = {
   fetchClient?: typeof fetch;
   webhookUrl?: string;
-};
-type PersistedRadarEvent = {
-  id: string;
-  symbol: string;
-  assetType: AssetType;
-  eventType: RadarEventType;
-  severity: RadarEventSeverity;
-  timeframe: string;
-  shortMessage: string;
-  score: number | null;
-  movePercent: number | null;
-  relativeVolume: number | null;
-  rangePercent: number | null;
-  metadataJson: unknown;
-  createdAt: Date;
 };
 
 export function resolveQuickCryptoRadarSettings(
@@ -146,7 +145,8 @@ export function resolveQuickCryptoRadarSettings(
     minAlertSeverity: parseRadarEventSeverity(
       env.QUICK_RADAR_MIN_ALERT_SEVERITY,
       defaultSettings.minAlertSeverity
-    )
+    ),
+    patternsEnabled: env.QUICK_RADAR_PATTERNS_ENABLED !== "false"
   };
 }
 
@@ -189,6 +189,7 @@ export async function quickCryptoRadar(
   let persistedRadarEventCount = 0;
   let sentRadarAlertCount = 0;
   let skippedRadarAlertCount = 0;
+  let patternObservationCount = 0;
   const topMovers: RadarObservation[] = [];
   const volumeSpikes: RadarObservation[] = [];
   const volatilitySpikes: RadarObservation[] = [];
@@ -220,8 +221,29 @@ export async function quickCryptoRadar(
           volatilitySpikes.push(observation);
         }
 
-        if (observation.observations.length > 0) {
-          const persistedEvents = await persistRadarEvents(database, observation, settings);
+        let patternObservations: ChartPatternObservation[] = [];
+
+        if (settings.patternsEnabled) {
+          const sortedCandles = [...candles].sort(
+            (left, right) => left.openTime.getTime() - right.openTime.getTime()
+          );
+          patternObservations = evaluateChartPatterns(
+            asset.symbol,
+            settings.timeframe,
+            sortedCandles,
+            {},
+            observation.observations
+          );
+          patternObservationCount += patternObservations.length;
+        }
+
+        if (observation.observations.length > 0 || patternObservations.length > 0) {
+          const persistedEvents = await persistRadarEvents(
+            database,
+            observation,
+            settings,
+            patternObservations
+          );
           persistedRadarEventCount += persistedEvents.length;
 
           for (const radarEvent of persistedEvents) {
@@ -258,6 +280,7 @@ export async function quickCryptoRadar(
             relativeVolume: observation.relativeVolume,
             rangePercent: observation.rangePercent,
             observations: observation.observations,
+            patternObservations: patternObservations.map((pattern) => pattern.factorLabel),
             wording: "Beobachtung, keine Handlungsempfehlung"
           });
         }
@@ -284,6 +307,7 @@ export async function quickCryptoRadar(
       topMovers,
       volumeSpikes,
       volatilitySpikes,
+      patternObservationCount,
       missingDataCount,
       errorCount,
       persistedRadarEventCount,
@@ -315,6 +339,7 @@ export async function quickCryptoRadar(
       topMovers,
       volumeSpikes,
       volatilitySpikes,
+      patternObservationCount,
       missingDataCount,
       errorCount: errorCount + 1,
       persistedRadarEventCount,
@@ -335,9 +360,14 @@ export async function quickCryptoRadar(
   }
 }
 
+export type RadarMetricSettings = Pick<
+  QuickCryptoRadarSettings,
+  "minMovePercent" | "minRelativeVolume" | "minRangePercent" | "timeframe"
+>;
+
 export function evaluateRadarCandles(
   asset: RadarAsset,
-  settings: QuickCryptoRadarSettings,
+  settings: RadarMetricSettings,
   candles: NormalizedCandle[]
 ): RadarObservation | null {
   if (candles.length < 2) {
@@ -459,6 +489,7 @@ function createEmptySummary(settings: QuickCryptoRadarSettings): QuickCryptoRada
     topMovers: [],
     volumeSpikes: [],
     volatilitySpikes: [],
+    patternObservationCount: 0,
     missingDataCount: 0,
     errorCount: 0,
     persistedRadarEventCount: 0,
@@ -470,85 +501,44 @@ function createEmptySummary(settings: QuickCryptoRadarSettings): QuickCryptoRada
 async function persistRadarEvents(
   database: PrismaClient,
   observation: RadarObservation,
-  settings: QuickCryptoRadarSettings
+  settings: QuickCryptoRadarSettings,
+  patternObservations: ChartPatternObservation[] = []
 ): Promise<PersistedRadarEvent[]> {
-  const candidates = buildRadarEventCandidates(observation, settings);
-  const persistedEvents: PersistedRadarEvent[] = [];
+  const candidates = [
+    ...buildRadarEventCandidates(observation, settings),
+    ...patternObservations.map(toPatternCandidate)
+  ];
   const cooldownMinutes = settings.alertsEnabled
     ? Math.max(defaultSettings.eventCooldownMinutes, settings.alertCooldownMinutes)
     : defaultSettings.eventCooldownMinutes;
 
-  for (const candidate of candidates) {
-    const existing = await database.radarEvent.findFirst({
-      where: {
-        symbol: observation.symbol,
-        timeframe: observation.timeframe,
-        eventType: candidate.eventType,
-        createdAt: {
-          gte: new Date(Date.now() - cooldownMinutes * 60 * 1000)
-        }
+  return persistRadarEventCandidates(
+    database,
+    {
+      assetId: observation.assetId,
+      symbol: observation.symbol,
+      assetType: AssetType.CRYPTO,
+      timeframe: observation.timeframe,
+      movePercent: observation.movementPercent,
+      relativeVolume: observation.relativeVolume,
+      rangePercent: observation.rangePercent,
+      baseMetadata: {
+        priority: observation.priority,
+        observations: observation.observations,
+        latestCloseTime: observation.latestCloseTime,
+        close: observation.close
       },
-      select: {
-        id: true
-      }
-    });
-
-    if (existing) {
-      continue;
-    }
-
-    const radarEvent = await database.radarEvent.create({
-      data: {
-        assetId: observation.assetId,
-        symbol: observation.symbol,
-        assetType: AssetType.CRYPTO,
-        eventType: candidate.eventType,
-        severity: candidate.severity,
-        timeframe: observation.timeframe,
-        score: candidate.score,
-        movePercent: observation.movementPercent,
-        relativeVolume: observation.relativeVolume,
-        rangePercent: observation.rangePercent,
-        shortMessage: candidate.shortMessage,
-        metadataJson: {
-          priority: observation.priority,
-          observations: observation.observations,
-          latestCloseTime: observation.latestCloseTime,
-          close: observation.close,
-          wording: "Beobachtung, keine Handlungsempfehlung"
-        }
-      }
-    });
-    persistedEvents.push({
-      id: radarEvent.id,
-      symbol: radarEvent.symbol,
-      assetType: radarEvent.assetType,
-      eventType: radarEvent.eventType,
-      severity: radarEvent.severity,
-      timeframe: radarEvent.timeframe,
-      shortMessage: radarEvent.shortMessage,
-      score: radarEvent.score,
-      movePercent: radarEvent.movePercent,
-      relativeVolume: radarEvent.relativeVolume,
-      rangePercent: radarEvent.rangePercent,
-      metadataJson: radarEvent.metadataJson,
-      createdAt: radarEvent.createdAt
-    });
-  }
-
-  return persistedEvents;
+      cooldownMinutes
+    },
+    candidates
+  );
 }
 
 function buildRadarEventCandidates(
   observation: RadarObservation,
   settings: QuickCryptoRadarSettings
 ) {
-  const candidates: Array<{
-    eventType: RadarEventType;
-    severity: RadarEventSeverity;
-    score: number;
-    shortMessage: string;
-  }> = [];
+  const candidates: RadarEventCandidate[] = [];
 
   if (Math.abs(observation.movementPercent) >= settings.minMovePercent) {
     candidates.push({
@@ -705,33 +695,7 @@ function shouldSendRadarAlert(
     return false;
   }
 
-  return severityRank(radarEvent.severity) >= severityRank(settings.minAlertSeverity);
-}
-
-function severityRank(severity: RadarEventSeverity): number {
-  if (severity === RadarEventSeverity.CRITICAL) {
-    return 4;
-  }
-
-  if (severity === RadarEventSeverity.IMPORTANT) {
-    return 3;
-  }
-
-  if (severity === RadarEventSeverity.WATCH) {
-    return 2;
-  }
-
-  return 1;
-}
-
-function buildDashboardUrl(): string | undefined {
-  const origin = process.env.DASHBOARD_ORIGIN?.trim();
-
-  if (!origin) {
-    return undefined;
-  }
-
-  return `${origin.replace(/\/$/, "")}/dashboard`;
+  return radarSeverityRank(radarEvent.severity) >= radarSeverityRank(settings.minAlertSeverity);
 }
 
 function toFiniteNumber(value: string | number | { toString(): string }): number {

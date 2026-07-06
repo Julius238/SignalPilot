@@ -198,29 +198,34 @@ export type RadarEventAlertPayload = {
 const defaultMaxAttempts = 3;
 const defaultRetryDelayMs = 500;
 
-export async function sendSignalAlertToN8n(
-  input: SendSignalAlertToN8nInput,
-  options: SendSignalAlertToN8nOptions = {}
+type DispatchAlertInput = {
+  payload: unknown;
+  signalId: string | null;
+  logLabel: string;
+  logMetadata: Record<string, unknown>;
+};
+
+async function dispatchAlertToN8n(
+  input: DispatchAlertInput,
+  options: SendSignalAlertToN8nOptions
 ): Promise<SendSignalAlertResult> {
   const database = options.database ?? prisma;
   const webhookUrl = options.webhookUrl ?? process.env.N8N_WEBHOOK_SIGNAL_URL;
-  const payload = buildPayload(input);
   const alert = await database.alert.create({
     data: {
-      signalId: input.signal.id,
+      signalId: input.signalId,
       channel: AlertChannel.WEBHOOK,
       status: AlertStatus.PENDING,
-      payloadJson: payload as Prisma.InputJsonObject
+      payloadJson: input.payload as Prisma.InputJsonObject
     }
   });
 
   if (!webhookUrl) {
     const error = "missing N8N_WEBHOOK_SIGNAL_URL";
     await markAlertFailed(database, alert.id, error);
-    await writeBotLog(database, "error", "Failed to dispatch signal alert to n8n", {
+    await writeBotLog(database, "error", `Failed to dispatch ${input.logLabel} to n8n`, {
       alertId: alert.id,
-      signalId: input.signal.id,
-      symbol: input.signal.symbol,
+      ...input.logMetadata,
       error
     });
 
@@ -244,7 +249,7 @@ export async function sendSignalAlertToN8n(
         headers: {
           "Content-Type": "application/json"
         },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(input.payload)
       });
 
       if (!response.ok) {
@@ -261,12 +266,9 @@ export async function sendSignalAlertToN8n(
           error: null
         }
       });
-      await writeBotLog(database, "info", "Dispatched signal alert to n8n", {
+      await writeBotLog(database, "info", `Dispatched ${input.logLabel} to n8n`, {
         alertId: alert.id,
-        signalId: input.signal.id,
-        symbol: input.signal.symbol,
-        alignment: payload.alignment,
-        alignmentScore: payload.alignmentScore,
+        ...input.logMetadata,
         attempts: attempt
       });
 
@@ -285,10 +287,9 @@ export async function sendSignalAlertToN8n(
   }
 
   await markAlertFailed(database, alert.id, lastError);
-  await writeBotLog(database, "error", "Failed to dispatch signal alert to n8n", {
+  await writeBotLog(database, "error", `Failed to dispatch ${input.logLabel} to n8n`, {
     alertId: alert.id,
-    signalId: input.signal.id,
-    symbol: input.signal.symbol,
+    ...input.logMetadata,
     attempts: maxAttempts,
     error: lastError
   });
@@ -301,110 +302,75 @@ export async function sendSignalAlertToN8n(
   };
 }
 
+export async function sendSignalAlertToN8n(
+  input: SendSignalAlertToN8nInput,
+  options: SendSignalAlertToN8nOptions = {}
+): Promise<SendSignalAlertResult> {
+  const payload = buildPayload(input);
+
+  return dispatchAlertToN8n(
+    {
+      payload,
+      signalId: input.signal.id,
+      logLabel: "signal alert",
+      logMetadata: {
+        signalId: input.signal.id,
+        symbol: input.signal.symbol,
+        alignment: payload.alignment,
+        alignmentScore: payload.alignmentScore
+      }
+    },
+    options
+  );
+}
+
 export async function sendRadarEventAlertToN8n(
   input: SendRadarEventAlertToN8nInput,
   options: SendSignalAlertToN8nOptions = {}
 ): Promise<SendSignalAlertResult> {
-  const database = options.database ?? prisma;
-  const webhookUrl = options.webhookUrl ?? process.env.N8N_WEBHOOK_SIGNAL_URL;
   const payload = buildRadarEventPayload(input);
-  const alert = await database.alert.create({
-    data: {
+
+  return dispatchAlertToN8n(
+    {
+      payload,
       signalId: null,
-      channel: AlertChannel.WEBHOOK,
-      status: AlertStatus.PENDING,
-      payloadJson: payload as Prisma.InputJsonObject
-    }
-  });
-
-  if (!webhookUrl) {
-    const error = "missing N8N_WEBHOOK_SIGNAL_URL";
-    await markAlertFailed(database, alert.id, error);
-    await writeBotLog(database, "error", "Failed to dispatch radar event alert to n8n", {
-      alertId: alert.id,
-      radarEventId: input.radarEvent.id,
-      symbol: input.radarEvent.symbol,
-      eventType: input.radarEvent.eventType,
-      error
-    });
-
-    return {
-      alertId: alert.id,
-      status: AlertStatus.FAILED,
-      attempts: 0,
-      error
-    };
-  }
-
-  const fetchClient = options.fetchClient ?? fetch;
-  const maxAttempts = options.maxAttempts ?? defaultMaxAttempts;
-  const retryDelayMs = options.retryDelayMs ?? defaultRetryDelayMs;
-  let lastError = "unknown n8n webhook error";
-
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    try {
-      const response = await fetchClient(webhookUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify(payload)
-      });
-
-      if (!response.ok) {
-        throw new Error(`n8n webhook failed with HTTP ${response.status}`);
-      }
-
-      await database.alert.update({
-        where: {
-          id: alert.id
-        },
-        data: {
-          status: AlertStatus.SENT,
-          sentAt: new Date(),
-          error: null
-        }
-      });
-      await writeBotLog(database, "info", "Dispatched radar event alert to n8n", {
-        alertId: alert.id,
+      logLabel: "radar event alert",
+      logMetadata: {
         radarEventId: input.radarEvent.id,
         symbol: input.radarEvent.symbol,
         eventType: input.radarEvent.eventType,
-        severity: input.radarEvent.severity,
-        attempts: attempt
-      });
-
-      return {
-        alertId: alert.id,
-        status: AlertStatus.SENT,
-        attempts: attempt
-      };
-    } catch (error) {
-      lastError = error instanceof Error ? error.message : "unknown n8n webhook error";
-
-      if (attempt < maxAttempts) {
-        await delay(retryDelayMs);
+        severity: input.radarEvent.severity
       }
-    }
-  }
+    },
+    options
+  );
+}
 
-  await markAlertFailed(database, alert.id, lastError);
-  await writeBotLog(database, "error", "Failed to dispatch radar event alert to n8n", {
-    alertId: alert.id,
-    radarEventId: input.radarEvent.id,
-    symbol: input.radarEvent.symbol,
-    eventType: input.radarEvent.eventType,
-    severity: input.radarEvent.severity,
-    attempts: maxAttempts,
-    error: lastError
-  });
+export type SendMarketEventAlertToN8nInput = {
+  marketEvent: MarketEventAlertInput;
+  dashboardUrl?: string;
+};
 
-  return {
-    alertId: alert.id,
-    status: AlertStatus.FAILED,
-    attempts: maxAttempts,
-    error: lastError
-  };
+export async function sendMarketEventAlertToN8n(
+  input: SendMarketEventAlertToN8nInput,
+  options: SendSignalAlertToN8nOptions = {}
+): Promise<SendSignalAlertResult> {
+  const payload = buildMarketEventAlertPayload(input.marketEvent, input.dashboardUrl);
+
+  return dispatchAlertToN8n(
+    {
+      payload,
+      signalId: null,
+      logLabel: "market event alert",
+      logMetadata: {
+        marketEventId: input.marketEvent.id,
+        alertType: input.marketEvent.alertType,
+        severity: input.marketEvent.severity,
+        eventTitle: input.marketEvent.title
+      }
+    },
+    options
+  );
 }
 
 function buildPayload(input: SendSignalAlertToN8nInput): AlertPayload {
@@ -441,7 +407,11 @@ const radarEventTypeLabels: Record<RadarEventType, string> = {
   VOLUME_SPIKE: "Volumenanstieg",
   VOLATILITY_SPIKE: "Erhöhte Volatilität",
   SCORE_CHANGE: "Score-Veränderung",
-  REGIME_CHANGE: "Marktumfeld-Wechsel"
+  REGIME_CHANGE: "Marktumfeld-Wechsel",
+  BREAKOUT_PROXIMITY: "Möglicher Ausbruchsbereich",
+  SR_PROXIMITY: "Support/Resistance-Nähe",
+  MOMENTUM_SHIFT: "Momentum-Wechsel",
+  CONFLUENCE: "Konfluenz mehrerer Faktoren"
 };
 
 const severityLabels: Record<ResearchAlertSeverity, string> = {

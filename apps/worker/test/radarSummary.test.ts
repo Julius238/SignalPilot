@@ -63,7 +63,18 @@ describe("radarSummary", () => {
       events: [
         createRadarEvent({ eventType: "MOVEMENT_SPIKE", symbol: "BTCUSDT", movePercent: 4.2 }),
         createRadarEvent({ eventType: "VOLUME_SPIKE", symbol: "ETHUSDT", relativeVolume: 2.8 }),
-        createRadarEvent({ eventType: "VOLATILITY_SPIKE", symbol: "SOLUSDT", rangePercent: 5.1 })
+        createRadarEvent({ eventType: "VOLATILITY_SPIKE", symbol: "SOLUSDT", rangePercent: 5.1 }),
+        createRadarEvent({ eventType: "BREAKOUT_PROXIMITY", symbol: "BTCUSDT" })
+      ],
+      marketEvents: [
+        {
+          title: "Fed signals possible rate cut",
+          eventType: "CENTRAL_BANK",
+          severity: "IMPORTANT",
+          region: "USA",
+          sourceUrl: "https://news.example/fed",
+          detectedAt: new Date("2026-01-01T00:40:00.000Z")
+        }
       ]
     });
     const payloads: unknown[] = [];
@@ -78,14 +89,72 @@ describe("radarSummary", () => {
     assert.equal(summary.webhookSent, true);
     assert.equal(summary.checkedAssetCount, 8);
     assert.equal(summary.notableAssetCount, 3);
+    assert.equal(summary.globalEventCount, 1);
+    assert.equal(summary.patternEvents.length, 1);
     assert.equal(state.alerts.length, 1);
     assert.equal(payloads.length, 1);
-    assert.equal((payloads[0] as { type: string }).type, "radar_summary");
+    const payload = payloads[0] as { type: string; globalEvents: unknown[]; globalEventCount: number };
+    assert.equal(payload.type, "radar_summary");
+    assert.equal(payload.globalEventCount, 1);
+    assert.equal(payload.globalEvents.length, 1);
+    assert.match(summary.summaryText, /Globale Ereignisse \(1\):/);
+    assert.match(summary.summaryText, /\[IMPORTANT\] Fed signals possible rate cut \(USA\)/);
+    assert.match(summary.summaryText, /Chart-Beobachtungen: BTCUSDT/);
     assert.match(summary.summaryText, /Keine Handlungsempfehlung/);
+  });
+
+  it("sends a briefing when only global events exist in the window", async () => {
+    process.env.RADAR_SUMMARY_ENABLED = "true";
+    process.env.RADAR_SUMMARY_WEBHOOK_ENABLED = "true";
+    process.env.RADAR_SUMMARY_MIN_EVENT_COUNT = "1";
+    process.env.RADAR_SUMMARY_LOOKBACK_MINUTES = "720";
+    process.env.N8N_WEBHOOK_SIGNAL_URL = "https://n8n.example.test/webhook";
+    const state = createDatabaseState({
+      events: [],
+      marketEvents: [
+        {
+          title: "OPEC announces production cut",
+          eventType: "ENERGY_COMMODITY",
+          severity: "IMPORTANT",
+          region: null,
+          sourceUrl: null,
+          detectedAt: new Date("2026-01-01T00:40:00.000Z")
+        }
+      ]
+    });
+    let fetchCallCount = 0;
+
+    const summary = await radarSummary(state.database as never, {
+      fetchClient: async () => {
+        fetchCallCount += 1;
+        return new Response(null, { status: 200 });
+      }
+    });
+
+    assert.equal(summary.period.lookbackMinutes, 720);
+    assert.equal(summary.radarEventCount, 0);
+    assert.equal(summary.globalEventCount, 1);
+    assert.equal(summary.webhookSent, true);
+    assert.equal(fetchCallCount, 1);
   });
 });
 
-function createDatabaseState({ events }: { events: ReturnType<typeof createRadarEvent>[] }) {
+type FakeMarketEvent = {
+  title: string;
+  eventType: string;
+  severity: string;
+  region: string | null;
+  sourceUrl: string | null;
+  detectedAt: Date;
+};
+
+function createDatabaseState({
+  events,
+  marketEvents = []
+}: {
+  events: ReturnType<typeof createRadarEvent>[];
+  marketEvents?: FakeMarketEvent[];
+}) {
   const botRunUpdates: Array<{ data: { status: BotRunStatus; metadataJson?: unknown } }> = [];
   const botLogs: Array<{ data: { message: string; metadataJson?: unknown } }> = [];
   const alerts: Array<{ data: { payloadJson: unknown } }> = [];
@@ -117,6 +186,9 @@ function createDatabaseState({ events }: { events: ReturnType<typeof createRadar
       },
       radarEvent: {
         findMany: async () => events
+      },
+      marketEvent: {
+        findMany: async () => marketEvents
       },
       marketRegimeSnapshot: {
         findFirst: async () => ({

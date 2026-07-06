@@ -407,7 +407,16 @@ export type RadarEvent = {
   assetId: string | null;
   symbol: string;
   assetType: AssetType;
-  eventType: "MOVEMENT_SPIKE" | "VOLUME_SPIKE" | "VOLATILITY_SPIKE" | "SCORE_CHANGE" | "REGIME_CHANGE";
+  eventType:
+    | "MOVEMENT_SPIKE"
+    | "VOLUME_SPIKE"
+    | "VOLATILITY_SPIKE"
+    | "SCORE_CHANGE"
+    | "REGIME_CHANGE"
+    | "BREAKOUT_PROXIMITY"
+    | "SR_PROXIMITY"
+    | "MOMENTUM_SHIFT"
+    | "CONFLUENCE";
   severity: "INFO" | "WATCH" | "IMPORTANT" | "CRITICAL";
   timeframe: string;
   score: number | null;
@@ -417,6 +426,42 @@ export type RadarEvent = {
   shortMessage: string;
   metadataJson: unknown;
   createdAt: string;
+};
+
+export type MarketEventType =
+  | "MACRO"
+  | "CENTRAL_BANK"
+  | "INFLATION"
+  | "LABOR_MARKET"
+  | "RATES"
+  | "GEOPOLITICAL"
+  | "SANCTIONS"
+  | "CONFLICT"
+  | "ENERGY_COMMODITY"
+  | "SUPPLY_CHAIN"
+  | "CORPORATE"
+  | "RISK_SENTIMENT"
+  | "OTHER";
+
+export type MarketEvent = {
+  id: string;
+  eventType: MarketEventType;
+  severity: "INFO" | "WATCH" | "IMPORTANT" | "CRITICAL";
+  confidence: number;
+  title: string;
+  summary: string | null;
+  region: string | null;
+  source: string;
+  sourceUrl: string | null;
+  affectedAssetClasses: string[];
+  affectedSectors: string[];
+  affectedSymbols: string[];
+  positiveImpact: string[];
+  negativeImpact: string[];
+  reasoning: string | null;
+  publishedAt: string | null;
+  detectedAt: string;
+  alertSentAt: string | null;
 };
 
 export type Alert = {

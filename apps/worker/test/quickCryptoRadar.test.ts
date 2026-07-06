@@ -132,6 +132,84 @@ describe("quickCryptoRadar", () => {
     assert.ok(state.botLogs.some((log) => log.data.message === "Quick Crypto Markt-Radar Beobachtung"));
   });
 
+  it("persists chart pattern events alongside classic observations", async () => {
+    process.env.QUICK_RADAR_ENABLED = "true";
+
+    const state = createDatabaseState([
+      {
+        id: "asset-1",
+        symbol: "BTCUSDT",
+        watchlistItem: { priority: WatchlistPriority.HIGH, alertEnabled: true }
+      }
+    ]);
+    // 24 ruhige Kerzen um 100, letzte Kerze nahe 20-Perioden-Hoch mit 2.5x Volumen
+    const series: NormalizedCandle[] = [];
+    for (let index = 0; index < 24; index += 1) {
+      const close = (100 + Math.sin(index) * 0.4).toFixed(4);
+      series.push(
+        candle({
+          open: close,
+          high: String(Number(close) * 1.01),
+          low: String(Number(close) * 0.99),
+          close,
+          volume: "100",
+          openTime: new Date(index + 1)
+        })
+      );
+    }
+    series.push(
+      candle({
+        open: "100.5",
+        high: "101.4",
+        low: "100.2",
+        close: "101.0",
+        volume: "250",
+        openTime: new Date(100)
+      })
+    );
+    const adapter = { fetchKlines: async () => series };
+
+    const summary = await quickCryptoRadar(state.database as never, adapter);
+
+    // Ausbruchsbereich + Momentum-Wechsel + Konfluenz (Volumenanstieg + 2 Patterns ≥ 3 Faktoren)
+    assert.equal(summary.patternObservationCount, 3);
+    assert.equal(summary.persistedRadarEventCount, 4);
+    const eventTypes = state.radarEvents.map((event) => event.data.eventType);
+    assert.ok(eventTypes.includes("VOLUME_SPIKE"));
+    assert.ok(eventTypes.includes("BREAKOUT_PROXIMITY"));
+    assert.ok(eventTypes.includes("MOMENTUM_SHIFT"));
+    assert.ok(eventTypes.includes("CONFLUENCE"));
+    const breakout = state.radarEvents.find((event) => event.data.eventType === "BREAKOUT_PROXIMITY");
+    assert.match(breakout?.data.shortMessage ?? "", /möglicher Ausbruchsbereich oberhalb/);
+    assert.doesNotMatch(breakout?.data.shortMessage ?? "", /kauf|verkauf|long|short|entry|exit/i);
+    const confluence = state.radarEvents.find((event) => event.data.eventType === "CONFLUENCE");
+    assert.match(confluence?.data.shortMessage ?? "", /Volumenanstieg/);
+  });
+
+  it("skips pattern evaluation when QUICK_RADAR_PATTERNS_ENABLED=false", async () => {
+    process.env.QUICK_RADAR_ENABLED = "true";
+    process.env.QUICK_RADAR_PATTERNS_ENABLED = "false";
+
+    const state = createDatabaseState([
+      {
+        id: "asset-1",
+        symbol: "BTCUSDT",
+        watchlistItem: { priority: WatchlistPriority.HIGH, alertEnabled: true }
+      }
+    ]);
+    const adapter = {
+      fetchKlines: async () => [
+        candle({ close: "100", volume: "100", openTime: new Date(1) }),
+        candle({ open: "100", high: "106", low: "99", close: "104", volume: "260", openTime: new Date(2) })
+      ]
+    };
+
+    const summary = await quickCryptoRadar(state.database as never, adapter);
+
+    assert.equal(summary.patternObservationCount, 0);
+    assert.equal(summary.persistedRadarEventCount, 3);
+  });
+
   it("sends no radar alerts when QUICK_RADAR_ALERTS_ENABLED is false", async () => {
     process.env.QUICK_RADAR_ENABLED = "true";
     process.env.N8N_WEBHOOK_SIGNAL_URL = "https://n8n.example.test/webhook";

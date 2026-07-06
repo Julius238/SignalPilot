@@ -29,6 +29,24 @@ export type FinnhubNewsFetchResult =
   | { kind: "no_news" }
   | { kind: "rate_limit" };
 
+export type GeneralNewsCategory = "general" | "forex" | "crypto" | "merger";
+
+export type NormalizedGeneralNewsItem = {
+  externalId: string | null;
+  source: string;
+  headline: string;
+  summary: string | null;
+  url: string | null;
+  publishedAt: Date;
+  category: string | null;
+  rawJson: unknown;
+};
+
+export type FinnhubGeneralNewsFetchResult =
+  | { kind: "ok"; items: NormalizedGeneralNewsItem[] }
+  | { kind: "no_news" }
+  | { kind: "rate_limit" };
+
 export class FinnhubNewsAdapter {
   private readonly baseUrl: string;
   private readonly fetchClient: FetchLike;
@@ -66,6 +84,54 @@ export class FinnhubNewsAdapter {
     const payload: unknown = await response.json();
     return normalizeNewsResponse(symbol, payload);
   }
+
+  async fetchGeneralNews(
+    category: GeneralNewsCategory = "general"
+  ): Promise<FinnhubGeneralNewsFetchResult> {
+    const url = new URL("/api/v1/news", this.baseUrl);
+    url.searchParams.set("category", category);
+    url.searchParams.set("token", this.apiKey);
+
+    const response = await this.fetchClient(url);
+
+    if (response.status === 429) {
+      return { kind: "rate_limit" };
+    }
+
+    if (!response.ok) {
+      throw new Error(`Finnhub general news request failed with HTTP ${response.status}.`);
+    }
+
+    const payload: unknown = await response.json();
+    return normalizeGeneralNewsResponse(payload);
+  }
+}
+
+export function normalizeGeneralNewsResponse(payload: unknown): FinnhubGeneralNewsFetchResult {
+  if (!Array.isArray(payload)) {
+    throw new Error("Invalid Finnhub general news response format.");
+  }
+
+  const items = payload.filter(isFinnhubNewsItem).map(normalizeGeneralNewsItem);
+
+  if (items.length === 0) {
+    return { kind: "no_news" };
+  }
+
+  return { kind: "ok", items };
+}
+
+function normalizeGeneralNewsItem(item: FinnhubNewsApiItem): NormalizedGeneralNewsItem {
+  return {
+    externalId: typeof item.id === "number" ? String(item.id) : null,
+    source: item.source,
+    headline: item.headline,
+    summary: item.summary || null,
+    url: item.url || null,
+    publishedAt: new Date(item.datetime * 1000),
+    category: item.category || null,
+    rawJson: item
+  };
 }
 
 export function normalizeNewsResponse(symbol: string, payload: unknown): FinnhubNewsFetchResult {

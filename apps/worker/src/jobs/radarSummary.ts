@@ -41,15 +41,29 @@ export type RadarSummaryResult = {
   checkedAssetCount: number;
   notableAssetCount: number;
   radarEventCount: number;
+  globalEventCount: number;
   topMovers: RadarSummaryEvent[];
   volumeSpikes: RadarSummaryEvent[];
   volatilitySpikes: RadarSummaryEvent[];
+  patternEvents: RadarSummaryEvent[];
+  globalEvents: GlobalEventSummaryItem[];
   marketRegimeContext: MarketRegimeContext | null;
   summaryText: string;
   webhookEnabled: boolean;
   webhookSent: boolean;
   skippedReason?: string;
 };
+
+type GlobalEventSummaryItem = {
+  title: string;
+  eventType: string;
+  severity: string;
+  region: string | null;
+  sourceUrl: string | null;
+  detectedAt: string;
+};
+
+const patternEventTypes = ["BREAKOUT_PROXIMITY", "SR_PROXIMITY", "MOMENTUM_SHIFT", "CONFLUENCE"];
 
 type RadarSummaryEvent = {
   symbol: string;
@@ -83,7 +97,8 @@ export function resolveRadarSummarySettings(env: NodeJS.ProcessEnv = process.env
     enabled: env.RADAR_SUMMARY_ENABLED === "true",
     minEventCount: parsePositiveInteger(env.RADAR_SUMMARY_MIN_EVENT_COUNT, 1),
     webhookEnabled: env.RADAR_SUMMARY_WEBHOOK_ENABLED === "true",
-    lookbackMinutes: defaultLookbackMinutes
+    // Für Daily Briefings (z.B. 2x täglich) auf 720 stellen
+    lookbackMinutes: parsePositiveInteger(env.RADAR_SUMMARY_LOOKBACK_MINUTES, defaultLookbackMinutes)
   };
 }
 
@@ -121,7 +136,7 @@ export async function radarSummary(
 
     const baseSummary = await buildRadarSummary(database, settings, from, now);
 
-    if (baseSummary.radarEventCount < settings.minEventCount) {
+    if (baseSummary.radarEventCount + baseSummary.globalEventCount < settings.minEventCount) {
       const summary = { ...baseSummary, skippedReason: "MIN_EVENT_COUNT_NOT_REACHED" };
       await finishBotRun(database, botRun.id, summary);
       await writeBotLog(database, "info", "Radar Summary ohne Versand fertig", {
@@ -181,9 +196,12 @@ export async function radarSummary(
       checkedAssetCount: 0,
       notableAssetCount: 0,
       radarEventCount: 0,
+      globalEventCount: 0,
       topMovers: [],
       volumeSpikes: [],
       volatilitySpikes: [],
+      patternEvents: [],
+      globalEvents: [],
       marketRegimeContext: null,
       summaryText: "Radar Summary konnte nicht erstellt werden.",
       webhookEnabled: settings.webhookEnabled,
@@ -216,9 +234,12 @@ function createDisabledSummary(
     checkedAssetCount: 0,
     notableAssetCount: 0,
     radarEventCount: 0,
+    globalEventCount: 0,
     topMovers: [],
     volumeSpikes: [],
     volatilitySpikes: [],
+    patternEvents: [],
+    globalEvents: [],
     marketRegimeContext: null,
     summaryText: "Radar Summary deaktiviert.",
     webhookEnabled: settings.webhookEnabled,
@@ -232,7 +253,7 @@ async function buildRadarSummary(
   from: Date,
   to: Date
 ): Promise<RadarSummaryResult> {
-  const [events, latestQuickRadar, latestMarketRegime] = await Promise.all([
+  const [events, marketEvents, latestQuickRadar, latestMarketRegime] = await Promise.all([
     database.radarEvent.findMany({
       where: {
         createdAt: {
@@ -244,6 +265,26 @@ async function buildRadarSummary(
         createdAt: "desc"
       },
       take: 100
+    }),
+    database.marketEvent.findMany({
+      where: {
+        detectedAt: {
+          gte: from,
+          lte: to
+        }
+      },
+      orderBy: {
+        detectedAt: "desc"
+      },
+      take: 20,
+      select: {
+        title: true,
+        eventType: true,
+        severity: true,
+        region: true,
+        sourceUrl: true,
+        detectedAt: true
+      }
     }),
     database.botRun.findFirst({
       where: {
@@ -275,6 +316,17 @@ async function buildRadarSummary(
     .filter((event) => event.eventType === "VOLATILITY_SPIKE")
     .sort((left, right) => (right.rangePercent ?? 0) - (left.rangePercent ?? 0))
     .slice(0, 5);
+  const patternEvents = mappedEvents
+    .filter((event) => patternEventTypes.includes(event.eventType))
+    .slice(0, 5);
+  const globalEvents: GlobalEventSummaryItem[] = marketEvents.map((event) => ({
+    title: event.title,
+    eventType: event.eventType,
+    severity: event.severity,
+    region: event.region,
+    sourceUrl: event.sourceUrl,
+    detectedAt: event.detectedAt.toISOString()
+  }));
   const marketRegimeContext = latestMarketRegime
     ? {
         generatedAt: latestMarketRegime.generatedAt.toISOString(),
@@ -298,9 +350,12 @@ async function buildRadarSummary(
     checkedAssetCount,
     notableAssetCount: notableSymbols.size,
     radarEventCount: events.length,
+    globalEventCount: globalEvents.length,
     topMovers,
     volumeSpikes,
     volatilitySpikes,
+    patternEvents,
+    globalEvents,
     marketRegimeContext,
     summaryText: buildSummaryText({
       checkedAssetCount,
@@ -309,6 +364,8 @@ async function buildRadarSummary(
       topMovers,
       volumeSpikes,
       volatilitySpikes,
+      patternEvents,
+      globalEvents,
       marketRegimeContext,
       period: {
         from: from.toISOString(),
@@ -326,11 +383,11 @@ async function hasSentSummaryForCurrentEvents(
   summary: RadarSummaryResult
 ) {
   const newestEventTime = [
-    ...summary.topMovers,
-    ...summary.volumeSpikes,
-    ...summary.volatilitySpikes
+    ...[...summary.topMovers, ...summary.volumeSpikes, ...summary.volatilitySpikes, ...summary.patternEvents].map(
+      (event) => new Date(event.createdAt).getTime()
+    ),
+    ...summary.globalEvents.map((event) => new Date(event.detectedAt).getTime())
   ]
-    .map((event) => new Date(event.createdAt).getTime())
     .filter(Number.isFinite)
     .sort((left, right) => right - left)[0];
 
@@ -370,9 +427,12 @@ async function sendRadarSummaryToN8n(
     checkedAssetCount: summary.checkedAssetCount,
     notableAssetCount: summary.notableAssetCount,
     radarEventCount: summary.radarEventCount,
+    globalEventCount: summary.globalEventCount,
     topMovers: summary.topMovers,
     volumeSpikes: summary.volumeSpikes,
     volatilitySpikes: summary.volatilitySpikes,
+    patternEvents: summary.patternEvents,
+    globalEvents: summary.globalEvents,
     marketRegimeContext: summary.marketRegimeContext,
     shortMessage: summary.summaryText,
     context: {
@@ -455,6 +515,8 @@ function buildSummaryText(input: {
   topMovers: RadarSummaryEvent[];
   volumeSpikes: RadarSummaryEvent[];
   volatilitySpikes: RadarSummaryEvent[];
+  patternEvents: RadarSummaryEvent[];
+  globalEvents: GlobalEventSummaryItem[];
   marketRegimeContext: MarketRegimeContext | null;
   period: { from: string; to: string };
 }) {
@@ -467,6 +529,17 @@ function buildSummaryText(input: {
     `Volume Spikes: ${formatSymbols(input.volumeSpikes)}`,
     `Volatility Spikes: ${formatSymbols(input.volatilitySpikes)}`
   ];
+
+  if (input.patternEvents.length > 0) {
+    lines.push(`Chart-Beobachtungen: ${formatSymbols(input.patternEvents)}`);
+  }
+
+  if (input.globalEvents.length > 0) {
+    lines.push(`Globale Ereignisse (${input.globalEvents.length}):`);
+    for (const event of input.globalEvents.slice(0, 5)) {
+      lines.push(`- [${event.severity}] ${event.title}${event.region ? ` (${event.region})` : ""}`);
+    }
+  }
 
   if (input.marketRegimeContext) {
     lines.push(

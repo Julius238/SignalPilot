@@ -153,7 +153,9 @@ container schedules these jobs in-process — no host crontab entries are needed
 | Crypto Full Pipeline (candles + regime + signals + paper eval) | always on | `CRYPTO_PIPELINE_CRON` | `0 * * * *` | `*/15 * * * *` |
 | Equity Pipeline | `ENABLE_EQUITY_PIPELINE=true` | `EQUITY_PIPELINE_CRON` | `30 * * * *` | `0 */4 * * *` |
 | Quick Crypto Radar | `QUICK_RADAR_ENABLED=true` | `QUICK_RADAR_CRON` | `*/5 * * * *` | `*/5 * * * *` |
-| Radar Summary | `RADAR_SUMMARY_ENABLED=true` | `RADAR_SUMMARY_CRON` | `0 * * * *` | `0 7,19 * * *` (morgens/abends) |
+| Equity/ETF Radar | `EQUITY_RADAR_ENABLED=true` | `EQUITY_RADAR_CRON` | `15 */4 * * *` | `15 */4 * * *` (nach der Equity-Pipeline) |
+| Radar Summary / Daily Briefing | `RADAR_SUMMARY_ENABLED=true` | `RADAR_SUMMARY_CRON` | `0 * * * *` | `0 7,19 * * *` + `RADAR_SUMMARY_LOOKBACK_MINUTES=720` |
+| Global Event Monitor | `GLOBAL_EVENT_MONITOR_ENABLED=true` | `GLOBAL_EVENT_MONITOR_CRON` | `*/30 * * * *` | `*/30 * * * *` (Finnhub-Limits beachten) |
 
 Market Regime and Paper Evaluation run as steps inside the Crypto Full Pipeline
 (`ENABLE_MARKET_REGIME`, `ENABLE_PAPER_EVALUATION`) and do not need separate schedules.
@@ -179,6 +181,14 @@ RADAR_SUMMARY_ENABLED=false
 RADAR_SUMMARY_CRON=0 * * * *
 RADAR_SUMMARY_MIN_EVENT_COUNT=1
 RADAR_SUMMARY_WEBHOOK_ENABLED=false
+GLOBAL_EVENT_MONITOR_ENABLED=false
+GLOBAL_EVENT_MONITOR_CRON=*/30 * * * *
+GLOBAL_EVENT_MONITOR_CATEGORIES=general
+GLOBAL_EVENT_MONITOR_MAX_EVENTS=25
+GLOBAL_EVENT_ALERTS_ENABLED=false
+MIN_EVENT_ALERT_SEVERITY=IMPORTANT
+GLOBAL_EVENT_ALERT_COOLDOWN_MINUTES=120
+GLOBAL_EVENT_MAX_ALERTS_PER_RUN=3
 ```
 
 Set `WORKER_RUN_ON_START=true` only when the worker should run the Crypto Full Pipeline once immediately after startup. The scheduler logs the cron expression, run-on-start setting, environment, and scheduler enabled state at startup without logging secrets. Invalid cron expressions abort startup with a clear error message.
@@ -194,15 +204,63 @@ Each scheduled run writes BotLog rows (`Scheduled quick radar run started/finish
 
 Quick Crypto Radar is a lightweight observation job for watchlist crypto assets. It stores Beobachtung summaries in `BotRun.metadataJson`, writes BotLogs, and persists structured `RadarEvent` rows for auffällige Bewegung, Volumenanstieg, and erhöhte Volatilität. It does not create user-facing recommendations. The API exposes recent rows at `GET /radar/events`.
 
+With `QUICK_RADAR_PATTERNS_ENABLED=true` (default) both radar jobs additionally run the
+Chart-Pattern-Radar on the same candles: Nähe zum 20-Perioden-Hoch/Tief wird als
+`SR_PROXIMITY` (ohne Volumenbestätigung, INFO) oder `BREAKOUT_PROXIMITY` (mit erhöhtem
+Volumen, WATCH/IMPORTANT) gemeldet, RSI-Mittellinien-Kreuzungen als `MOMENTUM_SHIFT`, und ab
+drei gleichzeitigen Faktoren entsteht ein `CONFLUENCE`-Ereignis (IMPORTANT/CRITICAL). Alle
+Messwerte stehen in `metadataJson.patternDetails`; die Formulierungen bleiben Research-Hinweise
+("möglicher Ausbruchsbereich", nie kaufen/verkaufen).
+
+The Equity/ETF Radar (`EQUITY_RADAR_ENABLED=true`) runs the same metric and pattern analysis
+for watchlist stocks/ETFs — but exclusively on candles already imported by the Equity-Pipeline
+(no extra Finnhub calls). Assets whose latest candle is older than
+`EQUITY_RADAR_MAX_DATA_AGE_HOURS` (default 96h) are skipped and counted as stale instead of
+being evaluated on outdated data. Schedule it after the Equity-Pipeline (default `15 */4 * * *`).
+Alerts use `alertType: equity_radar` and the same n8n webhook.
+
 Optional Radar alerts use the existing `N8N_WEBHOOK_SIGNAL_URL` only. There is no direct Telegram integration. Keep `QUICK_RADAR_ALERTS_ENABLED=false` unless the n8n flow is ready for `type: radar_event` payloads. When enabled, SignalPilot sends only events at or above `QUICK_RADAR_MIN_ALERT_SEVERITY` and suppresses repeated alerts for the same symbol/event type within `QUICK_RADAR_ALERT_COOLDOWN_MINUTES`.
 
-Radar Summary is a compact research update for the latest Radar Events and market-regime context. When `RADAR_SUMMARY_ENABLED=true`, the worker-scheduler runs it on `RADAR_SUMMARY_CRON` (manual runs via `worker:radar-summary` also work). It sends `type: radar_summary` payloads only when `RADAR_SUMMARY_ENABLED=true`, `RADAR_SUMMARY_WEBHOOK_ENABLED=true`, and at least `RADAR_SUMMARY_MIN_EVENT_COUNT` events exist in the lookback window. Repeated manual runs do not resend when no newer Radar Events exist.
+Radar Summary is a compact research update for the latest Radar Events, chart patterns, global
+market events, and market-regime context. When `RADAR_SUMMARY_ENABLED=true`, the
+worker-scheduler runs it on `RADAR_SUMMARY_CRON` (manual runs via `worker:radar-summary` also
+work). The lookback window is configurable via `RADAR_SUMMARY_LOOKBACK_MINUTES` (default 60) —
+for a morning/evening Daily Briefing set `RADAR_SUMMARY_CRON=0 7,19 * * *` and
+`RADAR_SUMMARY_LOOKBACK_MINUTES=720`. It sends `type: radar_summary` payloads only when
+`RADAR_SUMMARY_ENABLED=true`, `RADAR_SUMMARY_WEBHOOK_ENABLED=true`, and at least
+`RADAR_SUMMARY_MIN_EVENT_COUNT` events (Radar + globale Ereignisse kombiniert) exist in the
+lookback window. Repeated manual runs do not resend when no newer events exist.
 
-Run it manually:
+The Global Event Monitor fetches Finnhub General News (`GLOBAL_EVENT_MONITOR_CATEGORIES`,
+default `general`), classifies them with transparent keyword rules into structured
+`MarketEvent` rows (eventType, severity, confidence, region, reasoning, source URL) and
+deduplicates via a unique `dedupKey`. Unclassifiable headlines are skipped instead of stored.
+Confidence is deliberately conservative (max 0.6) because the classification is keyword-based —
+every event keeps its source and a human-readable reasoning. Alerts go through the same n8n
+webhook: only new events at or above `MIN_EVENT_ALERT_SEVERITY`, at most
+`GLOBAL_EVENT_MAX_ALERTS_PER_RUN` per run, and per eventType no more than one alert per
+`GLOBAL_EVENT_ALERT_COOLDOWN_MINUTES`. The dashboard shows recent events in the
+"Globale Ereignisse" section; the API serves them at `GET /market-events`.
+
+Each new event additionally runs through the rule-based Impact Engine
+(`@signalpilot/impact-engine`): ~16 deterministic rules (Ölpreis auf/ab, Zinssenkungs-/
+Zinserhöhungserwartung, USD-Stärke/-Schwäche, geopolitische Eskalation/Entspannung,
+schwache/starke Konjunkturdaten, Inflation, Risk-on/off, Lieferketten) fill
+`positiveImpact`/`negativeImpact`, `affectedAssetClasses`, `affectedSectors` and
+`affectedSymbols` (repräsentative Proxy-ETFs). The engine is intentionally boring: no LLM,
+matched rules are listed in the reasoning and in `metadataJson.appliedImpactRules`,
+contradictory signals land in `metadataJson.mixedSignals` instead of being hidden, and the
+impact confidence is capped at 0.6. Events no rule matches keep empty impact lists. The
+dashboard aggregates these lists into the "Asset Impact Map" and the
+"Makro & Geopolitik Monitor" (last 48h).
+
+Run jobs manually:
 
 ```bash
 pnpm worker:quick-crypto-radar
+pnpm worker:quick-equity-radar
 pnpm worker:radar-summary
+pnpm worker:global-event-monitor
 ```
 
 ### Testing Telegram/n8n alerts
@@ -217,7 +275,7 @@ Every payload is JSON with a `type` discriminator the n8n flow can switch on:
 | `signal` fields (no discriminator, has `signalId`) | Signal pipeline | Signal-Beobachtung |
 | `radar_event` | Quick Crypto Radar | Auffällige Marktbewegung |
 | `radar_summary` | Radar Summary | Kompakte Research-Zusammenfassung |
-| `market_event` | Global Event Monitor (geplant) | Makro-/Geopolitik-/Markt-Ereignis |
+| `market_event` | Global Event Monitor | Makro-/Geopolitik-/Markt-Ereignis |
 
 `radar_event` and `market_event` payloads share the research-alert format from
 `@signalpilot/alerts`:
@@ -227,8 +285,8 @@ Every payload is JSON with a `type` discriminator the n8n flow can switch on:
   `urgent_event`
 - `severity`: `INFO` | `WATCH` | `IMPORTANT` | `CRITICAL`
 - `title`, `whatHappened`, `whyRelevant`
-- `potentiallyPositive` / `potentiallyNegative` (Impact-Listen; leer bis die Impact Engine
-  sie befüllt)
+- `potentiallyPositive` / `potentiallyNegative` (Impact-Listen; bei `market_event` von der
+  regelbasierten Impact Engine befüllt, bei `radar_event` weiterhin leer)
 - `confidence` (0–1 oder null), `sourceName`, `sourceUrl`
 - `telegramText`: fertig formatierte Nachricht — der n8n-Flow kann sie unverändert an
   Telegram weiterreichen
@@ -248,10 +306,20 @@ pnpm alert:test-latest-signal
 #     QUICK_RADAR_MIN_ALERT_SEVERITY=WATCH lowers the bar for testing), then:
 ./scripts/ops/prod-run-worker-docker.sh worker:quick-crypto-radar
 
-# 3. Check what was sent and whether it succeeded (no secrets printed):
+# 3. Global Event Monitor: enable flags in .env.production first
+#    (GLOBAL_EVENT_MONITOR_ENABLED=true; for a Telegram test additionally
+#     GLOBAL_EVENT_ALERTS_ENABLED=true and MIN_EVENT_ALERT_SEVERITY=WATCH), then:
+./scripts/ops/prod-run-worker-docker.sh worker:global-event-monitor
+
+# 4. Check what was sent and whether it succeeded (no secrets printed):
 docker compose -f docker-compose.prod.yml exec postgres \
   psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
   -c 'select id, channel, status, error, "createdAt" from "Alert" order by "createdAt" desc limit 10;'
+
+# 5. Inspect detected market events:
+docker compose -f docker-compose.prod.yml exec postgres \
+  psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+  -c 'select "eventType", severity, confidence, region, title from "MarketEvent" order by "detectedAt" desc limit 10;'
 ```
 
 Failed deliveries stay in the `Alert` table with `status = FAILED` and the error message; the
@@ -525,7 +593,9 @@ Key groups:
 | Database | `DATABASE_URL`, `POSTGRES_*` |
 | Auth | `ADMIN_*`, `AUTH_*`, `API_AUTH_ENABLED`, `DASHBOARD_AUTH_ENABLED` |
 | Trading safety | `ENABLE_LIVE_TRADING=false`, `PAPER_TRADING_ONLY=true` |
-| Scheduling | `CRYPTO_PIPELINE_CRON`, `WORKER_RUN_ON_START`, `EQUITY_PIPELINE_CRON`, `RUN_EQUITY_PIPELINE_ON_START`, `QUICK_RADAR_CRON`, `RADAR_SUMMARY_CRON` |
+| Scheduling | `CRYPTO_PIPELINE_CRON`, `WORKER_RUN_ON_START`, `EQUITY_PIPELINE_CRON`, `RUN_EQUITY_PIPELINE_ON_START`, `QUICK_RADAR_CRON`, `EQUITY_RADAR_CRON`, `RADAR_SUMMARY_CRON`, `GLOBAL_EVENT_MONITOR_CRON` |
+| Pattern/Equity Radar | `QUICK_RADAR_PATTERNS_ENABLED`, `EQUITY_RADAR_ENABLED`, `EQUITY_RADAR_TIMEFRAME`, `EQUITY_RADAR_MAX_DATA_AGE_HOURS`, `EQUITY_RADAR_ALERTS_ENABLED`, `RADAR_SUMMARY_LOOKBACK_MINUTES` |
+| Global Events | `GLOBAL_EVENT_MONITOR_ENABLED`, `GLOBAL_EVENT_MONITOR_CATEGORIES`, `GLOBAL_EVENT_ALERTS_ENABLED`, `MIN_EVENT_ALERT_SEVERITY`, `GLOBAL_EVENT_ALERT_COOLDOWN_MINUTES`, `GLOBAL_EVENT_MAX_ALERTS_PER_RUN` |
 | Feature flags | `ENABLE_MARKET_REGIME`, `ENABLE_EQUITY_*`, `ENABLE_EQUITY_PIPELINE` |
 | Alerts | `ALERT_MODE`, `ALERT_COOLDOWN_MINUTES` |
 

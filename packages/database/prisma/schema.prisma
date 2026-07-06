@@ -63,6 +63,10 @@ enum RadarEventType {
   VOLATILITY_SPIKE
   SCORE_CHANGE
   REGIME_CHANGE
+  BREAKOUT_PROXIMITY
+  SR_PROXIMITY
+  MOMENTUM_SHIFT
+  CONFLUENCE
 }
 
 enum RadarEventSeverity {
@@ -690,4 +694,57 @@ model AuditLog {
   @@index([action])
   @@index([actor])
   @@index([createdAt])
+}
+
+enum MarketEventType {
+  MACRO
+  CENTRAL_BANK
+  INFLATION
+  LABOR_MARKET
+  RATES
+  GEOPOLITICAL
+  SANCTIONS
+  CONFLICT
+  ENERGY_COMMODITY
+  SUPPLY_CHAIN
+  CORPORATE
+  RISK_SENTIMENT
+  OTHER
+}
+
+enum MarketEventSeverity {
+  INFO
+  WATCH
+  IMPORTANT
+  CRITICAL
+}
+
+model MarketEvent {
+  id                   String              @id @default(cuid())
+  dedupKey             String              @unique
+  eventType            MarketEventType
+  severity             MarketEventSeverity
+  confidence           Float
+  title                String
+  summary              String?
+  region               String?
+  source               String
+  sourceUrl            String?
+  affectedAssetClasses String[]            @default([])
+  affectedSectors      String[]            @default([])
+  affectedSymbols      String[]            @default([])
+  positiveImpact       String[]            @default([])
+  negativeImpact       String[]            @default([])
+  reasoning            String?
+  publishedAt          DateTime?
+  detectedAt           DateTime            @default(now())
+  alertSentAt          DateTime?
+  metadataJson         Json?
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+
+  @@index([eventType, detectedAt])
+  @@index([severity, detectedAt])
+  @@index([detectedAt])
+  @@index([publishedAt])
 }

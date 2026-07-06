@@ -19,3 +19,4 @@ packages/database/generated/
 packages/database/prisma/generated/
 **/generated/prisma/
 **/.prisma/
+.claude/launch.json

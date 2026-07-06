@@ -7,6 +7,7 @@ import {
   resolveSchedulerSettings,
   runScheduledCryptoPipeline,
   runScheduledEquityPipeline,
+  runScheduledGlobalEventMonitor,
   runScheduledQuickRadar,
   runScheduledRadarSummary,
   type SchedulerState
@@ -31,6 +32,13 @@ describe("scheduler", () => {
     assert.equal(settings.radarSummaryCron, "0 * * * *");
   });
 
+  it("keeps the global event monitor schedule disabled by default", () => {
+    const settings = resolveSchedulerSettings({});
+
+    assert.equal(settings.globalEventMonitorEnabled, false);
+    assert.equal(settings.globalEventMonitorCron, "*/30 * * * *");
+  });
+
   it("reads quick radar and radar summary schedules from the environment", () => {
     const settings = resolveSchedulerSettings({
       QUICK_RADAR_ENABLED: "true",
@@ -43,6 +51,29 @@ describe("scheduler", () => {
     assert.equal(settings.quickRadarCron, "*/10 * * * *");
     assert.equal(settings.radarSummaryEnabled, true);
     assert.equal(settings.radarSummaryCron, "0 7,19 * * *");
+  });
+
+  it("reads the global event monitor schedule from the environment", () => {
+    const settings = resolveSchedulerSettings({
+      GLOBAL_EVENT_MONITOR_ENABLED: "true",
+      GLOBAL_EVENT_MONITOR_CRON: "*/15 * * * *"
+    });
+
+    assert.equal(settings.globalEventMonitorEnabled, true);
+    assert.equal(settings.globalEventMonitorCron, "*/15 * * * *");
+  });
+
+  it("keeps the equity radar schedule disabled by default and reads it from the environment", () => {
+    const defaults = resolveSchedulerSettings({});
+    assert.equal(defaults.equityRadarEnabled, false);
+    assert.equal(defaults.equityRadarCron, "15 */4 * * *");
+
+    const settings = resolveSchedulerSettings({
+      EQUITY_RADAR_ENABLED: "true",
+      EQUITY_RADAR_CRON: "0 8,20 * * *"
+    });
+    assert.equal(settings.equityRadarEnabled, true);
+    assert.equal(settings.equityRadarCron, "0 8,20 * * *");
   });
 
   it("uses WORKER_RUN_ON_START for startup crypto pipeline runs", () => {
@@ -247,6 +278,50 @@ describe("radar summary scheduler", () => {
     assert.equal(state.isRunning, false);
     assert.ok(botLogs.some((log) => log.data.message === "Scheduled radar summary run started"));
     assert.ok(botLogs.some((log) => log.data.message === "Scheduled radar summary run finished"));
+  });
+});
+
+describe("global event monitor scheduler", () => {
+  it("runs the global event monitor and logs success", async () => {
+    const botLogs: Array<{ data: { message: string; level: string } }> = [];
+    const state: SchedulerState = { isRunning: false, isShuttingDown: false };
+    const database = createSchedulerDatabase(botLogs);
+
+    const result = await runScheduledGlobalEventMonitor(database as never, state, async () =>
+      ({ status: BotRunStatus.SUCCESS, enabled: true }) as never
+    );
+
+    assert.equal(result, "success");
+    assert.equal(state.isRunning, false);
+    assert.ok(
+      botLogs.some((log) => log.data.message === "Scheduled global event monitor run started")
+    );
+    assert.ok(
+      botLogs.some((log) => log.data.message === "Scheduled global event monitor run finished")
+    );
+  });
+
+  it("skips a run while the previous one is still active", async () => {
+    const botLogs: Array<{ data: { message: string; level: string } }> = [];
+    const state: SchedulerState = { isRunning: true, isShuttingDown: false };
+    const database = createSchedulerDatabase(botLogs);
+    let jobCalled = false;
+
+    const result = await runScheduledGlobalEventMonitor(database as never, state, async () => {
+      jobCalled = true;
+      throw new Error("should not run");
+    });
+
+    assert.equal(result, "skipped");
+    assert.equal(jobCalled, false);
+    assert.ok(
+      botLogs.some(
+        (log) =>
+          log.data.level === "warn" &&
+          log.data.message ===
+            "Skipped scheduled global event monitor run because previous run is still active"
+      )
+    );
   });
 });
 
