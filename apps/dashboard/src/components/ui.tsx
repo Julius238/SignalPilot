@@ -22,11 +22,13 @@ export function PageHeader({
 
 export function SectionCard({
   title,
+  subtitle,
   action,
   children,
   className,
 }: {
   title?: string;
+  subtitle?: string;
   action?: ReactNode;
   children: ReactNode;
   className?: string;
@@ -37,6 +39,7 @@ export function SectionCard({
         <div className="section-header">
           {title ? <h2 className="section-title">{title}</h2> : null}
           {action ?? null}
+          {subtitle ? <p className="section-subtitle">{subtitle}</p> : null}
         </div>
       ) : null}
       {children}

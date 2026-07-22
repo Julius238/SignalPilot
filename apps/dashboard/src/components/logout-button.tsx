@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
-const apiUrl = process.env.NEXT_PUBLIC_SIGNALPILOT_API_URL ?? "http://localhost:3100";
+import { browserApiUrl } from "../lib/api-url";
 
 export function LogoutButton() {
   const router = useRouter();
@@ -12,7 +12,7 @@ export function LogoutButton() {
   async function handleLogout() {
     setPending(true);
     try {
-      await fetch(`${apiUrl}/auth/logout`, {
+      await fetch(`${browserApiUrl}/auth/logout`, {
         method: "POST",
         credentials: "include"
       });
@@ -23,7 +23,7 @@ export function LogoutButton() {
 
   return (
     <button className="logout-button" disabled={pending} onClick={handleLogout} type="button">
-      {pending ? "…" : "Sign out"}
+      {pending ? "…" : "Abmelden"}
     </button>
   );
 }

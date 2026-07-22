@@ -3,7 +3,7 @@
 import { type FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
-const apiUrl = process.env.NEXT_PUBLIC_SIGNALPILOT_API_URL ?? "http://localhost:3100";
+import { browserApiUrl } from "../../lib/api-url";
 
 type AuthStatus = {
   devLoginEnabled?: boolean;
@@ -21,7 +21,7 @@ export default function LoginPage() {
 
     async function loadAuthStatus() {
       try {
-        const response = await fetch(`${apiUrl}/auth/status`, {
+        const response = await fetch(`${browserApiUrl}/auth/status`, {
           credentials: "include",
           cache: "no-store"
         });
@@ -48,7 +48,7 @@ export default function LoginPage() {
     const formData = new FormData(event.currentTarget);
 
     try {
-      const response = await fetch(`${apiUrl}/auth/login`, {
+      const response = await fetch(`${browserApiUrl}/auth/login`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -76,7 +76,7 @@ export default function LoginPage() {
     setError(null);
 
     try {
-      const response = await fetch(`${apiUrl}/auth/dev-login`, {
+      const response = await fetch(`${browserApiUrl}/auth/dev-login`, {
         method: "POST",
         credentials: "include"
       });

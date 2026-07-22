@@ -7,41 +7,47 @@ import { LogoutButton } from "./logout-button";
 
 type NavItem = { href: string; label: string; exact?: boolean };
 
-const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
+// Navigation nach Nutzer-Aufgaben statt Systemmodulen:
+// "Was ist los?" → Übersicht · "Was macht der Markt?" → Märkte ·
+// "Was passiert in der Welt?" → Weltlage · Analyse → Research · Betrieb → System.
+const NAV_GROUPS: { label: string | null; items: NavItem[] }[] = [
   {
-    label: "Command",
+    label: null,
+    items: [{ href: "/dashboard", label: "Übersicht", exact: true }],
+  },
+  {
+    label: "Märkte",
     items: [
-      { href: "/dashboard", label: "Overview", exact: true },
       { href: "/dashboard/scanner", label: "Scanner" },
-      { href: "/dashboard/signals", label: "Signals" },
+      { href: "/dashboard/signals", label: "Signale" },
       { href: "/dashboard/assets", label: "Assets" },
       { href: "/dashboard/watchlist", label: "Watchlist" },
     ],
   },
   {
-    label: "Intelligence",
+    label: "Weltlage",
     items: [
-      { href: "/dashboard/market-regime", label: "Regime" },
+      { href: "/dashboard/market-regime", label: "Marktlage" },
       { href: "/dashboard/news", label: "News" },
-      { href: "/dashboard/events", label: "Events" },
-      { href: "/dashboard/multi-timeframe", label: "Multi-TF" },
-      { href: "/dashboard/rules", label: "Rules" },
+      { href: "/dashboard/events", label: "Termine" },
+      { href: "/dashboard/multi-timeframe", label: "Zeitebenen" },
+      { href: "/dashboard/rules", label: "Regeln" },
     ],
   },
   {
     label: "Research",
     items: [
       { href: "/dashboard/backtests", label: "Backtests" },
-      { href: "/dashboard/strategy-lab", label: "Strategy Lab" },
-      { href: "/dashboard/paper", label: "Paper Eval" },
+      { href: "/dashboard/strategy-lab", label: "Strategie-Labor" },
+      { href: "/dashboard/paper", label: "Paper-Auswertung" },
       { href: "/dashboard/performance", label: "Performance" },
     ],
   },
   {
     label: "System",
     items: [
-      { href: "/dashboard/data-quality", label: "Daten" },
-      { href: "/dashboard/operations", label: "Ops" },
+      { href: "/dashboard/data-quality", label: "Datenqualität" },
+      { href: "/dashboard/operations", label: "Betrieb" },
       { href: "/dashboard/logs", label: "Logs" },
       { href: "/dashboard/audit-logs", label: "Audit" },
     ],
@@ -68,20 +74,26 @@ export function NavBar() {
         aria-label="Hauptnavigation"
       >
         {NAV_GROUPS.map((group, i) => (
-          <Fragment key={group.label}>
+          <Fragment key={group.label ?? "start"}>
             {i > 0 && <div className="nav-sep" aria-hidden="true" />}
             <div className="nav-group">
-              <span className="nav-group-label">{group.label}</span>
-              {group.items.map((item) => (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={`nav-link${isActive(pathname, item.href, item.exact) ? " active" : ""}`}
-                  onClick={() => setOpen(false)}
-                >
-                  {item.label}
-                </Link>
-              ))}
+              {group.label ? (
+                <span className="nav-group-label">{group.label}</span>
+              ) : null}
+              {group.items.map((item) => {
+                const active = isActive(pathname, item.href, item.exact);
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    aria-current={active ? "page" : undefined}
+                    className={`nav-link${active ? " active" : ""}`}
+                    onClick={() => setOpen(false)}
+                  >
+                    {item.label}
+                  </Link>
+                );
+              })}
             </div>
           </Fragment>
         ))}

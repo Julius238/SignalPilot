@@ -1,26 +1,25 @@
 import Link from "next/link";
 
-import { SignalCard } from "../../components/signal-card";
 import { EmptyState, ErrorState } from "../../components/empty-state";
 import { PageHeader, SectionCard } from "../../components/ui";
 import { HeroBand, type HeroMetric } from "../../components/dashboard/hero-band";
 import { PriorityFeed, type PriorityItem } from "../../components/dashboard/priority-feed";
-import { RadarColumns } from "../../components/dashboard/radar-columns";
-import { SystemPanel, type WorkerStatusRow } from "../../components/dashboard/system-panel";
+import { RadarCompactCard, SignalsCompactCard } from "../../components/dashboard/radar-compact";
+import { StatusLine, type StatusTone } from "../../components/dashboard/status-line";
 import { NewsWorldMap } from "../../components/dashboard/news-world-map";
 import {
   chartPatternEventTypes,
   marketEventTypeLabels,
+  radarEventExplanation,
   radarEventTypeLabel,
-  severityColor,
+  regimeSentence,
   severityRank,
   withinHours
 } from "../../components/dashboard/shared";
-import { formatDateTime, formatRelativeTime } from "../../lib/format";
+import { formatDateTime } from "../../lib/format";
 import {
   fetchApi,
   type Alert,
-  type BotLog,
   type BotRun,
   type MarketEvent,
   type MarketRegimeSnapshot,
@@ -31,9 +30,13 @@ import {
   type WatchlistItem
 } from "../../lib/signalpilot-api";
 
-// Command Center v2 — Aufbau als Geschichte in fünf Bändern:
-// 1. Marktlage (Hero)  2. Wichtig jetzt  3. Woher & was betroffen (Karte + Impact)
-// 4. Radar (Bewegungen / Patterns / globale Ereignisse)  5. Signale, Aktivität, System.
+// Übersicht v3 — eine Seite, die sich wie eine kurze Lagebesprechung liest:
+// 1. Läuft alles? (Statuszeile)   2. Wie ist die Lage? (Lagebild)
+// 3. Was ist wichtig — und was könnte es bedeuten? (Wichtig jetzt)
+// 4. Wo passiert es & was ist betroffen? (Karte + Impact)
+// 5. Radar & Signale kompakt. Alles Weitere liegt auf den Unterseiten.
+
+const impactWindowHours = 48;
 
 const severityWeights: Record<MarketEvent["severity"], number> = {
   CRITICAL: 3,
@@ -41,8 +44,6 @@ const severityWeights: Record<MarketEvent["severity"], number> = {
   WATCH: 1,
   INFO: 0.5
 };
-
-const impactWindowHours = 48;
 
 type ImpactMapEntry = {
   area: string;
@@ -87,33 +88,107 @@ function buildImpactMap(events: MarketEvent[], now: Date): ImpactMapEntry[] {
     .slice(0, 8);
 }
 
-const impactToneStyles: Record<ImpactMapEntry["tone"], { label: string; color: string }> = {
-  chance: { label: "Potenzielle Chance", color: "var(--good)" },
-  risiko: { label: "Potenzielles Risiko", color: "var(--bad)" },
-  gemischt: { label: "Gemischte Signale", color: "var(--warn)" }
+const impactToneMeta: Record<
+  ImpactMapEntry["tone"],
+  { label: string; arrow: string; arrowClass: string; color: string }
+> = {
+  chance: {
+    label: "eher Rückenwind",
+    arrow: "↗",
+    arrowClass: "impact-entry-arrow--pos",
+    color: "var(--good)"
+  },
+  risiko: {
+    label: "eher Gegenwind",
+    arrow: "↘",
+    arrowClass: "impact-entry-arrow--neg",
+    color: "var(--bad)"
+  },
+  gemischt: {
+    label: "widersprüchliche Signale",
+    arrow: "↕",
+    arrowClass: "impact-entry-arrow--mixed",
+    color: "var(--mixed)"
+  }
 };
 
 const riskClusters: Array<{ label: string; types: Array<MarketEvent["eventType"]> }> = [
-  { label: "Makro", types: ["CENTRAL_BANK", "RATES", "INFLATION", "LABOR_MARKET", "MACRO"] },
+  { label: "Konjunktur & Zinsen", types: ["CENTRAL_BANK", "RATES", "INFLATION", "LABOR_MARKET", "MACRO"] },
   { label: "Geopolitik", types: ["GEOPOLITICAL", "SANCTIONS", "CONFLICT"] },
-  { label: "Rohstoffe", types: ["ENERGY_COMMODITY", "SUPPLY_CHAIN"] },
-  { label: "Markt", types: ["RISK_SENTIMENT", "CORPORATE", "OTHER"] }
+  { label: "Energie & Rohstoffe", types: ["ENERGY_COMMODITY", "SUPPLY_CHAIN"] },
+  { label: "Unternehmen & Stimmung", types: ["RISK_SENTIMENT", "CORPORATE", "OTHER"] }
 ];
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+const assetTypeLabels: Record<string, string> = {
+  CRYPTO: "Krypto",
+  STOCK: "Aktie",
+  ETF: "ETF"
+};
+
+// Finnhub-Summaries sind oft nur der Titel in anderer Zeichensetzung —
+// dann lieber gar keine Notiz zeigen. (Das technische reasoning-Feld des
+// Klassifikators gehört bewusst nicht auf die Übersicht.)
+function usefulSummary(summary: string | null, title: string): string | null {
+  if (!summary) return null;
+  const normalize = (value: string) => value.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+  return normalize(summary) === normalize(title) ? null : summary;
 }
 
-function stringFromRecord(record: Record<string, unknown>, key: string) {
-  const value = record[key];
-  return typeof value === "string" ? value : undefined;
+function countBy<T>(items: T[], predicate: (item: T) => boolean): number {
+  return items.reduce((total, item) => (predicate(item) ? total + 1 : total), 0);
 }
 
-function getAlertSummary(alert: Alert) {
-  const payload = isRecord(alert.payloadJson) ? alert.payloadJson : {};
-  const symbol = alert.signal?.symbol ?? stringFromRecord(payload, "symbol");
-  const title = stringFromRecord(payload, "title");
-  return title ?? (symbol ? `${symbol} · Alert` : "Alert");
+// Baut den menschlichen Puls-Satz des Lagebilds aus den echten Zahlen —
+// funktioniert auch ohne Regime-Snapshot.
+function buildPulse({
+  criticalCount,
+  notableCount,
+  radarCount,
+  topCluster,
+  topRegion,
+  regime
+}: {
+  criticalCount: number;
+  notableCount: number;
+  radarCount: number;
+  topCluster: string | null;
+  topRegion: string | null;
+  regime: MarketRegimeSnapshot | null | undefined;
+}): { pulse: string; context: string | null } {
+  let pulse: string;
+  if (criticalCount > 0) {
+    pulse =
+      criticalCount === 1
+        ? "Erhöhte Aufmerksamkeit: 1 sehr wichtiges Ereignis in den letzten 48 Stunden."
+        : `Erhöhte Aufmerksamkeit: ${criticalCount} sehr wichtige Ereignisse in den letzten 48 Stunden.`;
+  } else if (notableCount > 0) {
+    pulse =
+      notableCount === 1
+        ? "Eine wichtige Entwicklung im Blick — kein akuter Alarm."
+        : `${notableCount} wichtige Entwicklungen im Blick — kein akuter Alarm.`;
+  } else {
+    pulse = "Ruhige Lage — aktuell nichts Dringendes.";
+  }
+
+  const parts: string[] = [];
+  if (topCluster) {
+    parts.push(
+      topRegion
+        ? `Die meisten Meldungen drehen sich um ${topCluster} — häufigste Region: ${topRegion}.`
+        : `Die meisten Meldungen drehen sich um ${topCluster}.`
+    );
+  }
+  parts.push(
+    radarCount > 0
+      ? radarCount === 1
+        ? "Das Markt-Radar meldet eine Beobachtung."
+        : `Das Markt-Radar meldet ${radarCount} Beobachtungen.`
+      : "Das Markt-Radar ist ruhig."
+  );
+  const regimePart = regimeSentence(regime?.overallRegime);
+  if (regimePart) parts.push(regimePart);
+
+  return { pulse, context: parts.length > 0 ? parts.join(" ") : null };
 }
 
 export default async function DashboardPage() {
@@ -124,7 +199,6 @@ export default async function DashboardPage() {
     alerts,
     radarEvents,
     marketEvents,
-    workerLogs,
     cryptoPipeline,
     quickRadarRun,
     equityPipeline,
@@ -140,7 +214,6 @@ export default async function DashboardPage() {
     fetchApi<Alert[]>("/alerts?limit=30"),
     fetchApi<RadarEvent[]>("/radar/events?limit=40"),
     fetchApi<MarketEvent[]>("/market-events?limit=50"),
-    fetchApi<BotLog[]>("/logs?service=worker&limit=12"),
     fetchApi<BotRun[]>("/bot-runs?jobName=runCryptoSignalPipeline&limit=1"),
     fetchApi<BotRun[]>("/bot-runs?jobName=quickCryptoRadar&limit=1"),
     fetchApi<BotRun[]>("/bot-runs?jobName=runEquitySignalPipeline&limit=1"),
@@ -156,100 +229,168 @@ export default async function DashboardPage() {
   const alertList = alerts.data ?? [];
   const radarEventList = radarEvents.data ?? [];
   const marketEventList = marketEvents.data ?? [];
-  const recentWorkerLogs = workerLogs.data ?? [];
   const watchlistItems = watchlist.data ?? [];
   const regime = marketRegime.data;
   const scannerSummary = scanner.data?.summary;
-  const lastCrypto = cryptoPipeline.data?.[0] ?? null;
-  const lastQuickRadar = quickRadarRun.data?.[0] ?? null;
-  const lastEquity = equityPipeline.data?.[0] ?? null;
-  const lastEventMonitor = eventMonitorRun.data?.[0] ?? null;
-  const lastEquityRadar = equityRadarRun.data?.[0] ?? null;
 
   // ── Abgeleitete Sichten ──
-  const radarLast24h = radarEventList.filter((event) => withinHours(event.createdAt, 24, renderedAt));
+  const radarLast24h = radarEventList.filter((event) =>
+    withinHours(event.createdAt, 24, renderedAt)
+  );
   const eventsLast48h = marketEventList.filter((event) =>
     withinHours(event.detectedAt, impactWindowHours, renderedAt)
   );
-  const patternEvents = radarEventList
-    .filter((event) => chartPatternEventTypes.includes(event.eventType))
-    .slice(0, 5);
-  const marketMoves = radarEventList
-    .filter((event) => !chartPatternEventTypes.includes(event.eventType))
-    .slice(0, 5);
   const impactMap = buildImpactMap(marketEventList, renderedAt);
+
   const clusterChips = riskClusters
     .map((cluster) => ({
       label: cluster.label,
-      count: eventsLast48h.filter((event) => cluster.types.includes(event.eventType)).length
+      count: countBy(eventsLast48h, (event) => cluster.types.includes(event.eventType))
     }))
-    .filter((chip) => chip.count > 0);
+    .filter((chip) => chip.count > 0)
+    .sort((left, right) => right.count - left.count);
 
+  const regionCounts = new Map<string, number>();
+  for (const event of eventsLast48h) {
+    if (event.region) regionCounts.set(event.region, (regionCounts.get(event.region) ?? 0) + 1);
+  }
+  const topRegion =
+    [...regionCounts.entries()].sort((left, right) => right[1] - left[1])[0]?.[0] ?? null;
+
+  const criticalCount =
+    countBy(eventsLast48h, (event) => event.severity === "CRITICAL") +
+    countBy(radarLast24h, (event) => event.severity === "CRITICAL");
+  const notableCount =
+    countBy(eventsLast48h, (event) => event.severity === "IMPORTANT") +
+    countBy(radarLast24h, (event) => event.severity === "IMPORTANT");
+
+  const { pulse, context } = buildPulse({
+    criticalCount,
+    notableCount,
+    radarCount: radarLast24h.length,
+    topCluster: clusterChips[0]?.label ?? null,
+    topRegion,
+    regime
+  });
+
+  // ── Wichtig jetzt: Ereignisse + Radar gemischt, nur ab "Im Blick" ──
   const priorityItems: PriorityItem[] = [
-    ...eventsLast48h.map(
-      (event): PriorityItem => ({
-        id: `event-${event.id}`,
-        kind: "Event",
-        severity: event.severity,
-        title: event.title,
-        detail: [
-          marketEventTypeLabels[event.eventType] ?? event.eventType,
-          event.region,
-          event.source
-        ]
-          .filter(Boolean)
-          .join(" · "),
-        time: event.detectedAt,
-        externalUrl: event.sourceUrl
-      })
-    ),
-    ...radarLast24h.map(
-      (event): PriorityItem => ({
-        id: `radar-${event.id}`,
-        kind: chartPatternEventTypes.includes(event.eventType) ? "Chart" : "Radar",
-        severity: event.severity,
-        title: `${event.symbol} · ${radarEventTypeLabel(event.eventType)}`,
-        detail: event.shortMessage,
-        time: event.createdAt,
-        href: `/dashboard/assets/${encodeURIComponent(event.symbol)}`
-      })
-    )
+    ...eventsLast48h
+      .filter((event) => severityRank(event.severity) >= 2)
+      .map(
+        (event): PriorityItem => ({
+          id: `event-${event.id}`,
+          kind: "event",
+          severity: event.severity,
+          title: event.title,
+          note: usefulSummary(event.summary, event.title),
+          impactPos: event.positiveImpact ?? [],
+          impactNeg: event.negativeImpact ?? [],
+          showOpenImpact: true,
+          meta: [
+            marketEventTypeLabels[event.eventType] ?? event.eventType,
+            event.region,
+            `Quelle: ${event.source}`
+          ]
+            .filter(Boolean)
+            .join(" · "),
+          time: event.detectedAt,
+          externalUrl: event.sourceUrl
+        })
+      ),
+    ...radarLast24h
+      .filter((event) => severityRank(event.severity) >= 2)
+      .map(
+        (event): PriorityItem => ({
+          id: `radar-${event.id}`,
+          kind: chartPatternEventTypes.includes(event.eventType) ? "chart" : "radar",
+          severity: event.severity,
+          title: `${event.symbol}: ${radarEventTypeLabel(event.eventType)}`,
+          note: radarEventExplanation(event.eventType),
+          meta: [assetTypeLabels[event.assetType] ?? event.assetType, `Zeitebene ${event.timeframe}`]
+            .filter(Boolean)
+            .join(" · "),
+          time: event.createdAt,
+          href: `/dashboard/assets/${encodeURIComponent(event.symbol)}`
+        })
+      )
   ]
     .sort(
       (left, right) =>
         severityRank(right.severity) - severityRank(left.severity) ||
         new Date(right.time).getTime() - new Date(left.time).getTime()
     )
-    .slice(0, 6);
+    .slice(0, 5);
 
-  const failedAlerts = alertList.filter((alert) => alert.status === "FAILED").length;
-  const latestAlert = alertList[0] ?? null;
-  const highPrioritySignals = signalList
-    .filter((signal) => signal.status === "STRONG_WATCH" || signal.status === "WATCH")
-    .slice(0, 3);
-  const highPriorityWatchlist = watchlistItems.filter((item) => item.priority === "HIGH");
+  // ── Systemstatus als eine Zeile ──
+  const apiOk = health.data?.status === "ok";
+  const failedAlerts = countBy(alertList, (alert) => alert.status === "FAILED");
+  const jobChecks: Array<{ label: string; run: BotRun | null }> = [
+    { label: "Krypto-Analyse", run: cryptoPipeline.data?.[0] ?? null },
+    { label: "Markt-Radar", run: quickRadarRun.data?.[0] ?? null },
+    { label: "Aktien-Analyse", run: equityPipeline.data?.[0] ?? null },
+    { label: "Ereignis-Monitor", run: eventMonitorRun.data?.[0] ?? null },
+    { label: "Aktien-Radar", run: equityRadarRun.data?.[0] ?? null }
+  ];
+
+  const systemIssues: string[] = [];
+  if (!apiOk) {
+    systemIssues.push("Die Datenverbindung zur API ist gestört — Anzeigen können veraltet sein.");
+  }
+  for (const check of jobChecks) {
+    if (check.run?.status === "FAILED") {
+      systemIssues.push(`Der Hintergrund-Job „${check.label}“ ist zuletzt fehlgeschlagen.`);
+    }
+  }
+  if (failedAlerts > 0) {
+    systemIssues.push(
+      failedAlerts === 1
+        ? "1 Benachrichtigung konnte nicht zugestellt werden."
+        : `${failedAlerts} Benachrichtigungen konnten nicht zugestellt werden.`
+    );
+  }
+
+  const statusTone: StatusTone = !apiOk ? "error" : systemIssues.length > 0 ? "warn" : "ok";
+  const statusHeadline = !apiOk
+    ? "Verbindungsproblem"
+    : systemIssues.length > 0
+      ? systemIssues.length === 1
+        ? "Ein Hinweis zum System"
+        : `${systemIssues.length} Hinweise zum System`
+      : "Alle Systeme laufen";
+
+  // ── Lagebild-Kennzahlen ──
+  const importantTotal = criticalCount + notableCount;
+  const activeSignals =
+    (scannerSummary?.strongWatchCount ?? 0) + (scannerSummary?.watchCount ?? 0);
 
   const heroMetrics: HeroMetric[] = [
     {
-      label: "Beobachtungen 24h",
+      label: "Wichtige Entwicklungen",
+      value: importantTotal,
+      sub:
+        criticalCount > 0
+          ? `davon ${criticalCount} sehr wichtig`
+          : importantTotal > 0
+            ? "keine davon kritisch"
+            : "ruhige Lage",
+      href: "#wichtig-jetzt",
+      tone: criticalCount > 0 ? "var(--sev-critical)" : undefined
+    },
+    {
+      label: "Radar-Beobachtungen",
       value: radarLast24h.length,
-      sub: "Radar & Chart-Patterns",
+      sub: "Bewegungen & Chartbilder · 24 Std.",
       href: "/dashboard/scanner"
     },
     {
-      label: "Globale Events 48h",
-      value: eventsLast48h.length,
-      sub: "Makro · Geopolitik · Rohstoffe",
-      href: "/dashboard/events"
-    },
-    {
       label: "Aktive Signale",
-      value: (scannerSummary?.strongWatchCount ?? 0) + (scannerSummary?.watchCount ?? 0),
-      sub: `${scannerSummary?.strongWatchCount ?? 0} starke Beobachtung`,
+      value: activeSignals,
+      sub: `${scannerSummary?.strongWatchCount ?? 0} mit starker Beobachtung`,
       href: "/dashboard/signals"
     },
     {
-      label: "Alerts heute",
+      label: "Benachrichtigungen heute",
       value: scannerSummary?.alertsSentToday ?? 0,
       sub: failedAlerts > 0 ? `${failedAlerts} fehlgeschlagen` : "alle zugestellt",
       href: "/dashboard/logs",
@@ -257,88 +398,31 @@ export default async function DashboardPage() {
     }
   ];
 
-  const workerRows: WorkerStatusRow[] = [
-    {
-      label: "Crypto Pipeline",
-      status: lastCrypto?.status,
-      time: lastCrypto?.finishedAt ?? lastCrypto?.startedAt
-    },
-    {
-      label: "Quick Radar",
-      status: lastQuickRadar?.status,
-      time: lastQuickRadar?.finishedAt ?? lastQuickRadar?.startedAt
-    },
-    {
-      label: "Equity Pipeline",
-      status: lastEquity?.status,
-      time: lastEquity?.finishedAt ?? lastEquity?.startedAt,
-      note: "deaktiviert"
-    },
-    {
-      label: "Equity-Radar",
-      status: lastEquityRadar?.status,
-      time: lastEquityRadar?.finishedAt ?? lastEquityRadar?.startedAt,
-      note: "deaktiviert"
-    },
-    {
-      label: "Event Monitor",
-      status: lastEventMonitor?.status,
-      time: lastEventMonitor?.finishedAt ?? lastEventMonitor?.startedAt,
-      note: "deaktiviert"
-    }
-  ];
+  // ── Radar & Signale kompakt ──
+  const radarCompact = [...radarLast24h]
+    .sort(
+      (left, right) =>
+        severityRank(right.severity) - severityRank(left.severity) ||
+        new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()
+    )
+    .slice(0, 6);
 
-  const recentActivities = [
-    ...radarEventList.slice(0, 5).map((event) => ({
-      id: `radar-${event.id}`,
-      time: event.createdAt,
-      title: `${event.symbol} · ${radarEventTypeLabel(event.eventType)}`,
-      tone: severityColor(event.severity)
-    })),
-    ...alertList.slice(0, 4).map((alert) => ({
-      id: `alert-${alert.id}`,
-      time: alert.sentAt ?? alert.createdAt,
-      title: `Alert · ${getAlertSummary(alert)}`,
-      tone:
-        alert.status === "FAILED"
-          ? "var(--bad)"
-          : alert.status === "SENT"
-            ? "var(--good)"
-            : "var(--warn)"
-    })),
-    ...recentWorkerLogs.slice(0, 5).map((log) => ({
-      id: `log-${log.id}`,
-      time: log.createdAt,
-      title: log.message,
-      tone:
-        log.level === "error" ? "var(--bad)" : log.level === "warn" ? "var(--warn)" : undefined
-    }))
-  ]
-    .filter((item) => item.time)
-    .sort((left, right) => new Date(right.time).getTime() - new Date(left.time).getTime())
-    .slice(0, 9);
+  const topSignals = signalList
+    .filter((signal) => signal.status === "STRONG_WATCH" || signal.status === "WATCH")
+    .slice(0, 4);
+  const highPriorityWatchlist = countBy(watchlistItems, (item) => item.priority === "HIGH");
 
   const criticalErrors = [health, config, scanner].filter((result) => result.error);
-
-  const systemWarnings: string[] = [];
-  if (health.data?.status !== "ok") systemWarnings.push("API nicht erreichbar.");
-  if (!regime) systemWarnings.push("Markt-Regime noch nicht berechnet.");
-  if (lastCrypto?.status === "FAILED") systemWarnings.push("Letzte Crypto-Pipeline fehlgeschlagen.");
-  if (lastQuickRadar?.status === "FAILED") systemWarnings.push("Letzter Quick Radar Lauf fehlgeschlagen.");
-  if (lastEquity?.status === "FAILED") systemWarnings.push("Letzte Equity-Pipeline fehlgeschlagen.");
-  if (lastEventMonitor?.status === "FAILED") systemWarnings.push("Letzter Event-Monitor-Lauf fehlgeschlagen.");
-  if (lastEquityRadar?.status === "FAILED") systemWarnings.push("Letzter Equity-Radar-Lauf fehlgeschlagen.");
-  if (failedAlerts > 0) systemWarnings.push(`${failedAlerts} fehlgeschlagene Alerts.`);
 
   return (
     <>
       <PageHeader
-        title="Command Center"
-        subtitle={`Global Market Intelligence Radar · Stand: ${formatDateTime(renderedAt.toISOString())}`}
+        title="Übersicht"
+        subtitle={`Märkte, Weltgeschehen und System auf einen Blick · Stand ${formatDateTime(renderedAt.toISOString())}`}
         actions={
           <>
             <Link className="primary-link" href="/dashboard/scanner">
-              Scanner
+              Zum Scanner
             </Link>
             <Link className="primary-link secondary-link" href="/dashboard/watchlist">
               Watchlist
@@ -350,152 +434,99 @@ export default async function DashboardPage() {
       {criticalErrors.length > 0 ? (
         <div style={{ marginBottom: 16 }}>
           <ErrorState
-            title="API-Fehler"
+            title="Daten konnten nicht geladen werden"
             message={criticalErrors.map((result) => result.error).join(" | ")}
           />
         </div>
       ) : null}
 
-      {systemWarnings.length > 0 ? (
-        <div className="warning-section" style={{ marginBottom: 20 }}>
-          <h3 className="warning-section-title">System-Warnungen ({systemWarnings.length})</h3>
-          <ul className="warning-list">
-            {systemWarnings.map((warning) => (
-              <li key={warning} className="warning-item">
-                <span className="warning-icon">⚠</span>
-                <span>{warning}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : (
-        <p className="all-clear-line">
-          <span className="status-dot" style={{ backgroundColor: "var(--good)" }} />
-          Alle Systeme laufen · letzte Prüfung {formatRelativeTime(renderedAt.toISOString(), renderedAt)}
-        </p>
-      )}
+      {/* ── 1 · Läuft alles? ── */}
+      <StatusLine
+        tone={statusTone}
+        headline={statusHeadline}
+        meta={statusTone === "ok" ? "Worker, Datenverbindung und Zustellung geprüft" : undefined}
+        issues={systemIssues}
+      />
 
-      {/* ── 1 · Marktlage ── */}
-      <HeroBand regime={regime} metrics={heroMetrics} />
+      {/* ── 2 · Wie ist die Lage? ── */}
+      <HeroBand pulse={pulse} context={context} regime={regime} metrics={heroMetrics} />
 
-      {/* ── 2 · Wichtig jetzt ── */}
+      {/* ── 3 · Was ist wichtig — und was könnte es bedeuten? ── */}
       <PriorityFeed items={priorityItems} now={renderedAt} />
 
-      {/* ── 3 · Woher kommen die News & was ist betroffen ── */}
-      <div className="grid two map-row">
-        <SectionCard title="News-Weltkarte">
+      {/* ── 4 · Wo passiert es & was ist betroffen? ── */}
+      <div className="cmd-grid-2">
+        <SectionCard
+          title="Wo gerade etwas passiert"
+          subtitle="Herkunftsregionen der erkannten Ereignisse — letzte 48 Stunden."
+        >
+          {clusterChips.length > 0 ? (
+            <div className="cluster-chips">
+              {clusterChips.map((chip) => (
+                <span key={chip.label} className="cluster-chip">
+                  {chip.label} <strong>{chip.count}</strong>
+                </span>
+              ))}
+            </div>
+          ) : null}
           {eventsLast48h.length === 0 ? (
-            <EmptyState title="Keine globalen Ereignisse in den letzten 48h — die Karte füllt sich, sobald der Event Monitor Ereignisse erkennt." />
+            <EmptyState
+              title="Keine globalen Ereignisse in den letzten 48 Stunden."
+              description="Die Karte füllt sich, sobald der Ereignis-Monitor neue Meldungen erkennt und einordnet."
+            />
           ) : (
             <NewsWorldMap events={eventsLast48h} now={renderedAt} />
           )}
         </SectionCard>
-        <SectionCard title="Asset Impact Map">
+
+        <SectionCard
+          title="Was betroffen sein könnte"
+          subtitle="Bereiche, die in den aktuellen Meldungen als möglicher Rücken- oder Gegenwind auftauchen."
+        >
           {impactMap.length === 0 ? (
-            <EmptyState title="Noch keine Impact-Zuordnungen im Zeitfenster. Sie entstehen automatisch aus erkannten Ereignissen." />
+            <EmptyState
+              title="Noch keine Zuordnungen im Zeitfenster."
+              description="Sie entstehen automatisch, wenn erkannte Ereignisse per Regelwerk auf Anlagebereiche wirken könnten."
+            />
           ) : (
-            <div className="impact-list">
-              {impactMap.map((entry) => (
-                <div key={entry.area} className="impact-row">
-                  <span className="impact-area">{entry.area}</span>
-                  <span className="muted small">
-                    {entry.positiveCount > 0 ? `${entry.positiveCount}× positiv` : null}
-                    {entry.positiveCount > 0 && entry.negativeCount > 0 ? " · " : null}
-                    {entry.negativeCount > 0 ? `${entry.negativeCount}× negativ` : null}
-                  </span>
-                  <span
-                    className="impact-tone"
-                    style={{ color: impactToneStyles[entry.tone].color }}
-                  >
-                    {impactToneStyles[entry.tone].label}
-                  </span>
-                </div>
-              ))}
-              <p className="muted small impact-footnote">
-                Regelbasierte Zuordnung aus Events der letzten {impactWindowHours}h · keine
-                Handlungsempfehlung
+            <div className="impact-board">
+              {impactMap.map((entry) => {
+                const meta = impactToneMeta[entry.tone];
+                const mentions: string[] = [];
+                if (entry.positiveCount > 0) mentions.push(`${entry.positiveCount}× positiv erwähnt`);
+                if (entry.negativeCount > 0) mentions.push(`${entry.negativeCount}× negativ erwähnt`);
+
+                return (
+                  <div key={entry.area} className="impact-entry">
+                    <span className={`impact-entry-arrow ${meta.arrowClass}`} aria-hidden="true">
+                      {meta.arrow}
+                    </span>
+                    <div className="impact-entry-body">
+                      <span className="impact-entry-name">{entry.area}</span>
+                      <span className="impact-entry-note">{mentions.join(" · ")}</span>
+                    </div>
+                    <span className="impact-entry-tone" style={{ color: meta.color }}>
+                      {meta.label}
+                    </span>
+                  </div>
+                );
+              })}
+              <p className="impact-footnote">
+                Regelbasiert aus den Ereignissen der letzten {impactWindowHours} Stunden abgeleitet
+                — ein Ausgangspunkt für eigene Recherche, keine Handlungsempfehlung.
               </p>
             </div>
           )}
         </SectionCard>
       </div>
 
-      {/* ── 4 · Radar ── */}
-      <RadarColumns
-        marketMoves={marketMoves}
-        patterns={patternEvents}
-        globalEvents={eventsLast48h.slice(0, 5)}
-        clusterChips={clusterChips}
-        now={renderedAt}
-      />
-
-      {/* ── 5 · Signale, Aktivität, System ── */}
-      <div className="bottom-columns">
-        <SectionCard
-          title="Signal-Highlights"
-          action={
-            <Link href="/dashboard/signals" className="section-link">
-              Alle →
-            </Link>
-          }
-        >
-          {highPrioritySignals.length === 0 ? (
-            <EmptyState title="Keine aktiven Signals mit hoher Priorität." />
-          ) : (
-            <div className="signal-cards-list">
-              {highPrioritySignals.map((signal) => (
-                <SignalCard key={signal.id} signal={signal} />
-              ))}
-            </div>
-          )}
-          <p className="muted small" style={{ marginTop: 10 }}>
-            Watchlist: {watchlistItems.length} Assets · {highPriorityWatchlist.length} mit hoher
-            Priorität ·{" "}
-            <Link href="/dashboard/watchlist" className="section-link">
-              verwalten →
-            </Link>
-          </p>
-        </SectionCard>
-
-        <SectionCard
-          title="Aktivität"
-          action={
-            <Link href="/dashboard/logs" className="section-link">
-              Logs →
-            </Link>
-          }
-        >
-          {recentActivities.length === 0 ? (
-            <EmptyState title="Noch keine Aktivität vorhanden." />
-          ) : (
-            <div className="health-rows">
-              {recentActivities.map((item) => (
-                <div key={item.id} className="health-row">
-                  <span
-                    className="health-row-value activity-title"
-                    style={{ color: item.tone, textAlign: "left" }}
-                  >
-                    {item.title}
-                  </span>
-                  <span className="muted small" title={formatDateTime(item.time)}>
-                    {formatRelativeTime(item.time, renderedAt)}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-        </SectionCard>
-
-        <SystemPanel
-          healthOk={health.data?.status === "ok"}
-          workerRows={workerRows}
-          failedAlertCount={failedAlerts}
-          lastAlertSummary={
-            latestAlert
-              ? `Letzter: ${getAlertSummary(latestAlert)} · ${formatRelativeTime(latestAlert.sentAt ?? latestAlert.createdAt, renderedAt)}`
-              : null
-          }
-          now={renderedAt}
+      {/* ── 5 · Radar & Signale kompakt ── */}
+      <div className="cmd-grid-2">
+        <RadarCompactCard events={radarCompact} now={renderedAt} />
+        <SignalsCompactCard
+          signals={topSignals}
+          watchlistCount={watchlistItems.length}
+          watchlistHighPriority={highPriorityWatchlist}
         />
       </div>
 

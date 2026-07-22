@@ -1,6 +1,12 @@
 # ── Builder ───────────────────────────────────────────────────────────────────
 FROM node:22-alpine AS builder
 
+ARG NEXT_PUBLIC_SIGNALPILOT_API_URL=/api
+ARG SIGNALPILOT_API_INTERNAL_URL=http://api:3100
+
+ENV NEXT_PUBLIC_SIGNALPILOT_API_URL=${NEXT_PUBLIC_SIGNALPILOT_API_URL}
+ENV SIGNALPILOT_API_INTERNAL_URL=${SIGNALPILOT_API_INTERNAL_URL}
+
 RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 
 WORKDIR /repo

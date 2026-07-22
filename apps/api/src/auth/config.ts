@@ -1,7 +1,7 @@
-export const BCRYPT_HASH_PATTERN = /^\$2[aby]\$\d\d\$/;
+export const BCRYPT_HASH_PATTERN = /^\$2[aby]\$(?:0[4-9]|[12]\d|3[01])\$[./A-Za-z0-9]{53}$/;
 
 const INVALID_PASSWORD_HASH_MESSAGE =
-  "ADMIN_PASSWORD_HASH must be a bcrypt hash starting with $2a$, $2b$ or $2y$. Generate it with ADMIN_PASSWORD='your-cleartext-password' pnpm auth:hash-password";
+  "ADMIN_PASSWORD_HASH must be a complete bcrypt hash starting with $2a$, $2b$ or $2y$. Generate it with ADMIN_PASSWORD='your-cleartext-password' pnpm auth:hash-password";
 
 export function validateAuthConfig(): void {
   validateDevLoginConfig();

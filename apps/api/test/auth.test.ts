@@ -94,6 +94,25 @@ describe("auth routes", () => {
     assert.ok(cookieHeader.includes("signalpilot_session="), "cookie name should match");
     assert.ok(cookieHeader.toLowerCase().includes("httponly"), "cookie should be HttpOnly");
     assert.ok(cookieHeader.toLowerCase().includes("samesite=lax"), "cookie should be SameSite=Lax");
+    assert.doesNotMatch(cookieHeader, /;\s*Secure(?:;|$)/i);
+
+    await server.close();
+  });
+
+  it("sets a Secure cookie when AUTH_COOKIE_SECURE=true", async () => {
+    const server = await createAuthServer();
+    process.env.AUTH_COOKIE_SECURE = "true";
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/auth/login",
+      payload: { username: TEST_USERNAME, password: TEST_PASSWORD }
+    });
+
+    assert.equal(response.statusCode, 200);
+    const setCookie = response.headers["set-cookie"] as string | string[];
+    const cookieHeader = Array.isArray(setCookie) ? setCookie.join("; ") : setCookie;
+    assert.match(cookieHeader, /;\s*Secure(?:;|$)/i);
 
     await server.close();
   });
@@ -227,6 +246,25 @@ describe("auth routes", () => {
       logoutCookieStr.includes("signalpilot_session=;") ||
         logoutCookieStr.includes("signalpilot_session=")
     );
+
+    await server.close();
+  });
+
+  it("logout clears an HTTPS cookie with matching security attributes", async () => {
+    const server = await createAuthServer();
+    process.env.AUTH_COOKIE_SECURE = "true";
+
+    const logoutResponse = await server.inject({
+      method: "POST",
+      url: "/auth/logout"
+    });
+
+    assert.equal(logoutResponse.statusCode, 200);
+    const setCookie = logoutResponse.headers["set-cookie"] as string | string[];
+    const cookieHeader = Array.isArray(setCookie) ? setCookie.join("; ") : setCookie;
+    assert.match(cookieHeader, /;\s*Secure(?:;|$)/i);
+    assert.match(cookieHeader, /HttpOnly/i);
+    assert.match(cookieHeader, /SameSite=Lax/i);
 
     await server.close();
   });
@@ -430,7 +468,20 @@ describe("auth config validation", () => {
 
     assert.throws(
       () => validateAuthConfig(),
-      /ADMIN_PASSWORD_HASH must be a bcrypt hash starting with \$2a\$, \$2b\$ or \$2y\$/
+      /ADMIN_PASSWORD_HASH must be a complete bcrypt hash starting with \$2a\$, \$2b\$ or \$2y\$/
+    );
+  });
+
+  it("rejects a truncated bcrypt hash caused by environment interpolation", () => {
+    process.env.API_AUTH_ENABLED = "true";
+    process.env.ADMIN_USERNAME = "admin";
+    process.env.ADMIN_PASSWORD_HASH = "$2b$12$";
+    process.env.AUTH_SESSION_SECRET = TEST_SESSION_SECRET;
+    process.env.DEV_LOGIN_ENABLED = "false";
+
+    assert.throws(
+      () => validateAuthConfig(),
+      /ADMIN_PASSWORD_HASH must be a complete bcrypt hash/
     );
   });
 
@@ -444,7 +495,7 @@ describe("auth config validation", () => {
 
     await assert.rejects(
       () => buildServer(),
-      /ADMIN_PASSWORD_HASH must be a bcrypt hash starting with \$2a\$, \$2b\$ or \$2y\$/
+      /ADMIN_PASSWORD_HASH must be a complete bcrypt hash starting with \$2a\$, \$2b\$ or \$2y\$/
     );
   });
 
@@ -493,7 +544,8 @@ describe("auth scripts", () => {
     });
 
     assert.equal(result.status, 0, result.stderr);
-    assert.match(result.stdout, /^ADMIN_PASSWORD_HASH=\$2b\$12\$/);
+    assert.match(result.stdout, /^ADMIN_PASSWORD_HASH='\$2b\$12\$/);
+    assert.match(result.stdout, /'\nUse this hash in \.env/);
     assert.ok(!result.stdout.includes("testpass123"));
   });
 

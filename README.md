@@ -370,6 +370,7 @@ ADMIN_PASSWORD='choose-a-cleartext-password' pnpm auth:hash-password
 
 Copy the generated `ADMIN_PASSWORD_HASH=...` value into your `.env`. Do not store
 `ADMIN_PASSWORD` in `.env`; it is only used temporarily by the hash generator.
+The generated hash is single-quoted so Docker Compose preserves its `$` characters.
 
 **2. Generate a session secret**
 
@@ -458,10 +459,20 @@ All other API endpoints require a valid session cookie.
 ### Production checklist
 
 - `AUTH_COOKIE_SECURE=true` — required behind HTTPS
+- `AUTH_COOKIE_SECURE=false` — required while testing through plain HTTP/IP
 - `AUTH_SESSION_SECRET` — use a strong random value (`openssl rand -hex 32`)
 - `API_AUTH_ENABLED=true`
 - `DASHBOARD_AUTH_ENABLED=true`
 - `DASHBOARD_ORIGIN` — set to your actual dashboard domain
+- `NEXT_PUBLIC_SIGNALPILOT_API_URL=/api` — same-origin browser API path, embedded at build time
+- `SIGNALPILOT_API_INTERNAL_URL=http://api:3100` — API address inside production Docker
+
+For production Docker builds, pass `.env.production` to Compose so the public API build
+argument is available without copying the secret file into the image:
+
+```bash
+docker compose --env-file .env.production -f docker-compose.prod.yml build dashboard
+```
 
 ### Audit Logs
 

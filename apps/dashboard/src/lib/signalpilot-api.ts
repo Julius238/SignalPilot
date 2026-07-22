@@ -1,3 +1,5 @@
+import { getApiUrl } from "./api-url";
+
 export type AssetType = "STOCK" | "ETF" | "CRYPTO";
 export type SignalStatus = "STRONG_WATCH" | "WATCH" | "WAIT" | "AVOID" | "NO_EDGE";
 export type SignalDirection = "BULLISH" | "BEARISH" | "NEUTRAL" | "MIXED";
@@ -837,7 +839,6 @@ export type ApiResult<T> =
       error: string;
     };
 
-const apiUrl = process.env.NEXT_PUBLIC_SIGNALPILOT_API_URL ?? "http://localhost:3100";
 const SESSION_COOKIE = process.env.AUTH_COOKIE_NAME ?? "signalpilot_session";
 
 export async function fetchApi<T>(
@@ -845,6 +846,7 @@ export async function fetchApi<T>(
   init: RequestInit = {}
 ): Promise<ApiResult<T>> {
   const isServer = typeof window === "undefined";
+  const apiUrl = getApiUrl(isServer);
   const extraHeaders: Record<string, string> = {};
 
   if (isServer) {

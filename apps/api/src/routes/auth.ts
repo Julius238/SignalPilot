@@ -56,7 +56,7 @@ export async function registerAuthRoutes(server: FastifyInstance) {
         return reply.code(401).send({ error: "Invalid credentials" });
       }
 
-      const token = await signSession();
+      const token = await signSession({ role: "admin", username });
       setSessionCookie(reply, token);
 
       await logAudit({ action: "login_success", actor: username, ...ctx });
@@ -89,7 +89,12 @@ export async function registerAuthRoutes(server: FastifyInstance) {
 
   server.post("/auth/logout", async (request, reply) => {
     const ctx = extractRequestContext(request);
-    reply.clearCookie(getCookieName(), { path: "/" });
+    reply.clearCookie(getCookieName(), {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.AUTH_COOKIE_SECURE === "true",
+      path: "/"
+    });
     await logAudit({ action: "logout", actor: "admin", ...ctx });
     return reply.code(200).send({ ok: true });
   });

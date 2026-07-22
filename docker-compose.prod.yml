@@ -74,6 +74,9 @@ services:
       context: .
       dockerfile: apps/dashboard/Dockerfile
       target: runtime
+      args:
+        NEXT_PUBLIC_SIGNALPILOT_API_URL: ${NEXT_PUBLIC_SIGNALPILOT_API_URL:-/api}
+        SIGNALPILOT_API_INTERNAL_URL: ${SIGNALPILOT_API_INTERNAL_URL:-http://api:3100}
     restart: unless-stopped
     env_file:
       - path: .env.production

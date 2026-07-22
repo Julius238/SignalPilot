@@ -6,6 +6,7 @@ import type { FeatureCollection, Geometry } from "geojson";
 import worldAtlas from "world-atlas/countries-110m.json";
 
 import type { MarketEvent } from "../../lib/signalpilot-api";
+import { severityLabel } from "./shared";
 
 // Server-gerenderte SVG-Weltkarte: zeigt, aus welchen Regionen die zuletzt
 // erkannten globalen Ereignisse stammen. Kein Client-JavaScript — die Karte
@@ -26,17 +27,10 @@ const regionAnchors: Record<string, [number, number]> = {
 };
 
 const severityColors: Record<MarketEvent["severity"], string> = {
-  CRITICAL: "var(--bad)",
-  IMPORTANT: "var(--warn)",
-  WATCH: "var(--accent)",
+  CRITICAL: "var(--sev-critical)",
+  IMPORTANT: "var(--sev-important)",
+  WATCH: "var(--sev-watch)",
   INFO: "var(--muted)"
-};
-
-const severityLabels: Record<MarketEvent["severity"], string> = {
-  CRITICAL: "Hochrelevant",
-  IMPORTANT: "Wichtig",
-  WATCH: "Beobachten",
-  INFO: "Nur Information"
 };
 
 const severityOrder: Array<MarketEvent["severity"]> = ["CRITICAL", "IMPORTANT", "WATCH", "INFO"];
@@ -115,7 +109,7 @@ export function NewsWorldMap({ events, now }: { events: MarketEvent[]; now: Date
         {markers.map((marker) => (
           <g key={marker.region} transform={`translate(${marker.x}, ${marker.y})`}>
             <title>
-              {`${marker.region}: ${marker.count} ${marker.count === 1 ? "Ereignis" : "Ereignisse"} · höchste Einstufung: ${severityLabels[marker.maxSeverity]}`}
+              {`${marker.region}: ${marker.count} ${marker.count === 1 ? "Ereignis" : "Ereignisse"} · höchste Einstufung: ${severityLabel(marker.maxSeverity)}`}
             </title>
             <circle
               r={marker.radius}
@@ -140,7 +134,7 @@ export function NewsWorldMap({ events, now }: { events: MarketEvent[]; now: Date
               className="world-map-legend-dot"
               style={{ backgroundColor: severityColors[severity] }}
             />
-            {severityLabels[severity]}
+            {severityLabel(severity)}
           </span>
         ))}
         {unlocatedCount > 0 ? (

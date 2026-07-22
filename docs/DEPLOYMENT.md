@@ -22,11 +22,11 @@ SignalPilot must stay on its own Compose project and Docker network:
 ```bash
 cd /opt/signalpilot
 git pull
-docker compose -f docker-compose.prod.yml build
-docker compose -f docker-compose.prod.yml up -d postgres redis
+docker compose --env-file .env.production -f docker-compose.prod.yml build
+docker compose --env-file .env.production -f docker-compose.prod.yml up -d postgres redis
 ./scripts/ops/prod-migrate-docker.sh
 ./scripts/ops/prod-seed-docker.sh
-docker compose -f docker-compose.prod.yml up -d
+docker compose --env-file .env.production -f docker-compose.prod.yml up -d
 ```
 
 The migration and seed scripts start a temporary `node:22-bookworm` container on the `signalpilot_internal` network, mount the current repo at `/app`, enable Corepack, install the repo with the pinned pnpm version, and run the root `db:*` scripts. They do not run `migrate dev`, reset, drop, or print secrets.
@@ -80,7 +80,22 @@ Never commit `.env.production`. Because bcrypt hashes contain `$`, set `ADMIN_PA
 ADMIN_PASSWORD_HASH='$2b$12$...'
 ```
 
-By default Postgres and Redis are internal only. The API is bound to `127.0.0.1:3100`, and the dashboard is bound to `3000` for quick IP testing. Do not bind SignalPilot to `80` or `443` on this VPS while n8n Traefik owns those ports.
+By default Postgres and Redis are internal only. The API is bound to `127.0.0.1:3100`, and the dashboard is bound to `3000` for quick IP testing. Browser API requests use the same-origin `/api` path; Next.js forwards them to `http://api:3100` on the internal Compose network. Do not bind SignalPilot to `80` or `443` on this VPS while n8n Traefik owns those ports.
+
+For an HTTP/IP deployment, set:
+
+```env
+DASHBOARD_ORIGIN=http://YOUR_VPS_IP:3000
+NEXT_PUBLIC_SIGNALPILOT_API_URL=/api
+SIGNALPILOT_API_INTERNAL_URL=http://api:3100
+AUTH_COOKIE_SECURE=false
+API_AUTH_ENABLED=true
+DASHBOARD_AUTH_ENABLED=true
+```
+
+Replace `YOUR_VPS_IP` and do not add a trailing slash to `DASHBOARD_ORIGIN`.
+
+`NEXT_PUBLIC_SIGNALPILOT_API_URL` is a Docker build argument and is embedded in the browser bundle. Always build with `--env-file .env.production` (or use `pnpm ops:prod:build`) after changing it. The internal API URL is used for server-side rendering and the same-origin rewrite; it must not be `localhost` inside the dashboard container.
 
 ### 1. Clone and prepare
 
@@ -516,11 +531,11 @@ Keep backups off-site (S3, rsync, etc.).
 
 ```bash
 git pull
-docker compose -f docker-compose.prod.yml build
-docker compose -f docker-compose.prod.yml up -d postgres redis
+docker compose --env-file .env.production -f docker-compose.prod.yml build
+docker compose --env-file .env.production -f docker-compose.prod.yml up -d postgres redis
 ./scripts/ops/prod-migrate-docker.sh
 ./scripts/ops/prod-seed-docker.sh
-docker compose -f docker-compose.prod.yml up -d
+docker compose --env-file .env.production -f docker-compose.prod.yml up -d
 ```
 
 ---
@@ -533,8 +548,7 @@ The API is bound to `127.0.0.1:3100` (loopback only). Put Caddy or nginx in fron
 
 ```caddyfile
 your-domain.example.com {
-    reverse_proxy /api/* localhost:3100
-    reverse_proxy /* localhost:3000
+    reverse_proxy localhost:3000
 }
 ```
 
@@ -545,23 +559,24 @@ server {
     listen 443 ssl;
     server_name your-domain.example.com;
 
-    location /api/ {
-        proxy_pass http://127.0.0.1:3100/;
-        proxy_set_header Host $host;
-    }
-
     location / {
         proxy_pass http://localhost:3000;
         proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
 }
 ```
+
+The reverse proxy sends `/api/*` to the dashboard as well. The dashboard's same-origin
+rewrite forwards those requests to the API over the private Docker network, so port 3100
+does not need a public reverse-proxy route.
 
 Then in `.env.production`:
 
 ```env
 DASHBOARD_ORIGIN=https://your-domain.example.com
-NEXT_PUBLIC_SIGNALPILOT_API_URL=https://your-domain.example.com/api
+NEXT_PUBLIC_SIGNALPILOT_API_URL=/api
+SIGNALPILOT_API_INTERNAL_URL=http://api:3100
 AUTH_COOKIE_SECURE=true
 ```
 

@@ -11,6 +11,7 @@ backups/*.gz
 node_modules/
 dist/
 .next/
+*.tsbuildinfo
 
 coverage/
 .DS_Store

@@ -1,11 +1,12 @@
 import Link from "next/link";
 
 import { RegimeBadge, RiskModeBadge } from "../badges";
-import { formatDateTime } from "../../lib/format";
+import { confidenceWords } from "./shared";
 import type { MarketRegimeSnapshot } from "../../lib/signalpilot-api";
 
-// Hero-Band: beantwortet auf einen Blick "Wie ist die Marktlage?" und
-// liefert die vier Kernzahlen des Tages. Details liegen auf den Unterseiten.
+// Lagebild: beantwortet "Wie ist die Lage?" in einem Satz, den jeder versteht.
+// Der Puls-Satz wird aus den echten Daten gebaut (page.tsx) und funktioniert
+// auch dann, wenn die automatische Regime-Einschätzung noch fehlt.
 
 export type HeroMetric = {
   label: string;
@@ -16,49 +17,50 @@ export type HeroMetric = {
 };
 
 export function HeroBand({
+  pulse,
+  context,
   regime,
   metrics
 }: {
+  pulse: string;
+  context: string | null;
   regime: MarketRegimeSnapshot | null | undefined;
   metrics: HeroMetric[];
 }) {
+  const confidence = confidenceWords(regime?.confidence);
+
   return (
-    <section className="hero-band" aria-label="Marktlage">
-      <div className="hero-regime">
-        <span className="hero-label">Marktlage</span>
-        {regime ? (
-          <>
-            <div className="hero-regime-badges">
+    <section className="lagebild" aria-label="Marktlage">
+      <div>
+        <span className="lagebild-kicker">Marktlage heute</span>
+        <p className="lagebild-pulse">{pulse}</p>
+        {context ? <p className="lagebild-sub">{context}</p> : null}
+        <div className="lagebild-badges">
+          {regime ? (
+            <>
               <RegimeBadge value={regime.overallRegime} />
               <RiskModeBadge value={regime.riskMode} />
-            </div>
-            <div className="hero-regime-meta">
-              <span>Konfidenz {Math.round(regime.confidence * 100)}%</span>
-              <span className="muted small" title={formatDateTime(regime.generatedAt)}>
-                <Link href="/dashboard/market-regime" className="section-link">
-                  Details →
-                </Link>
-              </span>
-            </div>
-            {regime.riskNote ? (
-              <p className="hero-risk-note">
-                {regime.riskNote.slice(0, 140)}
-                {regime.riskNote.length > 140 ? "…" : ""}
-              </p>
-            ) : null}
-          </>
-        ) : (
-          <p className="muted small">Markt-Regime noch nicht berechnet.</p>
-        )}
+              {confidence ? <span className="muted small">{confidence}</span> : null}
+              <Link href="/dashboard/market-regime" className="section-link">
+                Einschätzung im Detail →
+              </Link>
+            </>
+          ) : (
+            <span className="muted small">
+              Die automatische Markt-Einschätzung liegt noch nicht vor — sie ergänzt dieses Bild,
+              sobald sie berechnet wurde.
+            </span>
+          )}
+        </div>
       </div>
-      <div className="hero-metrics">
+      <div className="lagebild-metrics">
         {metrics.map((metric) => (
-          <Link key={metric.label} href={metric.href} className="hero-metric">
-            <span className="metric-label">{metric.label}</span>
-            <strong className="metric-value" style={{ color: metric.tone }}>
+          <Link key={metric.label} href={metric.href} className="lagebild-metric">
+            <span className="lagebild-metric-value" style={{ color: metric.tone }}>
               {metric.value}
-            </strong>
-            {metric.sub ? <span className="muted small">{metric.sub}</span> : null}
+            </span>
+            <span className="lagebild-metric-label">{metric.label}</span>
+            {metric.sub ? <span className="lagebild-metric-sub">{metric.sub}</span> : null}
           </Link>
         ))}
       </div>

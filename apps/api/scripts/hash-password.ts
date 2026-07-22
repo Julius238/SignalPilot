@@ -16,7 +16,7 @@ async function main() {
   }
 
   const hash = await bcrypt.hash(envPassword, 12);
-  process.stdout.write(`ADMIN_PASSWORD_HASH=${hash}\n`);
+  process.stdout.write(`ADMIN_PASSWORD_HASH='${hash}'\n`);
   process.stdout.write("Use this hash in .env, then login with the original cleartext password.\n");
 }
 
