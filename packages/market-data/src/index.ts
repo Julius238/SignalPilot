@@ -1,4 +1,5 @@
 export { BinanceMarketDataAdapter, normalizeBinanceKlines } from "./binance.js";
+export type { BinanceHistoryOptions, BinanceKlineRequest } from "./binance.js";
 export { FinnhubMarketDataAdapter, normalizeFinnhubResponse } from "./finnhub.js";
 export type { FinnhubFetchResult } from "./finnhub.js";
 export {
@@ -28,5 +29,19 @@ export type {
   TimedCandle
 } from "./candle-quality.js";
 export { saveCandles } from "./candles.js";
+export { detectCandleGaps } from "./gaps.js";
+export type { CandleGap, CandleGapAudit, GapCandle } from "./gaps.js";
+export {
+  classifyProviderHttpError,
+  ProviderRequestError,
+  toTemporaryProviderError
+} from "./provider-errors.js";
+export type { ProviderFailureKind } from "./provider-errors.js";
+export { retryProviderRequest } from "./retry.js";
+export type {
+  ProviderRetryEvent,
+  ProviderRetryOptions,
+  ProviderRetryOutcome
+} from "./retry.js";
 export { supportedBinanceIntervals, supportedFinnhubIntervals } from "./types.js";
 export type { BinanceInterval, FinnhubInterval, CandleSource, NormalizedCandle } from "./types.js";

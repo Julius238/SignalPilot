@@ -1,7 +1,7 @@
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Prisma, prisma, type PrismaClient } from "@signalpilot/database";
+import { BotRunStatus, Prisma, prisma, type PrismaClient } from "@signalpilot/database";
 import { config } from "dotenv";
 import cron, { type ScheduledTask } from "node-cron";
 import pino from "pino";
@@ -20,6 +20,7 @@ import { quickCryptoRadar, type QuickCryptoRadarSummary } from "./jobs/quickCryp
 import { quickEquityRadar, type QuickEquityRadarSummary } from "./jobs/quickEquityRadar.js";
 import { radarSummary, type RadarSummaryResult } from "./jobs/radarSummary.js";
 import { globalEventMonitor, type GlobalEventMonitorSummary } from "./jobs/globalEventMonitor.js";
+import { auditCandleGaps, type CandleGapAuditSummary } from "./jobs/auditCandleGaps.js";
 
 const logger = pino({
   name: "signalpilot-worker-scheduler"
@@ -43,6 +44,7 @@ type RunQuickRadar = (database: PrismaClient) => Promise<QuickCryptoRadarSummary
 type RunEquityRadar = (database: PrismaClient) => Promise<QuickEquityRadarSummary>;
 type RunRadarSummary = (database: PrismaClient) => Promise<RadarSummaryResult>;
 type RunGlobalEventMonitor = (database: PrismaClient) => Promise<GlobalEventMonitorSummary>;
+type RunCandleGapAudit = (database: PrismaClient) => Promise<CandleGapAuditSummary>;
 
 const defaultCryptoCron = "0 * * * *";
 const defaultEquityCron = "30 * * * *";
@@ -50,6 +52,7 @@ const defaultQuickRadarCron = "*/5 * * * *";
 const defaultEquityRadarCron = "15 */4 * * *";
 const defaultRadarSummaryCron = "0 * * * *";
 const defaultGlobalEventMonitorCron = "*/30 * * * *";
+const defaultCandleGapAuditCron = "15 3 * * *";
 const schedulerState: SchedulerState = {
   isRunning: false,
   isShuttingDown: false
@@ -74,6 +77,10 @@ const globalEventMonitorSchedulerState: SchedulerState = {
   isRunning: false,
   isShuttingDown: false
 };
+const candleGapAuditSchedulerState: SchedulerState = {
+  isRunning: false,
+  isShuttingDown: false
+};
 
 export type SchedulerSettings = {
   cryptoCron: string;
@@ -91,6 +98,8 @@ export type SchedulerSettings = {
   radarSummaryCron: string;
   globalEventMonitorEnabled: boolean;
   globalEventMonitorCron: string;
+  candleGapAuditEnabled: boolean;
+  candleGapAuditCron: string;
 };
 
 export function resolveSchedulerSettings(env: NodeJS.ProcessEnv = process.env): SchedulerSettings {
@@ -109,7 +118,9 @@ export function resolveSchedulerSettings(env: NodeJS.ProcessEnv = process.env): 
     radarSummaryEnabled: env.RADAR_SUMMARY_ENABLED === "true",
     radarSummaryCron: env.RADAR_SUMMARY_CRON ?? defaultRadarSummaryCron,
     globalEventMonitorEnabled: env.GLOBAL_EVENT_MONITOR_ENABLED === "true",
-    globalEventMonitorCron: env.GLOBAL_EVENT_MONITOR_CRON ?? defaultGlobalEventMonitorCron
+    globalEventMonitorCron: env.GLOBAL_EVENT_MONITOR_CRON ?? defaultGlobalEventMonitorCron,
+    candleGapAuditEnabled: env.CANDLE_GAP_AUDIT_ENABLED === "true",
+    candleGapAuditCron: env.CANDLE_GAP_AUDIT_CRON ?? defaultCandleGapAuditCron
   };
 }
 
@@ -139,13 +150,17 @@ async function runScheduledJob<Summary>(
 
   try {
     const summary = await runJob(database);
+    const reportedStatus =
+      summary && typeof summary === "object" && "status" in summary
+        ? String(summary.status)
+        : "SUCCESS";
 
     await writeBotLog(database, "info", `Scheduled ${jobLabel} run finished`, {
       finishedAt: new Date().toISOString(),
       summary: summary as unknown as Prisma.InputJsonValue
     });
 
-    return "success";
+    return reportedStatus === BotRunStatus.FAILED ? "failed" : "success";
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown scheduled pipeline error";
 
@@ -209,6 +224,14 @@ export async function runScheduledGlobalEventMonitor(
   return runScheduledJob(database, state, "global event monitor", runJob);
 }
 
+export async function runScheduledCandleGapAudit(
+  database: PrismaClient,
+  state: SchedulerState,
+  runJob: RunCandleGapAudit = auditCandleGaps
+): Promise<ScheduledRunResult> {
+  return runScheduledJob(database, state, "candle gap audit", runJob);
+}
+
 async function startScheduler() {
   const settings = resolveSchedulerSettings();
   const {
@@ -226,7 +249,9 @@ async function startScheduler() {
     radarSummaryEnabled,
     radarSummaryCron,
     globalEventMonitorEnabled,
-    globalEventMonitorCron
+    globalEventMonitorCron,
+    candleGapAuditEnabled,
+    candleGapAuditCron
   } = settings;
 
   if (!cron.validate(cryptoCron)) {
@@ -251,6 +276,10 @@ async function startScheduler() {
 
   if (globalEventMonitorEnabled && !cron.validate(globalEventMonitorCron)) {
     throw new Error(`Invalid GLOBAL_EVENT_MONITOR_CRON expression: ${globalEventMonitorCron}`);
+  }
+
+  if (candleGapAuditEnabled && !cron.validate(candleGapAuditCron)) {
+    throw new Error(`Invalid CANDLE_GAP_AUDIT_CRON expression: ${candleGapAuditCron}`);
   }
 
   await writeBotLog(prisma, "info", "Crypto pipeline scheduler started", {
@@ -341,6 +370,17 @@ async function startScheduler() {
     tasks.push(globalEventMonitorTask);
   }
 
+  if (candleGapAuditEnabled) {
+    await writeBotLog(prisma, "info", "Candle gap audit scheduler started", {
+      cronExpression: candleGapAuditCron,
+      startedAt: new Date().toISOString()
+    });
+    const candleGapAuditTask = cron.schedule(candleGapAuditCron, () => {
+      void runScheduledCandleGapAudit(prisma, candleGapAuditSchedulerState);
+    });
+    tasks.push(candleGapAuditTask);
+  }
+
   registerShutdownHandlers(tasks);
 
   if (runOnStart) {
@@ -360,6 +400,7 @@ function registerShutdownHandlers(tasks: ScheduledTask[]) {
     equityRadarSchedulerState.isShuttingDown = true;
     radarSummarySchedulerState.isShuttingDown = true;
     globalEventMonitorSchedulerState.isShuttingDown = true;
+    candleGapAuditSchedulerState.isShuttingDown = true;
     tasks.forEach((task) => task.stop());
 
     logger.info({ signal, isRunning: schedulerState.isRunning }, "Pipeline schedulers shutdown");

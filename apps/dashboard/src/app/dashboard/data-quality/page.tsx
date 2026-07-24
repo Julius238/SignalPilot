@@ -200,6 +200,96 @@ export default async function DataQualityPage({ searchParams }: DataQualityPageP
       </section>
 
       {data ? (
+        <>
+          <section className="card" style={{ marginTop: 16 }}>
+            <h2>Provider-Coverage</h2>
+            <p className="muted small">
+              Persistente Messwerte aus inkrementellem Import, Initial-Backfill und Gap-Audit.
+            </p>
+            {data.providerHealth.length > 0 ? (
+              <div className="table-wrap" style={{ marginTop: 10 }}>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Provider</th>
+                      <th>Coverage</th>
+                      <th>Kerzen</th>
+                      <th>Lücken</th>
+                      <th>Veraltet</th>
+                      <th>Providerfehler</th>
+                      <th>Rate Limits</th>
+                      <th>403</th>
+                      <th>no_data</th>
+                      <th>Letzter Erfolg</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.providerHealth.map((provider) => (
+                      <tr key={provider.provider}>
+                        <td><strong>{provider.provider}</strong></td>
+                        <td>{formatPercent(provider.coveragePercent)}</td>
+                        <td>{provider.candleCount} / {provider.expectedCandleCount}</td>
+                        <td style={{ color: provider.gapCount > 0 ? "var(--warn)" : undefined }}>
+                          {provider.gapCount} ({provider.missingCandleCount} Kerzen)
+                        </td>
+                        <td style={{ color: provider.staleSeriesCount > 0 ? "var(--warn)" : undefined }}>
+                          {provider.staleSeriesCount}
+                        </td>
+                        <td>{provider.providerErrorCount}</td>
+                        <td>{provider.rateLimitCount}</td>
+                        <td style={{ color: provider.entitlementErrorCount > 0 ? "var(--bad)" : undefined }}>
+                          {provider.entitlementErrorCount}
+                        </td>
+                        <td>{provider.noDataCount}</td>
+                        <td>
+                          {provider.lastSuccessfulFetchAt
+                            ? formatDateTime(provider.lastSuccessfulFetchAt)
+                            : "Noch keiner"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <EmptyState
+                title="Noch keine Provider-Messwerte."
+                description="Führe zunächst einen Candle-Import oder Gap-Audit aus."
+              />
+            )}
+          </section>
+
+          <section className="grid metrics" style={{ marginTop: 16 }}>
+            <div className="card">
+              <span className="metric-label">News gespeichert</span>
+              <strong className="metric-value">{data.newsCoverage.totalStored}</strong>
+              <span className="muted small">{data.newsCoverage.storedLast7Days} in 7 Tagen</span>
+            </div>
+            <div className="card">
+              <span className="metric-label">Relevant (72 h)</span>
+              <strong className="metric-value">{data.newsCoverage.relevantLast72Hours}</strong>
+              <span className="muted small">Relevanz mindestens 30/100</span>
+            </div>
+            <div className="card">
+              <span className="metric-label">Dashboard-only</span>
+              <strong className="metric-value">{data.newsCoverage.dashboardOnlyCount}</strong>
+              <span className="muted small">Rohmeldungen unter der Schwelle</span>
+            </div>
+            <div className="card">
+              <span className="metric-label">Duplikate (7 Tage)</span>
+              <strong className="metric-value">{data.newsCoverage.duplicateCount}</strong>
+              <span className="muted small">zusammengeführt statt neu gespeichert</span>
+            </div>
+            <div className="card">
+              <span className="metric-label">Verworfen (7 Tage)</span>
+              <strong className="metric-value">{data.newsCoverage.discardedCount}</strong>
+              <span className="muted small">unklassifizierte Meldungen bleiben erhalten</span>
+            </div>
+          </section>
+        </>
+      ) : null}
+
+      {data ? (
         <div className="grid two" style={{ marginTop: 16 }}>
           {/* ── Warnungen (action-orientiert) ── */}
           <section className="card">

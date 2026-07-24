@@ -1,4 +1,10 @@
 import { supportedBinanceIntervals, type BinanceInterval, type NormalizedCandle } from "./types.js";
+import { classifyProviderHttpError, toTemporaryProviderError } from "./provider-errors.js";
+import {
+  retryProviderRequest,
+  type ProviderRetryEvent,
+  type ProviderRetryOptions
+} from "./retry.js";
 
 type BinanceKline = [
   number,
@@ -17,6 +23,19 @@ type BinanceKline = [
 
 export type FetchLike = (input: string | URL, init?: RequestInit) => Promise<Response>;
 
+export type BinanceKlineRequest = {
+  limit: number;
+  startTime?: Date | number;
+  endTime?: Date | number;
+  retry?: Omit<ProviderRetryOptions<NormalizedCandle[]>, "shouldRetryResult" | "resultKind">;
+};
+
+export type BinanceHistoryOptions = {
+  pageSize?: number;
+  retry?: BinanceKlineRequest["retry"];
+  onRetry?: (event: ProviderRetryEvent) => void | Promise<void>;
+};
+
 export class BinanceMarketDataAdapter {
   private readonly baseUrl: string;
   private readonly fetchClient: FetchLike;
@@ -29,9 +48,12 @@ export class BinanceMarketDataAdapter {
   async fetchKlines(
     symbol: string,
     interval: BinanceInterval,
-    limit: number
+    limitOrRequest: number | BinanceKlineRequest
   ): Promise<NormalizedCandle[]> {
     assertSupportedInterval(interval);
+    const request =
+      typeof limitOrRequest === "number" ? { limit: limitOrRequest } : limitOrRequest;
+    const { limit } = request;
 
     if (!Number.isInteger(limit) || limit < 1 || limit > 1000) {
       throw new Error("Binance kline limit must be an integer between 1 and 1000.");
@@ -41,16 +63,63 @@ export class BinanceMarketDataAdapter {
     url.searchParams.set("symbol", symbol);
     url.searchParams.set("interval", interval);
     url.searchParams.set("limit", String(limit));
-
-    const response = await this.fetchClient(url);
-
-    if (!response.ok) {
-      throw new Error(`Binance klines request failed with HTTP ${response.status}.`);
+    if (request.startTime !== undefined) {
+      url.searchParams.set("startTime", String(toMilliseconds(request.startTime)));
+    }
+    if (request.endTime !== undefined) {
+      url.searchParams.set("endTime", String(toMilliseconds(request.endTime)));
     }
 
-    const payload: unknown = await response.json();
+    const outcome = await retryProviderRequest(async () => {
+      let response: Response;
+      try {
+        response = await this.fetchClient(url);
+      } catch {
+        throw toTemporaryProviderError("BINANCE", "klines");
+      }
 
-    return normalizeBinanceKlines(symbol, interval, payload);
+      if (!response.ok) {
+        const hint = await response.text().catch(() => "");
+        throw classifyProviderHttpError("BINANCE", "klines", response.status, hint);
+      }
+
+      const payload: unknown = await response.json();
+      return normalizeBinanceKlines(symbol, interval, payload);
+    }, request.retry);
+
+    return outcome.value;
+  }
+
+  async *fetchKlineHistoryPages(
+    symbol: string,
+    interval: BinanceInterval,
+    from: Date,
+    to: Date,
+    options: BinanceHistoryOptions = {}
+  ): AsyncGenerator<NormalizedCandle[]> {
+    assertSupportedInterval(interval);
+    const pageSize = options.pageSize ?? 1000;
+    let cursor = from.getTime();
+    const endTime = to.getTime();
+
+    while (cursor <= endTime) {
+      const page = await this.fetchKlines(symbol, interval, {
+        limit: pageSize,
+        startTime: cursor,
+        endTime,
+        retry: {
+          ...options.retry,
+          onRetry: options.onRetry ?? options.retry?.onRetry
+        }
+      });
+
+      if (page.length === 0) return;
+      yield page;
+
+      const nextCursor = page.at(-1)!.openTime.getTime() + intervalDurationMs(interval);
+      if (nextCursor <= cursor || page.length < pageSize) return;
+      cursor = nextCursor;
+    }
   }
 }
 
@@ -112,4 +181,14 @@ function assertSupportedInterval(interval: string): asserts interval is BinanceI
   if (!supportedBinanceIntervals.includes(interval as BinanceInterval)) {
     throw new Error(`Unsupported Binance interval: ${interval}.`);
   }
+}
+
+function toMilliseconds(value: Date | number) {
+  return value instanceof Date ? value.getTime() : value;
+}
+
+function intervalDurationMs(interval: BinanceInterval) {
+  if (interval === "1h") return 60 * 60 * 1000;
+  if (interval === "4h") return 4 * 60 * 60 * 1000;
+  return 24 * 60 * 60 * 1000;
 }

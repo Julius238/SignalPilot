@@ -1,3 +1,5 @@
+import { classifyProviderHttpError, toTemporaryProviderError } from "./provider-errors.js";
+
 type FetchLike = (input: string | URL, init?: RequestInit) => Promise<Response>;
 
 type FinnhubNewsApiItem = {
@@ -13,8 +15,11 @@ type FinnhubNewsApiItem = {
 };
 
 export type NormalizedNewsItem = {
+  externalId: string | null;
   symbol: string;
+  relatedSymbols: string[];
   source: string;
+  transportProvider: "FINNHUB";
   headline: string;
   summary: string | null;
   url: string | null;
@@ -27,7 +32,12 @@ export type NormalizedNewsItem = {
 export type FinnhubNewsFetchResult =
   | { kind: "ok"; items: NormalizedNewsItem[] }
   | { kind: "no_news" }
-  | { kind: "rate_limit" };
+  | { kind: "rate_limit" }
+  | { kind: "invalid_api_key"; statusCode: number }
+  | { kind: "entitlement"; statusCode: number }
+  | { kind: "unsupported_symbol"; statusCode: number }
+  | { kind: "temporary_error"; statusCode: number | null }
+  | { kind: "permanent_error"; statusCode: number };
 
 export type GeneralNewsCategory = "general" | "forex" | "crypto" | "merger";
 
@@ -45,7 +55,12 @@ export type NormalizedGeneralNewsItem = {
 export type FinnhubGeneralNewsFetchResult =
   | { kind: "ok"; items: NormalizedGeneralNewsItem[] }
   | { kind: "no_news" }
-  | { kind: "rate_limit" };
+  | { kind: "rate_limit" }
+  | { kind: "invalid_api_key"; statusCode: number }
+  | { kind: "entitlement"; statusCode: number }
+  | { kind: "unsupported_symbol"; statusCode: number }
+  | { kind: "temporary_error"; statusCode: number | null }
+  | { kind: "permanent_error"; statusCode: number };
 
 export class FinnhubNewsAdapter {
   private readonly baseUrl: string;
@@ -71,18 +86,28 @@ export class FinnhubNewsAdapter {
     url.searchParams.set("to", formatDate(to));
     url.searchParams.set("token", this.apiKey);
 
-    const response = await this.fetchClient(url);
+    let response: Response;
+    try {
+      response = await this.fetchClient(url);
+    } catch {
+      const error = toTemporaryProviderError("FINNHUB", "company-news");
+      return { kind: "temporary_error", statusCode: error.statusCode };
+    }
 
     if (response.status === 429) {
       return { kind: "rate_limit" };
     }
 
     if (!response.ok) {
-      throw new Error(`Finnhub news request failed with HTTP ${response.status}.`);
+      return classifyNewsHttpFailure(response, "company-news");
     }
 
-    const payload: unknown = await response.json();
-    return normalizeNewsResponse(symbol, payload);
+    try {
+      const payload: unknown = await response.json();
+      return normalizeNewsResponse(symbol, payload);
+    } catch {
+      return { kind: "temporary_error", statusCode: response.status };
+    }
   }
 
   async fetchGeneralNews(
@@ -92,18 +117,27 @@ export class FinnhubNewsAdapter {
     url.searchParams.set("category", category);
     url.searchParams.set("token", this.apiKey);
 
-    const response = await this.fetchClient(url);
+    let response: Response;
+    try {
+      response = await this.fetchClient(url);
+    } catch {
+      return { kind: "temporary_error", statusCode: null };
+    }
 
     if (response.status === 429) {
       return { kind: "rate_limit" };
     }
 
     if (!response.ok) {
-      throw new Error(`Finnhub general news request failed with HTTP ${response.status}.`);
+      return classifyNewsHttpFailure(response, "general-news");
     }
 
-    const payload: unknown = await response.json();
-    return normalizeGeneralNewsResponse(payload);
+    try {
+      const payload: unknown = await response.json();
+      return normalizeGeneralNewsResponse(payload);
+    } catch {
+      return { kind: "temporary_error", statusCode: response.status };
+    }
   }
 }
 
@@ -149,9 +183,13 @@ export function normalizeNewsResponse(symbol: string, payload: unknown): Finnhub
 }
 
 function normalizeNewsItem(symbol: string, item: FinnhubNewsApiItem): NormalizedNewsItem {
+  const relatedSymbols = normalizeRelatedSymbols(item.related);
   return {
+    externalId: typeof item.id === "number" ? String(item.id) : null,
     symbol,
+    relatedSymbols: relatedSymbols.length > 0 ? relatedSymbols : [symbol.toUpperCase()],
     source: item.source,
+    transportProvider: "FINNHUB",
     headline: item.headline,
     summary: item.summary || null,
     url: item.url || null,
@@ -174,4 +212,44 @@ function isFinnhubNewsItem(item: unknown): item is FinnhubNewsApiItem {
 
 function formatDate(date: Date): string {
   return date.toISOString().slice(0, 10);
+}
+
+export function normalizeRelatedSymbols(related: string | null | undefined): string[] {
+  if (!related) return [];
+  return [
+    ...new Set(
+      related
+        .split(/[,\s;|]+/)
+        .map((symbol) => symbol.trim().toUpperCase())
+        .filter((symbol) => /^[A-Z0-9.^-]{1,20}$/.test(symbol))
+    )
+  ];
+}
+
+async function classifyNewsHttpFailure(
+  response: Response,
+  endpoint: string
+): Promise<
+  | { kind: "invalid_api_key"; statusCode: number }
+  | { kind: "entitlement"; statusCode: number }
+  | { kind: "unsupported_symbol"; statusCode: number }
+  | { kind: "temporary_error"; statusCode: number | null }
+  | { kind: "permanent_error"; statusCode: number }
+> {
+  const hint =
+    typeof response.text === "function" ? await response.text().catch(() => "") : "";
+  const error = classifyProviderHttpError("FINNHUB", endpoint, response.status, hint);
+  if (error.kind === "INVALID_API_KEY") {
+    return { kind: "invalid_api_key", statusCode: response.status };
+  }
+  if (error.kind === "ENTITLEMENT") {
+    return { kind: "entitlement", statusCode: response.status };
+  }
+  if (error.kind === "UNSUPPORTED_SYMBOL") {
+    return { kind: "unsupported_symbol", statusCode: response.status };
+  }
+  if (error.kind === "TEMPORARY") {
+    return { kind: "temporary_error", statusCode: response.status };
+  }
+  return { kind: "permanent_error", statusCode: response.status };
 }

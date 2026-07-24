@@ -26,8 +26,11 @@ describe("normalizeNewsResponse", () => {
 
     assert.equal(result.items.length, 1);
     assert.deepEqual(result.items[0], {
+      externalId: "123456",
       symbol: "AAPL",
+      relatedSymbols: ["AAPL"],
       source: "Reuters",
+      transportProvider: "FINNHUB",
       headline: "Apple beats earnings expectations",
       summary: "Apple Inc. reported strong quarterly results.",
       url: "https://reuters.com/apple-earnings",
@@ -87,14 +90,16 @@ describe("FinnhubNewsAdapter", () => {
     assert.equal(result.kind, "rate_limit");
   });
 
-  it("throws for non-429 HTTP errors", async () => {
+  it("classifies HTTP 403 as an entitlement error", async () => {
     const mockFetch = async () => ({ ok: false, status: 403, json: async () => ({}) }) as Response;
     const adapter = new FinnhubNewsAdapter({ apiKey: "test-key", fetchClient: mockFetch });
 
-    await assert.rejects(
-      () => adapter.fetchCompanyNews("AAPL", new Date("2026-01-01"), new Date("2026-01-07")),
-      /HTTP 403/
+    const result = await adapter.fetchCompanyNews(
+      "AAPL",
+      new Date("2026-01-01"),
+      new Date("2026-01-07")
     );
+    assert.deepEqual(result, { kind: "entitlement", statusCode: 403 });
   });
 
   it("returns ok items for a successful response", async () => {

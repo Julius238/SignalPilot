@@ -31,6 +31,8 @@
     "worker:fetch-equity-candles": "pnpm --filter @signalpilot/worker fetch:equity-candles",
     "worker:fetch-equity-news": "pnpm --filter @signalpilot/worker fetch:equity-news",
     "worker:fetch-equity-events": "pnpm --filter @signalpilot/worker fetch:equity-events",
+    "worker:backfill-candles": "pnpm --filter @signalpilot/worker backfill:candles",
+    "worker:audit-candle-gaps": "pnpm --filter @signalpilot/worker audit:candle-gaps",
     "worker:calculate-market-regime": "pnpm --filter @signalpilot/worker calculate:market-regime",
     "worker:run-backtest": "pnpm --filter @signalpilot/worker run:backtest",
     "worker:run-strategy-comparison": "pnpm --filter @signalpilot/worker run:strategy-comparison",

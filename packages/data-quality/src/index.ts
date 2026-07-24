@@ -61,8 +61,59 @@ export type DataQualityReport = {
     successfulAlertCount: number;
     alertCount: number;
   };
+  providerCoverage: ProviderCoverage[];
+  providerHealth: ProviderHealth[];
+  newsCoverage: NewsCoverage;
+  lastSuccessfulJobs: Record<string, string | null>;
   warnings: string[];
   recommendations: string[];
+};
+
+export type ProviderCoverage = {
+  assetId: string;
+  symbol: string;
+  provider: string;
+  timeframe: string;
+  oldestCandle: string | null;
+  latestClosedCandle: string | null;
+  candleCount: number;
+  expectedCandleCount: number;
+  gapCount: number;
+  missingCandleCount: number;
+  latestDataAgeSeconds: number | null;
+  providerErrorCount: number;
+  rateLimitCount: number;
+  entitlementErrorCount: number;
+  noDataCount: number;
+  lastSuccessfulFetchAt: string | null;
+  lastAuditAt: string | null;
+  lastErrorKind: string | null;
+};
+
+export type ProviderHealth = {
+  provider: string;
+  seriesCount: number;
+  candleCount: number;
+  expectedCandleCount: number;
+  coveragePercent: number;
+  gapCount: number;
+  missingCandleCount: number;
+  staleSeriesCount: number;
+  providerErrorCount: number;
+  rateLimitCount: number;
+  entitlementErrorCount: number;
+  noDataCount: number;
+  lastSuccessfulFetchAt: string | null;
+};
+
+export type NewsCoverage = {
+  totalStored: number;
+  storedLast7Days: number;
+  dashboardOnlyCount: number;
+  discardedCount: number;
+  duplicateCount: number;
+  relevantLast72Hours: number;
+  latestPublishedAt: string | null;
 };
 
 export type DataQualityInput = {
@@ -78,6 +129,10 @@ export type DataQualityInput = {
   alertStateCount: number;
   successfulAlertCount: number;
   alertCount: number;
+  providerCoverage?: ProviderCoverage[];
+  providerHealth?: ProviderHealth[];
+  newsCoverage?: Partial<NewsCoverage>;
+  lastSuccessfulJobs?: Record<string, string | null>;
   generatedAt?: Date;
 };
 
@@ -108,7 +163,10 @@ export function buildDataQualityReport(input: DataQualityInput): DataQualityRepo
       : ((input.totalSignals - input.signalsWithoutEvaluation) / input.totalSignals) * 100;
   const skippedRate =
     input.totalEvaluations === 0 ? 0 : (input.skippedEvaluationCount / input.totalEvaluations) * 100;
-  const warnings = buildWarnings(input, assetCoverage, assetsBelowMinimumByTimeframe, skippedRate);
+  const warnings = [
+    ...buildWarnings(input, assetCoverage, assetsBelowMinimumByTimeframe, skippedRate),
+    ...buildProviderWarnings(input.providerHealth ?? [])
+  ];
 
   return {
     generatedAt: (input.generatedAt ?? new Date()).toISOString(),
@@ -136,6 +194,18 @@ export function buildDataQualityReport(input: DataQualityInput): DataQualityRepo
       successfulAlertCount: input.successfulAlertCount,
       alertCount: input.alertCount
     },
+    providerCoverage: input.providerCoverage ?? [],
+    providerHealth: input.providerHealth ?? [],
+    newsCoverage: {
+      totalStored: input.newsCoverage?.totalStored ?? 0,
+      storedLast7Days: input.newsCoverage?.storedLast7Days ?? 0,
+      dashboardOnlyCount: input.newsCoverage?.dashboardOnlyCount ?? 0,
+      discardedCount: input.newsCoverage?.discardedCount ?? 0,
+      duplicateCount: input.newsCoverage?.duplicateCount ?? 0,
+      relevantLast72Hours: input.newsCoverage?.relevantLast72Hours ?? 0,
+      latestPublishedAt: input.newsCoverage?.latestPublishedAt ?? null
+    },
+    lastSuccessfulJobs: input.lastSuccessfulJobs ?? {},
     warnings,
     recommendations: buildRecommendations(warnings, skippedRate, evaluationCoverageRate)
   };
@@ -280,6 +350,14 @@ function buildRecommendations(warnings: string[], skippedRate: number, evaluatio
     recommendations.add("Backfill candles for low-coverage assets and timeframes.");
   }
 
+  if (warnings.some((warning) => warning.includes("provider errors") || warning.includes("403"))) {
+    recommendations.add("Inspect provider job metadata before changing the Finnhub configuration.");
+  }
+
+  if (warnings.some((warning) => warning.includes("candle gaps"))) {
+    recommendations.add("Run the bounded candle gap audit.");
+  }
+
   if (evaluationCoverageRate < 80) {
     recommendations.add("Run the Paper Evaluation backfill worker.");
   }
@@ -297,6 +375,25 @@ function buildRecommendations(warnings: string[], skippedRate: number, evaluatio
   }
 
   return [...recommendations];
+}
+
+function buildProviderWarnings(providers: ProviderHealth[]) {
+  return providers.flatMap((provider) => {
+    const warnings: string[] = [];
+    if (provider.gapCount > 0) {
+      warnings.push(`${provider.provider} has ${provider.gapCount} detected candle gaps.`);
+    }
+    if (provider.providerErrorCount > 0) {
+      warnings.push(`${provider.provider} has ${provider.providerErrorCount} provider errors.`);
+    }
+    if (provider.entitlementErrorCount > 0) {
+      warnings.push(`${provider.provider} has ${provider.entitlementErrorCount} HTTP 403 entitlement errors.`);
+    }
+    if (provider.staleSeriesCount > 0) {
+      warnings.push(`${provider.provider} has ${provider.staleSeriesCount} stale candle series.`);
+    }
+    return warnings;
+  });
 }
 
 function normalizeTimeframeRecord(input: Record<string, number> | undefined) {

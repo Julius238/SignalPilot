@@ -23,6 +23,7 @@ import {
   type BotRun,
   type MarketEvent,
   type MarketRegimeSnapshot,
+  type NewsItem,
   type PublicConfig,
   type RadarEvent,
   type ScannerResponse,
@@ -206,7 +207,8 @@ export default async function DashboardPage() {
     equityRadarRun,
     scanner,
     watchlist,
-    marketRegime
+    marketRegime,
+    relevantNews
   ] = await Promise.all([
     fetchApi<{ status: string }>("/health"),
     fetchApi<PublicConfig>("/config/public"),
@@ -221,7 +223,8 @@ export default async function DashboardPage() {
     fetchApi<BotRun[]>("/bot-runs?jobName=quickEquityRadar&limit=1"),
     fetchApi<ScannerResponse>("/scanner"),
     fetchApi<WatchlistItem[]>("/watchlist?limit=200"),
-    fetchApi<MarketRegimeSnapshot | null>("/market-regime/latest")
+    fetchApi<MarketRegimeSnapshot | null>("/market-regime/latest"),
+    fetchApi<NewsItem[]>("/news?minRelevance=30&maxAgeHours=72&limit=5")
   ]);
 
   const renderedAt = new Date();
@@ -231,6 +234,7 @@ export default async function DashboardPage() {
   const marketEventList = marketEvents.data ?? [];
   const watchlistItems = watchlist.data ?? [];
   const regime = marketRegime.data;
+  const relevantNewsItems = relevantNews.data ?? [];
   const scannerSummary = scanner.data?.summary;
 
   // ── Abgeleitete Sichten ──
@@ -524,7 +528,68 @@ export default async function DashboardPage() {
         </SectionCard>
       </div>
 
-      {/* ── 5 · Radar & Signale kompakt ── */}
+      {/* ── 5 · Relevante Nachrichten ── */}
+      <div style={{ marginTop: 16 }}>
+        <SectionCard
+          title="Relevante Nachrichten"
+          subtitle="Aktuelle, automatisch bewertete Meldungen — keine Sofortmeldungen per Telegram."
+          action={
+            <Link className="section-link" href="/dashboard/news">
+              Alle Nachrichten
+            </Link>
+          }
+        >
+          {relevantNews.error ? (
+            <ErrorState
+              title="Nachrichten derzeit nicht verfügbar"
+              message={relevantNews.error}
+            />
+          ) : relevantNewsItems.length === 0 ? (
+            <EmptyState
+              title="Keine ausreichend relevante aktuelle Meldung."
+              description="Rohmeldungen und ältere Nachrichten bleiben auf der Nachrichtenseite einsehbar."
+            />
+          ) : (
+            <div className="news-feed">
+              {relevantNewsItems.slice(0, 4).map((item) => {
+                const ageHours =
+                  (renderedAt.getTime() - new Date(item.publishedAt).getTime()) /
+                  (60 * 60 * 1000);
+                return (
+                  <article className="news-card" key={item.id}>
+                    <div className="news-card-meta">
+                      <span className="symbol-chip">
+                        {(item.relatedSymbols.length > 0
+                          ? item.relatedSymbols
+                          : [item.symbol]
+                        ).join(", ")}
+                      </span>
+                      <span>Quelle: {item.source}</span>
+                      <time dateTime={item.publishedAt}>{formatDateTime(item.publishedAt)}</time>
+                      {ageHours > 24 ? <span style={{ color: "var(--warn)" }}>älter als 24 h</span> : null}
+                    </div>
+                    <h2>
+                      {item.url ? (
+                        <a href={item.url} target="_blank" rel="noopener noreferrer">
+                          {item.headline} <span aria-hidden="true">↗</span>
+                        </a>
+                      ) : (
+                        item.headline
+                      )}
+                    </h2>
+                    <div className="news-card-footer">
+                      <span className="soft-chip">Relevanz {item.relevanceScore ?? 0}/100</span>
+                      <span className="soft-chip">via {item.transportProvider}</span>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </SectionCard>
+      </div>
+
+      {/* ── 6 · Radar & Signale kompakt ── */}
       <div className="overview-lower-grid">
         <RadarOverviewCard events={radarCompact} now={renderedAt} />
         <SignalsCompactCard

@@ -78,4 +78,21 @@ describe("dashboard comprehension and responsive states", () => {
     assert.match(source, /NO_SIGNAL: "Keine besondere Auffälligkeit"/);
     assert.match(source, /signalTypeLabel\(signal\.signalType\)/);
   });
+
+  it("shows relevant news with explicit empty, error, and stale states on the overview", async () => {
+    const source = await readFile(resolve(appDir, "src/app/dashboard/page.tsx"), "utf8");
+
+    assert.match(source, /Relevante Nachrichten/);
+    assert.match(source, /Keine ausreichend relevante aktuelle Meldung/);
+    assert.match(source, /Nachrichten derzeit nicht verfügbar/);
+    assert.match(source, /älter als 24 h/);
+    assert.match(source, /minRelevance=30&maxAgeHours=72&limit=5/);
+  });
+
+  it("does not introduce a Telegram dispatch path for overview news", async () => {
+    const source = await readFile(resolve(appDir, "src/app/dashboard/page.tsx"), "utf8");
+
+    assert.doesNotMatch(source, /sendSignalAlert|sendMarketEventAlert|N8N_WEBHOOK/);
+    assert.match(source, /keine Sofortmeldungen per Telegram/);
+  });
 });

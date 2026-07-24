@@ -21,6 +21,8 @@
     "fetch:equity-candles": "tsx src/jobs/fetchEquityCandles.ts",
     "fetch:equity-news": "tsx src/jobs/fetchEquityNews.ts",
     "fetch:equity-events": "tsx src/jobs/fetchEquityEvents.ts",
+    "backfill:candles": "tsx src/jobs/backfillCandleHistory.ts",
+    "audit:candle-gaps": "tsx src/jobs/auditCandleGaps.ts",
     "calculate:market-regime": "tsx src/jobs/calculateMarketRegime.ts",
     "run:backtest": "tsx src/jobs/runBacktest.ts",
     "run:strategy-comparison": "tsx src/jobs/runStrategyComparison.ts",

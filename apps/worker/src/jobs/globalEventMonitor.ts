@@ -204,6 +204,18 @@ export async function globalEventMonitor(
         continue;
       }
 
+      if (result.kind !== "ok") {
+        errorCount += 1;
+        await writeBotLog(database, "warn", "Global Event Monitor Providerfehler", {
+          botRunId: botRun.id,
+          provider: "FINNHUB",
+          category,
+          errorKind: result.kind.toUpperCase(),
+          statusCode: result.statusCode
+        });
+        continue;
+      }
+
       fetchedNewsCount += result.items.length;
 
       const candidates = classifyGlobalNews(result.items, { feed: `finnhub-${category}` });
@@ -272,8 +284,10 @@ export async function globalEventMonitor(
     sentAlertCount = alertOutcome.sentAlertCount;
     skippedAlertCount = alertOutcome.skippedAlertCount;
 
+    const finalStatus =
+      rateLimited || errorCount > 0 ? BotRunStatus.FAILED : BotRunStatus.SUCCESS;
     const summary: GlobalEventMonitorSummary = {
-      status: BotRunStatus.SUCCESS,
+      status: finalStatus,
       enabled: settings.enabled,
       categories: settings.categories,
       fetchedNewsCount,
@@ -288,7 +302,7 @@ export async function globalEventMonitor(
     };
 
     await finishBotRun(database, botRun.id, summary);
-    await writeBotLog(database, "info", "Global Event Monitor fertig", {
+    await writeBotLog(database, finalStatus === BotRunStatus.SUCCESS ? "info" : "warn", "Global Event Monitor fertig", {
       botRunId: botRun.id,
       fetchedNewsCount,
       classifiedCandidateCount,

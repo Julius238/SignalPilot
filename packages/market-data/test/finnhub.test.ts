@@ -100,7 +100,7 @@ describe("FinnhubMarketDataAdapter", () => {
     assert.equal(result.kind, "rate_limit");
   });
 
-  it("returns forbidden for HTTP 403", async () => {
+  it("classifies HTTP 403 as a permanent entitlement error", async () => {
     const mockFetch = async () =>
       ({
         ok: false,
@@ -114,13 +114,12 @@ describe("FinnhubMarketDataAdapter", () => {
     const to = new Date("2026-01-02T00:00:00.000Z");
     const result = await adapter.fetchStockCandles("AAPL", "1h", from, to);
 
-    assert.equal(result.kind, "forbidden");
-    if (result.kind !== "forbidden") return;
+    assert.equal(result.kind, "entitlement");
+    if (result.kind !== "entitlement") return;
     assert.equal(result.statusCode, 403);
-    assert.equal(result.body, "Forbidden");
   });
 
-  it("throws for non-429 non-403 HTTP error", async () => {
+  it("classifies HTTP 500 as a temporary provider error", async () => {
     const mockFetch = async () =>
       ({
         ok: false,
@@ -133,10 +132,8 @@ describe("FinnhubMarketDataAdapter", () => {
     const from = new Date("2026-01-01T00:00:00.000Z");
     const to = new Date("2026-01-02T00:00:00.000Z");
 
-    await assert.rejects(
-      () => adapter.fetchStockCandles("AAPL", "1h", from, to),
-      /HTTP 500/
-    );
+    const result = await adapter.fetchStockCandles("AAPL", "1h", from, to);
+    assert.deepEqual(result, { kind: "temporary_error", statusCode: 500 });
   });
 
   it("returns ok candles for a successful response", async () => {

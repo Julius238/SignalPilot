@@ -1,13 +1,17 @@
 import { prisma, type PrismaClient } from "@signalpilot/database";
 
 import type { NormalizedCandle } from "./types.js";
+import { isCandleClosed } from "./candle-quality.js";
 
 export async function saveCandles(
   assetId: string,
   candles: NormalizedCandle[],
-  database: PrismaClient = prisma
+  database: PrismaClient = prisma,
+  now: Date = new Date()
 ) {
-  for (const candle of candles) {
+  const closedCandles = candles.filter((candle) => isCandleClosed(candle, now));
+
+  for (const candle of closedCandles) {
     await database.candle.upsert({
       where: {
         assetId_timeframe_openTime: {
@@ -41,4 +45,9 @@ export async function saveCandles(
       }
     });
   }
+
+  return {
+    savedCandleCount: closedCandles.length,
+    skippedOpenCandleCount: candles.length - closedCandles.length
+  };
 }

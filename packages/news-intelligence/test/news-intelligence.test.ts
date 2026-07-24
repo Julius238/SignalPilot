@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { buildNewsContextForSignal, type NewsItemInput } from "../src/index.js";
+import {
+  buildNewsContextForSignal,
+  buildNewsDedupeKey,
+  scoreNewsRelevance,
+  type NewsItemInput
+} from "../src/index.js";
 
 const baseSignal = {
   createdAt: new Date("2026-01-01T12:00:00.000Z")
@@ -145,5 +150,47 @@ describe("buildNewsContextForSignal", () => {
     });
 
     assert.ok(ctx.riskNote.length > 0);
+  });
+
+  it("keeps every relevance score on the shared 0-100 scale", () => {
+    const values = [
+      scoreNewsRelevance(newsItem({ headline: "Routine company update" }), new Date("2026-01-01T12:00:00Z")),
+      scoreNewsRelevance(newsItem({ headline: "Apple earnings guidance investigation" }), new Date("2026-01-01T12:00:00Z"))
+    ];
+    assert.ok(values.every((value) => Number.isInteger(value) && value >= 0 && value <= 100));
+  });
+
+  it("devalues stale news compared with the same fresh headline", () => {
+    const now = new Date("2026-01-10T12:00:00.000Z");
+    const fresh = scoreNewsRelevance(
+      newsItem({ headline: "Apple raises earnings guidance", publishedAt: new Date("2026-01-10T10:00:00Z") }),
+      now
+    );
+    const stale = scoreNewsRelevance(
+      newsItem({ headline: "Apple raises earnings guidance", publishedAt: new Date("2025-12-01T10:00:00Z") }),
+      now
+    );
+    assert.ok(stale < fresh);
+  });
+
+  it("does not promote broad sec, product, or analyst words without a concrete event", () => {
+    const now = new Date("2026-01-01T12:00:00Z");
+    for (const headline of [
+      "Product team shares a routine update",
+      "Analyst writes a weekly column",
+      "Technology sector remains mixed"
+    ]) {
+      assert.ok(scoreNewsRelevance(newsItem({ headline, summary: "" }), now) < 40);
+    }
+  });
+
+  it("deduplicates tracking URL variants to the same key", () => {
+    const left = buildNewsDedupeKey(
+      newsItem({ url: "https://example.com/story?utm_source=feed" })
+    );
+    const right = buildNewsDedupeKey(
+      newsItem({ url: "https://example.com/story?utm_campaign=test" })
+    );
+    assert.equal(left, right);
   });
 });

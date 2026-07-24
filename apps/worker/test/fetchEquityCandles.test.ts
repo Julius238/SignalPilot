@@ -9,8 +9,8 @@ import { fetchEquityCandles } from "../src/jobs/fetchEquityCandles.js";
 const mockCandle = {
   symbol: "AAPL",
   timeframe: "1h" as const,
-  openTime: new Date("2026-01-01T00:00:00.000Z"),
-  closeTime: new Date("2026-01-01T01:00:00.000Z"),
+  openTime: new Date(Date.now() - 2 * 60 * 60 * 1000),
+  closeTime: new Date(Date.now() - 60 * 60 * 1000),
   open: "180.5",
   high: "181.0",
   low: "179.8",
@@ -43,7 +43,12 @@ function makeMockDatabase(assets: { id: string; symbol: string; assetType: strin
       findMany: async () => assets
     },
     candle: {
+      findFirst: async () => null,
+      findMany: async () => [],
       upsert: async () => {}
+    },
+    candleDataQuality: {
+      upsert: async () => ({})
     }
   };
 
@@ -55,7 +60,11 @@ function makeMockAdapter(
     | { kind: "ok"; candles: typeof mockCandle[] }
     | { kind: "no_data" }
     | { kind: "rate_limit" }
-    | { kind: "forbidden"; statusCode: number; body: string } = {
+    | { kind: "invalid_api_key"; statusCode: number }
+    | { kind: "entitlement"; statusCode: number }
+    | { kind: "unsupported_symbol"; statusCode: number }
+    | { kind: "temporary_error"; statusCode: number | null }
+    | { kind: "permanent_error"; statusCode: number } = {
     kind: "ok",
     candles: [mockCandle]
   }
@@ -69,6 +78,7 @@ function makeMockAdapter(
 describe("fetchEquityCandles", () => {
   const originalKey = process.env.FINNHUB_API_KEY;
   const originalDelay = process.env.MARKET_DATA_REQUEST_DELAY_MS;
+  const originalRetryAttempts = process.env.PROVIDER_RETRY_MAX_ATTEMPTS;
 
   afterEach(() => {
     if (originalKey === undefined) {
@@ -81,6 +91,11 @@ describe("fetchEquityCandles", () => {
       delete process.env.MARKET_DATA_REQUEST_DELAY_MS;
     } else {
       process.env.MARKET_DATA_REQUEST_DELAY_MS = originalDelay;
+    }
+    if (originalRetryAttempts === undefined) {
+      delete process.env.PROVIDER_RETRY_MAX_ATTEMPTS;
+    } else {
+      process.env.PROVIDER_RETRY_MAX_ATTEMPTS = originalRetryAttempts;
     }
   });
 
@@ -101,6 +116,7 @@ describe("fetchEquityCandles", () => {
   it("returns a summary with savedCandleCount when assets are fetched successfully", async () => {
     process.env.FINNHUB_API_KEY = "test-key";
     process.env.MARKET_DATA_REQUEST_DELAY_MS = "0";
+    process.env.PROVIDER_RETRY_MAX_ATTEMPTS = "1";
 
     const assets = [
       { id: "asset-1", symbol: "AAPL", assetType: "STOCK" },
@@ -124,6 +140,7 @@ describe("fetchEquityCandles", () => {
   it("counts no_data results without failing the job", async () => {
     process.env.FINNHUB_API_KEY = "test-key";
     process.env.MARKET_DATA_REQUEST_DELAY_MS = "0";
+    process.env.PROVIDER_RETRY_MAX_ATTEMPTS = "1";
 
     const assets = [{ id: "asset-1", symbol: "AAPL", assetType: "STOCK" }];
     const { db } = makeMockDatabase(assets);
@@ -139,6 +156,7 @@ describe("fetchEquityCandles", () => {
   it("marks FAILED and counts rate limit hits", async () => {
     process.env.FINNHUB_API_KEY = "test-key";
     process.env.MARKET_DATA_REQUEST_DELAY_MS = "0";
+    process.env.PROVIDER_RETRY_MAX_ATTEMPTS = "1";
 
     const assets = [{ id: "asset-1", symbol: "AAPL", assetType: "STOCK" }];
     const { db } = makeMockDatabase(assets);
@@ -153,22 +171,24 @@ describe("fetchEquityCandles", () => {
   it("marks FAILED and counts forbidden hits for HTTP 403", async () => {
     process.env.FINNHUB_API_KEY = "test-key";
     process.env.MARKET_DATA_REQUEST_DELAY_MS = "0";
+    process.env.PROVIDER_RETRY_MAX_ATTEMPTS = "1";
 
     const assets = [{ id: "asset-1", symbol: "AAPL", assetType: "STOCK" }];
     const { db, botLogs } = makeMockDatabase(assets);
-    const adapter = makeMockAdapter({ kind: "forbidden", statusCode: 403, body: "Forbidden" });
+    const adapter = makeMockAdapter({ kind: "entitlement", statusCode: 403 });
 
     const summary = await fetchEquityCandles(db as never, adapter);
 
     assert.equal(summary.status, BotRunStatus.FAILED);
     assert.equal(summary.forbiddenCount, 2);
     assert.equal(summary.errorCount, 0);
-    assert.ok(botLogs.some((log) => log.data.message.includes("403")));
+    assert.ok(botLogs.some((log) => log.data.message.includes("provider failure")));
   });
 
   it("writes summary fields to the final BotRun metadata", async () => {
     process.env.FINNHUB_API_KEY = "test-key";
     process.env.MARKET_DATA_REQUEST_DELAY_MS = "0";
+    process.env.PROVIDER_RETRY_MAX_ATTEMPTS = "1";
 
     const assets = [{ id: "asset-1", symbol: "AAPL", assetType: "STOCK" }];
     const { db, botRunUpdates } = makeMockDatabase(assets);

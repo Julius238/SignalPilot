@@ -22,7 +22,7 @@ const mockNewsPayload = [
 function makeMockDatabase(options: {
   assets?: { id: string; symbol: string; assetType: string }[];
   newsItemFindUnique?: () => Promise<null | { id: string }>;
-  newsItemFindFirst?: () => Promise<null | { id: string }>;
+  newsItemFindFirst?: () => Promise<null | { id: string; category: string | null }>;
 } = {}) {
   const assets = options.assets ?? [];
   const newsItemFindUnique = options.newsItemFindUnique ?? (async () => null);
@@ -46,6 +46,7 @@ function makeMockDatabase(options: {
     newsItem: {
       findUnique: newsItemFindUnique,
       findFirst: newsItemFindFirst,
+      update: async () => ({ id: "news-existing" }),
       create: async (op: unknown) => {
         createdNewsItems.push(op);
         return { id: "news-1" };
@@ -60,6 +61,7 @@ describe("fetchEquityNews", () => {
   const savedKey = process.env.FINNHUB_API_KEY;
   const savedDelay = process.env.MARKET_DATA_REQUEST_DELAY_MS;
   const savedFetch = globalThis.fetch;
+  const savedRetryAttempts = process.env.PROVIDER_RETRY_MAX_ATTEMPTS;
 
   afterEach(() => {
     if (savedKey === undefined) {
@@ -75,11 +77,17 @@ describe("fetchEquityNews", () => {
     }
 
     globalThis.fetch = savedFetch;
+    if (savedRetryAttempts === undefined) {
+      delete process.env.PROVIDER_RETRY_MAX_ATTEMPTS;
+    } else {
+      process.env.PROVIDER_RETRY_MAX_ATTEMPTS = savedRetryAttempts;
+    }
   });
 
   it("returns FAILED cleanly when FINNHUB_API_KEY is missing", async () => {
     delete process.env.FINNHUB_API_KEY;
     process.env.MARKET_DATA_REQUEST_DELAY_MS = "0";
+    process.env.PROVIDER_RETRY_MAX_ATTEMPTS = "1";
 
     const { db } = makeMockDatabase();
     const summary = await fetchEquityNews(db as never);
@@ -92,6 +100,7 @@ describe("fetchEquityNews", () => {
   it("saves news items and counts correctly", async () => {
     process.env.FINNHUB_API_KEY = "test-key";
     process.env.MARKET_DATA_REQUEST_DELAY_MS = "0";
+    process.env.PROVIDER_RETRY_MAX_ATTEMPTS = "1";
     globalThis.fetch = async () =>
       ({ ok: true, status: 200, json: async () => mockNewsPayload }) as Response;
 
@@ -117,7 +126,7 @@ describe("fetchEquityNews", () => {
     const assets = [{ id: "asset-1", symbol: "AAPL", assetType: AssetType.STOCK }];
     const { db } = makeMockDatabase({
       assets,
-      newsItemFindUnique: async () => ({ id: "existing-news-1" })
+      newsItemFindFirst: async () => ({ id: "existing-news-1", category: "company news" })
     });
 
     const summary = await fetchEquityNews(db as never);
@@ -129,6 +138,7 @@ describe("fetchEquityNews", () => {
   it("counts noNewsCount when Finnhub returns empty array", async () => {
     process.env.FINNHUB_API_KEY = "test-key";
     process.env.MARKET_DATA_REQUEST_DELAY_MS = "0";
+    process.env.PROVIDER_RETRY_MAX_ATTEMPTS = "1";
     globalThis.fetch = async () =>
       ({ ok: true, status: 200, json: async () => [] }) as Response;
 
@@ -144,6 +154,7 @@ describe("fetchEquityNews", () => {
   it("counts rateLimitCount and marks FAILED on HTTP 429", async () => {
     process.env.FINNHUB_API_KEY = "test-key";
     process.env.MARKET_DATA_REQUEST_DELAY_MS = "0";
+    process.env.PROVIDER_RETRY_MAX_ATTEMPTS = "1";
     globalThis.fetch = async () =>
       ({ ok: false, status: 429, json: async () => ({}) }) as Response;
 
@@ -154,5 +165,35 @@ describe("fetchEquityNews", () => {
 
     assert.equal(summary.rateLimitCount, 1);
     assert.equal(summary.status, BotRunStatus.FAILED);
+  });
+
+  it("creates asset-scoped links for every normalized related symbol", async () => {
+    process.env.FINNHUB_API_KEY = "test-key";
+    process.env.MARKET_DATA_REQUEST_DELAY_MS = "0";
+    process.env.PROVIDER_RETRY_MAX_ATTEMPTS = "1";
+    globalThis.fetch = async () =>
+      ({
+        ok: true,
+        status: 200,
+        json: async () => [{ ...mockNewsPayload[0], related: "AAPL, MSFT" }]
+      }) as Response;
+
+    const assets = [
+      { id: "asset-aapl", symbol: "AAPL", assetType: AssetType.STOCK },
+      { id: "asset-msft", symbol: "MSFT", assetType: AssetType.STOCK }
+    ];
+    const { db, createdNewsItems } = makeMockDatabase({ assets });
+
+    await fetchEquityNews(db as never);
+
+    const created = createdNewsItems.map(
+      (operation) => (operation as { data: Record<string, unknown> }).data
+    );
+    assert.deepEqual(
+      [...new Set(created.map((item) => item.symbol))].sort(),
+      ["AAPL", "MSFT"]
+    );
+    assert.ok(created.every((item) => item.transportProvider === "FINNHUB"));
+    assert.ok(created.every((item) => (item.relevanceScore as number) >= 0 && (item.relevanceScore as number) <= 100));
   });
 });

@@ -1,7 +1,7 @@
 export type NewsContextSentiment = "POSITIVE" | "NEGATIVE" | "NEUTRAL" | "MIXED" | "UNKNOWN";
 
 export type NewsItemInput = {
-  id: string;
+  id?: string;
   symbol: string;
   headline: string;
   summary?: string | null;
@@ -39,15 +39,38 @@ export type BuildNewsContextInput = {
   recentWindowHours?: number;
 };
 
-const HIGH_IMPACT_KEYWORDS = [
-  "earnings", "guidance", "revenue", "profit", "loss", "lawsuit", "investigation",
-  "sec", "fda", "merger", "acquisition", "downgrade", "upgrade", "analyst",
-  "dividend", "split", "layoffs", "product", "partnership"
+const HIGH_IMPACT_PATTERNS = [
+  /\bearnings\b/i,
+  /\bguidance\b/i,
+  /\brevenue\b/i,
+  /\bprofit\b/i,
+  /\bloss(?:es)?\b/i,
+  /\blawsuit\b/i,
+  /\binvestigation\b/i,
+  /\bfda\b/i,
+  /\bmerger\b/i,
+  /\bacquisition\b/i,
+  /\bdowngrade[ds]?\b/i,
+  /\bupgrade[ds]?\b/i,
+  /\banalyst (?:upgrade|downgrade|rating|target)\b/i,
+  /\bdividend\b/i,
+  /\bstock split\b/i,
+  /\blayoffs?\b/i,
+  /\bproduct (?:launch|recall|approval)\b/i,
+  /\bpartnership\b/i
 ];
 
-const CRITICAL_KEYWORDS = [
-  "earnings", "guidance", "revenue", "sec", "fda", "merger", "acquisition",
-  "lawsuit", "investigation"
+const CRITICAL_PATTERNS = [
+  /\bearnings\b/i,
+  /\bguidance\b/i,
+  /\brevenue\b/i,
+  /\bsecurities and exchange commission\b/i,
+  /\bsec (?:filing|investigation|probe|charges?)\b/i,
+  /\bfda (?:approval|rejection|warning)\b/i,
+  /\bmerger\b/i,
+  /\bacquisition\b/i,
+  /\blawsuit\b/i,
+  /\binvestigation\b/i
 ];
 
 const POSITIVE_KEYWORDS = [
@@ -83,8 +106,8 @@ export function buildNewsContextForSignal(input: BuildNewsContextInput): NewsCon
   const scored = recentNews
     .map((item) => ({
       item,
-      score: scoreRelevance(item),
-      sentiment: classifySentiment(item)
+      score: scoreNewsRelevance(item, now),
+      sentiment: classifyNewsSentiment(item)
     }))
     .sort((a, b) => b.score - a.score);
 
@@ -126,20 +149,25 @@ function emptyContext(): NewsContext {
   };
 }
 
-function scoreRelevance(item: NewsItemInput): number {
-  const text = `${item.headline} ${item.summary ?? ""}`.toLowerCase();
-  let score = 10;
+export function scoreNewsRelevance(item: NewsItemInput, now: Date = new Date()): number {
+  const text = `${item.headline} ${item.summary ?? ""}`;
+  let score = 20;
 
-  if (CRITICAL_KEYWORDS.some((kw) => text.includes(kw))) {
-    score += 70;
-  } else if (HIGH_IMPACT_KEYWORDS.some((kw) => text.includes(kw))) {
-    score += 20;
+  if (CRITICAL_PATTERNS.some((pattern) => pattern.test(text))) {
+    score += 65;
+  } else if (HIGH_IMPACT_PATTERNS.some((pattern) => pattern.test(text))) {
+    score += 35;
   }
 
-  return Math.min(score, 100);
+  const publishedAt = toDate(item.publishedAt);
+  const ageHours = Math.max(0, now.getTime() - publishedAt.getTime()) / (60 * 60 * 1000);
+  const ageFactor =
+    ageHours <= 6 ? 1 : ageHours <= 24 ? 0.9 : ageHours <= 72 ? 0.75 : ageHours <= 168 ? 0.5 : 0.2;
+
+  return clampScore(score * ageFactor);
 }
 
-function classifySentiment(item: NewsItemInput): NewsContextSentiment {
+export function classifyNewsSentiment(item: NewsItemInput): NewsContextSentiment {
   const text = `${item.headline} ${item.summary ?? ""}`.toLowerCase();
   const positive = POSITIVE_KEYWORDS.filter((kw) => text.includes(kw)).length;
   const negative = NEGATIVE_KEYWORDS.filter((kw) => text.includes(kw)).length;
@@ -148,6 +176,45 @@ function classifySentiment(item: NewsItemInput): NewsContextSentiment {
   if (positive > 0) return "POSITIVE";
   if (negative > 0) return "NEGATIVE";
   return "NEUTRAL";
+}
+
+export function normalizeNewsUrl(value: string | null | undefined): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    url.hash = "";
+    for (const key of [...url.searchParams.keys()]) {
+      if (/^(utm_|fbclid$|gclid$)/i.test(key)) {
+        url.searchParams.delete(key);
+      }
+    }
+    url.pathname = url.pathname.replace(/\/+$/, "") || "/";
+    return url.toString();
+  } catch {
+    return value.trim() || null;
+  }
+}
+
+export function buildNewsDedupeKey(item: {
+  externalId?: string | null;
+  url?: string | null;
+  headline: string;
+  source: string;
+  publishedAt: Date | string;
+}): string {
+  const normalizedUrl = normalizeNewsUrl(item.url);
+  if (normalizedUrl) return `url:${normalizedUrl}`;
+
+  const headline = item.headline
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+  const source = item.source.toLowerCase().replace(/\s+/g, " ").trim();
+  const publishedAt = toDate(item.publishedAt);
+  publishedAt.setUTCMinutes(0, 0, 0);
+  const external = item.externalId ? `:${item.externalId}` : "";
+  return `content:${headline}:${source}:${publishedAt.toISOString()}${external}`;
 }
 
 function computeRelevanceScore(
@@ -212,4 +279,8 @@ function buildSourceNote(sources: string[]): string {
 
 function toDate(value: Date | string): Date {
   return value instanceof Date ? value : new Date(value);
+}
+
+function clampScore(score: number) {
+  return Math.max(0, Math.min(100, Math.round(score)));
 }

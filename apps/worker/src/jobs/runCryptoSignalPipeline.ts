@@ -135,8 +135,17 @@ export async function runCryptoSignalPipeline(
     }
 
     const finishedAt = new Date();
+    const finalStatus = [
+      fetchSummary,
+      marketRegimeSummary,
+      analyzeSummary,
+      createPaperEvaluationsSummary,
+      evaluatePaperSignalsSummary
+    ].some((child) => child?.status === BotRunStatus.FAILED)
+      ? BotRunStatus.FAILED
+      : BotRunStatus.SUCCESS;
     const summary = buildPipelineSummary({
-      status: BotRunStatus.SUCCESS,
+      status: finalStatus,
       startedAt,
       finishedAt,
       paperEvaluationEnabled,
@@ -153,16 +162,20 @@ export async function runCryptoSignalPipeline(
         id: botRun.id
       },
       data: {
-        status: BotRunStatus.SUCCESS,
+        status: finalStatus,
         finishedAt,
         metadataJson: summary as Prisma.InputJsonObject
       }
     });
 
-    await writeBotLog(database, "info", "Pipeline erfolgreich beendet", {
-      botRunId: botRun.id,
-      ...summary
-    });
+    await writeBotLog(
+      database,
+      finalStatus === BotRunStatus.SUCCESS ? "info" : "warn",
+      finalStatus === BotRunStatus.SUCCESS
+        ? "Pipeline erfolgreich beendet"
+        : "Pipeline mit Providerfehlern beendet",
+      { botRunId: botRun.id, ...summary }
+    );
 
     return summary;
   } catch (error) {

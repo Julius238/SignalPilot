@@ -335,14 +335,14 @@ describe("globalEventMonitor", () => {
     );
   });
 
-  it("marks the summary rate limited without failing the run", async () => {
+  it("marks the summary and BotRun failed when the provider is rate limited", async () => {
     process.env.GLOBAL_EVENT_MONITOR_ENABLED = "true";
     const { adapter } = createAdapter({ kind: "rate_limit" });
     const state = createDatabaseState();
 
     const summary = await globalEventMonitor(state.database as never, adapter as never);
 
-    assert.equal(summary.status, BotRunStatus.SUCCESS);
+    assert.equal(summary.status, BotRunStatus.FAILED);
     assert.equal(summary.rateLimited, true);
     assert.equal(summary.newEventCount, 0);
   });

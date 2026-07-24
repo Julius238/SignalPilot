@@ -158,8 +158,19 @@ export async function runEquitySignalPipeline(
     }
 
     const finishedAt = new Date();
+    const finalStatus = [
+      fetchSummary,
+      fetchNewsSummary,
+      fetchEventsSummary,
+      marketRegimeSummary,
+      analyzeSummary,
+      createPaperEvaluationsSummary,
+      evaluatePaperSignalsSummary
+    ].some((child) => child?.status === BotRunStatus.FAILED)
+      ? BotRunStatus.FAILED
+      : BotRunStatus.SUCCESS;
     const summary = buildPipelineSummary({
-      status: BotRunStatus.SUCCESS,
+      status: finalStatus,
       startedAt,
       finishedAt,
       paperEvaluationEnabled,
@@ -177,13 +188,20 @@ export async function runEquitySignalPipeline(
 
     await database.botRun.update({
       where: { id: botRun.id },
-      data: { status: BotRunStatus.SUCCESS, finishedAt, metadataJson: summary as Prisma.InputJsonObject }
+      data: { status: finalStatus, finishedAt, metadataJson: summary as Prisma.InputJsonObject }
     });
 
-    await writeBotLog(database, "info", "Equity Pipeline erfolgreich beendet", {
+    await writeBotLog(
+      database,
+      finalStatus === BotRunStatus.SUCCESS ? "info" : "warn",
+      finalStatus === BotRunStatus.SUCCESS
+        ? "Equity Pipeline erfolgreich beendet"
+        : "Equity Pipeline mit Providerfehlern beendet",
+      {
       botRunId: botRun.id,
       ...summary
-    });
+      }
+    );
 
     return summary;
   } catch (error) {

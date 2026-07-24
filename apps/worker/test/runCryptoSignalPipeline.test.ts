@@ -118,6 +118,33 @@ describe("runCryptoSignalPipeline", () => {
     assert.equal(botRunUpdates.at(-1)?.data.status, BotRunStatus.FAILED);
     assert.ok(botLogs.some((log) => log.data.message === "Pipeline Fehler"));
   });
+
+  it("does not report full success when a child provider job returns FAILED", async () => {
+    const botRunUpdates: Array<{ data: { status: BotRunStatus; metadataJson?: unknown } }> = [];
+    const botLogs: Array<{ data: { message: string; metadataJson?: unknown } }> = [];
+    const database = createPipelineDatabase(botRunUpdates, botLogs);
+
+    const summary = await runCryptoSignalPipeline(database as never, {
+      fetchCryptoCandles: async () =>
+        ({
+          status: BotRunStatus.FAILED,
+          assetCount: 1,
+          timeframeCount: 3,
+          savedCandleCount: 0,
+          errorCount: 1
+        }) as never,
+      analyzeCryptoSignals: async () =>
+        ({ status: BotRunStatus.SUCCESS, analyzedCount: 0, savedSignalCount: 0 }) as never,
+      createPaperEvaluationsForSignals: async () =>
+        ({ status: BotRunStatus.SUCCESS }) as never,
+      evaluatePaperSignals: async () =>
+        ({ status: BotRunStatus.SUCCESS }) as never
+    });
+
+    assert.equal(summary.status, BotRunStatus.FAILED);
+    assert.equal(botRunUpdates.at(-1)?.data.status, BotRunStatus.FAILED);
+    assert.ok(botLogs.some((log) => log.data.message.includes("Providerfehlern")));
+  });
 });
 
 function createPipelineDatabase(

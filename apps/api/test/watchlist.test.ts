@@ -577,6 +577,14 @@ function createDatabase(state: {
       }
     },
     botRun: {
+      findFirst: async () => null,
+      findMany: async () => []
+    },
+    candleDataQuality: {
+      findMany: async () => []
+    },
+    newsItem: {
+      count: async () => 0,
       findFirst: async () => null
     },
     marketRegimeSnapshot: {

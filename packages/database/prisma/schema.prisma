@@ -166,25 +166,26 @@ enum StrategyComparisonStatus {
 }
 
 model Asset {
-  id            String          @id @default(cuid())
-  symbol        String
-  name          String
-  assetType     AssetType
-  exchange      String
-  baseCurrency  String?
-  quoteCurrency String?
-  isActive      Boolean         @default(true)
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
-  candles       Candle[]
-  signals       Signal[]
-  paperOrders   PaperOrder[]
-  positions     PaperPosition[]
-  watchlistItem WatchlistItem?
-  newsItems     NewsItem[]
-  events        Event[]
-  backtestSignals BacktestSignal[]
-  radarEvents   RadarEvent[]
+  id                String              @id @default(cuid())
+  symbol            String
+  name              String
+  assetType         AssetType
+  exchange          String
+  baseCurrency      String?
+  quoteCurrency     String?
+  isActive          Boolean             @default(true)
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  candles           Candle[]
+  signals           Signal[]
+  paperOrders       PaperOrder[]
+  positions         PaperPosition[]
+  watchlistItem     WatchlistItem?
+  newsItems         NewsItem[]
+  events            Event[]
+  backtestSignals   BacktestSignal[]
+  radarEvents       RadarEvent[]
+  candleDataQuality CandleDataQuality[]
 
   @@unique([symbol, exchange, assetType])
   @@index([symbol])
@@ -229,8 +230,43 @@ model Candle {
   @@index([source])
 }
 
+model CandleDataQuality {
+  id                    String    @id @default(cuid())
+  assetId               String
+  provider              String
+  timeframe             String
+  oldestCandle          DateTime?
+  latestClosedCandle    DateTime?
+  candleCount           Int       @default(0)
+  expectedCandleCount   Int       @default(0)
+  gapCount              Int       @default(0)
+  missingCandleCount    Int       @default(0)
+  latestDataAgeSeconds  Int?
+  providerErrorCount    Int       @default(0)
+  rateLimitCount        Int       @default(0)
+  entitlementErrorCount Int       @default(0)
+  noDataCount           Int       @default(0)
+  lastSuccessfulFetchAt DateTime?
+  lastAuditAt           DateTime?
+  lastErrorKind         String?
+  lastErrorAt           DateTime?
+  backfillStart         DateTime?
+  backfillEnd           DateTime?
+  backfillCursor        DateTime?
+  backfillStatus        String?
+  metadataJson          Json?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  asset                 Asset     @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@unique([assetId, provider, timeframe])
+  @@index([provider, timeframe])
+  @@index([lastAuditAt])
+  @@index([lastErrorKind, lastErrorAt])
+}
+
 model Signal {
-  id              String          @id @default(cuid())
+  id              String                 @id @default(cuid())
   assetId         String
   symbol          String
   timeframe       String
@@ -248,8 +284,8 @@ model Signal {
   socialScore     Float
   eventScore      Float
   riskScore       Float
-  createdAt       DateTime        @default(now())
-  asset           Asset           @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  createdAt       DateTime               @default(now())
+  asset           Asset                  @relation(fields: [assetId], references: [id], onDelete: Cascade)
   output          SignalOutput?
   alerts          Alert[]
   paperOrders     PaperOrder[]
@@ -313,21 +349,21 @@ model MarketRegimeSnapshot {
 }
 
 model BacktestRun {
-  id           String            @id @default(cuid())
-  name         String
-  assetType    AssetType?
-  symbols      Json?
-  timeframes   Json
-  from         DateTime
-  to           DateTime
-  status       BacktestRunStatus
-  configJson   Json
-  summaryJson  Json?
-  startedAt    DateTime          @default(now())
-  finishedAt   DateTime?
-  createdAt    DateTime          @default(now())
-  updatedAt    DateTime          @updatedAt
-  signals      BacktestSignal[]
+  id              String                   @id @default(cuid())
+  name            String
+  assetType       AssetType?
+  symbols         Json?
+  timeframes      Json
+  from            DateTime
+  to              DateTime
+  status          BacktestRunStatus
+  configJson      Json
+  summaryJson     Json?
+  startedAt       DateTime                 @default(now())
+  finishedAt      DateTime?
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
+  signals         BacktestSignal[]
   strategyResults StrategyBacktestResult[]
 
   @@index([status])
@@ -369,25 +405,25 @@ model StrategyComparisonRun {
 }
 
 model StrategyBacktestResult {
-  id               String                @id @default(cuid())
-  comparisonRunId  String
-  comparisonRun    StrategyComparisonRun @relation(fields: [comparisonRunId], references: [id], onDelete: Cascade)
-  strategyConfigId String
-  strategyConfig   StrategyConfig        @relation(fields: [strategyConfigId], references: [id], onDelete: Cascade)
-  backtestRunId    String?
-  backtestRun      BacktestRun?          @relation(fields: [backtestRunId], references: [id], onDelete: SetNull)
-  totalSignals     Int
-  evaluatedCount   Int
-  winRate          Float?
-  avgReturnAfter1d Float?
+  id                 String                @id @default(cuid())
+  comparisonRunId    String
+  comparisonRun      StrategyComparisonRun @relation(fields: [comparisonRunId], references: [id], onDelete: Cascade)
+  strategyConfigId   String
+  strategyConfig     StrategyConfig        @relation(fields: [strategyConfigId], references: [id], onDelete: Cascade)
+  backtestRunId      String?
+  backtestRun        BacktestRun?          @relation(fields: [backtestRunId], references: [id], onDelete: SetNull)
+  totalSignals       Int
+  evaluatedCount     Int
+  winRate            Float?
+  avgReturnAfter1d   Float?
   targetReachedCount Int
-  invalidatedCount Int
-  positiveCount    Int
-  negativeCount    Int
-  neutralCount     Int
-  summaryJson      Json
-  rank             Int?
-  createdAt        DateTime              @default(now())
+  invalidatedCount   Int
+  positiveCount      Int
+  negativeCount      Int
+  neutralCount       Int
+  summaryJson        Json
+  rank               Int?
+  createdAt          DateTime              @default(now())
 
   @@index([comparisonRunId])
   @@index([strategyConfigId])
@@ -436,28 +472,34 @@ model BacktestSignal {
 }
 
 model NewsItem {
-  id             String   @id @default(cuid())
-  assetId        String?
-  symbol         String
-  source         String
-  headline       String
-  summary        String?
-  url            String?  @unique
-  imageUrl       String?
-  publishedAt    DateTime
-  category       String?
-  relatedSymbols Json?
-  sentiment      String?
-  relevanceScore Float?
-  rawJson        Json
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-  asset          Asset?   @relation(fields: [assetId], references: [id], onDelete: SetNull)
+  id                String   @id @default(cuid())
+  assetId           String?
+  symbol            String
+  source            String
+  headline          String
+  summary           String?
+  url               String?
+  imageUrl          String?
+  publishedAt       DateTime
+  category          String?
+  relatedSymbols    Json?
+  sentiment         String?
+  relevanceScore    Float?
+  dedupeKey         String?
+  transportProvider String   @default("UNKNOWN")
+  dashboardOnly     Boolean  @default(false)
+  rawJson           Json
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  asset             Asset?   @relation(fields: [assetId], references: [id], onDelete: SetNull)
 
+  @@unique([assetId, dedupeKey])
   @@index([assetId])
   @@index([symbol])
   @@index([source])
   @@index([publishedAt])
+  @@index([transportProvider, publishedAt])
+  @@index([relevanceScore, publishedAt])
 }
 
 model Event {
@@ -584,40 +626,40 @@ model AlertState {
 }
 
 model PaperSignalEvaluation {
-  id                  String                  @id @default(cuid())
-  signalId            String                  @unique
-  signal              Signal                  @relation(fields: [signalId], references: [id], onDelete: Cascade)
-  assetId             String
-  symbol              String
-  timeframe           String
-  direction           SignalDirection
-  status              SignalStatus
-  signalType          SignalType
-  score               Float
-  riskLevel           RiskLevel
-  entryPrice          Decimal                 @db.Decimal(30, 12)
-  invalidationPrice   Decimal?                @db.Decimal(30, 12)
-  targetPrice         Decimal?                @db.Decimal(30, 12)
-  evaluationKind      PaperEvaluationKind     @default(SKIPPED)
+  id                    String                     @id @default(cuid())
+  signalId              String                     @unique
+  signal                Signal                     @relation(fields: [signalId], references: [id], onDelete: Cascade)
+  assetId               String
+  symbol                String
+  timeframe             String
+  direction             SignalDirection
+  status                SignalStatus
+  signalType            SignalType
+  score                 Float
+  riskLevel             RiskLevel
+  entryPrice            Decimal                    @db.Decimal(30, 12)
+  invalidationPrice     Decimal?                   @db.Decimal(30, 12)
+  targetPrice           Decimal?                   @db.Decimal(30, 12)
+  evaluationKind        PaperEvaluationKind        @default(SKIPPED)
   expectedMoveDirection PaperExpectedMoveDirection @default(NONE)
-  evaluationStatus    PaperEvaluationStatus   @default(OPEN)
-  skipReason          String?
-  openedAt            DateTime                @default(now())
-  evaluatedAt         DateTime?
-  priceAfter1h        Decimal?                @db.Decimal(30, 12)
-  priceAfter4h        Decimal?                @db.Decimal(30, 12)
-  priceAfter1d        Decimal?                @db.Decimal(30, 12)
-  priceAfter3d        Decimal?                @db.Decimal(30, 12)
-  returnAfter1h       Float?
-  returnAfter4h       Float?
-  returnAfter1d       Float?
-  returnAfter3d       Float?
-  maxFavorableMove    Float?
-  maxAdverseMove      Float?
-  outcome             PaperEvaluationOutcome?
-  notes               String?
-  createdAt           DateTime                @default(now())
-  updatedAt           DateTime                @updatedAt
+  evaluationStatus      PaperEvaluationStatus      @default(OPEN)
+  skipReason            String?
+  openedAt              DateTime                   @default(now())
+  evaluatedAt           DateTime?
+  priceAfter1h          Decimal?                   @db.Decimal(30, 12)
+  priceAfter4h          Decimal?                   @db.Decimal(30, 12)
+  priceAfter1d          Decimal?                   @db.Decimal(30, 12)
+  priceAfter3d          Decimal?                   @db.Decimal(30, 12)
+  returnAfter1h         Float?
+  returnAfter4h         Float?
+  returnAfter1d         Float?
+  returnAfter3d         Float?
+  maxFavorableMove      Float?
+  maxAdverseMove        Float?
+  outcome               PaperEvaluationOutcome?
+  notes                 String?
+  createdAt             DateTime                   @default(now())
+  updatedAt             DateTime                   @updatedAt
 
   @@index([symbol])
   @@index([timeframe])

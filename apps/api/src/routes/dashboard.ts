@@ -944,6 +944,8 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
     const source = parseOptionalString(query.source);
     const from = parseOptionalIsoDate(query.from);
     const to = parseOptionalIsoDate(query.to);
+    const minRelevance = parseOptionalInteger(query.minRelevance, "minRelevance", reply);
+    const maxAgeHours = parseOptionalInteger(query.maxAgeHours, "maxAgeHours", reply);
     const limit = parseLimit(query.limit, 100, 500, reply);
 
     if (reply.sent) {
@@ -954,9 +956,19 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
       where: {
         symbol,
         source: source ?? undefined,
-        publishedAt: from || to
+        relevanceScore:
+          minRelevance === undefined
+            ? undefined
+            : {
+                gte: Math.max(0, Math.min(100, minRelevance))
+              },
+        publishedAt: from || to || maxAgeHours !== undefined
           ? {
-              gte: from ?? undefined,
+              gte:
+                from ??
+                (maxAgeHours === undefined
+                  ? undefined
+                  : new Date(Date.now() - Math.max(1, maxAgeHours) * 60 * 60 * 1000)),
               lte: to ?? undefined
             }
           : undefined
@@ -1882,8 +1894,11 @@ function toNewsItem(item: {
   imageUrl: string | null;
   publishedAt: Date;
   category: string | null;
+  relatedSymbols: Prisma.JsonValue | null;
   sentiment: string | null;
   relevanceScore: number | null;
+  transportProvider: string;
+  dashboardOnly: boolean;
   createdAt: Date;
   updatedAt: Date;
 }) {
@@ -1898,8 +1913,11 @@ function toNewsItem(item: {
     imageUrl: item.imageUrl,
     publishedAt: item.publishedAt,
     category: item.category,
+    relatedSymbols: jsonStringArray(item.relatedSymbols),
     sentiment: item.sentiment,
     relevanceScore: item.relevanceScore,
+    transportProvider: item.transportProvider,
+    dashboardOnly: item.dashboardOnly,
     createdAt: item.createdAt,
     updatedAt: item.updatedAt
   };
@@ -2567,12 +2585,20 @@ async function loadDataQualityReport(input: { assetType?: AssetType; symbol?: st
     signalsWithoutEvaluation,
     totalEvaluations,
     latestMarketRegimeSnapshot,
-    latestBacktestRun
+    latestBacktestRun,
+    providerQualityRows,
+    totalStoredNews,
+    storedNewsLast7Days,
+    dashboardOnlyNews,
+    relevantNewsLast72Hours,
+    latestNews,
+    providerJobRuns
   ] = await Promise.all([
     database.candle.groupBy({
       by: ["assetId", "timeframe"],
-      where: assetWhere,
+      where: { ...assetWhere, closeTime: { lte: now } },
       _count: { _all: true },
+      _min: { openTime: true },
       _max: { closeTime: true }
     }),
     database.signal.groupBy({
@@ -2658,7 +2684,47 @@ async function loadDataQualityReport(input: { assetType?: AssetType; symbol?: st
     }),
     database.paperSignalEvaluation.count({ where: assetWhere }),
     database.marketRegimeSnapshot.findFirst({ orderBy: { generatedAt: "desc" } }),
-    database.backtestRun.findFirst({ orderBy: { startedAt: "desc" } })
+    database.backtestRun.findFirst({ orderBy: { startedAt: "desc" } }),
+    database.candleDataQuality.findMany({
+      where: assetWhere,
+      orderBy: [{ provider: "asc" }, { timeframe: "asc" }],
+      include: { asset: { select: { symbol: true } } }
+    }),
+    database.newsItem.count({ where: assetWhere }),
+    database.newsItem.count({
+      where: {
+        ...assetWhere,
+        publishedAt: { gte: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000) }
+      }
+    }),
+    database.newsItem.count({ where: { ...assetWhere, dashboardOnly: true } }),
+    database.newsItem.count({
+      where: {
+        ...assetWhere,
+        publishedAt: { gte: new Date(now.getTime() - 72 * 60 * 60 * 1000) },
+        relevanceScore: { gte: 30 }
+      }
+    }),
+    database.newsItem.findFirst({
+      where: assetWhere,
+      orderBy: { publishedAt: "desc" },
+      select: { publishedAt: true }
+    }),
+    database.botRun.findMany({
+      where: {
+        jobName: {
+          in: [
+            "fetchCryptoCandles",
+            "fetchEquityCandles",
+            "backfillCandleHistory",
+            "auditCandleGaps",
+            "fetchEquityNews"
+          ]
+        }
+      },
+      orderBy: { startedAt: "desc" },
+      take: 200
+    })
   ]);
 
   const signalCountsByAsset = new Map<string, number>();
@@ -2774,7 +2840,51 @@ async function loadDataQualityReport(input: { assetType?: AssetType; symbol?: st
     skippedByReason,
     alertStateCount: alertStates.length,
     successfulAlertCount: alerts.filter((alert) => alert.status === AlertStatus.SENT).length,
-    alertCount: alerts.length
+    alertCount: alerts.length,
+    providerCoverage: providerQualityRows.map((row) => ({
+      assetId: row.assetId,
+      symbol: row.asset.symbol,
+      provider: row.provider,
+      timeframe: row.timeframe,
+      oldestCandle: row.oldestCandle?.toISOString() ?? null,
+      latestClosedCandle: row.latestClosedCandle?.toISOString() ?? null,
+      candleCount: row.candleCount,
+      expectedCandleCount: row.expectedCandleCount,
+      gapCount: row.gapCount,
+      missingCandleCount: row.missingCandleCount,
+      latestDataAgeSeconds: row.latestDataAgeSeconds,
+      providerErrorCount: row.providerErrorCount,
+      rateLimitCount: row.rateLimitCount,
+      entitlementErrorCount: row.entitlementErrorCount,
+      noDataCount: row.noDataCount,
+      lastSuccessfulFetchAt: row.lastSuccessfulFetchAt?.toISOString() ?? null,
+      lastAuditAt: row.lastAuditAt?.toISOString() ?? null,
+      lastErrorKind: row.lastErrorKind
+    })),
+    providerHealth: buildProviderHealth(providerQualityRows),
+    newsCoverage: {
+      totalStored: totalStoredNews,
+      storedLast7Days: storedNewsLast7Days,
+      dashboardOnlyCount: dashboardOnlyNews,
+      discardedCount: sumRunMetadata(providerJobRuns, "discardedNewsCount", 7, now),
+      duplicateCount: sumRunMetadata(providerJobRuns, "duplicateCount", 7, now),
+      relevantLast72Hours: relevantNewsLast72Hours,
+      latestPublishedAt: latestNews?.publishedAt.toISOString() ?? null
+    },
+    lastSuccessfulJobs: Object.fromEntries(
+      [
+        "fetchCryptoCandles",
+        "fetchEquityCandles",
+        "backfillCandleHistory",
+        "auditCandleGaps",
+        "fetchEquityNews"
+      ].map((jobName) => [
+        jobName,
+        providerJobRuns.find(
+          (run) => run.jobName === jobName && run.status === BotRunStatus.SUCCESS
+        )?.finishedAt?.toISOString() ?? null
+      ])
+    )
   });
   const marketRegimeWarnings = buildMarketRegimeCoverageWarnings(
     assets,
@@ -2788,6 +2898,103 @@ async function loadDataQualityReport(input: { assetType?: AssetType; symbol?: st
     ...report,
     warnings: [...report.warnings, ...marketRegimeWarnings, ...backtestWarnings]
   };
+}
+
+function buildProviderHealth(
+  rows: Array<{
+    provider: string;
+    timeframe: string;
+    candleCount: number;
+    expectedCandleCount: number;
+    gapCount: number;
+    missingCandleCount: number;
+    latestDataAgeSeconds: number | null;
+    providerErrorCount: number;
+    rateLimitCount: number;
+    entitlementErrorCount: number;
+    noDataCount: number;
+    lastSuccessfulFetchAt: Date | null;
+  }>
+) {
+  const grouped = new Map<string, (typeof rows)[number][]>();
+  for (const row of rows) {
+    grouped.set(row.provider, [...(grouped.get(row.provider) ?? []), row]);
+  }
+
+  return [...grouped.entries()].map(([provider, providerRows]) => {
+    const candleCount = sumNumbers(providerRows.map((row) => row.candleCount));
+    const expectedCandleCount = sumNumbers(providerRows.map((row) => row.expectedCandleCount));
+    const latestSuccess = providerRows
+      .map((row) => row.lastSuccessfulFetchAt)
+      .filter((value): value is Date => value !== null)
+      .sort((left, right) => right.getTime() - left.getTime())[0];
+
+    return {
+      provider,
+      seriesCount: providerRows.length,
+      candleCount,
+      expectedCandleCount,
+      coveragePercent:
+        expectedCandleCount === 0
+          ? 0
+          : Math.min(100, (candleCount / expectedCandleCount) * 100),
+      gapCount: sumNumbers(providerRows.map((row) => row.gapCount)),
+      missingCandleCount: sumNumbers(providerRows.map((row) => row.missingCandleCount)),
+      staleSeriesCount: providerRows.filter((row) =>
+        isProviderSeriesStale(row.provider, row.timeframe, row.latestDataAgeSeconds)
+      ).length,
+      providerErrorCount: sumNumbers(providerRows.map((row) => row.providerErrorCount)),
+      rateLimitCount: sumNumbers(providerRows.map((row) => row.rateLimitCount)),
+      entitlementErrorCount: sumNumbers(providerRows.map((row) => row.entitlementErrorCount)),
+      noDataCount: sumNumbers(providerRows.map((row) => row.noDataCount)),
+      lastSuccessfulFetchAt: latestSuccess?.toISOString() ?? null
+    };
+  });
+}
+
+function isProviderSeriesStale(
+  provider: string,
+  timeframe: string,
+  latestDataAgeSeconds: number | null
+) {
+  if (latestDataAgeSeconds === null) return true;
+  const maxAgeHours =
+    provider === "FINNHUB"
+      ? timeframe === "1h"
+        ? 96
+        : 120
+      : timeframe === "1h"
+        ? 3
+        : timeframe === "4h"
+          ? 10
+          : 54;
+  return latestDataAgeSeconds > maxAgeHours * 60 * 60;
+}
+
+function sumRunMetadata(
+  runs: Array<{ startedAt: Date; metadataJson: Prisma.JsonValue | null }>,
+  key: string,
+  days: number,
+  now: Date
+) {
+  const since = now.getTime() - days * 24 * 60 * 60 * 1000;
+  return runs
+    .filter((run) => run.startedAt.getTime() >= since)
+    .reduce((total, run) => {
+      if (!isRecord(run.metadataJson)) return total;
+      const value = run.metadataJson[key];
+      return total + (typeof value === "number" && Number.isFinite(value) ? value : 0);
+    }, 0);
+}
+
+function jsonStringArray(value: Prisma.JsonValue | null): string[] {
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === "string")
+    : [];
+}
+
+function sumNumbers(values: number[]) {
+  return values.reduce((total, value) => total + value, 0);
 }
 
 function buildMarketRegimeCoverageWarnings(

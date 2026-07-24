@@ -6,6 +6,7 @@ import { BotRunStatus } from "@signalpilot/database";
 import {
   resolveSchedulerSettings,
   runScheduledCryptoPipeline,
+  runScheduledCandleGapAudit,
   runScheduledEquityPipeline,
   runScheduledGlobalEventMonitor,
   runScheduledQuickRadar,
@@ -37,6 +38,8 @@ describe("scheduler", () => {
 
     assert.equal(settings.globalEventMonitorEnabled, false);
     assert.equal(settings.globalEventMonitorCron, "*/30 * * * *");
+    assert.equal(settings.candleGapAuditEnabled, false);
+    assert.equal(settings.candleGapAuditCron, "15 3 * * *");
   });
 
   it("reads quick radar and radar summary schedules from the environment", () => {
@@ -162,6 +165,21 @@ describe("scheduler", () => {
         (log) => log.data.level === "info" && log.data.message === "Scheduled crypto pipeline run finished"
       )
     );
+  });
+});
+
+describe("candle gap audit scheduler", () => {
+  it("reports a failed job summary as a failed scheduled run", async () => {
+    const botLogs: Array<{ data: { message: string; level: string } }> = [];
+    const state: SchedulerState = { isRunning: false, isShuttingDown: false };
+    const database = createSchedulerDatabase(botLogs);
+
+    const result = await runScheduledCandleGapAudit(database as never, state, async () =>
+      ({ status: BotRunStatus.FAILED }) as never
+    );
+
+    assert.equal(result, "failed");
+    assert.equal(state.isRunning, false);
   });
 });
 

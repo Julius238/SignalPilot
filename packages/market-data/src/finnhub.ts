@@ -1,4 +1,5 @@
 import { supportedFinnhubIntervals, type FinnhubInterval, type NormalizedCandle } from "./types.js";
+import { classifyProviderHttpError, toTemporaryProviderError } from "./provider-errors.js";
 
 type FetchLike = (input: string | URL, init?: RequestInit) => Promise<Response>;
 
@@ -16,7 +17,11 @@ export type FinnhubFetchResult =
   | { kind: "ok"; candles: NormalizedCandle[] }
   | { kind: "no_data" }
   | { kind: "rate_limit" }
-  | { kind: "forbidden"; statusCode: number; body: string };
+  | { kind: "invalid_api_key"; statusCode: number }
+  | { kind: "entitlement"; statusCode: number }
+  | { kind: "unsupported_symbol"; statusCode: number }
+  | { kind: "temporary_error"; statusCode: number | null }
+  | { kind: "permanent_error"; statusCode: number };
 
 export class FinnhubMarketDataAdapter {
   private readonly baseUrl: string;
@@ -51,23 +56,47 @@ export class FinnhubMarketDataAdapter {
     url.searchParams.set("to", String(Math.floor(to.getTime() / 1000)));
     url.searchParams.set("token", this.apiKey);
 
-    const response = await this.fetchClient(url);
+    let response: Response;
+    try {
+      response = await this.fetchClient(url);
+    } catch {
+      const error = toTemporaryProviderError("FINNHUB", "stock/candle");
+      return { kind: "temporary_error", statusCode: error.statusCode };
+    }
 
     if (response.status === 429) {
       return { kind: "rate_limit" };
     }
 
-    if (response.status === 403) {
-      const body = await response.text().catch(() => "");
-      return { kind: "forbidden", statusCode: 403, body };
-    }
-
     if (!response.ok) {
-      throw new Error(`Finnhub candle request failed with HTTP ${response.status}.`);
+      const hint = await response.text().catch(() => "");
+      const error = classifyProviderHttpError(
+        "FINNHUB",
+        "stock/candle",
+        response.status,
+        hint
+      );
+      if (error.kind === "INVALID_API_KEY") {
+        return { kind: "invalid_api_key", statusCode: response.status };
+      }
+      if (error.kind === "ENTITLEMENT") {
+        return { kind: "entitlement", statusCode: response.status };
+      }
+      if (error.kind === "UNSUPPORTED_SYMBOL") {
+        return { kind: "unsupported_symbol", statusCode: response.status };
+      }
+      if (error.kind === "TEMPORARY") {
+        return { kind: "temporary_error", statusCode: response.status };
+      }
+      return { kind: "permanent_error", statusCode: response.status };
     }
 
-    const payload: unknown = await response.json();
-    return normalizeFinnhubResponse(symbol, interval, payload);
+    try {
+      const payload: unknown = await response.json();
+      return normalizeFinnhubResponse(symbol, interval, payload);
+    } catch {
+      return { kind: "temporary_error", statusCode: response.status };
+    }
   }
 }
 

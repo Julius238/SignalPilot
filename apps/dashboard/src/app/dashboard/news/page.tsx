@@ -90,7 +90,8 @@ export default async function NewsPage({ searchParams }: NewsPageProps) {
                   >
                     {item.symbol}
                   </Link>
-                  <span>{item.source}</span>
+                  <span>Quelle: {item.source}</span>
+                  <span>via {item.transportProvider}</span>
                   <time dateTime={item.publishedAt}>{formatDateTime(item.publishedAt)}</time>
                 </div>
                 <h2>
@@ -111,6 +112,15 @@ export default async function NewsPage({ searchParams }: NewsPageProps) {
                 ) : null}
                 <div className="news-card-footer">
                   {item.category ? <span className="soft-chip">{item.category}</span> : null}
+                  {item.relatedSymbols.map((relatedSymbol) => (
+                    <Link
+                      className="soft-chip"
+                      key={relatedSymbol}
+                      href={`/dashboard/assets/${encodeURIComponent(relatedSymbol)}`}
+                    >
+                      Betrifft {relatedSymbol}
+                    </Link>
+                  ))}
                   {item.sentiment ? (
                     <span
                       className="soft-chip"
@@ -121,16 +131,19 @@ export default async function NewsPage({ searchParams }: NewsPageProps) {
                   ) : null}
                   {item.relevanceScore != null ? (
                     <span className="soft-chip" title="Automatisch geschätzte Relevanz der Meldung">
-                      Relevanz {item.relevanceScore}/10 ·{" "}
-                      {item.relevanceScore >= 7
+                      Relevanz {item.relevanceScore}/100 ·{" "}
+                      {item.relevanceScore >= 70
                         ? "hoch"
-                        : item.relevanceScore >= 4
+                        : item.relevanceScore >= 40
                           ? "mittel"
                           : "gering"}
                     </span>
                   ) : (
                     <span className="soft-chip">Noch nicht bewertet</span>
                   )}
+                  {item.dashboardOnly ? (
+                    <span className="soft-chip">Rohmeldung · nur Dashboard</span>
+                  ) : null}
                 </div>
               </article>
             ))}
