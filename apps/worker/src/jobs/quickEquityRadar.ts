@@ -1,7 +1,10 @@
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { sendRadarEventAlertToN8n } from "@signalpilot/alerts";
+import {
+  evaluateRadarAlertQualityGate,
+  sendRadarEventAlertToN8n
+} from "@signalpilot/alerts";
 import {
   AssetType,
   BotRunStatus,
@@ -11,7 +14,11 @@ import {
   prisma,
   type PrismaClient
 } from "@signalpilot/database";
-import { supportedBinanceIntervals, type BinanceInterval } from "@signalpilot/market-data";
+import {
+  assessCandleSeriesQuality,
+  supportedBinanceIntervals,
+  type BinanceInterval
+} from "@signalpilot/market-data";
 import { config } from "dotenv";
 import pino from "pino";
 
@@ -24,6 +31,7 @@ import {
   type PersistedRadarEvent,
   type RadarEventCandidate
 } from "../lib/radarPersistence.js";
+import { shouldRouteAlertForAsset } from "../lib/alertRouting.js";
 import { evaluateRadarCandles, type RadarObservation } from "./quickCryptoRadar.js";
 
 // Equity/ETF-Radar: arbeitet ausschließlich auf bereits importierten Kerzen aus der
@@ -176,29 +184,46 @@ export async function quickEquityRadar(
 
     for (const asset of assets) {
       try {
-        const candles = await loadCandles(database, asset.id, settings);
+        const candles = await loadCandles(database, asset.id, settings, now);
+        const candleQuality = assessCandleSeriesQuality(candles, {
+          now,
+          timeframe: settings.timeframe,
+          marketKind: "SESSION",
+          minimumClosedCandles: 2,
+          maxAgeMs: settings.maxDataAgeHours * 3_600_000
+        });
 
-        if (candles.length < 2) {
-          missingDataCount += 1;
-          continue;
-        }
+        if (candleQuality.reason !== "OK") {
+          if (candleQuality.reason === "STALE_DATA") {
+            staleDataCount += 1;
+          } else {
+            missingDataCount += 1;
+          }
 
-        const latestCandle = candles.at(-1);
-        const dataAgeMs = now.getTime() - (latestCandle?.closeTime.getTime() ?? 0);
-
-        if (dataAgeMs > settings.maxDataAgeHours * 3_600_000) {
-          staleDataCount += 1;
-          await writeBotLog(database, "warn", "Equity Markt-Radar Datenstand veraltet", {
+          await writeBotLog(database, "warn", "Equity Markt-Radar Kerzendaten übersprungen", {
             botRunId: botRun.id,
             symbol: asset.symbol,
             timeframe: settings.timeframe,
-            latestCloseTime: latestCandle?.closeTime.toISOString(),
+            reason: candleQuality.reason,
+            closedCandleCount: candleQuality.closedCandles.length,
+            excludedOpenOrInvalidCandleCount:
+              candleQuality.openOrInvalidCandleCount,
+            latestCloseTime:
+              candleQuality.latestCloseTime?.toISOString() ?? null,
             maxDataAgeHours: settings.maxDataAgeHours
           });
           continue;
         }
 
-        const observation = evaluateRadarCandles(asset, settings, candles);
+        const latestCandle = candleQuality.closedCandles.at(-1);
+        const observation = evaluateRadarCandles(
+          asset,
+          settings,
+          candleQuality.closedCandles,
+          now,
+          "SESSION",
+          settings.maxDataAgeHours * 3_600_000
+        );
 
         if (!observation) {
           missingDataCount += 1;
@@ -214,7 +239,7 @@ export async function quickEquityRadar(
           patternObservations = evaluateChartPatterns(
             asset.symbol,
             settings.timeframe,
-            candles,
+            candleQuality.closedCandles,
             {},
             observation.observations
           );
@@ -230,11 +255,23 @@ export async function quickEquityRadar(
           asset,
           observation,
           settings,
-          patternObservations
+          patternObservations,
+          now
         );
         persistedRadarEventCount += persistedEvents.length;
 
         for (const radarEvent of persistedEvents) {
+          const routeDecision = shouldRouteAlertForAsset({
+            asset,
+            watchlistItem: asset.watchlistItem,
+            alertMode: process.env.ALERT_MODE
+          });
+
+          if (!routeDecision.shouldRoute) {
+            skippedRadarAlertCount += 1;
+            continue;
+          }
+
           if (!shouldSendAlert(radarEvent, settings)) {
             skippedRadarAlertCount += 1;
             continue;
@@ -401,12 +438,16 @@ type DatabaseCandle = {
 async function loadCandles(
   database: PrismaClient,
   assetId: string,
-  settings: QuickEquityRadarSettings
+  settings: QuickEquityRadarSettings,
+  now: Date
 ) {
   const rows = (await database.candle.findMany({
     where: {
       assetId,
-      timeframe: settings.timeframe
+      timeframe: settings.timeframe,
+      closeTime: {
+        lte: now
+      }
     },
     orderBy: {
       openTime: "desc"
@@ -442,7 +483,8 @@ async function persistEquityRadarEvents(
   asset: EquityRadarAsset,
   observation: RadarObservation,
   settings: QuickEquityRadarSettings,
-  patternObservations: ChartPatternObservation[]
+  patternObservations: ChartPatternObservation[],
+  now: Date
 ): Promise<PersistedRadarEvent[]> {
   const candidates: RadarEventCandidate[] = [
     ...buildMetricCandidates(observation, settings),
@@ -467,9 +509,13 @@ async function persistEquityRadarEvents(
         observations: observation.observations,
         latestCloseTime: observation.latestCloseTime,
         close: observation.close,
+        watchlistAlertEnabled: asset.watchlistItem?.alertEnabled === true,
+        closedCandle: true,
+        freshData: true,
         dataSource: "Equity-Kerzen aus Datenbank (Equity-Pipeline)"
       },
-      cooldownMinutes
+      cooldownMinutes,
+      now
     },
     candidates
   );
@@ -529,14 +575,18 @@ function createEmptySummary(settings: QuickEquityRadarSettings): QuickEquityRada
 }
 
 function shouldSendAlert(
-  radarEvent: Pick<PersistedRadarEvent, "severity">,
+  radarEvent: PersistedRadarEvent,
   settings: QuickEquityRadarSettings
 ): boolean {
   if (!settings.alertsEnabled) {
     return false;
   }
 
-  return radarSeverityRank(radarEvent.severity) >= radarSeverityRank(settings.minAlertSeverity);
+  return (
+    radarSeverityRank(radarEvent.severity) >=
+      radarSeverityRank(settings.minAlertSeverity) &&
+    evaluateRadarAlertQualityGate(radarEvent).allowed
+  );
 }
 
 async function finishBotRun(

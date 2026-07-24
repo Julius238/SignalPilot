@@ -1,7 +1,10 @@
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { sendRadarEventAlertToN8n } from "@signalpilot/alerts";
+import {
+  evaluateRadarAlertQualityGate,
+  sendRadarEventAlertToN8n
+} from "@signalpilot/alerts";
 import {
   AssetType,
   BotRunStatus,
@@ -14,6 +17,7 @@ import {
 } from "@signalpilot/database";
 import {
   BinanceMarketDataAdapter,
+  assessCandleSeriesQuality,
   supportedBinanceIntervals,
   type BinanceInterval,
   type NormalizedCandle
@@ -30,6 +34,7 @@ import {
   type PersistedRadarEvent,
   type RadarEventCandidate
 } from "../lib/radarPersistence.js";
+import { shouldRouteAlertForAsset } from "../lib/alertRouting.js";
 
 const logger = pino({
   name: "signalpilot-worker"
@@ -84,6 +89,7 @@ export type RadarObservation = {
   symbol: string;
   timeframe: BinanceInterval;
   priority: WatchlistPriority | null;
+  alertEnabled: boolean;
   movementPercent: number;
   relativeVolume: number;
   rangePercent: number;
@@ -113,6 +119,7 @@ type MarketDataAdapter = Pick<BinanceMarketDataAdapter, "fetchKlines">;
 type QuickCryptoRadarOptions = {
   fetchClient?: typeof fetch;
   webhookUrl?: string;
+  now?: Date;
 };
 
 export function resolveQuickCryptoRadarSettings(
@@ -156,6 +163,7 @@ export async function quickCryptoRadar(
   options: QuickCryptoRadarOptions = {}
 ): Promise<QuickCryptoRadarSummary> {
   const settings = resolveQuickCryptoRadarSettings();
+  const now = options.now ?? new Date();
   const botRun = await database.botRun.create({
     data: {
       jobName: "quickCryptoRadar",
@@ -200,7 +208,35 @@ export async function quickCryptoRadar(
     for (const asset of assets) {
       try {
         const candles = await adapter.fetchKlines(asset.symbol, settings.timeframe, settings.candleLimit);
-        const observation = evaluateRadarCandles(asset, settings, candles);
+        const candleQuality = assessCandleSeriesQuality(candles, {
+          now,
+          timeframe: settings.timeframe,
+          marketKind: "CONTINUOUS",
+          minimumClosedCandles: 2
+        });
+
+        if (candleQuality.reason !== "OK") {
+          missingDataCount += 1;
+          await writeBotLog(database, "warn", "Quick Crypto Markt-Radar Kerzendaten übersprungen", {
+            botRunId: botRun.id,
+            symbol: asset.symbol,
+            timeframe: settings.timeframe,
+            reason: candleQuality.reason,
+            closedCandleCount: candleQuality.closedCandles.length,
+            excludedOpenOrInvalidCandleCount:
+              candleQuality.openOrInvalidCandleCount,
+            latestCloseTime:
+              candleQuality.latestCloseTime?.toISOString() ?? null
+          });
+          continue;
+        }
+
+        const observation = evaluateRadarCandles(
+          asset,
+          settings,
+          candleQuality.closedCandles,
+          now
+        );
 
         if (!observation) {
           missingDataCount += 1;
@@ -224,7 +260,7 @@ export async function quickCryptoRadar(
         let patternObservations: ChartPatternObservation[] = [];
 
         if (settings.patternsEnabled) {
-          const sortedCandles = [...candles].sort(
+          const sortedCandles = [...candleQuality.closedCandles].sort(
             (left, right) => left.openTime.getTime() - right.openTime.getTime()
           );
           patternObservations = evaluateChartPatterns(
@@ -242,11 +278,23 @@ export async function quickCryptoRadar(
             database,
             observation,
             settings,
-            patternObservations
+            patternObservations,
+            now
           );
           persistedRadarEventCount += persistedEvents.length;
 
           for (const radarEvent of persistedEvents) {
+            const routeDecision = shouldRouteAlertForAsset({
+              asset,
+              watchlistItem: asset.watchlistItem,
+              alertMode: process.env.ALERT_MODE
+            });
+
+            if (!routeDecision.shouldRoute) {
+              skippedRadarAlertCount += 1;
+              continue;
+            }
+
             if (!shouldSendRadarAlert(radarEvent, settings)) {
               skippedRadarAlertCount += 1;
               continue;
@@ -368,13 +416,24 @@ export type RadarMetricSettings = Pick<
 export function evaluateRadarCandles(
   asset: RadarAsset,
   settings: RadarMetricSettings,
-  candles: NormalizedCandle[]
+  candles: NormalizedCandle[],
+  now: Date = new Date(),
+  marketKind: "CONTINUOUS" | "SESSION" = "CONTINUOUS",
+  maxAgeMs?: number
 ): RadarObservation | null {
-  if (candles.length < 2) {
+  const candleQuality = assessCandleSeriesQuality(candles, {
+    now,
+    timeframe: settings.timeframe,
+    marketKind,
+    minimumClosedCandles: 2,
+    maxAgeMs
+  });
+
+  if (candleQuality.reason !== "OK") {
     return null;
   }
 
-  const sorted = [...candles].sort((a, b) => a.openTime.getTime() - b.openTime.getTime());
+  const sorted = candleQuality.closedCandles;
   const latest = sorted.at(-1);
   const previous = sorted.at(-2);
 
@@ -433,6 +492,7 @@ export function evaluateRadarCandles(
     symbol: asset.symbol,
     timeframe: settings.timeframe,
     priority: asset.watchlistItem?.priority ?? null,
+    alertEnabled: asset.watchlistItem?.alertEnabled === true,
     movementPercent,
     relativeVolume,
     rangePercent,
@@ -502,7 +562,8 @@ async function persistRadarEvents(
   database: PrismaClient,
   observation: RadarObservation,
   settings: QuickCryptoRadarSettings,
-  patternObservations: ChartPatternObservation[] = []
+  patternObservations: ChartPatternObservation[] = [],
+  now: Date = new Date()
 ): Promise<PersistedRadarEvent[]> {
   const candidates = [
     ...buildRadarEventCandidates(observation, settings),
@@ -526,9 +587,13 @@ async function persistRadarEvents(
         priority: observation.priority,
         observations: observation.observations,
         latestCloseTime: observation.latestCloseTime,
-        close: observation.close
+        close: observation.close,
+        watchlistAlertEnabled: observation.alertEnabled,
+        closedCandle: true,
+        freshData: true
       },
-      cooldownMinutes
+      cooldownMinutes,
+      now
     },
     candidates
   );
@@ -688,14 +753,18 @@ function scoreFromRatio(ratio: number): number {
 }
 
 function shouldSendRadarAlert(
-  radarEvent: Pick<PersistedRadarEvent, "severity">,
+  radarEvent: PersistedRadarEvent,
   settings: QuickCryptoRadarSettings
 ): boolean {
   if (!settings.alertsEnabled) {
     return false;
   }
 
-  return radarSeverityRank(radarEvent.severity) >= radarSeverityRank(settings.minAlertSeverity);
+  return (
+    radarSeverityRank(radarEvent.severity) >=
+      radarSeverityRank(settings.minAlertSeverity) &&
+    evaluateRadarAlertQualityGate(radarEvent).allowed
+  );
 }
 
 function toFiniteNumber(value: string | number | { toString(): string }): number {

@@ -20,8 +20,19 @@ export type AlertSignal = {
   direction: string;
   signalType: string;
   score: number;
+  volumeScore?: number | null;
   riskLevel: string;
   createdAt: Date | string;
+};
+
+export type SignalAlertQualityContext = {
+  closedCandle: boolean;
+  freshData: boolean;
+  patternConfirmed: boolean;
+  volumeConfirmed: boolean;
+  confirmingTimeframes: string[];
+  newsEventContextFingerprint: string | null;
+  materialRepeat: boolean;
 };
 
 export type AlertSignalOutput = {
@@ -34,6 +45,7 @@ export type AlertSignalOutput = {
 export type SendSignalAlertToN8nInput = {
   signal: AlertSignal;
   signalOutput: AlertSignalOutput;
+  qualityContext?: SignalAlertQualityContext;
   dashboardUrl?: string;
 };
 
@@ -50,6 +62,34 @@ export type SendSignalAlertResult = {
   status: AlertStatus;
   attempts: number;
   error?: string;
+};
+
+export type AlertQualityGateDecision = {
+  allowed: boolean;
+  reasons: string[];
+};
+
+export type AlertRepeatReason =
+  | "NO_PREVIOUS_ALERT"
+  | "SCORE_IMPROVED"
+  | "SEVERITY_ESCALATED"
+  | "TIMEFRAME_CONFIRMATION_ADDED"
+  | "DIRECTION_CHANGED"
+  | "NEWS_EVENT_CONTEXT_CHANGED"
+  | "NO_MATERIAL_IMPROVEMENT";
+
+export type AlertRepeatDecision = {
+  shouldSend: boolean;
+  reason: AlertRepeatReason;
+  details: Record<string, unknown>;
+};
+
+export type SignalRepeatSnapshot = {
+  status: string;
+  direction: string;
+  score: number;
+  confirmingTimeframes: readonly string[];
+  newsEventContextFingerprint: string | null;
 };
 
 export type RadarEventAlert = {
@@ -158,6 +198,7 @@ type AlertPayload = {
   multiTimeframeSummary?: unknown;
   alignment?: string;
   alignmentScore?: number;
+  qualityContext?: SignalAlertQualityContext;
   dashboardUrl?: string;
   createdAt: string;
 };
@@ -197,6 +238,8 @@ export type RadarEventAlertPayload = {
 
 const defaultMaxAttempts = 3;
 const defaultRetryDelayMs = 500;
+const minimumInstantSignalScore = 75;
+const minimumConfirmedVolumeScore = 75;
 
 type DispatchAlertInput = {
   payload: unknown;
@@ -302,11 +345,60 @@ async function dispatchAlertToN8n(
   };
 }
 
+async function recordBlockedAlert(
+  input: DispatchAlertInput,
+  options: SendSignalAlertToN8nOptions,
+  gate: AlertQualityGateDecision
+): Promise<SendSignalAlertResult> {
+  const database = options.database ?? prisma;
+  const error = `quality gate blocked: ${gate.reasons.join(", ")}`;
+  const alert = await database.alert.create({
+    data: {
+      signalId: input.signalId,
+      channel: AlertChannel.WEBHOOK,
+      status: AlertStatus.FAILED,
+      payloadJson: input.payload as Prisma.InputJsonObject,
+      error
+    }
+  });
+
+  await writeBotLog(database, "warn", `Blocked ${input.logLabel} before n8n dispatch`, {
+    alertId: alert.id,
+    ...input.logMetadata,
+    qualityGateReasons: gate.reasons
+  });
+
+  return {
+    alertId: alert.id,
+    status: AlertStatus.FAILED,
+    attempts: 0,
+    error
+  };
+}
+
 export async function sendSignalAlertToN8n(
   input: SendSignalAlertToN8nInput,
   options: SendSignalAlertToN8nOptions = {}
 ): Promise<SendSignalAlertResult> {
   const payload = buildPayload(input);
+  const gate = evaluateSignalAlertQualityGate(input);
+
+  if (!gate.allowed) {
+    return recordBlockedAlert(
+      {
+        payload,
+        signalId: input.signal.id,
+        logLabel: "signal alert",
+        logMetadata: {
+          signalId: input.signal.id,
+          symbol: input.signal.symbol,
+          qualityGateReasons: gate.reasons
+        }
+      },
+      options,
+      gate
+    );
+  }
 
   return dispatchAlertToN8n(
     {
@@ -329,6 +421,25 @@ export async function sendRadarEventAlertToN8n(
   options: SendSignalAlertToN8nOptions = {}
 ): Promise<SendSignalAlertResult> {
   const payload = buildRadarEventPayload(input);
+  const gate = evaluateRadarAlertQualityGate(input.radarEvent);
+
+  if (!gate.allowed) {
+    return recordBlockedAlert(
+      {
+        payload,
+        signalId: null,
+        logLabel: "radar event alert",
+        logMetadata: {
+          radarEventId: input.radarEvent.id,
+          symbol: input.radarEvent.symbol,
+          eventType: input.radarEvent.eventType,
+          qualityGateReasons: gate.reasons
+        }
+      },
+      options,
+      gate
+    );
+  }
 
   return dispatchAlertToN8n(
     {
@@ -394,12 +505,286 @@ function buildPayload(input: SendSignalAlertToN8nInput): AlertPayload {
     multiTimeframeSummary,
     alignment,
     alignmentScore,
+    qualityContext: input.qualityContext,
     dashboardUrl: input.dashboardUrl,
     createdAt:
       input.signal.createdAt instanceof Date
         ? input.signal.createdAt.toISOString()
         : input.signal.createdAt
   };
+}
+
+export function evaluateSignalAlertQualityGate(
+  input: Pick<SendSignalAlertToN8nInput, "signal" | "signalOutput" | "qualityContext">
+): AlertQualityGateDecision {
+  const reasons: string[] = [];
+  const signal = input.signal;
+  const quality = input.qualityContext;
+
+  if (!input.signalOutput.telegramText?.trim()) {
+    reasons.push("EMPTY_TELEGRAM_TEXT");
+  }
+
+  if (signal.status === "WAIT") {
+    reasons.push("WAIT_STATUS");
+  }
+
+  if (signal.status === "NO_EDGE") {
+    reasons.push("NO_EDGE_STATUS");
+  }
+
+  if (signal.signalType === "NO_SIGNAL") {
+    reasons.push("NO_SIGNAL_TYPE");
+  }
+
+  if (signal.direction !== "BULLISH" && signal.direction !== "BEARISH") {
+    reasons.push("UNCLEAR_DIRECTION");
+  }
+
+  if (!Number.isFinite(signal.score) || signal.score < minimumInstantSignalScore) {
+    reasons.push("SCORE_BELOW_75");
+  }
+
+  if (quality?.closedCandle !== true) {
+    reasons.push("CANDLE_NOT_CONFIRMED_CLOSED");
+  }
+
+  if (quality?.freshData !== true) {
+    reasons.push("STALE_OR_UNCONFIRMED_DATA");
+  }
+
+  if (signal.signalType === "BREAKOUT_ALERT" && quality?.patternConfirmed !== true) {
+    reasons.push("UNCONFIRMED_PATTERN");
+  }
+
+  if (
+    (signal.signalType === "BREAKOUT_ALERT" || signal.signalType === "VOLUME_SPIKE") &&
+    (quality?.volumeConfirmed !== true ||
+      !Number.isFinite(signal.volumeScore) ||
+      (signal.volumeScore ?? 0) < minimumConfirmedVolumeScore)
+  ) {
+    reasons.push("MISSING_VOLUME_CONFIRMATION");
+  }
+
+  if (quality?.materialRepeat !== true) {
+    reasons.push("NO_MATERIAL_REPEAT_IMPROVEMENT");
+  }
+
+  return {
+    allowed: reasons.length === 0,
+    reasons
+  };
+}
+
+export function evaluateRadarAlertQualityGate(
+  radarEvent: RadarEventAlert
+): AlertQualityGateDecision {
+  const reasons: string[] = [];
+  const metadata = toRecord(radarEvent.metadataJson);
+  const patternDirection = extractStringField(metadata, "patternDirection");
+  const hasDirectionalMove =
+    radarEvent.eventType === RadarEventType.MOVEMENT_SPIKE &&
+    typeof radarEvent.movePercent === "number" &&
+    radarEvent.movePercent !== 0;
+  const hasDirectionalPattern =
+    radarEvent.eventType === RadarEventType.MOMENTUM_SHIFT &&
+    (patternDirection === "UP" || patternDirection === "DOWN");
+
+  if (
+    radarEvent.severity !== RadarEventSeverity.IMPORTANT &&
+    radarEvent.severity !== RadarEventSeverity.CRITICAL
+  ) {
+    reasons.push("SEVERITY_BELOW_IMPORTANT");
+  }
+
+  if (typeof radarEvent.score !== "number" || radarEvent.score < minimumInstantSignalScore) {
+    reasons.push("SCORE_BELOW_75");
+  }
+
+  if (!hasDirectionalMove && !hasDirectionalPattern) {
+    reasons.push("UNCLEAR_DIRECTION");
+  }
+
+  if (
+    radarEvent.eventType === RadarEventType.VOLUME_SPIKE ||
+    radarEvent.eventType === RadarEventType.VOLATILITY_SPIKE
+  ) {
+    reasons.push("OBSERVATION_ONLY_TYPE");
+  }
+
+  if (
+    radarEvent.eventType === RadarEventType.BREAKOUT_PROXIMITY ||
+    radarEvent.eventType === RadarEventType.SR_PROXIMITY ||
+    radarEvent.eventType === RadarEventType.CONFLUENCE
+  ) {
+    reasons.push("UNCONFIRMED_OR_NEUTRAL_PATTERN");
+  }
+
+  if (
+    radarEvent.eventType === RadarEventType.MOMENTUM_SHIFT &&
+    extractBooleanField(metadata, "patternConfirmed") !== true
+  ) {
+    reasons.push("UNCONFIRMED_PATTERN");
+  }
+
+  if (extractBooleanField(metadata, "watchlistAlertEnabled") !== true) {
+    reasons.push("WATCHLIST_ALERT_NOT_ENABLED");
+  }
+
+  if (extractBooleanField(metadata, "closedCandle") !== true) {
+    reasons.push("CANDLE_NOT_CONFIRMED_CLOSED");
+  }
+
+  if (extractBooleanField(metadata, "freshData") !== true) {
+    reasons.push("STALE_OR_UNCONFIRMED_DATA");
+  }
+
+  if (extractBooleanField(metadata, "alertMaterialChange") !== true) {
+    reasons.push("NO_MATERIAL_REPEAT_IMPROVEMENT");
+  }
+
+  return {
+    allowed: reasons.length === 0,
+    reasons
+  };
+}
+
+export function evaluateSignalAlertRepeat(
+  input: {
+    current: SignalRepeatSnapshot;
+    previous?: (SignalRepeatSnapshot & { sentAt: Date }) | null;
+    now?: Date;
+    cooldownMinutes: number;
+    scoreImprovementThreshold?: number;
+  }
+): AlertRepeatDecision {
+  const previous = input.previous ?? null;
+  const threshold = Math.max(8, input.scoreImprovementThreshold ?? 8);
+
+  if (!previous) {
+    return {
+      shouldSend: true,
+      reason: "NO_PREVIOUS_ALERT",
+      details: {
+        score: input.current.score,
+        direction: input.current.direction,
+        confirmingTimeframes: [...input.current.confirmingTimeframes]
+      }
+    };
+  }
+
+  const scoreDelta = input.current.score - previous.score;
+
+  if (scoreDelta >= threshold) {
+    return {
+      shouldSend: true,
+      reason: "SCORE_IMPROVED",
+      details: {
+        previousScore: previous.score,
+        currentScore: input.current.score,
+        scoreDelta,
+        threshold
+      }
+    };
+  }
+
+  if (signalSeverityRank(input.current.status) > signalSeverityRank(previous.status)) {
+    return {
+      shouldSend: true,
+      reason: "SEVERITY_ESCALATED",
+      details: {
+        previousStatus: previous.status,
+        currentStatus: input.current.status
+      }
+    };
+  }
+
+  if (
+    isClearDirection(input.current.direction) &&
+    isClearDirection(previous.direction) &&
+    input.current.direction !== previous.direction
+  ) {
+    return {
+      shouldSend: true,
+      reason: "DIRECTION_CHANGED",
+      details: {
+        previousDirection: previous.direction,
+        currentDirection: input.current.direction
+      }
+    };
+  }
+
+  const previousTimeframes = new Set(previous.confirmingTimeframes);
+  const addedTimeframes = input.current.confirmingTimeframes.filter(
+    (timeframe) => !previousTimeframes.has(timeframe)
+  );
+
+  if (addedTimeframes.length > 0) {
+    return {
+      shouldSend: true,
+      reason: "TIMEFRAME_CONFIRMATION_ADDED",
+      details: {
+        previousConfirmingTimeframes: [...previous.confirmingTimeframes],
+        currentConfirmingTimeframes: [...input.current.confirmingTimeframes],
+        addedTimeframes
+      }
+    };
+  }
+
+  if (
+    input.current.newsEventContextFingerprint !== null &&
+    input.current.newsEventContextFingerprint !== previous.newsEventContextFingerprint
+  ) {
+    return {
+      shouldSend: true,
+      reason: "NEWS_EVENT_CONTEXT_CHANGED",
+      details: {
+        hadPreviousContext: previous.newsEventContextFingerprint !== null,
+        hasCurrentContext: true
+      }
+    };
+  }
+
+  const now = input.now ?? new Date();
+  const elapsedMinutes = (now.getTime() - previous.sentAt.getTime()) / 60_000;
+
+  return {
+    shouldSend: false,
+    reason: "NO_MATERIAL_IMPROVEMENT",
+    details: {
+      elapsedMinutes,
+      cooldownMinutes: input.cooldownMinutes,
+      cooldownExpired: elapsedMinutes >= input.cooldownMinutes,
+      previousScore: previous.score,
+      currentScore: input.current.score,
+      previousStatus: previous.status,
+      currentStatus: input.current.status,
+      previousDirection: previous.direction,
+      currentDirection: input.current.direction,
+      previousConfirmingTimeframes: [...previous.confirmingTimeframes],
+      currentConfirmingTimeframes: [...input.current.confirmingTimeframes]
+    }
+  };
+}
+
+function signalSeverityRank(status: string): number {
+  if (status === "STRONG_WATCH") {
+    return 3;
+  }
+
+  if (status === "WATCH" || status === "AVOID") {
+    return 2;
+  }
+
+  if (status === "WAIT") {
+    return 1;
+  }
+
+  return 0;
+}
+
+function isClearDirection(direction: string): boolean {
+  return direction === "BULLISH" || direction === "BEARISH";
 }
 
 const radarEventTypeLabels: Record<RadarEventType, string> = {
@@ -680,6 +1065,19 @@ function extractNumberField(source: unknown, field: string): number | undefined 
 
   const value = source[field];
   return typeof value === "number" ? value : undefined;
+}
+
+function extractBooleanField(source: unknown, field: string): boolean | undefined {
+  if (!isRecord(source)) {
+    return undefined;
+  }
+
+  const value = source[field];
+  return typeof value === "boolean" ? value : undefined;
+}
+
+function toRecord(value: unknown): Record<string, unknown> {
+  return isRecord(value) ? value : {};
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

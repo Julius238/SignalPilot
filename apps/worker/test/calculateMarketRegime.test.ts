@@ -50,10 +50,15 @@ describe("calculateMarketRegime", () => {
 function uptrendCandles(start: number) {
   return Array.from({ length: 220 }, (_, index) => {
     const close = start + index;
+    const closeTime = new Date(
+      Date.now() - 30 * 60_000 - (220 - index - 1) * 24 * 60 * 60_000
+    );
     return {
       close: { toString: () => String(close) },
       high: { toString: () => String(close + 1) },
-      low: { toString: () => String(close - 1) }
+      low: { toString: () => String(close - 1) },
+      openTime: new Date(closeTime.getTime() - 24 * 60 * 60_000),
+      closeTime
     };
   });
 }

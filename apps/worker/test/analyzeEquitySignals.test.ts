@@ -6,13 +6,20 @@ import { AssetType, BotRunStatus } from "@signalpilot/database";
 import { analyzeEquitySignals } from "../src/jobs/analyzeEquitySignals.js";
 
 function createCandles(count: number) {
-  return Array.from({ length: count }, (_, i) => ({
-    high: { toString: () => String(100 + i) },
-    low: { toString: () => String(98 + i) },
-    close: { toString: () => String(99 + i) },
-    volume: { toString: () => "1000000" },
-    openTime: new Date(Date.now() - (count - i) * 3600_000)
-  }));
+  return Array.from({ length: count }, (_, i) => {
+    const closeTime = new Date(
+      Date.now() - 30 * 60_000 - (count - i - 1) * 3_600_000
+    );
+
+    return {
+      high: { toString: () => String(100 + i) },
+      low: { toString: () => String(98 + i) },
+      close: { toString: () => String(99 + i) },
+      volume: { toString: () => "1000000" },
+      openTime: new Date(closeTime.getTime() - 3_600_000),
+      closeTime
+    };
+  });
 }
 
 function makeNewsItems() {

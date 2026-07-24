@@ -98,6 +98,7 @@ describe("analyzeCryptoSignals", () => {
             direction: string;
             signalType: string;
             score: number;
+            volumeScore: number;
             riskLevel: string;
             output: { create: { telegramText: string; dashboardJson: unknown } };
           };
@@ -111,6 +112,7 @@ describe("analyzeCryptoSignals", () => {
             direction: operation.data.direction,
             signalType: operation.data.signalType,
             score: operation.data.score,
+            volumeScore: operation.data.volumeScore,
             riskLevel: operation.data.riskLevel,
             createdAt: new Date("2026-01-01T00:00:00.000Z"),
             asset: {
@@ -179,8 +181,20 @@ describe("analyzeCryptoSignals", () => {
       counterArguments: [],
       nextTrigger: "Neuer Scan mit klarerem Setup."
     } as const;
+    const qualityContext = {
+      closedCandle: true,
+      freshData: true,
+      patternConfirmed: true,
+      volumeConfirmed: true,
+      confirmingTimeframes: ["4h"],
+      newsEventContextFingerprint: null,
+      materialRepeat: true
+    };
 
-    assert.equal(shouldSendSignalAlert(baseDecision, "telegram text"), false);
+    assert.equal(
+      shouldSendSignalAlert(baseDecision, "telegram text", null, qualityContext),
+      false
+    );
     assert.equal(
       shouldSendSignalAlert(
         {
@@ -189,7 +203,9 @@ describe("analyzeCryptoSignals", () => {
           status: "WATCH",
           score: 75
         },
-        ""
+        "",
+        null,
+        qualityContext
       ),
       false
     );
@@ -201,9 +217,11 @@ describe("analyzeCryptoSignals", () => {
           status: "WAIT",
           score: 55
         },
-        "telegram text"
+        "telegram text",
+        null,
+        qualityContext
       ),
-      true
+      false
     );
     assert.equal(
       shouldSendSignalAlert(
@@ -211,11 +229,18 @@ describe("analyzeCryptoSignals", () => {
           ...baseDecision,
           signalType: "BREAKOUT_ALERT",
           status: "WATCH",
-          score: 75
+          score: 75,
+          direction: "BULLISH",
+          volumeScore: 82
         },
-        "telegram text"
+        "telegram text",
+        null,
+        {
+          ...qualityContext,
+          patternConfirmed: false
+        }
       ),
-      true
+      false
     );
     assert.equal(
       shouldSendSignalAlert(
@@ -239,9 +264,10 @@ describe("analyzeCryptoSignals", () => {
           summary: "Aligned.",
           riskNote: "Risk medium.",
           nextFocus: "Watch 4h."
-        }
+        },
+        qualityContext
       ),
-      true
+      false
     );
     assert.equal(
       shouldSendSignalAlert(
@@ -266,7 +292,23 @@ describe("analyzeCryptoSignals", () => {
           summary: "Conflict.",
           riskNote: "Risk high.",
           nextFocus: "Watch higher timeframes."
-        }
+        },
+        qualityContext
+      ),
+      false
+    );
+    assert.equal(
+      shouldSendSignalAlert(
+        {
+          ...baseDecision,
+          signalType: "MOMENTUM_ALERT",
+          status: "STRONG_WATCH",
+          direction: "BULLISH",
+          score: 82
+        },
+        "telegram text",
+        null,
+        qualityContext
       ),
       true
     );
@@ -280,9 +322,7 @@ describe("analyzeCryptoSignals", () => {
         existingAlertState: null,
         now: new Date("2026-01-01T01:00:00.000Z"),
         cooldownMinutes: 240,
-        scoreImprovementThreshold: 8,
-        allowStatusEscalation: true,
-        allowRiskEscalation: true
+        scoreImprovementThreshold: 8
       }).reason,
       "NO_PREVIOUS_ALERT"
     );
@@ -295,16 +335,14 @@ describe("analyzeCryptoSignals", () => {
       existingAlertState: createExistingAlertState({ lastScore: 70 }),
       now: new Date("2026-01-01T01:00:00.000Z"),
       cooldownMinutes: 240,
-      scoreImprovementThreshold: 8,
-      allowStatusEscalation: true,
-      allowRiskEscalation: true
+      scoreImprovementThreshold: 8
     });
 
     assert.equal(decision.shouldSend, false);
-    assert.equal(decision.reason, "COOLDOWN_ACTIVE");
+    assert.equal(decision.reason, "NO_MATERIAL_IMPROVEMENT");
   });
 
-  it("sends when cooldown expired", () => {
+  it("blocks an unchanged setup after cooldown expired", () => {
     assert.equal(
       shouldSendAfterCooldown({
         signal: createCooldownSignal(),
@@ -314,11 +352,9 @@ describe("analyzeCryptoSignals", () => {
         }),
         now: new Date("2026-01-01T04:00:00.000Z"),
         cooldownMinutes: 240,
-        scoreImprovementThreshold: 8,
-        allowStatusEscalation: true,
-        allowRiskEscalation: true
+        scoreImprovementThreshold: 8
       }).reason,
-      "COOLDOWN_EXPIRED"
+      "NO_MATERIAL_IMPROVEMENT"
     );
   });
 
@@ -330,9 +366,7 @@ describe("analyzeCryptoSignals", () => {
         existingAlertState: createExistingAlertState({ lastScore: 70 }),
         now: new Date("2026-01-01T01:00:00.000Z"),
         cooldownMinutes: 240,
-        scoreImprovementThreshold: 8,
-        allowStatusEscalation: true,
-        allowRiskEscalation: true
+        scoreImprovementThreshold: 8
       }).reason,
       "SCORE_IMPROVED"
     );
@@ -346,47 +380,45 @@ describe("analyzeCryptoSignals", () => {
         existingAlertState: createExistingAlertState({ status: "WATCH" }),
         now: new Date("2026-01-01T01:00:00.000Z"),
         cooldownMinutes: 240,
-        scoreImprovementThreshold: 8,
-        allowStatusEscalation: true,
-        allowRiskEscalation: true
+        scoreImprovementThreshold: 8
       }).reason,
-      "STATUS_ESCALATED"
+      "SEVERITY_ESCALATED"
     );
   });
 
-  it("sends on risk escalation from MEDIUM to HIGH", () => {
+  it("sends on a clear direction change", () => {
     assert.equal(
       shouldSendAfterCooldown({
-        signal: createCooldownSignal({ riskLevel: "HIGH" }),
+        signal: createCooldownSignal({ direction: "BEARISH" }),
         signalOutput: { telegramText: "BTCUSDT watch" },
-        existingAlertState: createExistingAlertState({ lastRiskLevel: "MEDIUM" }),
+        existingAlertState: createExistingAlertState({ direction: "BULLISH" }),
         now: new Date("2026-01-01T01:00:00.000Z"),
         cooldownMinutes: 240,
-        scoreImprovementThreshold: 8,
-        allowStatusEscalation: true,
-        allowRiskEscalation: true
+        scoreImprovementThreshold: 8
       }).reason,
-      "RISK_ESCALATED"
+      "DIRECTION_CHANGED"
     );
   });
 
-  it("sends when alignment score improves by at least 10", () => {
+  it("sends when an additional timeframe confirms", () => {
     assert.equal(
       shouldSendAfterCooldown({
         signal: createCooldownSignal(),
         signalOutput: { telegramText: "BTCUSDT watch" },
         multiTimeframeSummary: {
           alignment: "BULLISH_ALIGNED",
-          alignmentScore: 72
+          alignmentScore: 72,
+          confirmingTimeframes: ["4h", "1d"]
         },
-        existingAlertState: createExistingAlertState({ lastAlignmentScore: 62 }),
+        existingAlertState: createExistingAlertState({
+          lastAlignmentScore: 62,
+          lastConfirmingTimeframes: ["4h"]
+        }),
         now: new Date("2026-01-01T01:00:00.000Z"),
         cooldownMinutes: 240,
-        scoreImprovementThreshold: 8,
-        allowStatusEscalation: true,
-        allowRiskEscalation: true
+        scoreImprovementThreshold: 8
       }).reason,
-      "ALIGNMENT_IMPROVED"
+      "TIMEFRAME_CONFIRMATION_ADDED"
     );
   });
 
@@ -548,6 +580,24 @@ describe("analyzeCryptoSignals", () => {
     assert.equal(alertUpdates.length, 0);
     assert.equal(metadata.cooldownSkippedAlertCount, 3);
   });
+
+  it("does not analyze a still-open candle as part of the minimum history", async () => {
+    const candles = createCandles(20);
+    const latest = candles.at(-1);
+
+    if (latest) {
+      latest.closeTime = new Date(Date.now() + 60 * 60_000);
+    }
+
+    const database = createAnalyzeDatabase({
+      assetWatchlistItem: null,
+      candles
+    });
+    const summary = await analyzeCryptoSignals(database as never);
+
+    assert.equal(summary.savedSignalCount, 0);
+    assert.equal(summary.analyzedCount, 0);
+  });
 });
 
 function assertDashboardJsonHasMultiTimeframeSummary(dashboardJson: unknown) {
@@ -563,10 +613,17 @@ function assertDashboardJsonHasMultiTimeframeSummary(dashboardJson: unknown) {
 }
 
 function createCandles(count: number) {
+  const latestCloseTime = Date.now() - 30 * 60 * 1000;
+
   return Array.from({ length: count }, (_, index) => {
     const close = 100 + index;
+    const closeTime = new Date(
+      latestCloseTime - (count - index - 1) * 60 * 60 * 1000
+    );
 
     return {
+      openTime: new Date(closeTime.getTime() - 60 * 60 * 1000),
+      closeTime,
       high: String(close + 2),
       low: String(close - 2),
       close: String(close),
@@ -580,8 +637,9 @@ function createAnalyzeDatabase(input: {
   alertUpdates?: Array<{ data: { status: AlertStatus; sentAt?: Date } }>;
   botRunUpdates?: Array<{ data: { metadataJson?: unknown } }>;
   existingAlertState?: ReturnType<typeof createExistingAlertState> | null;
+  candles?: ReturnType<typeof createCandles>;
 }) {
-  const candles = createCandles(250);
+  const candles = input.candles ?? createCandles(250);
   const alertUpdates = input.alertUpdates ?? [];
   const botRunUpdates = input.botRunUpdates ?? [];
   const alertStateUpserts: unknown[] = [];
@@ -593,6 +651,7 @@ function createAnalyzeDatabase(input: {
       direction: string;
       signalType: string;
       score: number;
+      volumeScore: number;
       riskLevel: string;
       output: { create: { telegramText: string; dashboardJson: unknown } };
     };
@@ -656,6 +715,7 @@ function createAnalyzeDatabase(input: {
           direction: string;
           signalType: string;
           score: number;
+          volumeScore: number;
           riskLevel: string;
           output: { create: { telegramText: string; dashboardJson: unknown } };
         };
@@ -669,6 +729,7 @@ function createAnalyzeDatabase(input: {
           direction: operation.data.direction,
           signalType: operation.data.signalType,
           score: operation.data.score,
+          volumeScore: operation.data.volumeScore,
           riskLevel: operation.data.riskLevel,
           createdAt: new Date("2026-01-01T00:00:00.000Z"),
           asset: {
@@ -714,10 +775,13 @@ function createExistingAlertState(
 function createBaseExistingAlertState() {
   return {
     status: "WATCH",
+    direction: "BULLISH",
     lastScore: 72,
     lastRiskLevel: "MEDIUM",
     lastAlignment: "MIXED",
     lastAlignmentScore: 60,
+    lastConfirmingTimeframes: ["1h", "4h", "1d"],
+    lastNewsEventContextFingerprint: null,
     lastSentAt: new Date("2026-01-01T00:00:00.000Z")
   } as const;
 }

@@ -16,6 +16,10 @@ import {
 } from "@signalpilot/database";
 import { buildIndicatorSnapshot, type IndicatorCandle } from "@signalpilot/indicators";
 import {
+  assessCandleSeriesQuality,
+  isTimestampFresh
+} from "@signalpilot/market-data";
+import {
   calculateMultiTimeframeSummary,
   type MultiTimeframeSignalInput,
   type MultiTimeframeSummary
@@ -39,6 +43,10 @@ import type { AssetClass, IntelligenceContext, SignalDecision } from "@signalpil
 import { config } from "dotenv";
 import pino from "pino";
 
+import {
+  buildSignalAlertQualityContext,
+  loadPreviousNotificationContext
+} from "../lib/alertQuality.js";
 import {
   shouldRouteAlertForAsset,
   shouldSendAfterCooldown,
@@ -98,8 +106,7 @@ export async function analyzeEquitySignals(
     process.env.ALERT_SCORE_IMPROVEMENT_THRESHOLD,
     defaultAlertScoreImprovementThreshold
   );
-  const allowStatusEscalation = parseBooleanEnv(process.env.ALERT_ALLOW_STATUS_ESCALATION, true);
-  const allowRiskEscalation = parseBooleanEnv(process.env.ALERT_ALLOW_RISK_ESCALATION, true);
+  const now = new Date();
 
   const botRun = await database.botRun.create({
     data: {
@@ -152,7 +159,6 @@ export async function analyzeEquitySignals(
 
     const equityNewsEnabled = parseBooleanEnv(process.env.ENABLE_EQUITY_NEWS, true);
     const equityEventsEnabled = parseBooleanEnv(process.env.ENABLE_EQUITY_EVENTS, true);
-    const now = new Date();
     const marketRegimeReport = await loadLatestMarketRegimeReport(database);
     const performanceReport = await loadPerformanceReport(database);
 
@@ -179,12 +185,44 @@ export async function analyzeEquitySignals(
       for (const timeframe of equityIntervals) {
         try {
           const candles = await database.candle.findMany({
-            where: { assetId: asset.id, timeframe },
+            where: {
+              assetId: asset.id,
+              timeframe,
+              closeTime: {
+                lte: now
+              }
+            },
             orderBy: { openTime: "desc" },
             take: candleLimit
           });
 
-          const chronologicalCandles: IndicatorCandle[] = [...candles].reverse().map((candle) => ({
+          const candleQuality = assessCandleSeriesQuality(candles, {
+            now,
+            timeframe,
+            marketKind: "SESSION",
+            minimumClosedCandles: minimumUsefulCandles
+          });
+
+          if (candleQuality.reason !== "OK") {
+            missingDataCount += 1;
+            await writeBotLog(database, "warn", "Equity signal analysis skipped for candle quality", {
+              botRunId: botRun.id,
+              assetId: asset.id,
+              symbol: asset.symbol,
+              timeframe,
+              reason: candleQuality.reason,
+              closedCandleCount: candleQuality.closedCandles.length,
+              excludedOpenOrInvalidCandleCount: candleQuality.openOrInvalidCandleCount,
+              latestCloseTime: candleQuality.latestCloseTime?.toISOString() ?? null,
+              ageHours:
+                candleQuality.ageMs === null
+                  ? null
+                  : Math.round((candleQuality.ageMs / 3_600_000) * 10) / 10
+            });
+            continue;
+          }
+
+          const chronologicalCandles: IndicatorCandle[] = candleQuality.closedCandles.map((candle) => ({
             high: candle.high.toString(),
             low: candle.low.toString(),
             close: candle.close.toString(),
@@ -234,6 +272,14 @@ export async function analyzeEquitySignals(
             }
           });
           const adjustedDecision = applyRuleResultToDecision(decision, signalRulesResult);
+          const baseAlertQualityContext = buildSignalAlertQualityContext({
+            decision: adjustedDecision,
+            candles: chronologicalCandles,
+            indicators: snapshot,
+            multiTimeframeSummary,
+            newsContext,
+            eventContext
+          });
 
           const outputDraft = composeSignalOutput({
             decision: adjustedDecision,
@@ -289,7 +335,18 @@ export async function analyzeEquitySignals(
 
           const signalOutput = signal.output;
 
-          if (!signalOutput || !shouldSendSignalAlert(adjustedDecision, signalOutput.telegramText, multiTimeframeSummary)) {
+          if (
+            !signalOutput ||
+            !shouldSendSignalAlert(
+              adjustedDecision,
+              signalOutput.telegramText,
+              multiTimeframeSummary,
+              {
+                ...baseAlertQualityContext,
+                materialRepeat: true
+              }
+            )
+          ) {
             skippedAlertCount += 1;
             continue;
           }
@@ -328,16 +385,27 @@ export async function analyzeEquitySignals(
               where: { assetId: asset.id, timeframe, signalType: signal.signalType },
               orderBy: { lastSentAt: "desc" }
             });
+            const previousContext = await loadPreviousNotificationContext(
+              database,
+              existingAlertState?.lastSignalId
+            );
 
             const cooldownDecision = shouldSendAfterCooldown({
               signal,
               signalOutput,
               multiTimeframeSummary,
-              existingAlertState,
+              qualityContext: baseAlertQualityContext,
+              existingAlertState: existingAlertState
+                ? {
+                    ...existingAlertState,
+                    lastConfirmingTimeframes:
+                      previousContext.confirmingTimeframes,
+                    lastNewsEventContextFingerprint:
+                      previousContext.newsEventContextFingerprint
+                  }
+                : null,
               cooldownMinutes: alertCooldownMinutes,
-              scoreImprovementThreshold: alertScoreImprovementThreshold,
-              allowStatusEscalation,
-              allowRiskEscalation
+              scoreImprovementThreshold: alertScoreImprovementThreshold
             });
 
             if (!cooldownDecision.shouldSend) {
@@ -346,7 +414,18 @@ export async function analyzeEquitySignals(
               continue;
             }
 
-            const alertResult = await sendSignalAlertToN8n({ signal, signalOutput, dashboardUrl: undefined }, { database });
+            const alertResult = await sendSignalAlertToN8n(
+              {
+                signal,
+                signalOutput,
+                qualityContext: {
+                  ...baseAlertQualityContext,
+                  materialRepeat: cooldownDecision.shouldSend
+                },
+                dashboardUrl: undefined
+              },
+              { database }
+            );
 
             if (alertResult.status === AlertStatus.SENT) {
               sentAlertCount += 1;
@@ -594,7 +673,11 @@ async function loadLatestEquitySignalsByTimeframe(
 
   const map = new Map<string, MultiTimeframeSignalInput>();
   for (const signal of latestSignals) {
-    if (signal && !map.has(signal.timeframe)) {
+    if (
+      signal &&
+      isTimestampFresh(signal.createdAt, signal.timeframe, "SESSION") &&
+      !map.has(signal.timeframe)
+    ) {
       map.set(signal.timeframe, signal);
     }
   }

@@ -9,7 +9,10 @@ import {
   type PrismaClient
 } from "@signalpilot/database";
 import { buildIndicatorSnapshot, type IndicatorCandle } from "@signalpilot/indicators";
-import { supportedBinanceIntervals } from "@signalpilot/market-data";
+import {
+  assessCandleSeriesQuality,
+  supportedBinanceIntervals
+} from "@signalpilot/market-data";
 import { config } from "dotenv";
 import pino from "pino";
 
@@ -26,6 +29,7 @@ const candleLimit = 250;
 const minimumUsefulCandles = 20;
 
 export async function analyzeCryptoIndicators(database: PrismaClient = prisma) {
+  const analysisNow = new Date();
   const botRun = await database.botRun.create({
     data: {
       jobName: "analyzeCryptoIndicators",
@@ -63,17 +67,41 @@ export async function analyzeCryptoIndicators(database: PrismaClient = prisma) {
           const candles = await database.candle.findMany({
             where: {
               assetId: asset.id,
-              timeframe
+              timeframe,
+              closeTime: {
+                lte: analysisNow
+              }
             },
             orderBy: {
               openTime: "desc"
             },
             take: candleLimit
           });
+          const candleQuality = assessCandleSeriesQuality(candles, {
+            now: analysisNow,
+            timeframe,
+            marketKind: "CONTINUOUS",
+            minimumClosedCandles: minimumUsefulCandles
+          });
 
-          const chronologicalCandles: IndicatorCandle[] = [...candles]
-            .reverse()
-            .map((candle) => ({
+          if (candleQuality.reason !== "OK") {
+            insufficientDataCount += 1;
+            await writeBotLog(database, "warn", "Crypto indicator analysis skipped for candle quality", {
+              botRunId: botRun.id,
+              assetId: asset.id,
+              symbol: asset.symbol,
+              timeframe,
+              reason: candleQuality.reason,
+              closedCandleCount: candleQuality.closedCandles.length,
+              excludedOpenOrInvalidCandleCount:
+                candleQuality.openOrInvalidCandleCount,
+              latestCloseTime:
+                candleQuality.latestCloseTime?.toISOString() ?? null
+            });
+            continue;
+          }
+
+          const chronologicalCandles: IndicatorCandle[] = candleQuality.closedCandles.map((candle) => ({
               high: candle.high.toString(),
               low: candle.low.toString(),
               close: candle.close.toString(),

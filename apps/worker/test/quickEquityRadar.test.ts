@@ -52,10 +52,30 @@ function buildCandleSeries(lastCloseTime: Date): FakeCandle[] {
   return candles;
 }
 
-function createDatabaseState(candles: FakeCandle[]) {
+function createDatabaseState(
+  candles: FakeCandle[],
+  watchlistItem = {
+    priority: WatchlistPriority.HIGH,
+    alertEnabled: true
+  }
+) {
   const botRunUpdates: Array<{ data: { status: BotRunStatus; metadataJson?: unknown } }> = [];
   const botLogs: Array<{ data: { message: string; level: string } }> = [];
-  const radarEvents: Array<{ data: { symbol: string; assetType: string; eventType: string; shortMessage: string } }> = [];
+  const radarEvents: Array<{
+    data: {
+      symbol: string;
+      assetType: string;
+      eventType: string;
+      severity: string;
+      timeframe: string;
+      shortMessage: string;
+      score: number;
+      movePercent: number;
+      relativeVolume: number;
+      rangePercent: number;
+      metadataJson: unknown;
+    };
+  }> = [];
   const alerts: Array<{ data: { payloadJson: unknown } }> = [];
 
   return {
@@ -82,7 +102,7 @@ function createDatabaseState(candles: FakeCandle[]) {
             id: "asset-aapl",
             symbol: "AAPL",
             assetType: "STOCK",
-            watchlistItem: { priority: WatchlistPriority.HIGH, alertEnabled: true }
+            watchlistItem
           }
         ]
       },
@@ -93,7 +113,19 @@ function createDatabaseState(candles: FakeCandle[]) {
       radarEvent: {
         findFirst: async () => null,
         create: async (operation: {
-          data: { symbol: string; assetType: string; eventType: string; shortMessage: string };
+          data: {
+            symbol: string;
+            assetType: string;
+            eventType: string;
+            severity: string;
+            timeframe: string;
+            shortMessage: string;
+            score: number;
+            movePercent: number;
+            relativeVolume: number;
+            rangePercent: number;
+            metadataJson: unknown;
+          };
         }) => {
           radarEvents.push(operation);
           return {
@@ -101,14 +133,14 @@ function createDatabaseState(candles: FakeCandle[]) {
             symbol: operation.data.symbol,
             assetType: operation.data.assetType,
             eventType: operation.data.eventType,
-            severity: "WATCH",
-            timeframe: "1d",
+            severity: operation.data.severity,
+            timeframe: operation.data.timeframe,
             shortMessage: operation.data.shortMessage,
-            score: null,
-            movePercent: null,
-            relativeVolume: null,
-            rangePercent: null,
-            metadataJson: null,
+            score: operation.data.score,
+            movePercent: operation.data.movePercent,
+            relativeVolume: operation.data.relativeVolume,
+            rangePercent: operation.data.rangePercent,
+            metadataJson: operation.data.metadataJson,
             createdAt: new Date()
           };
         }
@@ -185,7 +217,39 @@ describe("quickEquityRadar", () => {
     assert.equal(summary.checkedAssetCount, 0);
     assert.equal(state.radarEvents.length, 0);
     assert.ok(
-      state.botLogs.some((log) => log.data.message === "Equity Markt-Radar Datenstand veraltet")
+      state.botLogs.some((log) => log.data.message === "Equity Markt-Radar Kerzendaten übersprungen")
     );
+  });
+
+  it("respects HIGH_PRIORITY_ONLY for equity radar alerts", async () => {
+    process.env.EQUITY_RADAR_ENABLED = "true";
+    process.env.EQUITY_RADAR_ALERTS_ENABLED = "true";
+    process.env.ALERT_MODE = "HIGH_PRIORITY_ONLY";
+    process.env.N8N_WEBHOOK_SIGNAL_URL = "https://n8n.example.test/webhook";
+    const now = new Date("2026-07-06T12:00:00.000Z");
+    const candles = buildCandleSeries(new Date("2026-07-06T00:00:00.000Z"));
+    const latest = candles.at(-1);
+
+    if (latest) {
+      latest.close = "105";
+      latest.high = "107";
+    }
+
+    const state = createDatabaseState(candles, {
+      priority: WatchlistPriority.MEDIUM,
+      alertEnabled: true
+    });
+    let fetchCallCount = 0;
+    const summary = await quickEquityRadar(state.database as never, {
+      now,
+      fetchClient: async () => {
+        fetchCallCount += 1;
+        return new Response(null, { status: 200 });
+      }
+    });
+
+    assert.ok(summary.persistedRadarEventCount > 0);
+    assert.equal(summary.sentRadarAlertCount, 0);
+    assert.equal(fetchCallCount, 0);
   });
 });

@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 
 import { calculateMarketRegimeReport, type MarketRegimeReport } from "@signalpilot/market-regime";
 import { AssetType, BotRunStatus, Prisma, prisma, type PrismaClient } from "@signalpilot/database";
+import { assessCandleSeriesQuality } from "@signalpilot/market-data";
 import { config } from "dotenv";
 import pino from "pino";
 
@@ -69,24 +70,49 @@ export async function calculateMarketRegime(
     });
     const benchmarks = [];
     const missingSymbols = new Set<string>(benchmarkSymbols);
+    const analysisNow = new Date();
 
     for (const asset of assets) {
       missingSymbols.delete(asset.symbol);
       const candles = await database.candle.findMany({
-        where: { assetId: asset.id, timeframe: "1d" },
+        where: {
+          assetId: asset.id,
+          timeframe: "1d",
+          closeTime: {
+            lte: analysisNow
+          }
+        },
         orderBy: { openTime: "desc" },
         take: candleLimit
       });
+      const candleQuality = assessCandleSeriesQuality(candles, {
+        now: analysisNow,
+        timeframe: "1d",
+        marketKind:
+          asset.assetType === AssetType.CRYPTO ? "CONTINUOUS" : "SESSION",
+        minimumClosedCandles: 20
+      });
 
-      if (candles.length === 0) {
+      if (candleQuality.reason !== "OK") {
         missingSymbols.add(asset.symbol);
+        await writeBotLog(database, "warn", "Market regime benchmark skipped for candle quality", {
+          botRunId: botRun.id,
+          symbol: asset.symbol,
+          reason: candleQuality.reason,
+          closedCandleCount: candleQuality.closedCandles.length,
+          excludedOpenOrInvalidCandleCount:
+            candleQuality.openOrInvalidCandleCount,
+          latestCloseTime:
+            candleQuality.latestCloseTime?.toISOString() ?? null
+        });
+        continue;
       }
 
       benchmarks.push({
         symbol: asset.symbol,
         assetType: mapAssetType(asset.assetType),
         timeframe: "1d",
-        candles: candles.reverse().map((candle) => ({
+        candles: candleQuality.closedCandles.map((candle) => ({
           close: candle.close.toString(),
           high: candle.high.toString(),
           low: candle.low.toString()

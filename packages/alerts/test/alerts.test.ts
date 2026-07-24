@@ -6,8 +6,12 @@ import { AlertStatus } from "@signalpilot/database";
 import {
   buildMarketEventAlertPayload,
   buildRadarEventPayload,
+  evaluateRadarAlertQualityGate,
+  evaluateSignalAlertQualityGate,
+  evaluateSignalAlertRepeat,
   researchAlertDisclaimer,
   sendMarketEventAlertToN8n,
+  sendRadarEventAlertToN8n,
   sendSignalAlertToN8n
 } from "../src/index.js";
 
@@ -99,6 +103,254 @@ describe("sendSignalAlertToN8n", () => {
     assert.equal(database.alertUpdates[0].data.status, AlertStatus.FAILED);
     assert.match(database.alertUpdates[0].data.error, /HTTP 500/);
     assert.equal(database.botLogCreates[0].data.level, "error");
+  });
+});
+
+describe("instant alert quality gates", () => {
+  it("blocks WAIT, neutral directions, and special types below the hard gates", () => {
+    const base = createInput();
+
+    assert.equal(
+      evaluateSignalAlertQualityGate({
+        ...base,
+        signal: {
+          ...base.signal,
+          status: "WAIT"
+        }
+      }).allowed,
+      false
+    );
+    assert.equal(
+      evaluateSignalAlertQualityGate({
+        ...base,
+        signal: {
+          ...base.signal,
+          direction: "NEUTRAL"
+        }
+      }).allowed,
+      false
+    );
+    assert.equal(
+      evaluateSignalAlertQualityGate({
+        ...base,
+        signal: {
+          ...base.signal,
+          signalType: "VOLATILITY_SPIKE",
+          score: 74
+        }
+      }).allowed,
+      false
+    );
+    assert.equal(
+      evaluateSignalAlertQualityGate({
+        ...base,
+        signal: {
+          ...base.signal,
+          signalType: "BREAKOUT_ALERT"
+        },
+        qualityContext: {
+          ...base.qualityContext,
+          patternConfirmed: false
+        }
+      }).allowed,
+      false
+    );
+  });
+
+  it("blocks a repeated setup even after cooldown without material improvement", () => {
+    const repeat = evaluateSignalAlertRepeat({
+      current: {
+        status: "WATCH",
+        direction: "BULLISH",
+        score: 80,
+        confirmingTimeframes: ["4h"],
+        newsEventContextFingerprint: null
+      },
+      previous: {
+        status: "WATCH",
+        direction: "BULLISH",
+        score: 80,
+        confirmingTimeframes: ["4h"],
+        newsEventContextFingerprint: null,
+        sentAt: new Date("2026-07-24T08:00:00.000Z")
+      },
+      now: new Date("2026-07-24T13:00:00.000Z"),
+      cooldownMinutes: 240
+    });
+
+    assert.equal(repeat.shouldSend, false);
+    assert.equal(repeat.reason, "NO_MATERIAL_IMPROVEMENT");
+    assert.equal(repeat.details.cooldownExpired, true);
+  });
+
+  it("allows score, severity, timeframe, direction, or context improvements", () => {
+    const previous = {
+      status: "WATCH",
+      direction: "BULLISH",
+      score: 80,
+      confirmingTimeframes: ["4h"],
+      newsEventContextFingerprint: "context-a",
+      sentAt: new Date("2026-07-24T12:00:00.000Z")
+    };
+    const common = {
+      previous,
+      now: new Date("2026-07-24T13:00:00.000Z"),
+      cooldownMinutes: 240
+    };
+
+    assert.equal(
+      evaluateSignalAlertRepeat({
+        ...common,
+        current: { ...previous, score: 88 }
+      }).reason,
+      "SCORE_IMPROVED"
+    );
+    assert.equal(
+      evaluateSignalAlertRepeat({
+        ...common,
+        current: { ...previous, score: 87 },
+        scoreImprovementThreshold: 5
+      }).reason,
+      "NO_MATERIAL_IMPROVEMENT"
+    );
+    assert.equal(
+      evaluateSignalAlertRepeat({
+        ...common,
+        current: { ...previous, status: "STRONG_WATCH" }
+      }).reason,
+      "SEVERITY_ESCALATED"
+    );
+    assert.equal(
+      evaluateSignalAlertRepeat({
+        ...common,
+        current: {
+          ...previous,
+          confirmingTimeframes: ["4h", "1d"]
+        }
+      }).reason,
+      "TIMEFRAME_CONFIRMATION_ADDED"
+    );
+    assert.equal(
+      evaluateSignalAlertRepeat({
+        ...common,
+        current: { ...previous, direction: "BEARISH" }
+      }).reason,
+      "DIRECTION_CHANGED"
+    );
+    assert.equal(
+      evaluateSignalAlertRepeat({
+        ...common,
+        current: {
+          ...previous,
+          newsEventContextFingerprint: "context-b"
+        }
+      }).reason,
+      "NEWS_EVENT_CONTEXT_CHANGED"
+    );
+  });
+
+  it("blocks neutral confluence and observation-only radar events", () => {
+    const metadataJson = {
+      closedCandle: true,
+      freshData: true,
+      alertMaterialChange: true,
+      watchlistAlertEnabled: true,
+      patternDirection: "NEUTRAL"
+    };
+
+    assert.equal(
+      evaluateRadarAlertQualityGate({
+        id: "radar-confluence",
+        symbol: "BTCUSDT",
+        eventType: "CONFLUENCE",
+        severity: "CRITICAL",
+        timeframe: "1h",
+        shortMessage: "Mehrere Beobachtungen.",
+        score: 95,
+        metadataJson,
+        createdAt: new Date()
+      }).allowed,
+      false
+    );
+    assert.equal(
+      evaluateRadarAlertQualityGate({
+        id: "radar-volume",
+        symbol: "BTCUSDT",
+        eventType: "VOLUME_SPIKE",
+        severity: "CRITICAL",
+        timeframe: "1h",
+        shortMessage: "Volumenbeobachtung.",
+        score: 95,
+        movePercent: 4,
+        relativeVolume: 3,
+        metadataJson,
+        createdAt: new Date()
+      }).allowed,
+      false
+    );
+  });
+
+  it("performs the final gate before a direct radar webhook call", async () => {
+    const database = createFakeDatabase();
+    let fetchCallCount = 0;
+    const result = await sendRadarEventAlertToN8n(
+      {
+        radarEvent: {
+          id: "radar-neutral",
+          symbol: "BTCUSDT",
+          eventType: "CONFLUENCE",
+          severity: "CRITICAL",
+          timeframe: "1h",
+          shortMessage: "Neutrale Konfluenz.",
+          score: 95,
+          metadataJson: {
+            closedCandle: true,
+            freshData: true,
+            alertMaterialChange: true,
+            watchlistAlertEnabled: true,
+            patternDirection: "NEUTRAL"
+          },
+          createdAt: new Date()
+        }
+      },
+      {
+        database: database as never,
+        webhookUrl: "https://n8n.example/webhook/signal",
+        fetchClient: async () => {
+          fetchCallCount += 1;
+          return new Response("ok");
+        }
+      }
+    );
+
+    assert.equal(result.status, AlertStatus.FAILED);
+    assert.equal(result.attempts, 0);
+    assert.equal(fetchCallCount, 0);
+  });
+
+  it("blocks radar dispatch when the watchlist item has no alert permission", () => {
+    const decision = evaluateRadarAlertQualityGate({
+      id: "radar-watchlist-disabled",
+      symbol: "BTCUSDT",
+      eventType: "MOVEMENT_SPIKE",
+      severity: "CRITICAL",
+      timeframe: "1h",
+      shortMessage: "Bestätigte gerichtete Bewegung.",
+      score: 95,
+      movePercent: 5,
+      metadataJson: {
+        closedCandle: true,
+        freshData: true,
+        alertMaterialChange: true,
+        watchlistAlertEnabled: false
+      },
+      createdAt: new Date()
+    });
+
+    assert.deepEqual(decision, {
+      allowed: false,
+      reasons: ["WATCHLIST_ALERT_NOT_ENABLED"]
+    });
   });
 });
 
@@ -309,7 +561,8 @@ function createInput() {
       status: "WATCH",
       direction: "BULLISH",
       signalType: "MOMENTUM_ALERT",
-      score: 72.4,
+      score: 82.4,
+      volumeScore: 82,
       riskLevel: "MEDIUM",
       createdAt: new Date("2026-05-15T10:00:00.000Z")
     },
@@ -324,6 +577,15 @@ function createInput() {
           nextFocus: "Als naechstes 4h beobachten."
         }
       }
+    },
+    qualityContext: {
+      closedCandle: true,
+      freshData: true,
+      patternConfirmed: true,
+      volumeConfirmed: true,
+      confirmingTimeframes: ["1d"],
+      newsEventContextFingerprint: null,
+      materialRepeat: true
     },
     dashboardUrl: "https://dashboard.example/signals/signal-1"
   };

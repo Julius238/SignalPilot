@@ -1,7 +1,12 @@
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { sendSignalAlertToN8n } from "@signalpilot/alerts";
+import {
+  evaluateSignalAlertQualityGate,
+  evaluateSignalAlertRepeat,
+  sendSignalAlertToN8n,
+  type SignalAlertQualityContext
+} from "@signalpilot/alerts";
 import {
   AlertStatus,
   AssetType,
@@ -12,11 +17,14 @@ import {
   SignalDirection,
   SignalStatus,
   SignalType,
-  WatchlistPriority,
   type PrismaClient
 } from "@signalpilot/database";
 import { buildIndicatorSnapshot, type IndicatorCandle } from "@signalpilot/indicators";
-import { supportedBinanceIntervals } from "@signalpilot/market-data";
+import {
+  assessCandleSeriesQuality,
+  isTimestampFresh,
+  supportedBinanceIntervals
+} from "@signalpilot/market-data";
 import {
   calculateMultiTimeframeSummary,
   type MultiTimeframeSignalInput,
@@ -35,6 +43,21 @@ import type { AssetClass, IntelligenceContext, SignalDecision } from "@signalpil
 import { config } from "dotenv";
 import pino from "pino";
 
+import {
+  buildSignalAlertQualityContext,
+  loadPreviousNotificationContext
+} from "../lib/alertQuality.js";
+import {
+  parseAlertMode,
+  shouldRouteAlertForAsset,
+  type AlertMode
+} from "../lib/alertRouting.js";
+
+export {
+  shouldRouteAlertForAsset,
+  type AlertMode
+} from "../lib/alertRouting.js";
+
 const logger = pino({
   name: "signalpilot-worker"
 });
@@ -47,17 +70,15 @@ config();
 const candleLimit = 250;
 const minimumUsefulCandles = 20;
 const multiTimeframeIntervals = ["1h", "4h", "1d"] as const;
-const alertModes = ["ALL_ASSETS", "WATCHLIST_ONLY", "HIGH_PRIORITY_ONLY"] as const;
 const defaultAlertCooldownMinutes = 240;
 const defaultAlertScoreImprovementThreshold = 8;
-const alignmentImprovementThreshold = 10;
 const cooldownSentReasons = [
   "NO_PREVIOUS_ALERT",
-  "COOLDOWN_EXPIRED",
   "SCORE_IMPROVED",
-  "STATUS_ESCALATED",
-  "RISK_ESCALATED",
-  "ALIGNMENT_IMPROVED"
+  "SEVERITY_ESCALATED",
+  "TIMEFRAME_CONFIRMATION_ADDED",
+  "DIRECTION_CHANGED",
+  "NEWS_EVENT_CONTEXT_CHANGED"
 ] as const;
 
 const neutralIntelligenceContext: IntelligenceContext = {
@@ -85,35 +106,9 @@ export type AnalyzeCryptoSignalsSummary = {
   errorCount: number;
 };
 
-export type AlertMode = (typeof alertModes)[number];
-
-export type AlertRouteReason =
-  | "ALL_ASSETS"
-  | "WATCHLIST_ONLY_MATCH"
-  | "HIGH_PRIORITY_MATCH"
-  | "WATCHLIST_DISABLED"
-  | "NOT_ON_WATCHLIST"
-  | "NOT_HIGH_PRIORITY"
-  | "INVALID_ALERT_MODE";
-
-type AlertRouteWatchlistItem = {
-  alertEnabled: boolean;
-  priority: WatchlistPriority;
-} | null;
-
-type AlertRouteAsset = {
-  id: string;
-  symbol: string;
-};
-
-export type AlertRouteDecision = {
-  shouldRoute: boolean;
-  reason: AlertRouteReason;
-};
-
 export type AlertCooldownReason =
   | (typeof cooldownSentReasons)[number]
-  | "COOLDOWN_ACTIVE";
+  | "NO_MATERIAL_IMPROVEMENT";
 
 export type AlertCooldownDecision = {
   shouldSend: boolean;
@@ -135,11 +130,15 @@ type CooldownSignal = {
 
 type ExistingAlertState = {
   status: SignalStatus;
+  direction: SignalDirection;
+  lastSignalId?: string | null;
   lastScore: number;
   lastRiskLevel: RiskLevel;
   lastAlignment: string | null;
   lastAlignmentScore: number | null;
   lastSentAt: Date;
+  lastConfirmingTimeframes?: string[];
+  lastNewsEventContextFingerprint?: string | null;
 };
 
 export async function analyzeCryptoSignals(
@@ -154,8 +153,7 @@ export async function analyzeCryptoSignals(
     process.env.ALERT_SCORE_IMPROVEMENT_THRESHOLD,
     defaultAlertScoreImprovementThreshold
   );
-  const allowStatusEscalation = parseBooleanEnv(process.env.ALERT_ALLOW_STATUS_ESCALATION, true);
-  const allowRiskEscalation = parseBooleanEnv(process.env.ALERT_ALLOW_RISK_ESCALATION, true);
+  const analysisNow = new Date();
   const botRun = await database.botRun.create({
     data: {
       jobName: "analyzeCryptoSignals",
@@ -228,7 +226,10 @@ export async function analyzeCryptoSignals(
           const candles = await database.candle.findMany({
             where: {
               assetId: asset.id,
-              timeframe
+              timeframe,
+              closeTime: {
+                lte: analysisNow
+              }
             },
             orderBy: {
               openTime: "desc"
@@ -236,9 +237,31 @@ export async function analyzeCryptoSignals(
             take: candleLimit
           });
 
-          const chronologicalCandles: IndicatorCandle[] = [...candles]
-            .reverse()
-            .map((candle) => ({
+          const candleQuality = assessCandleSeriesQuality(candles, {
+            now: analysisNow,
+            timeframe,
+            marketKind: "CONTINUOUS",
+            minimumClosedCandles: minimumUsefulCandles
+          });
+
+          if (candleQuality.reason !== "OK") {
+            insufficientDataCount += 1;
+            await writeBotLog(database, "warn", "Crypto signal analysis skipped for candle quality", {
+              botRunId: botRun.id,
+              assetId: asset.id,
+              symbol: asset.symbol,
+              timeframe,
+              reason: candleQuality.reason,
+              closedCandleCount: candleQuality.closedCandles.length,
+              excludedOpenOrInvalidCandleCount: candleQuality.openOrInvalidCandleCount,
+              latestCloseTime: candleQuality.latestCloseTime?.toISOString() ?? null,
+              ageMinutes:
+                candleQuality.ageMs === null ? null : Math.round(candleQuality.ageMs / 60_000)
+            });
+            continue;
+          }
+
+          const chronologicalCandles: IndicatorCandle[] = candleQuality.closedCandles.map((candle) => ({
               high: candle.high.toString(),
               low: candle.low.toString(),
               close: candle.close.toString(),
@@ -270,7 +293,7 @@ export async function analyzeCryptoSignals(
             indicators: snapshot
           });
 
-          const currentSignalInput = toMultiTimeframeSignalInput(decision, new Date());
+          const currentSignalInput = toMultiTimeframeSignalInput(decision, analysisNow);
           const multiTimeframeSummary = calculateSummaryWithCurrentSignal(
             latestSignalsByTimeframe,
             currentSignalInput
@@ -296,6 +319,12 @@ export async function analyzeCryptoSignals(
             }
           });
           const adjustedDecision = applyRuleResultToDecision(decision, signalRulesResult);
+          const baseAlertQualityContext = buildSignalAlertQualityContext({
+            decision: adjustedDecision,
+            candles: chronologicalCandles,
+            indicators: snapshot,
+            multiTimeframeSummary
+          });
 
           const outputDraft = composeSignalOutput({
             decision: adjustedDecision,
@@ -359,7 +388,18 @@ export async function analyzeCryptoSignals(
 
           const signalOutput = signal.output;
 
-          if (!signalOutput || !shouldSendSignalAlert(adjustedDecision, signalOutput.telegramText, multiTimeframeSummary)) {
+          if (
+            !signalOutput ||
+            !shouldSendSignalAlert(
+              adjustedDecision,
+              signalOutput.telegramText,
+              multiTimeframeSummary,
+              {
+                ...baseAlertQualityContext,
+                materialRepeat: true
+              }
+            )
+          ) {
             skippedAlertCount += 1;
           } else {
             const routeDecision = shouldRouteAlertForAsset({
@@ -396,15 +436,18 @@ export async function analyzeCryptoSignals(
                   lastSentAt: "desc"
                 }
               });
+              const enrichedAlertState = await enrichExistingAlertState(
+                database,
+                existingAlertState
+              );
               const cooldownDecision = shouldSendAfterCooldown({
                 signal,
                 signalOutput,
                 multiTimeframeSummary,
-                existingAlertState,
+                qualityContext: baseAlertQualityContext,
+                existingAlertState: enrichedAlertState,
                 cooldownMinutes: alertCooldownMinutes,
-                scoreImprovementThreshold: alertScoreImprovementThreshold,
-                allowStatusEscalation,
-                allowRiskEscalation
+                scoreImprovementThreshold: alertScoreImprovementThreshold
               });
 
               if (!cooldownDecision.shouldSend) {
@@ -416,6 +459,10 @@ export async function analyzeCryptoSignals(
               const alertResult = await sendSignalAlertToN8n({
                 signal,
                 signalOutput,
+                qualityContext: {
+                  ...baseAlertQualityContext,
+                  materialRepeat: cooldownDecision.shouldSend
+                },
                 dashboardUrl: undefined
               }, {
                 database
@@ -618,255 +665,82 @@ export async function analyzeCryptoSignals(
   }
 }
 
-export function shouldRouteAlertForAsset(input: {
-  asset: AlertRouteAsset;
-  watchlistItem?: AlertRouteWatchlistItem;
-  alertMode?: string | null;
-}): AlertRouteDecision {
-  const parsed = parseAlertMode(input.alertMode);
-  const watchlistItem = input.watchlistItem ?? null;
-
-  if (parsed.invalidValue && !watchlistItem) {
-    return {
-      shouldRoute: true,
-      reason: "INVALID_ALERT_MODE"
-    };
-  }
-
-  if (watchlistItem?.alertEnabled === false) {
-    return {
-      shouldRoute: false,
-      reason: "WATCHLIST_DISABLED"
-    };
-  }
-
-  if (parsed.alertMode === "ALL_ASSETS") {
-    return {
-      shouldRoute: true,
-      reason: parsed.invalidValue ? "INVALID_ALERT_MODE" : "ALL_ASSETS"
-    };
-  }
-
-  if (!watchlistItem) {
-    return {
-      shouldRoute: false,
-      reason: "NOT_ON_WATCHLIST"
-    };
-  }
-
-  if (parsed.alertMode === "WATCHLIST_ONLY") {
-    return {
-      shouldRoute: true,
-      reason: "WATCHLIST_ONLY_MATCH"
-    };
-  }
-
-  if (watchlistItem.priority === WatchlistPriority.HIGH) {
-    return {
-      shouldRoute: true,
-      reason: "HIGH_PRIORITY_MATCH"
-    };
-  }
-
-  return {
-    shouldRoute: false,
-    reason: "NOT_HIGH_PRIORITY"
-  };
-}
-
 export function shouldSendSignalAlert(
   decision: SignalDecision,
   telegramText?: string | null,
-  multiTimeframeSummary?: MultiTimeframeSummary | null
+  multiTimeframeSummary?: MultiTimeframeSummary | null,
+  qualityContext?: SignalAlertQualityContext
 ): boolean {
-  if (!telegramText?.trim()) {
-    return false;
-  }
-
-  if (isMultiTimeframeAlertWorthy(decision, multiTimeframeSummary)) {
-    return true;
-  }
-
-  if (decision.status === "NO_EDGE" || decision.signalType === "NO_SIGNAL") {
-    return false;
-  }
-
-  const hasAlertSignalType =
-    decision.signalType === "VOLUME_SPIKE" ||
-    decision.signalType === "VOLATILITY_SPIKE" ||
-    decision.signalType === "BREAKOUT_ALERT";
-
-  if (hasAlertSignalType) {
-    return true;
-  }
-
-  if (decision.status === "WAIT" && decision.score < 70) {
-    return false;
-  }
-
-  return (
-    decision.status === "STRONG_WATCH" ||
-    (decision.status === "WATCH" && decision.score >= 70) ||
-    (decision.status === "AVOID" && decision.riskLevel === "HIGH")
-  );
+  return evaluateSignalAlertQualityGate({
+    signal: {
+      id: "worker-preflight",
+      symbol: decision.symbol,
+      assetType: decision.assetType,
+      timeframe: decision.timeframe,
+      status: decision.status,
+      direction: decision.direction,
+      signalType: decision.signalType,
+      score: decision.score,
+      volumeScore: decision.volumeScore,
+      riskLevel: decision.riskLevel,
+      createdAt: new Date(0)
+    },
+    signalOutput: {
+      shortConclusion: "",
+      telegramText: telegramText ?? "",
+      dashboardJson: {},
+      multiTimeframeSummary
+    },
+    qualityContext
+  }).allowed;
 }
 
 export function shouldSendAfterCooldown(input: {
   signal: CooldownSignal;
   signalOutput: { telegramText?: string | null };
-  multiTimeframeSummary?: Pick<MultiTimeframeSummary, "alignment" | "alignmentScore"> | null;
+  multiTimeframeSummary?: Pick<
+    MultiTimeframeSummary,
+    "alignment" | "alignmentScore" | "confirmingTimeframes"
+  > | null;
+  qualityContext?: Pick<
+    SignalAlertQualityContext,
+    "confirmingTimeframes" | "newsEventContextFingerprint"
+  >;
   existingAlertState?: ExistingAlertState | null;
   now?: Date;
   cooldownMinutes: number;
   scoreImprovementThreshold: number;
-  allowStatusEscalation: boolean;
-  allowRiskEscalation: boolean;
 }): AlertCooldownDecision {
-  const now = input.now ?? new Date();
   const existing = input.existingAlertState ?? null;
-  const currentAlignmentScore = input.multiTimeframeSummary?.alignmentScore;
+  const repeatDecision = evaluateSignalAlertRepeat({
+    current: {
+      status: input.signal.status,
+      direction: input.signal.direction,
+      score: input.signal.score,
+      confirmingTimeframes:
+        input.qualityContext?.confirmingTimeframes ??
+        input.multiTimeframeSummary?.confirmingTimeframes ??
+        [],
+      newsEventContextFingerprint:
+        input.qualityContext?.newsEventContextFingerprint ?? null
+    },
+    previous: existing
+      ? {
+          status: existing.status,
+          direction: existing.direction,
+          score: existing.lastScore,
+          confirmingTimeframes: existing.lastConfirmingTimeframes ?? [],
+          newsEventContextFingerprint:
+            existing.lastNewsEventContextFingerprint ?? null,
+          sentAt: existing.lastSentAt
+        }
+      : null,
+    now: input.now,
+    cooldownMinutes: input.cooldownMinutes,
+    scoreImprovementThreshold: input.scoreImprovementThreshold
+  });
 
-  if (!existing) {
-    return {
-      shouldSend: true,
-      reason: "NO_PREVIOUS_ALERT",
-      details: {
-        score: input.signal.score,
-        riskLevel: input.signal.riskLevel,
-        alignment: input.multiTimeframeSummary?.alignment ?? null,
-        alignmentScore: currentAlignmentScore ?? null
-      }
-    };
-  }
-
-  const elapsedMinutes = (now.getTime() - existing.lastSentAt.getTime()) / 60_000;
-
-  if (elapsedMinutes >= input.cooldownMinutes) {
-    return {
-      shouldSend: true,
-      reason: "COOLDOWN_EXPIRED",
-      details: {
-        elapsedMinutes,
-        cooldownMinutes: input.cooldownMinutes,
-        lastSentAt: existing.lastSentAt.toISOString()
-      }
-    };
-  }
-
-  const scoreDelta = input.signal.score - existing.lastScore;
-
-  if (scoreDelta >= input.scoreImprovementThreshold) {
-    return {
-      shouldSend: true,
-      reason: "SCORE_IMPROVED",
-      details: {
-        previousScore: existing.lastScore,
-        currentScore: input.signal.score,
-        scoreDelta,
-        threshold: input.scoreImprovementThreshold
-      }
-    };
-  }
-
-  const currentStatusRank = statusRank(input.signal.status);
-  const previousStatusRank = statusRank(existing.status);
-
-  if (
-    input.allowStatusEscalation &&
-    currentStatusRank !== null &&
-    previousStatusRank !== null &&
-    currentStatusRank > previousStatusRank
-  ) {
-    return {
-      shouldSend: true,
-      reason: "STATUS_ESCALATED",
-      details: {
-        previousStatus: existing.status,
-        currentStatus: input.signal.status
-      }
-    };
-  }
-
-  if (
-    input.allowRiskEscalation &&
-    riskRank(input.signal.riskLevel) > riskRank(existing.lastRiskLevel)
-  ) {
-    return {
-      shouldSend: true,
-      reason: "RISK_ESCALATED",
-      details: {
-        previousRiskLevel: existing.lastRiskLevel,
-        currentRiskLevel: input.signal.riskLevel
-      }
-    };
-  }
-
-  const alignmentDelta =
-    currentAlignmentScore === undefined || existing.lastAlignmentScore === null
-      ? null
-      : currentAlignmentScore - existing.lastAlignmentScore;
-
-  if (alignmentDelta !== null && alignmentDelta >= alignmentImprovementThreshold) {
-    return {
-      shouldSend: true,
-      reason: "ALIGNMENT_IMPROVED",
-      details: {
-        previousAlignment: existing.lastAlignment,
-        currentAlignment: input.multiTimeframeSummary?.alignment ?? null,
-        previousAlignmentScore: existing.lastAlignmentScore,
-        currentAlignmentScore,
-        alignmentDelta,
-        threshold: alignmentImprovementThreshold
-      }
-    };
-  }
-
-  return {
-    shouldSend: false,
-    reason: "COOLDOWN_ACTIVE",
-    details: {
-      elapsedMinutes,
-      cooldownMinutes: input.cooldownMinutes,
-      previousScore: existing.lastScore,
-      currentScore: input.signal.score,
-      previousStatus: existing.status,
-      currentStatus: input.signal.status,
-      previousRiskLevel: existing.lastRiskLevel,
-      currentRiskLevel: input.signal.riskLevel,
-      previousAlignmentScore: existing.lastAlignmentScore,
-      currentAlignmentScore: currentAlignmentScore ?? null
-    }
-  };
-}
-
-function parseAlertMode(value: string | null | undefined): {
-  alertMode: AlertMode;
-  rawAlertMode: string | null | undefined;
-  invalidValue: string | null;
-} {
-  if (value === undefined || value === null || value.trim() === "") {
-    return {
-      alertMode: "ALL_ASSETS",
-      rawAlertMode: value,
-      invalidValue: null
-    };
-  }
-
-  const normalized = value.trim();
-
-  if (alertModes.includes(normalized as AlertMode)) {
-    return {
-      alertMode: normalized as AlertMode,
-      rawAlertMode: value,
-      invalidValue: null
-    };
-  }
-
-  return {
-    alertMode: "ALL_ASSETS",
-    rawAlertMode: value,
-    invalidValue: value
-  };
+  return repeatDecision;
 }
 
 function parsePositiveNumberEnv(value: string | undefined, defaultValue: number) {
@@ -878,59 +752,11 @@ function parsePositiveNumberEnv(value: string | undefined, defaultValue: number)
   return Number.isFinite(parsed) && parsed > 0 ? parsed : defaultValue;
 }
 
-function parseBooleanEnv(value: string | undefined, defaultValue: boolean) {
-  if (value === undefined || value.trim() === "") {
-    return defaultValue;
-  }
-
-  if (value === "true") {
-    return true;
-  }
-
-  if (value === "false") {
-    return false;
-  }
-
-  return defaultValue;
-}
-
 function createCooldownSentReasonCounts() {
   return Object.fromEntries(cooldownSentReasons.map((reason) => [reason, 0])) as Record<
     (typeof cooldownSentReasons)[number],
     number
   >;
-}
-
-function statusRank(status: SignalStatus): number | null {
-  if (status === "NO_EDGE") {
-    return 0;
-  }
-
-  if (status === "WAIT") {
-    return 1;
-  }
-
-  if (status === "WATCH") {
-    return 2;
-  }
-
-  if (status === "STRONG_WATCH") {
-    return 3;
-  }
-
-  return null;
-}
-
-function riskRank(riskLevel: RiskLevel) {
-  if (riskLevel === "LOW") {
-    return 0;
-  }
-
-  if (riskLevel === "MEDIUM") {
-    return 1;
-  }
-
-  return 2;
 }
 
 async function upsertAlertStateAfterSend(
@@ -983,6 +809,27 @@ async function upsertAlertStateAfterSend(
   });
 }
 
+async function enrichExistingAlertState(
+  database: PrismaClient,
+  existingAlertState: ExistingAlertState | null
+): Promise<ExistingAlertState | null> {
+  if (!existingAlertState?.lastSignalId) {
+    return existingAlertState;
+  }
+
+  const previousContext = await loadPreviousNotificationContext(
+    database,
+    existingAlertState.lastSignalId
+  );
+
+  return {
+    ...existingAlertState,
+    lastConfirmingTimeframes: previousContext.confirmingTimeframes,
+    lastNewsEventContextFingerprint:
+      previousContext.newsEventContextFingerprint
+  };
+}
+
 async function loadLatestSignalsByTimeframe(
   database: PrismaClient,
   assetId: string
@@ -1015,7 +862,14 @@ async function loadLatestSignalsByTimeframe(
   const latestSignalsByTimeframe = new Map<string, MultiTimeframeSignalInput>();
 
   for (const signal of latestSignals) {
-    if (!signal) {
+    if (
+      !signal ||
+      !isTimestampFresh(
+        signal.createdAt,
+        signal.timeframe,
+        "CONTINUOUS"
+      )
+    ) {
       continue;
     }
 
@@ -1049,29 +903,6 @@ function toMultiTimeframeSignalInput(
     riskScore: decision.riskScore,
     createdAt
   };
-}
-
-function isMultiTimeframeAlertWorthy(
-  decision: SignalDecision,
-  summary?: MultiTimeframeSummary | null
-): boolean {
-  if (!summary) {
-    return false;
-  }
-
-  if (summary.alignment === "BULLISH_ALIGNED" && summary.alignmentScore >= 70) {
-    return true;
-  }
-
-  if (summary.alignment === "HIGHER_TIMEFRAME_CONFIRMATION" && summary.alignmentScore >= 65) {
-    return true;
-  }
-
-  if (summary.alignment === "CONFLICT" && decision.riskLevel === "HIGH") {
-    return true;
-  }
-
-  return summary.alignment === "BEARISH_ALIGNED" && decision.riskLevel === "HIGH";
 }
 
 function mapAssetType(assetType: AssetType): AssetClass {

@@ -15,6 +15,18 @@ export type {
 } from "./finnhub-news.js";
 export { FinnhubEventsAdapter, normalizeEarningsCalendarResponse } from "./finnhub-events.js";
 export type { FinnhubEventsFetchResult, NormalizedEarningsEvent } from "./finnhub-events.js";
+export {
+  assessCandleSeriesQuality,
+  defaultMaxCandleAgeMs,
+  isCandleClosed,
+  isTimestampFresh,
+  timeframeDurationMs
+} from "./candle-quality.js";
+export type {
+  CandleMarketKind,
+  CandleSeriesQuality,
+  TimedCandle
+} from "./candle-quality.js";
 export { saveCandles } from "./candles.js";
 export { supportedBinanceIntervals, supportedFinnhubIntervals } from "./types.js";
 export type { BinanceInterval, FinnhubInterval, CandleSource, NormalizedCandle } from "./types.js";

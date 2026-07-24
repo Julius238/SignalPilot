@@ -75,6 +75,29 @@ describe("quickCryptoRadar", () => {
     assert.equal(observation, null);
   });
 
+  it("does not evaluate a still-open latest candle", () => {
+    const settings = resolveQuickCryptoRadarSettings({ QUICK_RADAR_ENABLED: "true" });
+    const now = new Date("2026-07-24T12:00:00.000Z");
+    const observation = evaluateRadarCandles(
+      { id: "asset-1", symbol: "BTCUSDT", watchlistItem: null },
+      settings,
+      [
+        candle({
+          closeTime: new Date("2026-07-24T11:00:00.000Z"),
+          close: "100"
+        }),
+        candle({
+          closeTime: new Date("2026-07-24T13:00:00.000Z"),
+          close: "110",
+          volume: "500"
+        })
+      ],
+      now
+    );
+
+    assert.equal(observation, null);
+  });
+
   it("does not crash when selected assets have no data", async () => {
     process.env.QUICK_RADAR_ENABLED = "true";
 
@@ -261,7 +284,7 @@ describe("quickCryptoRadar", () => {
     const adapter = {
       fetchKlines: async () => [
         candle({ close: "100", volume: "100", openTime: new Date(1) }),
-        candle({ open: "100", high: "106", low: "99", close: "104", volume: "260", openTime: new Date(2) })
+        candle({ open: "100", high: "107", low: "99", close: "105", volume: "260", openTime: new Date(2) })
       ]
     };
     const payloads: unknown[] = [];
@@ -274,21 +297,79 @@ describe("quickCryptoRadar", () => {
     });
 
     assert.equal(summary.persistedRadarEventCount, 3);
-    assert.equal(summary.sentRadarAlertCount, 2);
-    assert.equal(summary.skippedRadarAlertCount, 1);
-    assert.equal(state.alerts.length, 2);
-    assert.equal(payloads.length, 2);
+    assert.equal(summary.sentRadarAlertCount, 1);
+    assert.equal(summary.skippedRadarAlertCount, 2);
+    assert.equal(state.alerts.length, 1);
+    assert.equal(payloads.length, 1);
     assert.deepEqual(
       payloads.map((payload) => (payload as { type: string }).type),
-      ["radar_event", "radar_event"]
+      ["radar_event"]
     );
+  });
+
+  it("keeps radar observations but blocks alerts when alertEnabled is false", async () => {
+    process.env.QUICK_RADAR_ENABLED = "true";
+    process.env.QUICK_RADAR_ALERTS_ENABLED = "true";
+    process.env.QUICK_RADAR_MIN_MOVE_PERCENT = "2";
+    process.env.N8N_WEBHOOK_SIGNAL_URL = "https://n8n.example.test/webhook";
+    const state = createDatabaseState([
+      {
+        id: "asset-1",
+        symbol: "BTCUSDT",
+        watchlistItem: {
+          priority: WatchlistPriority.HIGH,
+          alertEnabled: false
+        }
+      }
+    ]);
+    let fetchCallCount = 0;
+    const summary = await quickCryptoRadar(
+      state.database as never,
+      {
+        fetchKlines: async () => [
+          candle({ close: "100", volume: "100", openTime: new Date(1) }),
+          candle({
+            open: "100",
+            high: "107",
+            low: "99",
+            close: "105",
+            volume: "260",
+            openTime: new Date(2)
+          })
+        ]
+      },
+      {
+        fetchClient: async () => {
+          fetchCallCount += 1;
+          return new Response(null, { status: 200 });
+        }
+      }
+    );
+
+    assert.equal(summary.persistedRadarEventCount, 3);
+    assert.equal(summary.sentRadarAlertCount, 0);
+    assert.equal(fetchCallCount, 0);
   });
 });
 
 function createDatabaseState(assets: unknown[]) {
   const botRunUpdates: Array<{ data: { status: BotRunStatus; metadataJson?: unknown } }> = [];
   const botLogs: Array<{ data: { message: string; metadataJson?: unknown } }> = [];
-  const radarEvents: Array<{ data: { symbol: string; eventType: string; severity?: string; shortMessage: string } }> = [];
+  const radarEvents: Array<{
+    data: {
+      symbol: string;
+      assetType: string;
+      eventType: string;
+      severity?: string;
+      timeframe: string;
+      shortMessage: string;
+      score?: number | null;
+      movePercent?: number | null;
+      relativeVolume?: number | null;
+      rangePercent?: number | null;
+      metadataJson?: unknown;
+    };
+  }> = [];
   const alerts: Array<{ data: { payloadJson: unknown } }> = [];
 
   return {
@@ -311,21 +392,36 @@ function createDatabaseState(assets: unknown[]) {
       },
       radarEvent: {
         findFirst: async () => null,
-        create: async (operation: { data: { symbol: string; eventType: string; severity?: string; shortMessage: string } }) => {
+        create: async (operation: {
+          data: {
+            symbol: string;
+            assetType: string;
+            eventType: string;
+            severity?: string;
+            timeframe: string;
+            shortMessage: string;
+            score?: number | null;
+            movePercent?: number | null;
+            relativeVolume?: number | null;
+            rangePercent?: number | null;
+            metadataJson?: unknown;
+          };
+        }) => {
           radarEvents.push(operation);
           return {
             id: `radar-event-${radarEvents.length}`,
             symbol: operation.data.symbol,
             eventType: operation.data.eventType,
             severity: operation.data.severity ?? "WATCH",
-            timeframe: "1h",
+            assetType: operation.data.assetType,
+            timeframe: operation.data.timeframe,
             shortMessage: operation.data.shortMessage,
-            score: null,
-            movePercent: null,
-            relativeVolume: null,
-            rangePercent: null,
-            metadataJson: null,
-            createdAt: new Date("2026-01-01T00:00:00.000Z")
+            score: operation.data.score ?? null,
+            movePercent: operation.data.movePercent ?? null,
+            relativeVolume: operation.data.relativeVolume ?? null,
+            rangePercent: operation.data.rangePercent ?? null,
+            metadataJson: operation.data.metadataJson ?? null,
+            createdAt: new Date()
           };
         }
       },
@@ -344,11 +440,14 @@ function createDatabaseState(assets: unknown[]) {
 }
 
 function candle(overrides: Partial<NormalizedCandle>): NormalizedCandle {
+  const sequence = overrides.openTime?.getTime() ?? 0;
+  const defaultCloseTime = new Date(Date.now() - 30 * 60_000 + sequence);
+
   return {
     symbol: "BTCUSDT",
     timeframe: "1h",
     openTime: new Date(overrides.openTime ?? 0),
-    closeTime: new Date(overrides.closeTime ?? overrides.openTime ?? 0),
+    closeTime: new Date(overrides.closeTime ?? defaultCloseTime),
     open: "100",
     high: "101",
     low: "99",
