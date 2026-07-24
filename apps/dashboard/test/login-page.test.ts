@@ -4,6 +4,8 @@ import { dirname, resolve } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { redirectAfterLogin, type LoginRouter } from "../src/lib/login-redirect";
+
 const appDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 describe("login page dev login", () => {
@@ -15,12 +17,17 @@ describe("login page dev login", () => {
     assert.match(source, /credentials: "include"/);
     assert.match(source, /username: formData\.get\("username"\)/);
     assert.match(source, /password: formData\.get\("password"\)/);
+    assert.match(source, /redirectToDashboard\(\)/);
+    assert.match(source, /Invalid credentials\. Please try again\./);
   });
 
-  it("loads auth status and only renders the dev button from devLoginEnabled", async () => {
+  it("redirects authenticated sessions and only renders the dev button when enabled", async () => {
     const source = await readFile(resolve(appDir, "src/app/login/page.tsx"), "utf8");
 
     assert.match(source, /\/auth\/status/);
+    assert.match(source, /cache: "no-store"/);
+    assert.match(source, /status\.authenticated === true/);
+    assert.match(source, /redirectToDashboard\(\)/);
     assert.match(source, /setDevLoginEnabled\(status\.devLoginEnabled === true\)/);
     assert.match(source, /devLoginEnabled \? \(/);
     assert.match(source, /Continue in Dev Mode/);
@@ -32,7 +39,32 @@ describe("login page dev login", () => {
     assert.match(source, /\/auth\/dev-login/);
     assert.match(source, /method: "POST"/);
     assert.match(source, /credentials: "include"/);
-    assert.match(source, /router\.replace\("\/dashboard"\)/);
+    assert.match(source, /redirectToDashboard\(\)/);
+  });
+
+  it("clears the login UI while the successful redirect is being committed", async () => {
+    const source = await readFile(resolve(appDir, "src/app/login/page.tsx"), "utf8");
+
+    assert.match(source, /setPending\(false\)/);
+    assert.match(source, /setDevPending\(false\)/);
+    assert.match(source, /setRedirecting\(true\)/);
+    assert.match(source, /if \(redirecting\) return null/);
+  });
+
+  it("replaces the login history entry and refreshes the authenticated route", () => {
+    const calls: string[] = [];
+    const router: LoginRouter = {
+      replace(href) {
+        calls.push(`replace:${href}`);
+      },
+      refresh() {
+        calls.push("refresh");
+      }
+    };
+
+    redirectAfterLogin(router);
+
+    assert.deepEqual(calls, ["replace:/dashboard", "refresh"]);
   });
 });
 

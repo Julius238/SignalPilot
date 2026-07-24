@@ -6,21 +6,21 @@ import { formatDateTime } from "../lib/format";
 import type { MultiTimeframeSummary, ScannerGroupKey, SignalListItem } from "../lib/signalpilot-api";
 
 const groupTitles: Record<ScannerGroupKey, string> = {
-  strongWatch: "Starke Beobachtung",
+  strongWatch: "Hohe Relevanz",
   watchlist: "Beobachten",
-  volumeSpikes: "Volumen-Spike",
-  breakouts: "Ausbrüche",
+  volumeSpikes: "Ungewöhnliche Aktivität",
+  breakouts: "Kurszonen im Fokus",
   highRisk: "Hohes Risiko",
-  noEdge: "Kein Vorteil"
+  noEdge: "Geringe Relevanz"
 };
 
 const groupDescriptions: Record<ScannerGroupKey, string> = {
-  strongWatch: "Höchste Überzeugung – sortiert nach Signalqualität.",
-  watchlist: "Konstruktive Setups – es ist Beobachtung angebracht.",
-  volumeSpikes: "Frische Aktivitätsverschiebungen nach Signalzeitpunkt.",
-  breakouts: "Ausbruch-Signale sortiert nach Stärke.",
-  highRisk: "Hohes Risiko – Kontext prüfen, Vorsicht geboten.",
-  noEdge: "Signals ohne klaren Vorteil – niedrige Priorität."
+  strongWatch: "Die derzeit deutlichsten Beobachtungen, nach Qualität sortiert.",
+  watchlist: "Prüfenswerte Entwicklungen, die weiter beobachtet werden sollten.",
+  volumeSpikes: "Deutlich mehr Marktaktivität als zuletzt üblich.",
+  breakouts: "Assets nahe wichtigen Bereichen ihrer jüngsten Kursspanne.",
+  highRisk: "Beobachtungen mit erhöhter Unsicherheit und zusätzlichem Prüfbedarf.",
+  noEdge: "Signale ohne klaren Informationsvorteil — bewusst nachrangig."
 };
 
 export function ScannerGroups({
@@ -80,7 +80,7 @@ function ScannerGroup({
       </div>
 
       {sortedSignals.length === 0 ? (
-        <EmptyState title="Keine passenden Signals gefunden." />
+        <EmptyState title="Keine passenden Signale gefunden." tone="calm" />
       ) : (
         <div className="scanner-list">
           {sortedSignals.map((signal) => (

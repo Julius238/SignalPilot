@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { Inter } from "next/font/google";
 
-import { NavBar } from "../components/nav-bar";
+import { AppShell } from "../components/app-shell";
 import "./globals.css";
 
 const inter = Inter({
@@ -24,15 +24,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="de" className={inter.variable}>
       <body>
-        <div className="app-shell">
-          {authDisabled ? (
-            <div className="auth-warning">
-              Login ist deaktiviert — dieses Dashboard nicht öffentlich erreichbar machen.
-            </div>
-          ) : null}
-          <NavBar />
-          <main className="page">{children}</main>
-        </div>
+        <AppShell authDisabled={authDisabled}>{children}</AppShell>
       </body>
     </html>
   );

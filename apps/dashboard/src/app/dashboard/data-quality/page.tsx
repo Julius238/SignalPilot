@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { ErrorState, EmptyState } from "../../../components/empty-state";
+import { PageHeader } from "../../../components/ui";
 import { formatDateTime } from "../../../lib/format";
 import {
   buildQuery,
@@ -110,15 +111,16 @@ export default async function DataQualityPage({ searchParams }: DataQualityPageP
 
   return (
     <>
-      <div className="page-header">
-        <div>
-          <h1>Datenqualität</h1>
-          <p className="muted">Abdeckung von Candles, Signalen, Evaluations und Alerts.</p>
-        </div>
-        <Link className="primary-link" href="/dashboard/performance">
-          Performance →
-        </Link>
-      </div>
+      <PageHeader
+        eyebrow="System"
+        title="Datenqualität"
+        subtitle="Wie vollständig und frisch Markt-, Signal- und Auswertungsdaten aktuell sind."
+        actions={
+          <Link className="primary-link secondary-link" href="/dashboard/performance">
+            Performance ansehen
+          </Link>
+        }
+      />
 
       {report.error ? <ErrorState title="Qualitätsbericht nicht verfügbar" message={report.error} /> : null}
       {assets.error ? <ErrorState title="Asset-Coverage nicht verfügbar" message={assets.error} /> : null}

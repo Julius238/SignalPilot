@@ -1,11 +1,13 @@
 "use client";
 
-import { type FormEvent, useEffect, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { browserApiUrl } from "../../lib/api-url";
+import { redirectAfterLogin } from "../../lib/login-redirect";
 
 type AuthStatus = {
+  authenticated?: boolean;
   devLoginEnabled?: boolean;
 };
 
@@ -15,6 +17,18 @@ export default function LoginPage() {
   const [pending, setPending] = useState(false);
   const [devPending, setDevPending] = useState(false);
   const [devLoginEnabled, setDevLoginEnabled] = useState(false);
+  const [redirecting, setRedirecting] = useState(false);
+  const redirectStarted = useRef(false);
+
+  const redirectToDashboard = useCallback(() => {
+    if (redirectStarted.current) return;
+
+    redirectStarted.current = true;
+    setPending(false);
+    setDevPending(false);
+    setRedirecting(true);
+    redirectAfterLogin(router);
+  }, [router]);
 
   useEffect(() => {
     let cancelled = false;
@@ -27,7 +41,12 @@ export default function LoginPage() {
         });
         if (!response.ok) return;
         const status = (await response.json()) as AuthStatus;
-        if (!cancelled) setDevLoginEnabled(status.devLoginEnabled === true);
+        if (cancelled) return;
+        if (status.authenticated === true) {
+          redirectToDashboard();
+          return;
+        }
+        setDevLoginEnabled(status.devLoginEnabled === true);
       } catch {
         if (!cancelled) setDevLoginEnabled(false);
       }
@@ -38,7 +57,7 @@ export default function LoginPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [redirectToDashboard]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -64,7 +83,7 @@ export default function LoginPage() {
         return;
       }
 
-      router.replace("/dashboard");
+      redirectToDashboard();
     } catch {
       setError("Unable to reach API. Please check your connection.");
       setPending(false);
@@ -87,12 +106,14 @@ export default function LoginPage() {
         return;
       }
 
-      router.replace("/dashboard");
+      redirectToDashboard();
     } catch {
       setError("Unable to reach API. Please check your connection.");
       setDevPending(false);
     }
   }
+
+  if (redirecting) return null;
 
   return (
     <div className="login-page">

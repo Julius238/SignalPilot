@@ -41,8 +41,9 @@ export default async function NewsPage({ searchParams }: NewsPageProps) {
   return (
     <>
       <PageHeader
-        title="News-Feed"
-        subtitle="Nachrichten und Meldungen für beobachtete Assets"
+        eyebrow="Kontext"
+        title="Nachrichten"
+        subtitle="Aktuelle Meldungen zu beobachteten Assets — kompakt nach Quelle und Zeitpunkt eingeordnet."
       />
 
       {result.error ? (
@@ -69,72 +70,71 @@ export default async function NewsPage({ searchParams }: NewsPageProps) {
         ) : null}
       </form>
 
-      <SectionCard>
+      <SectionCard
+        title={news.length > 0 ? `${news.length} Meldungen` : undefined}
+        subtitle={hasFilter ? "Die Ansicht ist aktuell gefiltert." : "Neueste Meldungen zuerst."}
+      >
         {news.length === 0 ? (
-          <EmptyState title="Keine News-Einträge gefunden." />
+          <EmptyState
+            title="Keine passenden Nachrichten gefunden."
+            description="Passe die Filter an oder warte auf den nächsten News-Abruf."
+          />
         ) : (
-          <>
-            <p className="muted small" style={{ marginBottom: 12 }}>
-              {news.length} Einträge
-              {hasFilter ? " (gefiltert)" : ""}
-            </p>
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Symbol</th>
-                    <th>Quelle</th>
-                    <th>Schlagzeile</th>
-                    <th>Veröffentlicht</th>
-                    <th>Kategorie</th>
-                    <th>Sentiment</th>
-                    <th>Relevanz</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {news.map((item) => (
-                    <tr key={item.id}>
-                      <td>
-                        <Link href={`/dashboard/assets/${encodeURIComponent(item.symbol)}`}>
-                          <strong>{item.symbol}</strong>
-                        </Link>
-                      </td>
-                      <td>{item.source}</td>
-                      <td>
-                        {item.url ? (
-                          <a href={item.url} target="_blank" rel="noopener noreferrer">
-                            {item.headline}
-                          </a>
-                        ) : (
-                          item.headline
-                        )}
-                        {item.summary ? (
-                          <p className="muted small" style={{ margin: "2px 0 0" }}>
-                            {item.summary.slice(0, 120)}
-                            {item.summary.length > 120 ? "…" : ""}
-                          </p>
-                        ) : null}
-                      </td>
-                      <td className="nowrap">{formatDateTime(item.publishedAt)}</td>
-                      <td>{item.category ?? "—"}</td>
-                      <td>
-                        {item.sentiment ? (
-                          <span style={{ color: sentimentColor(item.sentiment) }}>
-                            {SENTIMENT_LABELS[item.sentiment] ?? item.sentiment}
-                          </span>
-                        ) : (
-                          <span className="muted">—</span>
-                        )}
-                      </td>
-                      <td>
-                        {item.relevanceScore != null ? item.relevanceScore : "—"}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          <div className="news-feed">
+            {news.map((item) => (
+              <article className="news-card" key={item.id}>
+                <div className="news-card-meta">
+                  <Link
+                    className="symbol-chip"
+                    href={`/dashboard/assets/${encodeURIComponent(item.symbol)}`}
+                  >
+                    {item.symbol}
+                  </Link>
+                  <span>{item.source}</span>
+                  <time dateTime={item.publishedAt}>{formatDateTime(item.publishedAt)}</time>
+                </div>
+                <h2>
+                  {item.url ? (
+                    <a href={item.url} target="_blank" rel="noopener noreferrer">
+                      {item.headline}
+                      <span aria-hidden="true"> ↗</span>
+                    </a>
+                  ) : (
+                    item.headline
+                  )}
+                </h2>
+                {item.summary ? (
+                  <p>
+                    {item.summary.slice(0, 220)}
+                    {item.summary.length > 220 ? "…" : ""}
+                  </p>
+                ) : null}
+                <div className="news-card-footer">
+                  {item.category ? <span className="soft-chip">{item.category}</span> : null}
+                  {item.sentiment ? (
+                    <span
+                      className="soft-chip"
+                      style={{ color: sentimentColor(item.sentiment) }}
+                    >
+                      Stimmung: {SENTIMENT_LABELS[item.sentiment] ?? item.sentiment}
+                    </span>
+                  ) : null}
+                  {item.relevanceScore != null ? (
+                    <span className="soft-chip" title="Automatisch geschätzte Relevanz der Meldung">
+                      Relevanz {item.relevanceScore}/10 ·{" "}
+                      {item.relevanceScore >= 7
+                        ? "hoch"
+                        : item.relevanceScore >= 4
+                          ? "mittel"
+                          : "gering"}
+                    </span>
+                  ) : (
+                    <span className="soft-chip">Noch nicht bewertet</span>
+                  )}
+                </div>
+              </article>
+            ))}
             </div>
-          </>
         )}
       </SectionCard>
     </>

@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { ErrorState, EmptyState } from "../../../components/empty-state";
+import { PageHeader } from "../../../components/ui";
 import { formatDateTime } from "../../../lib/format";
 import { fetchApi, type BotLog } from "../../../lib/signalpilot-api";
 
@@ -39,15 +40,16 @@ export default async function LogsPage() {
 
   return (
     <>
-      <div className="page-header">
-        <div>
-          <h1>System Logs</h1>
-          <p className="muted">Bot-Logs und Debug-Ausgaben der letzten Läufe.</p>
-        </div>
-        <Link className="primary-link" href="/dashboard/operations">
-          Operations →
-        </Link>
-      </div>
+      <PageHeader
+        eyebrow="System · Technische Ebene"
+        title="Ausführungsprotokoll"
+        subtitle="Technische Meldungen der letzten Worker- und Datenläufe."
+        actions={
+          <Link className="primary-link secondary-link" href="/dashboard/operations">
+            Zur Systemübersicht
+          </Link>
+        }
+      />
 
       {botLogs.error ? (
         <ErrorState title="Logs nicht verfügbar" message={botLogs.error} />

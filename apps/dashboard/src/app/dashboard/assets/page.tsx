@@ -27,8 +27,9 @@ export default async function AssetsPage() {
   return (
     <>
       <PageHeader
-        title="Asset-Übersicht"
-        subtitle={`${allAssets.length} Assets · ${activeCount} aktiv`}
+        eyebrow="Beobachten"
+        title="Märkte & Assets"
+        subtitle={`${allAssets.length} Instrumente im System · ${activeCount} werden aktuell beobachtet`}
       />
 
       {assets.error ? (

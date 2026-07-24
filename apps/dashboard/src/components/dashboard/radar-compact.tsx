@@ -4,43 +4,94 @@ import { EmptyState } from "../empty-state";
 import { SectionCard } from "../ui";
 import { DirectionBadge, StatusBadge } from "../badges";
 import { formatDateTime, formatRelativeTime } from "../../lib/format";
-import type { RadarEvent, SignalListItem } from "../../lib/signalpilot-api";
+import type { Alert, RadarEvent, SignalListItem } from "../../lib/signalpilot-api";
 import {
+  chartPatternEventTypes,
   radarEventExplanation,
   radarEventTypeLabel,
   severityLabel,
   severityTone
 } from "./shared";
 
-// Kompakte Übersichtsblöcke: Markt-Radar und Signale.
-// Jede Radar-Zeile trägt einen Erklärsatz, damit auch ohne Chart-Vorwissen
-// klar ist, was die Beobachtung bedeutet. Details liegen auf den Unterseiten.
+// Die Übersicht trennt Marktbewegungen von Chartmustern. So ist sofort
+// erkennbar, ob die Beobachtung aus dem Krypto-, Aktien- oder Chart-Radar kommt.
 
-export function RadarCompactCard({ events, now }: { events: RadarEvent[]; now: Date }) {
+export function RadarOverviewCard({ events, now }: { events: RadarEvent[]; now: Date }) {
+  const patternEvents = events.filter((event) =>
+    chartPatternEventTypes.includes(event.eventType)
+  );
+  const cryptoEvents = events.filter(
+    (event) => event.assetType === "CRYPTO" && !chartPatternEventTypes.includes(event.eventType)
+  );
+  const equityEvents = events.filter(
+    (event) => event.assetType !== "CRYPTO" && !chartPatternEventTypes.includes(event.eventType)
+  );
+
   return (
     <SectionCard
-      title="Markt-Radar"
-      subtitle="Auffällige Bewegungen und Chartbilder der letzten 24 Stunden."
+      className="radar-overview-card"
+      title="Radar im Überblick"
+      subtitle="Drei Blickwinkel auf ungewöhnliche Aktivität der letzten 24 Stunden."
       action={
         <Link href="/dashboard/scanner" className="section-link">
-          Zum Scanner →
+          Gesamten Markt-Radar öffnen
         </Link>
       }
     >
-      {events.length === 0 ? (
-        <EmptyState
-          tone="calm"
-          title="Das Radar ist ruhig."
-          description="Keine auffälligen Bewegungen oder Chartbilder in den letzten 24 Stunden."
+      <div className="radar-lanes">
+        <RadarLane
+          description="Schnelle Bewegungen und ungewöhnliche Marktaktivität."
+          events={cryptoEvents}
+          label="Krypto"
+          now={now}
         />
+        <RadarLane
+          description="Auffälligkeiten bei Aktien und ETFs aus gespeicherten Marktdaten."
+          events={equityEvents}
+          label="Aktien & ETFs"
+          now={now}
+        />
+        <RadarLane
+          description="Kurszonen, Momentumwechsel und mehrere Faktoren zugleich."
+          events={patternEvents}
+          label="Chartmuster"
+          now={now}
+        />
+      </div>
+    </SectionCard>
+  );
+}
+
+function RadarLane({
+  description,
+  events,
+  label,
+  now
+}: {
+  description: string;
+  events: RadarEvent[];
+  label: string;
+  now: Date;
+}) {
+  return (
+    <section className="radar-lane">
+      <div className="radar-lane-head">
+        <div>
+          <h3>{label}</h3>
+          <p>{description}</p>
+        </div>
+        <span className="radar-lane-count">{events.length}</span>
+      </div>
+      {events.length === 0 ? (
+        <EmptyState tone="calm" title="Aktuell ruhig." />
       ) : (
         <div className="radar-list">
-          {events.map((event) => (
+          {events.slice(0, 4).map((event) => (
             <RadarRow key={event.id} event={event} now={now} />
           ))}
         </div>
       )}
-    </SectionCard>
+    </section>
   );
 }
 
@@ -70,22 +121,42 @@ function RadarRow({ event, now }: { event: RadarEvent; now: Date }) {
 export function SignalsCompactCard({
   signals,
   watchlistCount,
-  watchlistHighPriority
+  watchlistHighPriority,
+  alerts
 }: {
   signals: SignalListItem[];
   watchlistCount: number;
   watchlistHighPriority: number;
+  alerts: Alert[];
 }) {
+  const sentAlerts = alerts.filter((alert) => alert.status === "SENT").length;
+  const failedAlerts = alerts.filter((alert) => alert.status === "FAILED").length;
+
   return (
     <SectionCard
-      title="Signale im Blick"
-      subtitle="Assets, die das System aktuell für beobachtenswert hält."
+      className="signals-overview-card"
+      title="Signale & Benachrichtigungen"
+      subtitle="Beobachtungen mit der höchsten aktuellen Relevanz und ihr Zustellstatus."
       action={
         <Link href="/dashboard/signals" className="section-link">
-          Alle Signale →
+          Alle Signale öffnen
         </Link>
       }
     >
+      <div className="signal-overview-stats">
+        <div>
+          <strong>{signals.length}</strong>
+          <span>im Fokus</span>
+        </div>
+        <div>
+          <strong>{sentAlerts}</strong>
+          <span>zugestellt</span>
+        </div>
+        <div className={failedAlerts > 0 ? "has-issue" : undefined}>
+          <strong>{failedAlerts}</strong>
+          <span>nicht zugestellt</span>
+        </div>
+      </div>
       {signals.length === 0 ? (
         <EmptyState
           tone="calm"
@@ -102,7 +173,13 @@ export function SignalsCompactCard({
               <span className="signal-mini-meta">
                 {signal.timeframe}
                 {typeof signal.score === "number"
-                  ? ` · Signalqualität ${signal.score.toFixed(1)}`
+                  ? ` · Qualität ${signal.score.toFixed(1)} · ${
+                      signal.score >= 70
+                        ? "hohe Relevanz"
+                        : signal.score >= 50
+                          ? "prüfenswert"
+                          : "geringe Relevanz"
+                    }`
                   : ""}
               </span>
               <span className="signal-mini-right">
@@ -114,10 +191,10 @@ export function SignalsCompactCard({
         </div>
       )}
       <p className="muted small" style={{ marginTop: 12 }}>
-        Watchlist: {watchlistCount} Assets
-        {watchlistHighPriority > 0 ? ` · ${watchlistHighPriority} mit hoher Priorität` : ""} ·{" "}
+        Persönlicher Fokus: {watchlistCount} Assets
+        {watchlistHighPriority > 0 ? ` · ${watchlistHighPriority} besonders wichtig` : ""} ·{" "}
         <Link href="/dashboard/watchlist" className="section-link">
-          verwalten →
+          Watchlist verwalten
         </Link>
       </p>
     </SectionCard>

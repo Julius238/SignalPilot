@@ -35,7 +35,8 @@ export default async function StrategyLabPage() {
   return (
     <>
       <PageHeader
-        title="Strategy Lab"
+        eyebrow="Research"
+        title="Strategie-Labor"
         subtitle="Hypothetischer Vergleich von Strategiekonfigurationen · kein Indikator für zukünftige Ergebnisse"
         actions={
           <Link className="primary-link secondary-link" href="/dashboard/backtests">
@@ -46,7 +47,7 @@ export default async function StrategyLabPage() {
 
       {errors.length > 0 ? (
         <ErrorState
-          title="Strategy Lab konnte nicht geladen werden"
+          title="Strategie-Labor konnte nicht geladen werden"
           message={errors.join(" | ")}
         />
       ) : null}

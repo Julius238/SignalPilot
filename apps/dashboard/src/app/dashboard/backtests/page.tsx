@@ -26,11 +26,12 @@ export default async function BacktestsPage() {
   return (
     <>
       <PageHeader
+        eyebrow="Research"
         title="Backtest-Analysen"
         subtitle="Hypothetische historische Auswertungen · kein Indikator für zukünftige Ergebnisse"
         actions={
           <Link className="primary-link secondary-link" href="/dashboard/strategy-lab">
-            Strategy Lab →
+            Strategie-Labor
           </Link>
         }
       />

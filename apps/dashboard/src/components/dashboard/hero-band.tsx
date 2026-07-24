@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 import { RegimeBadge, RiskModeBadge } from "../badges";
-import { confidenceWords } from "./shared";
+import { confidenceWords, regimeSentence } from "./shared";
 import type { MarketRegimeSnapshot } from "../../lib/signalpilot-api";
 
 // Lagebild: beantwortet "Wie ist die Lage?" in einem Satz, den jeder versteht.
@@ -32,7 +32,7 @@ export function HeroBand({
   return (
     <section className="lagebild" aria-label="Marktlage">
       <div>
-        <span className="lagebild-kicker">Marktlage heute</span>
+        <span className="lagebild-kicker">Lagebild</span>
         <p className="lagebild-pulse">{pulse}</p>
         {context ? <p className="lagebild-sub">{context}</p> : null}
         <div className="lagebild-badges">
@@ -40,9 +40,9 @@ export function HeroBand({
             <>
               <RegimeBadge value={regime.overallRegime} />
               <RiskModeBadge value={regime.riskMode} />
-              {confidence ? <span className="muted small">{confidence}</span> : null}
+              {confidence ? <span className="confidence-copy">{confidence}</span> : null}
               <Link href="/dashboard/market-regime" className="section-link">
-                Einschätzung im Detail →
+                Marktlage verstehen
               </Link>
             </>
           ) : (
@@ -52,6 +52,9 @@ export function HeroBand({
             </span>
           )}
         </div>
+        {regimeSentence(regime?.overallRegime) ? (
+          <p className="regime-explanation">{regimeSentence(regime?.overallRegime)}</p>
+        ) : null}
       </div>
       <div className="lagebild-metrics">
         {metrics.map((metric) => (

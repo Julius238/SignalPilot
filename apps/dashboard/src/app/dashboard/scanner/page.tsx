@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { ErrorState } from "../../../components/empty-state";
 import { RegimeBadge, RiskModeBadge } from "../../../components/badges";
+import { regimeSentence } from "../../../components/dashboard/shared";
 import { ScannerFilters } from "../../../components/scanner-filters";
 import { ScannerGroups } from "../../../components/scanner-groups";
 import { PageHeader, MetricCard } from "../../../components/ui";
@@ -53,15 +54,16 @@ export default async function ScannerPage({ searchParams }: ScannerPageProps) {
   return (
     <>
       <PageHeader
-        title="Signal Scanner"
-        subtitle="Aktuelle Signals nach Gruppe · sortiert nach Qualität und Multi-TF-Ausrichtung"
+        eyebrow="Beobachten"
+        title="Markt-Radar"
+        subtitle="Aktuelle Signale nach Bedeutung gruppiert — mit Qualität, Risiko und Bestätigung über mehrere Zeitebenen."
         actions={
           <>
             <Link className="primary-link secondary-link" href="/dashboard/signals">
-              Signal Feed
+              Alle Signale
             </Link>
             <Link className="primary-link secondary-link" href="/dashboard/multi-timeframe">
-              Multi-Timeframe
+              Zeitebenen vergleichen
             </Link>
           </>
         }
@@ -80,8 +82,8 @@ export default async function ScannerPage({ searchParams }: ScannerPageProps) {
           </div>
           <span className="regime-sep">·</span>
           <span className="muted small">
-            {marketRegime.data.summary?.slice(0, 100)}
-            {(marketRegime.data.summary?.length ?? 0) > 100 ? "…" : ""}
+            {regimeSentence(marketRegime.data.overallRegime) ??
+              marketRegime.data.summary?.slice(0, 120)}
           </span>
           <span className="regime-sep" style={{ marginLeft: "auto" }}>·</span>
           <Link href="/dashboard/market-regime" className="section-link">Details →</Link>
@@ -102,37 +104,44 @@ export default async function ScannerPage({ searchParams }: ScannerPageProps) {
 
       {/* Kennzahlen */}
       <section className="grid metrics scanner-metrics">
-        <MetricCard label="Starke Beobachtung" value={summary?.strongWatchCount ?? 0} />
-        <MetricCard label="Beobachten" value={summary?.watchCount ?? 0} />
         <MetricCard
-          label="Aufwärts-Ausrichtung"
-          value={
-            <span style={{ color: "var(--good)" }}>{summary?.bullishAlignedCount ?? 0}</span>
-          }
+          label="Hohe Relevanz"
+          value={summary?.strongWatchCount ?? 0}
+          sub="zuerst prüfen"
         />
+        <MetricCard label="Beobachten" value={summary?.watchCount ?? 0} sub="im Blick behalten" />
+        <MetricCard label="Konflikte" value={summary?.conflictCount ?? 0} sub="Zeitebenen uneinig" />
         <MetricCard
-          label="Abwärts-Ausrichtung"
-          value={
-            <span style={{ color: "var(--bad)" }}>{summary?.bearishAlignedCount ?? 0}</span>
-          }
-        />
-        <MetricCard label="Konflikte" value={summary?.conflictCount ?? 0} />
-        <MetricCard
-          label="Kein Vorteil"
-          value={summary?.noEdgeCount ?? 0}
-          sub="niedrige Priorität"
-        />
-        <MetricCard label="Alerts heute" value={summary?.alertsSentToday ?? 0} />
-        <MetricCard
-          label="Pipeline-Status"
-          value={
-            <span style={{ color: pipelineColor }}>
-              {summary?.lastPipelineRunStatus ?? "—"}
-            </span>
-          }
-          sub={formatDateTime(summary?.lastPipelineRunAt)}
+          label="Benachrichtigungen"
+          value={summary?.alertsSentToday ?? 0}
+          sub="heute zugestellt"
         />
       </section>
+
+      <div className="scanner-summary-strip">
+        <span>
+          <strong style={{ color: "var(--good)" }}>{summary?.bullishAlignedCount ?? 0}</strong>{" "}
+          aufwärts bestätigt
+        </span>
+        <span>
+          <strong style={{ color: "var(--bad)" }}>{summary?.bearishAlignedCount ?? 0}</strong>{" "}
+          abwärts bestätigt
+        </span>
+        <span>
+          <strong>{summary?.noEdgeCount ?? 0}</strong> ohne klare Relevanz
+        </span>
+        <span>
+          Datenlauf:{" "}
+          <strong style={{ color: pipelineColor }}>
+            {summary?.lastPipelineRunStatus === "SUCCESS"
+              ? "erfolgreich"
+              : summary?.lastPipelineRunStatus === "FAILED"
+                ? "fehlgeschlagen"
+                : summary?.lastPipelineRunStatus ?? "noch offen"}
+          </strong>{" "}
+          · {formatDateTime(summary?.lastPipelineRunAt)}
+        </span>
+      </div>
 
       {hasActiveFilter ? (
         <p className="muted small" style={{ marginBottom: 12 }}>

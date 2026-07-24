@@ -10,11 +10,11 @@ import type {
 
 export function StatusBadge({ value }: { value: SignalStatus | string }) {
   const labels: Record<string, string> = {
-    STRONG_WATCH: "Starke Beobachtung",
+    STRONG_WATCH: "Hohe Relevanz",
     WATCH: "Beobachten",
-    WAIT: "Abwarten",
-    AVOID: "Meiden",
-    NO_EDGE: "Kein Vorteil"
+    WAIT: "Noch unklar",
+    AVOID: "Erhöhte Unsicherheit",
+    NO_EDGE: "Geringe Relevanz"
   };
   return (
     <span className={`badge status-${value.toLowerCase()}`}>
@@ -83,21 +83,31 @@ export function AlignmentBadge({ value }: { value: MultiTimeframeAlignment | str
 export function HealthBadge({ ok }: { ok: boolean }) {
   return (
     <span className={`badge ${ok ? "health-ok" : "health-fail"}`}>
-      {ok ? "OK" : "DOWN"}
+      {ok ? "Verfügbar" : "Nicht verfügbar"}
     </span>
   );
 }
 
 export function RegimeBadge({ value }: { value: MarketRegime | string }) {
   const labels: Record<string, string> = {
-    RISK_ON: "Risk-On",
-    RISK_OFF: "Risk-Off",
-    MIXED: "Gemischt",
-    NEUTRAL: "Neutral",
-    UNKNOWN: "Unbekannt"
+    RISK_ON: "Konstruktives Umfeld",
+    RISK_OFF: "Defensives Umfeld",
+    MIXED: "Gemischtes Umfeld",
+    NEUTRAL: "Neutrales Umfeld",
+    UNKNOWN: "Noch keine Einschätzung"
+  };
+  const explanations: Record<string, string> = {
+    RISK_ON: "Marktteilnehmer akzeptieren derzeit eher Risiko.",
+    RISK_OFF: "Stabilität und Schutz stehen derzeit stärker im Vordergrund.",
+    MIXED: "Die beobachteten Märkte senden unterschiedliche Signale.",
+    NEUTRAL: "Es gibt aktuell keine klare übergeordnete Tendenz.",
+    UNKNOWN: "Für eine belastbare Einordnung fehlen noch Daten."
   };
   return (
-    <span className={`regime-tag regime-tag-${value.toLowerCase()}`}>
+    <span
+      className={`regime-tag regime-tag-${value.toLowerCase()}`}
+      title={explanations[value]}
+    >
       {labels[value] ?? value}
     </span>
   );
@@ -105,11 +115,11 @@ export function RegimeBadge({ value }: { value: MarketRegime | string }) {
 
 export function RiskModeBadge({ value }: { value: RiskMode | string }) {
   const labels: Record<string, string> = {
-    AGGRESSIVE: "Aggressiv",
-    NORMAL: "Normal",
-    DEFENSIVE: "Defensiv",
-    HIGH_RISK: "Hohes Risiko",
-    UNKNOWN: "Unbekannt"
+    AGGRESSIVE: "Risikofreudiges Klima",
+    NORMAL: "Ausgeglichenes Klima",
+    DEFENSIVE: "Vorsichtiges Klima",
+    HIGH_RISK: "Erhöhte Unsicherheit",
+    UNKNOWN: "Risikoklima offen"
   };
   return (
     <span className={`regime-tag regime-tag-${value.toLowerCase()}`}>
@@ -127,23 +137,23 @@ export function ContextBadge({
 }) {
   const labels: Record<string, Record<string, string>> = {
     news: {
-      none: "News: —",
-      relevant: "News: Relevant",
-      high: "News: Hoch"
+      none: "Nachrichten: —",
+      relevant: "Nachrichten: Relevant",
+      high: "Nachrichten: Hoch"
     },
     events: {
-      none: "Events: —",
-      upcoming: "Event: Bald",
-      high: "Event: Hochrisiko"
+      none: "Termine: —",
+      upcoming: "Termin: Bald",
+      high: "Termin: Hohes Risiko"
     },
     regime: {
-      aligned: "Regime: Bestätigt",
-      conflict: "Regime: Konflikt",
-      neutral: "Regime: Neutral"
+      aligned: "Marktlage: Bestätigt",
+      conflict: "Marktlage: Konflikt",
+      neutral: "Marktlage: Neutral"
     },
     rules: {
-      adjusted: "Rules: Angepasst",
-      none: "Rules: —"
+      adjusted: "Regeln: Angepasst",
+      none: "Regeln: —"
     }
   };
   const label = labels[type]?.[level] ?? `${type}: ${level}`;
@@ -171,17 +181,30 @@ export function ScoreBadge({
   }
 
   const tier =
-    value >= 7 ? "score-badge-high" : value >= 4 ? "score-badge-medium" : "score-badge-risk";
+    value >= 70
+      ? "score-badge-high"
+      : value >= 50
+        ? "score-badge-medium"
+        : "score-badge-risk";
   const isAdjusted =
     typeof originalValue === "number" && Math.abs(originalValue - value) > 0.05;
+  const meaning =
+    value >= 75
+      ? "hohe Relevanz"
+      : value >= 60
+        ? "gute Relevanz"
+        : value >= 45
+          ? "gemischtes Bild"
+          : "geringe Relevanz";
 
   return (
-    <div className={`score-badge ${tier}`}>
+    <div className={`score-badge ${tier}`} title={`${label}: ${meaning}`}>
       <span className="score-badge-value">{value.toFixed(1)}</span>
       {isAdjusted ? (
         <span className="score-badge-orig">orig. {originalValue?.toFixed(1)}</span>
       ) : null}
       <span className="score-badge-label">{label}</span>
+      <span className="score-badge-meaning">{meaning}</span>
     </div>
   );
 }

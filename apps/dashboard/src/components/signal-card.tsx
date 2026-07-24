@@ -56,6 +56,31 @@ function deriveRulesLevel(dashboardJson: unknown): "adjusted" | "none" {
   return "none";
 }
 
+function assetTypeLabel(value: string) {
+  const labels: Record<string, string> = {
+    CRYPTO: "Krypto",
+    STOCK: "Aktie",
+    EQUITY: "Aktie",
+    ETF: "ETF",
+    INDEX: "Index"
+  };
+  return labels[value] ?? value;
+}
+
+function signalTypeLabel(value: string) {
+  const labels: Record<string, string> = {
+    MOMENTUM_ALERT: "Momentum",
+    TREND_ALERT: "Trend",
+    VOLUME_SPIKE: "Ungewöhnliches Volumen",
+    VOLATILITY_SPIKE: "Erhöhte Schwankung",
+    BREAKOUT_ALERT: "Markante Kurszone",
+    NEWS_REACTION: "Nachrichtenreaktion",
+    EVENT_IMPACT: "Ereigniseffekt",
+    NO_SIGNAL: "Keine besondere Auffälligkeit"
+  };
+  return labels[value] ?? value.replaceAll("_", " ");
+}
+
 export function SignalCard({ signal }: { signal: SignalListItem }) {
   const dashboardJson = signal.signalOutput?.dashboardJson;
   const originalScore = extractDashboardField<number>(dashboardJson, "originalScore");
@@ -76,7 +101,8 @@ export function SignalCard({ signal }: { signal: SignalListItem }) {
             {signal.symbol}
           </Link>
           <span className="signal-card-meta">
-            {signal.asset.assetType} · {signal.timeframe} · {signal.signalType}
+            {assetTypeLabel(signal.asset.assetType)} · {signal.timeframe} ·{" "}
+            {signalTypeLabel(signal.signalType)}
           </span>
           <span className="signal-card-meta">{formatDateTime(signal.createdAt)}</span>
         </div>

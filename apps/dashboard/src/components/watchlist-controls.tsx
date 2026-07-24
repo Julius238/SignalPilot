@@ -87,7 +87,7 @@ export function AddWatchlistForm({ symbol }: { symbol: string }) {
       </label>
       <label className="check-filter">
         <input defaultChecked name="alertEnabled" type="checkbox" value="true" />
-        Alerts aktiviert
+        Benachrichtigungen aktiv
       </label>
       <button disabled={pending} type="submit">
         {pending ? "Hinzufügen…" : "Hinzufügen"}
@@ -154,7 +154,7 @@ export function WatchlistItemEditor({
 
   return (
     <form className="watchlist-form" onSubmit={submit}>
-      <div className="watchlist-state">In Watchlist</div>
+      <div className="watchlist-state">Auf meiner Watchlist</div>
       <label>
         Priorität
         <select defaultValue={item.priority} name="priority">
@@ -176,7 +176,7 @@ export function WatchlistItemEditor({
           type="checkbox"
           value="true"
         />
-        Alerts aktiviert
+        Benachrichtigungen aktiv
       </label>
       <div className="watchlist-actions">
         <button disabled={pending} type="submit">

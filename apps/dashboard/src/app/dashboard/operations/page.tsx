@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { ErrorState, EmptyState } from "../../../components/empty-state";
+import { PageHeader } from "../../../components/ui";
 import { formatDateTime } from "../../../lib/format";
 import {
   fetchApi,
@@ -16,7 +17,12 @@ function RunStatusBadge({ status }: { status: BotRun["status"] }) {
       : status === "FAILED"
         ? "alert-failed"
         : "alert-pending";
-  return <span className={`badge ${cls}`}>{status}</span>;
+  const labels: Record<BotRun["status"], string> = {
+    SUCCESS: "Erfolgreich",
+    FAILED: "Fehlgeschlagen",
+    RUNNING: "Läuft"
+  };
+  return <span className={`badge ${cls}`}>{labels[status] ?? status}</span>;
 }
 
 function AlertStatusBadge({ status }: { status: Alert["status"] }) {
@@ -26,7 +32,12 @@ function AlertStatusBadge({ status }: { status: Alert["status"] }) {
       : status === "FAILED"
         ? "alert-failed"
         : "alert-pending";
-  return <span className={`badge ${cls}`}>{status}</span>;
+  const labels: Record<Alert["status"], string> = {
+    SENT: "Zugestellt",
+    FAILED: "Fehlgeschlagen",
+    PENDING: "Ausstehend"
+  };
+  return <span className={`badge ${cls}`}>{labels[status] ?? status}</span>;
 }
 
 function duration(start: string, end: string | null): string {
@@ -37,8 +48,13 @@ function duration(start: string, end: string | null): string {
 }
 
 function jobLabel(jobName: string): string {
-  if (jobName.toLowerCase().includes("crypto")) return "Crypto Pipeline";
-  if (jobName.toLowerCase().includes("equity")) return "Equity Pipeline";
+  const lower = jobName.toLowerCase();
+  if (lower.includes("quickcryptoradar")) return "Krypto-Radar";
+  if (lower.includes("quickequityradar")) return "Aktien-Radar";
+  if (lower.includes("globalevent")) return "Ereignis-Monitor";
+  if (lower.includes("radarsummary")) return "Radar-Zusammenfassung";
+  if (lower.includes("crypto")) return "Krypto-Analyse";
+  if (lower.includes("equity")) return "Aktien-Analyse";
   return jobName;
 }
 
@@ -63,15 +79,16 @@ export default async function OperationsPage() {
 
   return (
     <>
-      <div className="page-header">
-        <div>
-          <h1>Operations</h1>
-          <p className="muted">Pipeline-Status, Alert-Dispatch und Systemereignisse.</p>
-        </div>
-        <Link className="primary-link" href="/dashboard/logs">
-          System Logs →
-        </Link>
-      </div>
+      <PageHeader
+        eyebrow="System"
+        title="Systemstatus"
+        subtitle="Laufen Datenanalyse und Benachrichtigungen zuverlässig? Technische Details bleiben eine Ebene tiefer."
+        actions={
+          <Link className="primary-link secondary-link" href="/dashboard/logs">
+            Ausführungsprotokoll
+          </Link>
+        }
+      />
 
       {botRuns.error ? <ErrorState title="Pipeline-Daten nicht verfügbar" message={botRuns.error} /> : null}
       {alerts.error ? <ErrorState title="Alert-Daten nicht verfügbar" message={alerts.error} /> : null}
@@ -80,7 +97,7 @@ export default async function OperationsPage() {
       {/* ── Status-Übersicht ── */}
       <div className="grid metrics">
         <div className="card">
-          <span className="metric-label">Crypto Pipeline</span>
+          <span className="metric-label">Krypto-Analyse</span>
           <span className="metric-value">
             {lastCrypto ? (
               <RunStatusBadge status={lastCrypto.status} />
@@ -93,7 +110,7 @@ export default async function OperationsPage() {
           )}
         </div>
         <div className="card">
-          <span className="metric-label">Equity Pipeline</span>
+          <span className="metric-label">Aktien-Analyse</span>
           <span className="metric-value">
             {lastEquity ? (
               <RunStatusBadge status={lastEquity.status} />
@@ -106,12 +123,12 @@ export default async function OperationsPage() {
           )}
         </div>
         <div className="card">
-          <span className="metric-label">Aktive Runs</span>
+          <span className="metric-label">Aktive Ausführungen</span>
           <strong className="metric-value">{activeRuns.length}</strong>
           <span className="muted small">aktuell laufend</span>
         </div>
         <div className="card">
-          <span className="metric-label">Fehlgeschlagene Runs</span>
+          <span className="metric-label">Fehlgeschlagene Ausführungen</span>
           <strong
             className="metric-value"
             style={{ color: failedRuns.length > 0 ? "var(--bad)" : undefined }}
@@ -121,7 +138,7 @@ export default async function OperationsPage() {
           <span className="muted small">der letzten 50</span>
         </div>
         <div className="card">
-          <span className="metric-label">Fehlgeschlagene Alerts</span>
+          <span className="metric-label">Nicht zugestellte Hinweise</span>
           <strong
             className="metric-value"
             style={{ color: failedAlerts.length > 0 ? "var(--bad)" : undefined }}
@@ -131,18 +148,18 @@ export default async function OperationsPage() {
           <span className="muted small">nicht zugestellt</span>
         </div>
         <div className="card">
-          <span className="metric-label">Alerts zugestellt</span>
+          <span className="metric-label">Hinweise zugestellt</span>
           <strong className="metric-value">{sentAlerts.length}</strong>
           <span className="muted small">der letzten 100</span>
         </div>
       </div>
 
-      {/* ── Fehlgeschlagene Alerts (prominent wenn vorhanden) ── */}
+      {/* ── Fehlgeschlagene Benachrichtigungen (prominent wenn vorhanden) ── */}
       {failedAlerts.length > 0 && (
         <section className="card" style={{ marginTop: 16, borderColor: "rgba(248,81,73,0.4)" }}>
-          <h2>Fehlgeschlagene Alerts ({failedAlerts.length})</h2>
+          <h2>Nicht zugestellte Benachrichtigungen ({failedAlerts.length})</h2>
           <p className="muted small" style={{ marginBottom: 12 }}>
-            Diese Alerts konnten nicht zugestellt werden. Mögliche Ursachen: Webhook-Fehler, ungültige
+            Diese Nachrichten konnten nicht zugestellt werden. Mögliche Ursachen: Webhook-Fehler, ungültige
             Konfiguration oder Netzwerkprobleme.
           </p>
           <div className="table-wrap">
@@ -181,7 +198,7 @@ export default async function OperationsPage() {
       <div className="grid two" style={{ marginTop: 16 }}>
         {/* ── Pipeline Runs ── */}
         <section className="card">
-          <h2>Pipeline Runs</h2>
+          <h2>Letzte Datenläufe</h2>
           <p className="muted small" style={{ marginBottom: 10 }}>
             Letzte 50 Ausführungen · fehlgeschlagene Runs erfordern manuelle Prüfung
           </p>
@@ -207,9 +224,9 @@ export default async function OperationsPage() {
 
         {/* ── Alert-Dispatch Verlauf ── */}
         <section className="card">
-          <h2>Alert-Dispatch</h2>
+          <h2>Letzte Benachrichtigungen</h2>
           <p className="muted small" style={{ marginBottom: 10 }}>
-            Letzte Benachrichtigungen · SENT = zugestellt, PENDING = ausstehend
+            Letzte Zustellversuche und ihr aktueller Status
           </p>
           {alertList.length > 0 ? (
             <div className="stack-list compact">
@@ -237,11 +254,11 @@ export default async function OperationsPage() {
         </section>
       </div>
 
-      {/* ── Alert States ── */}
+      {/* ── Benachrichtigungszustände ── */}
       <section className="card" style={{ marginTop: 16 }}>
-        <h2>Alert-Zustände</h2>
+        <h2>Benachrichtigungszustände</h2>
         <p className="muted small" style={{ marginBottom: 10 }}>
-          Aktuell registrierte Signal-Beobachtungen mit Alert-Versand-Zähler.
+          Aktuell registrierte Signal-Beobachtungen mit Versandzähler.
           Hoher sendCount = Signal wurde wiederholt benachrichtigt.
         </p>
         {stateList.length > 0 ? (
@@ -293,7 +310,7 @@ export default async function OperationsPage() {
             </table>
           </div>
         ) : (
-          <EmptyState title="Keine Alert-Zustände vorhanden." />
+          <EmptyState title="Keine Benachrichtigungszustände vorhanden." />
         )}
       </section>
     </>

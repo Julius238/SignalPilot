@@ -53,8 +53,9 @@ export default async function MarketRegimePage() {
   return (
     <>
       <PageHeader
-        title="Markt-Regime"
-        subtitle="Aktuelles Marktumfeld und Risikokontext für die Signal-Interpretation"
+        eyebrow="Kontext"
+        title="Marktlage"
+        subtitle="Wie risikofreudig oder defensiv das Umfeld gerade ist — und was das für die Einordnung von Signalen bedeutet."
         actions={
           <Link className="primary-link secondary-link" href="/dashboard/scanner">
             Scanner

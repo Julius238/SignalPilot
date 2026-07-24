@@ -4,7 +4,7 @@ import { EmptyState, ErrorState } from "../../components/empty-state";
 import { PageHeader, SectionCard } from "../../components/ui";
 import { HeroBand, type HeroMetric } from "../../components/dashboard/hero-band";
 import { PriorityFeed, type PriorityItem } from "../../components/dashboard/priority-feed";
-import { RadarCompactCard, SignalsCompactCard } from "../../components/dashboard/radar-compact";
+import { RadarOverviewCard, SignalsCompactCard } from "../../components/dashboard/radar-compact";
 import { StatusLine, type StatusTone } from "../../components/dashboard/status-line";
 import { NewsWorldMap } from "../../components/dashboard/news-world-map";
 import {
@@ -404,8 +404,7 @@ export default async function DashboardPage() {
       (left, right) =>
         severityRank(right.severity) - severityRank(left.severity) ||
         new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()
-    )
-    .slice(0, 6);
+    );
 
   const topSignals = signalList
     .filter((signal) => signal.status === "STRONG_WATCH" || signal.status === "WATCH")
@@ -417,15 +416,16 @@ export default async function DashboardPage() {
   return (
     <>
       <PageHeader
-        title="Übersicht"
-        subtitle={`Märkte, Weltgeschehen und System auf einen Blick · Stand ${formatDateTime(renderedAt.toISOString())}`}
+        eyebrow="SignalPilot Lagezentrum"
+        title="Command Center"
+        subtitle={`Was jetzt zählt — Märkte, Weltgeschehen und Systemlage · Aktualisiert ${formatDateTime(renderedAt.toISOString())}`}
         actions={
           <>
             <Link className="primary-link" href="/dashboard/scanner">
-              Zum Scanner
+              Markt-Radar öffnen
             </Link>
             <Link className="primary-link secondary-link" href="/dashboard/watchlist">
-              Watchlist
+              Meine Watchlist
             </Link>
           </>
         }
@@ -446,6 +446,10 @@ export default async function DashboardPage() {
         headline={statusHeadline}
         meta={statusTone === "ok" ? "Worker, Datenverbindung und Zustellung geprüft" : undefined}
         issues={systemIssues}
+        workers={jobChecks.map((check) => ({
+          label: check.label,
+          status: check.run?.status ?? null
+        }))}
       />
 
       {/* ── 2 · Wie ist die Lage? ── */}
@@ -455,7 +459,7 @@ export default async function DashboardPage() {
       <PriorityFeed items={priorityItems} now={renderedAt} />
 
       {/* ── 4 · Wo passiert es & was ist betroffen? ── */}
-      <div className="cmd-grid-2">
+      <div className="cmd-grid-2 context-grid-overview">
         <SectionCard
           title="Wo gerade etwas passiert"
           subtitle="Herkunftsregionen der erkannten Ereignisse — letzte 48 Stunden."
@@ -521,9 +525,10 @@ export default async function DashboardPage() {
       </div>
 
       {/* ── 5 · Radar & Signale kompakt ── */}
-      <div className="cmd-grid-2">
-        <RadarCompactCard events={radarCompact} now={renderedAt} />
+      <div className="overview-lower-grid">
+        <RadarOverviewCard events={radarCompact} now={renderedAt} />
         <SignalsCompactCard
+          alerts={alertList}
           signals={topSignals}
           watchlistCount={watchlistItems.length}
           watchlistHighPriority={highPriorityWatchlist}

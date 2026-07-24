@@ -2,10 +2,14 @@ export default function MultiTimeframeLoading() {
   return (
     <>
       <div className="page-header">
-        <h1>Multi-Timeframe</h1>
-        <p>Loading alignment summaries.</p>
+        <div>
+          <span className="page-eyebrow">Kontext</span>
+          <h1>Zeitebenen</h1>
+          <p>Kurz- und langfristige Beobachtungen werden zusammengeführt.</p>
+        </div>
       </div>
-      <div className="empty-state">Multi-Timeframe Daten werden geladen.</div>
+      <div className="skeleton-block" style={{ height: 112 }} />
+      <div className="skeleton-block" style={{ height: 340 }} />
     </>
   );
 }

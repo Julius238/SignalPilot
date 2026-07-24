@@ -12,11 +12,11 @@ const assetTypes = [
 
 const statuses = [
   { value: "", label: "Alle Status" },
-  { value: "STRONG_WATCH", label: "Starke Beobachtung" },
+  { value: "STRONG_WATCH", label: "Hohe Relevanz" },
   { value: "WATCH", label: "Beobachten" },
   { value: "WAIT", label: "Abwarten" },
   { value: "AVOID", label: "Meiden" },
-  { value: "NO_EDGE", label: "Kein Vorteil" }
+  { value: "NO_EDGE", label: "Geringe Relevanz" }
 ];
 
 const directions = [

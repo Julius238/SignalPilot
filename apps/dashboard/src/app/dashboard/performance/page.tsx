@@ -107,6 +107,7 @@ export default async function PerformancePage() {
   return (
     <>
       <PageHeader
+        eyebrow="Research"
         title="Research-Performance"
         subtitle="Muster aus simulierten Auswertungen · keine echten Trades · kein Indikator für zukünftige Ergebnisse"
         actions={

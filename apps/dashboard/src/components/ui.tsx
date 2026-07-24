@@ -1,10 +1,12 @@
 import type { ReactNode } from "react";
 
 export function PageHeader({
+  eyebrow,
   title,
   subtitle,
   actions,
 }: {
+  eyebrow?: string;
   title: string;
   subtitle?: string;
   actions?: ReactNode;
@@ -12,6 +14,7 @@ export function PageHeader({
   return (
     <div className="page-header">
       <div>
+        {eyebrow ? <span className="page-eyebrow">{eyebrow}</span> : null}
         <h1>{title}</h1>
         {subtitle ? <p className="muted">{subtitle}</p> : null}
       </div>
@@ -34,16 +37,18 @@ export function SectionCard({
   className?: string;
 }) {
   return (
-    <div className={`card${className ? ` ${className}` : ""}`}>
+    <section className={`card section-card${className ? ` ${className}` : ""}`}>
       {title || action ? (
         <div className="section-header">
-          {title ? <h2 className="section-title">{title}</h2> : null}
+          <div>
+            {title ? <h2 className="section-title">{title}</h2> : null}
+            {subtitle ? <p className="section-subtitle">{subtitle}</p> : null}
+          </div>
           {action ?? null}
-          {subtitle ? <p className="section-subtitle">{subtitle}</p> : null}
         </div>
       ) : null}
       {children}
-    </div>
+    </section>
   );
 }
 

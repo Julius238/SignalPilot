@@ -1,6 +1,7 @@
 import { fetchApi, type AuditLog } from "../../../lib/signalpilot-api";
 import { formatDateTime } from "../../../lib/format";
 import { ErrorState, EmptyState } from "../../../components/empty-state";
+import { PageHeader } from "../../../components/ui";
 
 function actionBadgeClass(action: string): string {
   const a = action.toUpperCase();
@@ -43,12 +44,11 @@ export default async function AuditLogsPage() {
 
   return (
     <>
-      <div className="page-header">
-        <div>
-          <h1>Audit-Logs</h1>
-          <p className="muted">Admin-Aktionen und sicherheitsrelevante Ereignisse.</p>
-        </div>
-      </div>
+      <PageHeader
+        eyebrow="System · Administration"
+        title="Audit"
+        subtitle="Nachvollziehbare administrative und sicherheitsrelevante Änderungen."
+      />
 
       {error ? (
         <ErrorState title="Audit-Logs nicht verfügbar" message={error} />

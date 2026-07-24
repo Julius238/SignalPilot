@@ -6,6 +6,16 @@ import { useRouter, useSearchParams } from "next/navigation";
 const assetTypes = ["", "CRYPTO", "STOCK", "ETF"];
 const timeframes = ["", "1h", "4h", "1d"];
 const riskLevels = ["", "LOW", "MEDIUM", "HIGH"];
+const assetTypeLabels: Record<string, string> = {
+  CRYPTO: "Krypto",
+  STOCK: "Aktien",
+  ETF: "ETF"
+};
+const riskLabels: Record<string, string> = {
+  LOW: "Niedriges Risiko",
+  MEDIUM: "Mittleres Risiko",
+  HIGH: "Hohes Risiko"
+};
 
 const filterKeys = [
   "assetType",
@@ -46,7 +56,7 @@ export function ScannerFilters() {
       <select defaultValue={searchParams.get("assetType") ?? ""} name="assetType">
         {assetTypes.map((v) => (
           <option key={v} value={v}>
-            {v || "Alle Assets"}
+            {assetTypeLabels[v] ?? "Alle Asset-Typen"}
           </option>
         ))}
       </select>
@@ -54,7 +64,7 @@ export function ScannerFilters() {
       <select defaultValue={searchParams.get("timeframe") ?? ""} name="timeframe">
         {timeframes.map((v) => (
           <option key={v} value={v}>
-            {v || "Alle Timeframes"}
+            {v || "Alle Zeitebenen"}
           </option>
         ))}
       </select>
@@ -62,7 +72,7 @@ export function ScannerFilters() {
       <select defaultValue={searchParams.get("riskLevel") ?? ""} name="riskLevel">
         {riskLevels.map((v) => (
           <option key={v} value={v}>
-            {v ? `Risiko: ${v}` : "Alle Risiko-Level"}
+            {riskLabels[v] ?? "Alle Risikostufen"}
           </option>
         ))}
       </select>
@@ -71,10 +81,10 @@ export function ScannerFilters() {
         defaultValue={searchParams.get("minScore") ?? ""}
         inputMode="decimal"
         min="0"
-        max="10"
-        step="0.5"
+        max="100"
+        step="5"
         name="minScore"
-        placeholder="Min. Score"
+        placeholder="Min. Qualität"
         type="number"
         style={{ width: 110 }}
       />
@@ -86,7 +96,7 @@ export function ScannerFilters() {
           type="checkbox"
           value="true"
         />
-        Alert-würdig
+        Nur mit Hinweis
       </label>
 
       <label className="check-filter">

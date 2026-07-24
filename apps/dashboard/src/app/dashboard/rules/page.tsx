@@ -43,8 +43,9 @@ export default async function RulesPage({ searchParams }: RulesPageProps) {
   return (
     <>
       <PageHeader
-        title="Score-Anpassungen"
-        subtitle="Regelbasierte Korrekturen nach der Basis-Bewertung — macht Anpassungen nachvollziehbar"
+        eyebrow="Research"
+        title="Signalregeln"
+        subtitle="Welche Regeln eine automatische Basisbewertung verändert haben — mit Richtung und Stärke der Anpassung."
       />
 
       {errors.length > 0 ? (

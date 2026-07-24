@@ -8,6 +8,7 @@ import {
 } from "../../../components/badges";
 import { EmptyState, ErrorState } from "../../../components/empty-state";
 import { WatchlistItemEditor } from "../../../components/watchlist-controls";
+import { PageHeader } from "../../../components/ui";
 import { buildQuery, fetchApi, type WatchlistItem } from "../../../lib/signalpilot-api";
 import { formatScore } from "../../../lib/format";
 
@@ -37,58 +38,72 @@ export default async function WatchlistPage({ searchParams }: WatchlistPageProps
 
   return (
     <>
-      <div className="page-header">
-        <div>
-          <h1>Watchlist</h1>
-          <p>Tracked assets with latest signal state and multi-timeframe context.</p>
-        </div>
-        <Link className="primary-link secondary-link" href="/dashboard/assets">
-          Browse Assets
-        </Link>
-      </div>
+      <PageHeader
+        eyebrow="Persönlicher Fokus"
+        title="Meine Watchlist"
+        subtitle="Beobachtete Assets mit ihrem neuesten Signal und dem Bild über mehrere Zeitebenen."
+        actions={
+          <Link className="primary-link secondary-link" href="/dashboard/assets">
+            Märkte durchsuchen
+          </Link>
+        }
+      />
 
       <form className="filter-bar multi-timeframe-filter-bar">
         <select defaultValue={params.priority ?? ""} name="priority">
           {priorities.map((value) => (
             <option key={value} value={value}>
-              {value || "ALL Priorities"}
+              {value === "LOW"
+                ? "Niedrige Priorität"
+                : value === "MEDIUM"
+                  ? "Mittlere Priorität"
+                  : value === "HIGH"
+                    ? "Hohe Priorität"
+                    : "Alle Prioritäten"}
             </option>
           ))}
         </select>
         <select defaultValue={params.assetType ?? ""} name="assetType">
           {assetTypes.map((value) => (
             <option key={value} value={value}>
-              {value || "ALL Assets"}
+              {value === "CRYPTO"
+                ? "Krypto"
+                : value === "STOCK"
+                  ? "Aktien"
+                  : value || "Alle Asset-Typen"}
             </option>
           ))}
         </select>
         <select defaultValue={params.alertEnabled ?? ""} name="alertEnabled">
-          <option value="">ALL Alert States</option>
-          <option value="true">Alerts Enabled</option>
-          <option value="false">Alerts Disabled</option>
+          <option value="">Alle Benachrichtigungszustände</option>
+          <option value="true">Benachrichtigungen aktiv</option>
+          <option value="false">Benachrichtigungen aus</option>
         </select>
-        <button type="submit">Apply</button>
+        <button type="submit">Anwenden</button>
       </form>
 
-      {result.error ? <ErrorState title="Could not load watchlist" message={result.error} /> : null}
+      {result.error ? <ErrorState title="Watchlist konnte nicht geladen werden" message={result.error} /> : null}
 
       <section className="grid metrics">
         <div className="card">
-          <span className="metric-label">Watchlist Count</span>
+          <span className="metric-label">Beobachtete Assets</span>
           <span className="metric-value">{items.length}</span>
         </div>
         <div className="card">
-          <span className="metric-label">High Priority</span>
+          <span className="metric-label">Hohe Priorität</span>
           <span className="metric-value">{highPriorityCount}</span>
         </div>
         <div className="card">
-          <span className="metric-label">Alert Enabled</span>
+          <span className="metric-label">Benachrichtigungen aktiv</span>
           <span className="metric-value">{alertEnabledCount}</span>
         </div>
       </section>
 
       {!result.error && items.length === 0 ? (
-        <EmptyState title="No watchlist items found." />
+        <EmptyState
+          title="Keine passenden Watchlist-Einträge."
+          description="Passe die Filter an oder füge über die Marktübersicht ein Asset hinzu."
+        />
       ) : null}
 
       {items.length > 0 ? (
@@ -110,14 +125,14 @@ export default async function WatchlistPage({ searchParams }: WatchlistPageProps
                 <div className="watchlist-badges">
                   <PriorityBadge value={item.priority} />
                   <span className={`badge ${item.alertEnabled ? "health-ok" : "status-no_edge"}`}>
-                    {item.alertEnabled ? "ALERTS ON" : "ALERTS OFF"}
+                    {item.alertEnabled ? "Hinweise aktiv" : "Hinweise aus"}
                   </span>
                 </div>
               </div>
 
               <div className="watchlist-signal-grid">
                 <div>
-                  <span className="metric-label">Latest Signal</span>
+                  <span className="metric-label">Neuestes Signal</span>
                   {item.latestSignal ? (
                     <>
                       <Link href={`/dashboard/signals/${item.latestSignal.id}`}>
@@ -126,7 +141,9 @@ export default async function WatchlistPage({ searchParams }: WatchlistPageProps
                       <div className="watchlist-badges">
                         <StatusBadge value={item.latestSignal.status} />
                         <DirectionBadge value={item.latestSignal.direction} />
-                        <span>Score {formatScore(item.latestSignal.score)}</span>
+                        <span title="Automatisch berechnete Relevanz von 0 bis 100">
+                          Qualität {formatScore(item.latestSignal.score)}
+                        </span>
                       </div>
                     </>
                   ) : (
@@ -134,11 +151,13 @@ export default async function WatchlistPage({ searchParams }: WatchlistPageProps
                   )}
                 </div>
                 <div>
-                  <span className="metric-label">Multi-Timeframe</span>
+                  <span className="metric-label">Zeitebenen</span>
                   {item.multiTimeframeSummary ? (
                     <>
                       <AlignmentBadge value={item.multiTimeframeSummary.alignment} />
-                      <strong>Score {formatScore(item.multiTimeframeSummary.alignmentScore)}</strong>
+                      <strong title="Übereinstimmung der beobachteten Zeitebenen von 0 bis 100">
+                        Bestätigung {formatScore(item.multiTimeframeSummary.alignmentScore)}
+                      </strong>
                     </>
                   ) : (
                     <strong>-</strong>
@@ -146,7 +165,7 @@ export default async function WatchlistPage({ searchParams }: WatchlistPageProps
                 </div>
               </div>
 
-              <p className="watchlist-note">{item.notes ?? "No notes."}</p>
+              <p className="watchlist-note">{item.notes ?? "Noch keine persönliche Notiz."}</p>
               <WatchlistItemEditor item={item} />
             </article>
           ))}

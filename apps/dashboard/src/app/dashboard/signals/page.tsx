@@ -27,11 +27,12 @@ export default async function SignalsPage({ searchParams }: SignalsPageProps) {
   return (
     <>
       <PageHeader
-        title="Signal Feed"
-        subtitle="Gespeicherte Signalentscheidungen mit Analyse-Zusammenfassung"
+        eyebrow="Beobachten"
+        title="Signale"
+        subtitle="Gespeicherte Marktbeobachtungen — verständlich zusammengefasst und nach Relevanz einordenbar."
         actions={
           <Link className="primary-link secondary-link" href="/dashboard/scanner">
-            Scanner →
+            Markt-Radar →
           </Link>
         }
       />
@@ -43,11 +44,15 @@ export default async function SignalsPage({ searchParams }: SignalsPageProps) {
       ) : null}
 
       {list.length === 0 ? (
-        <EmptyState title="Keine Signals gefunden." />
+        <EmptyState
+          tone="calm"
+          title="Keine passenden Signale gefunden."
+          description="Passe die Filter an oder warte auf den nächsten Datenlauf."
+        />
       ) : (
         <>
           <p className="muted small" style={{ marginBottom: 10 }}>
-            {list.length} Signal{list.length !== 1 ? "s" : ""} geladen
+            {list.length} Signal{list.length !== 1 ? "e" : ""} geladen
           </p>
           <div className="signal-cards-list">
             {list.map((signal) => (

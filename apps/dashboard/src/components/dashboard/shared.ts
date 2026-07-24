@@ -24,10 +24,10 @@ export function severityColor(severity: Severity | undefined): string | undefine
 }
 
 export function severityLabel(severity: Severity | undefined): string {
-  if (severity === "CRITICAL") return "Sehr wichtig";
+  if (severity === "CRITICAL") return "Sofort ansehen";
   if (severity === "IMPORTANT") return "Wichtig";
-  if (severity === "WATCH") return "Im Blick";
-  return "Zur Info";
+  if (severity === "WATCH") return "Beobachten";
+  return "Information";
 }
 
 export function severityRank(severity: Severity | undefined): number {
@@ -119,8 +119,10 @@ export function pipelineStatusLabel(status: string | undefined): string {
 // ── Marktlage in Alltagssprache (für das Lagebild) ──
 
 export function regimeSentence(regime: string | undefined): string | null {
-  if (regime === "RISK_ON") return "Die Märkte sind derzeit eher risikofreudig.";
-  if (regime === "RISK_OFF") return "Die Märkte sind derzeit eher vorsichtig.";
+  if (regime === "RISK_ON")
+    return "Das Umfeld ist konstruktiv: Marktteilnehmer akzeptieren derzeit eher Risiko.";
+  if (regime === "RISK_OFF")
+    return "Das Umfeld ist defensiv: Kapital sucht derzeit eher Stabilität und Schutz.";
   if (regime === "MIXED") return "Das Marktumfeld sendet gemischte Signale.";
   if (regime === "NEUTRAL") return "Das Marktumfeld ist unauffällig.";
   return null;

@@ -39,8 +39,9 @@ export default async function EventsPage({ searchParams }: EventsPageProps) {
   return (
     <>
       <PageHeader
-        title="Events"
-        subtitle="Earnings-Termine und Unternehmensereignisse"
+        eyebrow="Kontext"
+        title="Unternehmenstermine"
+        subtitle="Earnings und bekannte Unternehmensereignisse — mit Schätzungen und veröffentlichten Werten."
       />
 
       {result.error ? (
@@ -79,75 +80,70 @@ export default async function EventsPage({ searchParams }: EventsPageProps) {
         ) : null}
       </form>
 
-      <SectionCard>
+      <SectionCard
+        title={events.length > 0 ? `${events.length} Termine` : undefined}
+        subtitle={hasFilter ? "Die Ansicht ist aktuell gefiltert." : "Chronologische Unternehmensereignisse."}
+      >
         {events.length === 0 ? (
-          <EmptyState title="Keine Events gefunden." />
+          <EmptyState
+            title="Keine passenden Termine gefunden."
+            description="Passe den Zeitraum oder die Filter an."
+          />
         ) : (
-          <>
-            <p className="muted small" style={{ marginBottom: 12 }}>
-              {events.length} Einträge
-              {hasFilter ? " (gefiltert)" : ""}
-            </p>
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Symbol</th>
-                    <th>Typ</th>
-                    <th>Titel</th>
-                    <th>Datum</th>
-                    <th>Quartal</th>
-                    <th>EPS (Schätzung)</th>
-                    <th>EPS (Tatsächlich)</th>
-                    <th>Umsatz (Schätz.)</th>
-                    <th>Umsatz (Tats.)</th>
-                    <th>Quelle</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {events.map((event) => (
-                    <tr key={event.id}>
-                      <td>
-                        <Link
-                          href={`/dashboard/assets/${encodeURIComponent(event.symbol ?? "")}`}
-                        >
-                          <strong>{event.symbol ?? "—"}</strong>
-                        </Link>
-                      </td>
-                      <td>{event.eventType}</td>
-                      <td>{event.title}</td>
-                      <td className="nowrap">
-                        {event.eventDate ? formatDateTime(event.eventDate) : "—"}
-                        {event.eventTime ? (
-                          <span className="muted small"> · {event.eventTime}</span>
-                        ) : null}
-                      </td>
-                      <td>
-                        {event.fiscalQuarter && event.fiscalYear
-                          ? `Q${event.fiscalQuarter} ${event.fiscalYear}`
-                          : event.fiscalQuarter
-                            ? `Q${event.fiscalQuarter}`
-                            : event.fiscalYear
-                              ? String(event.fiscalYear)
-                              : "—"}
-                      </td>
-                      <td>{event.epsEstimate ?? "—"}</td>
-                      <td>{event.epsActual ?? "—"}</td>
-                      <td>
+          <div className="event-card-grid">
+            {events.map((event) => {
+              const quarter =
+                event.fiscalQuarter && event.fiscalYear
+                  ? `Q${event.fiscalQuarter} ${event.fiscalYear}`
+                  : event.fiscalQuarter
+                    ? `Q${event.fiscalQuarter}`
+                    : event.fiscalYear
+                      ? String(event.fiscalYear)
+                      : null;
+
+              return (
+                <article className="event-card" key={event.id}>
+                  <div className="event-card-head">
+                    <Link
+                      className="event-card-symbol"
+                      href={`/dashboard/assets/${encodeURIComponent(event.symbol ?? "")}`}
+                    >
+                      {event.symbol ?? "Ohne Symbol"}
+                    </Link>
+                    <span className="soft-chip">
+                      {event.eventType === "EARNINGS" ? "Quartalszahlen" : event.eventType}
+                    </span>
+                  </div>
+                  <h2>{event.title}</h2>
+                  <p className="event-card-date">
+                    {event.eventDate ? formatDateTime(event.eventDate) : "Termin noch offen"}
+                    {event.eventTime ? ` · ${event.eventTime}` : ""}
+                    {quarter ? ` · ${quarter}` : ""}
+                  </p>
+                  <div className="event-facts">
+                    <div>
+                      <span>Gewinn je Aktie</span>
+                      <strong>{event.epsActual ?? "—"}</strong>
+                      <small>Schätzung {event.epsEstimate ?? "—"}</small>
+                    </div>
+                    <div>
+                      <span>Umsatz</span>
+                      <strong>
+                        {event.revenueActual ? formatLargeNumber(event.revenueActual) : "—"}
+                      </strong>
+                      <small>
+                        Schätzung{" "}
                         {event.revenueEstimate
                           ? formatLargeNumber(event.revenueEstimate)
                           : "—"}
-                      </td>
-                      <td>
-                        {event.revenueActual ? formatLargeNumber(event.revenueActual) : "—"}
-                      </td>
-                      <td>{event.source}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                      </small>
+                    </div>
+                  </div>
+                  <span className="event-card-source">Quelle: {event.source}</span>
+                </article>
+              );
+            })}
             </div>
-          </>
         )}
       </SectionCard>
     </>

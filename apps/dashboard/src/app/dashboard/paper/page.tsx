@@ -78,6 +78,7 @@ export default async function PaperPage({ searchParams }: PaperPageProps) {
   return (
     <>
       <PageHeader
+        eyebrow="Research"
         title="Simulierte Auswertung"
         subtitle="Beobachtungsbasierte Signal-Qualitätsmessung · keine echten Trades"
         actions={

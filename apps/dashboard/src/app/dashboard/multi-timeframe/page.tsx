@@ -53,11 +53,12 @@ export default async function MultiTimeframePage({ searchParams }: MultiTimefram
   return (
     <>
       <PageHeader
-        title="Multi-Timeframe"
-        subtitle="Ausrichtung von 1h-, 4h- und 1d-Signals pro Asset"
+        eyebrow="Kontext"
+        title="Zeitebenen"
+        subtitle="Zeigt, ob kurzfristige und übergeordnete Beobachtungen dasselbe Bild ergeben oder einander widersprechen."
         actions={
           <Link className="primary-link secondary-link" href="/dashboard/scanner">
-            Scanner
+            Markt-Radar
           </Link>
         }
       />
