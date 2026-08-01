@@ -20,6 +20,7 @@ import { formatDateTime } from "../../lib/format";
 import {
   fetchApi,
   type Alert,
+  type AssetDiscoveryOverview,
   type BotRun,
   type MarketEvent,
   type MarketRegimeSnapshot,
@@ -208,7 +209,8 @@ export default async function DashboardPage() {
     scanner,
     watchlist,
     marketRegime,
-    relevantNews
+    relevantNews,
+    discovery
   ] = await Promise.all([
     fetchApi<{ status: string }>("/health"),
     fetchApi<PublicConfig>("/config/public"),
@@ -224,7 +226,8 @@ export default async function DashboardPage() {
     fetchApi<ScannerResponse>("/scanner"),
     fetchApi<WatchlistItem[]>("/watchlist?limit=200"),
     fetchApi<MarketRegimeSnapshot | null>("/market-regime/latest"),
-    fetchApi<NewsItem[]>("/news?minRelevance=30&maxAgeHours=72&limit=5")
+    fetchApi<NewsItem[]>("/news?minRelevance=30&maxAgeHours=72&limit=5"),
+    fetchApi<AssetDiscoveryOverview>("/discovery/overview?limit=20")
   ]);
 
   const renderedAt = new Date();
@@ -235,6 +238,7 @@ export default async function DashboardPage() {
   const watchlistItems = watchlist.data ?? [];
   const regime = marketRegime.data;
   const relevantNewsItems = relevantNews.data ?? [];
+  const discoveryData = discovery.data;
   const scannerSummary = scanner.data?.summary;
 
   // ── Abgeleitete Sichten ──
@@ -416,6 +420,15 @@ export default async function DashboardPage() {
   const highPriorityWatchlist = countBy(watchlistItems, (item) => item.priority === "HIGH");
 
   const criticalErrors = [health, config, scanner].filter((result) => result.error);
+  const discoveryToday = (discoveryData?.candidates ?? [])
+    .filter(
+      (candidate) =>
+        withinHours(candidate.createdAt, 24, renderedAt) &&
+        (candidate.proposedAction === "ADD" ||
+          candidate.previousScore === null ||
+          (candidate.scoreDelta ?? 0) >= 5)
+    )
+    .slice(0, 4);
 
   return (
     <>
@@ -461,6 +474,49 @@ export default async function DashboardPage() {
 
       {/* ── 3 · Was ist wichtig — und was könnte es bedeuten? ── */}
       <PriorityFeed items={priorityItems} now={renderedAt} />
+
+      <SectionCard
+        title="Heute neu im Blick"
+        subtitle="Frühe Discovery-Beobachtungen; noch keine Kauf- oder Verkaufsempfehlungen."
+        action={
+          <Link className="text-link" href="/dashboard/discovery">
+            Markt entdecken →
+          </Link>
+        }
+      >
+        {discoveryToday.length > 0 ? (
+          <div className="discovery-overview-list">
+            {discoveryToday.map((candidate) => (
+              <Link
+                key={candidate.id}
+                href={`/dashboard/assets/${encodeURIComponent(candidate.symbol)}`}
+                className="discovery-overview-item"
+              >
+                <span>
+                  <strong>{candidate.symbol}</strong>
+                  <small>
+                    {candidate.reasons[0]?.replaceAll("_", " ") ?? "Neuer Kandidat"} ·{" "}
+                    {candidate.isActive ? "vollständig analysiert" : "frühe Beobachtung"}
+                  </small>
+                </span>
+                <span className="score-badge score-badge-medium">
+                  <span className="score-badge-value">{candidate.score.toFixed(0)}</span>
+                  <span className="score-badge-label">Discovery</span>
+                </span>
+              </Link>
+            ))}
+          </div>
+        ) : (
+          <EmptyState
+            title="Heute noch keine neuen Discovery-Kandidaten."
+            description={
+              discoveryData?.config.enabled
+                ? "Der nächste Lauf aktualisiert diese kompakte Auswahl."
+                : "Asset Discovery ist sicher deaktiviert; Vorschläge entstehen erst nach Aktivierung."
+            }
+          />
+        )}
+      </SectionCard>
 
       {/* ── 4 · Wo passiert es & was ist betroffen? ── */}
       <div className="cmd-grid-2 context-grid-overview">

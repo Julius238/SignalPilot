@@ -165,31 +165,223 @@ enum StrategyComparisonStatus {
   CANCELLED
 }
 
+enum AssetUniverseRole {
+  CORE
+  DISCOVERY
+  ACTIVE
+  INACTIVE
+}
+
+enum AssetUniverseSource {
+  CORE
+  PINNED
+  AUTO_DISCOVERED
+  MANUAL
+  EXCLUDED
+  INACTIVE
+}
+
+enum AssetDiscoveryRunKind {
+  UNIVERSE_REFRESH
+  DISCOVERY_SCAN
+  ACTIVE_SELECTION
+  RECONCILIATION
+  FULL_PIPELINE
+}
+
+enum AssetDiscoveryCandidateStatus {
+  ELIGIBLE
+  EXCLUDED
+  SELECTED
+  RETAINED
+  REMOVED
+  ERROR
+}
+
+enum AssetDiscoveryAction {
+  ADD
+  REMOVE
+  KEEP
+  NONE
+}
+
 model Asset {
-  id                String              @id @default(cuid())
-  symbol            String
-  name              String
-  assetType         AssetType
-  exchange          String
-  baseCurrency      String?
-  quoteCurrency     String?
-  isActive          Boolean             @default(true)
-  createdAt         DateTime            @default(now())
-  updatedAt         DateTime            @updatedAt
-  candles           Candle[]
-  signals           Signal[]
-  paperOrders       PaperOrder[]
-  positions         PaperPosition[]
-  watchlistItem     WatchlistItem?
-  newsItems         NewsItem[]
-  events            Event[]
-  backtestSignals   BacktestSignal[]
-  radarEvents       RadarEvent[]
-  candleDataQuality CandleDataQuality[]
+  id                      String                    @id @default(cuid())
+  symbol                  String
+  name                    String
+  assetType               AssetType
+  exchange                String
+  baseCurrency            String?
+  quoteCurrency           String?
+  currency                String?
+  sector                  String?
+  industry                String?
+  provider                String?
+  providerSymbol          String?
+  providerMetadataJson    Json?
+  instrumentStatus        String                    @default("ACTIVE")
+  isTradable              Boolean                   @default(true)
+  isLeveraged             Boolean                   @default(false)
+  isInverse               Boolean                   @default(false)
+  isStablecoin            Boolean                   @default(false)
+  lastUniverseRefreshAt   DateTime?
+  isActive                Boolean                   @default(true)
+  createdAt               DateTime                  @default(now())
+  updatedAt               DateTime                  @updatedAt
+  candles                 Candle[]
+  signals                 Signal[]
+  paperOrders             PaperOrder[]
+  positions               PaperPosition[]
+  watchlistItem           WatchlistItem?
+  newsItems               NewsItem[]
+  events                  Event[]
+  backtestSignals         BacktestSignal[]
+  radarEvents             RadarEvent[]
+  candleDataQuality       CandleDataQuality[]
+  universeMemberships     AssetUniverseMembership[]
+  universePreference      AssetUniversePreference?
+  discoveryCandidates     AssetDiscoveryCandidate[]
+  discoveryScoreSnapshots DiscoveryScoreSnapshot[]
 
   @@unique([symbol, exchange, assetType])
   @@index([symbol])
   @@index([assetType, isActive])
+  @@index([provider, providerSymbol])
+  @@index([instrumentStatus, isTradable])
+}
+
+model AssetUniversePreference {
+  id           String   @id @default(cuid())
+  assetId      String   @unique
+  isPinned     Boolean  @default(false)
+  isExcluded   Boolean  @default(false)
+  manualActive Boolean  @default(false)
+  observeOnly  Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  asset        Asset    @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@index([isPinned])
+  @@index([isExcluded])
+  @@index([manualActive])
+}
+
+model AssetUniverseMembership {
+  id             String              @id @default(cuid())
+  assetId        String
+  role           AssetUniverseRole
+  source         AssetUniverseSource
+  isCurrent      Boolean             @default(true)
+  reason         String
+  policyVersion  String
+  discoveryRunId String?
+  activatedAt    DateTime?
+  deactivatedAt  DateTime?
+  validFrom      DateTime            @default(now())
+  validTo        DateTime?
+  cooldownUntil  DateTime?
+  metadataJson   Json?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  asset          Asset               @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  discoveryRun   AssetDiscoveryRun?  @relation(fields: [discoveryRunId], references: [id], onDelete: SetNull)
+
+  @@index([assetId, isCurrent])
+  @@index([role, isCurrent])
+  @@index([source, isCurrent])
+  @@index([cooldownUntil])
+  @@index([discoveryRunId])
+}
+
+model AssetDiscoveryRun {
+  id                    String                    @id @default(cuid())
+  runKey                String                    @unique
+  kind                  AssetDiscoveryRunKind
+  status                BotRunStatus
+  enabled               Boolean                   @default(false)
+  dryRun                Boolean                   @default(true)
+  policyVersion         String
+  checkedAssetCount     Int                       @default(0)
+  excludedAssetCount    Int                       @default(0)
+  candidateCount        Int                       @default(0)
+  proposedAdditionCount Int                       @default(0)
+  proposedRemovalCount  Int                       @default(0)
+  activatedCount        Int                       @default(0)
+  deactivatedCount      Int                       @default(0)
+  providerRequestCount  Int                       @default(0)
+  estimatedApiUnits     Int                       @default(0)
+  errorCount            Int                       @default(0)
+  exclusionReasonsJson  Json?
+  metricsJson           Json?
+  errorJson             Json?
+  startedAt             DateTime                  @default(now())
+  finishedAt            DateTime?
+  createdAt             DateTime                  @default(now())
+  updatedAt             DateTime                  @updatedAt
+  candidates            AssetDiscoveryCandidate[]
+  memberships           AssetUniverseMembership[]
+  scoreSnapshots        DiscoveryScoreSnapshot[]
+
+  @@index([kind, startedAt])
+  @@index([status, startedAt])
+  @@index([policyVersion])
+}
+
+model AssetDiscoveryCandidate {
+  id                   String                        @id @default(cuid())
+  discoveryRunId       String
+  assetId              String
+  status               AssetDiscoveryCandidateStatus
+  proposedAction       AssetDiscoveryAction          @default(NONE)
+  score                Float
+  confidence           Float
+  dataQuality          Float
+  liquidity            Float
+  rank                 Int?
+  selected             Boolean                       @default(false)
+  reasonsJson          Json
+  exclusionReasonsJson Json
+  metricsJson          Json?
+  providerMetadataJson Json?
+  subsequentReturn1d   Float?
+  subsequentReturn7d   Float?
+  subsequentReturn30d  Float?
+  evaluatedAt          DateTime?
+  createdAt            DateTime                      @default(now())
+  updatedAt            DateTime                      @updatedAt
+  discoveryRun         AssetDiscoveryRun             @relation(fields: [discoveryRunId], references: [id], onDelete: Cascade)
+  asset                Asset                         @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  scoreSnapshot        DiscoveryScoreSnapshot?
+
+  @@unique([discoveryRunId, assetId])
+  @@index([status, score])
+  @@index([assetId, createdAt])
+  @@index([proposedAction, createdAt])
+}
+
+model DiscoveryScoreSnapshot {
+  id             String                  @id @default(cuid())
+  discoveryRunId String
+  candidateId    String                  @unique
+  assetId        String
+  score          Float
+  rawScore       Float
+  confidence     Float
+  dataQuality    Float
+  liquidity      Float
+  sampleSize     Int
+  policyVersion  String
+  componentsJson Json
+  weightsJson    Json
+  metricsJson    Json?
+  createdAt      DateTime                @default(now())
+  discoveryRun   AssetDiscoveryRun       @relation(fields: [discoveryRunId], references: [id], onDelete: Cascade)
+  candidate      AssetDiscoveryCandidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  asset          Asset                   @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@index([assetId, createdAt])
+  @@index([discoveryRunId, score])
+  @@index([policyVersion])
 }
 
 model WatchlistItem {

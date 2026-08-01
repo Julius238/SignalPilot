@@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url";
 import {
   AlertChannel,
   AlertStatus,
+  AssetDiscoveryAction,
+  AssetDiscoveryRunKind,
   BotRunStatus,
   Prisma,
   prisma,
@@ -28,6 +30,7 @@ export type RadarSummarySettings = {
   minEventCount: number;
   webhookEnabled: boolean;
   lookbackMinutes: number;
+  discoverySummaryEnabled: boolean;
 };
 
 export type RadarSummaryResult = {
@@ -48,6 +51,8 @@ export type RadarSummaryResult = {
   patternEvents: RadarSummaryEvent[];
   globalEvents: GlobalEventSummaryItem[];
   marketRegimeContext: MarketRegimeContext | null;
+  discoveryCandidates: DiscoverySummaryItem[];
+  discoveryCandidateCount: number;
   summaryText: string;
   webhookEnabled: boolean;
   webhookSent: boolean;
@@ -61,6 +66,14 @@ type GlobalEventSummaryItem = {
   region: string | null;
   sourceUrl: string | null;
   detectedAt: string;
+};
+
+type DiscoverySummaryItem = {
+  symbol: string;
+  score: number;
+  action: string;
+  reasons: string[];
+  createdAt: string;
 };
 
 const patternEventTypes = ["BREAKOUT_PROXIMITY", "SR_PROXIMITY", "MOMENTUM_SHIFT", "CONFLUENCE"];
@@ -98,7 +111,8 @@ export function resolveRadarSummarySettings(env: NodeJS.ProcessEnv = process.env
     minEventCount: parsePositiveInteger(env.RADAR_SUMMARY_MIN_EVENT_COUNT, 1),
     webhookEnabled: env.RADAR_SUMMARY_WEBHOOK_ENABLED === "true",
     // Für Daily Briefings (z.B. 2x täglich) auf 720 stellen
-    lookbackMinutes: parsePositiveInteger(env.RADAR_SUMMARY_LOOKBACK_MINUTES, defaultLookbackMinutes)
+    lookbackMinutes: parsePositiveInteger(env.RADAR_SUMMARY_LOOKBACK_MINUTES, defaultLookbackMinutes),
+    discoverySummaryEnabled: env.ASSET_DISCOVERY_SUMMARY_ENABLED !== "false"
   };
 }
 
@@ -136,7 +150,12 @@ export async function radarSummary(
 
     const baseSummary = await buildRadarSummary(database, settings, from, now);
 
-    if (baseSummary.radarEventCount + baseSummary.globalEventCount < settings.minEventCount) {
+    if (
+      baseSummary.radarEventCount +
+        baseSummary.globalEventCount +
+        baseSummary.discoveryCandidateCount <
+      settings.minEventCount
+    ) {
       const summary = { ...baseSummary, skippedReason: "MIN_EVENT_COUNT_NOT_REACHED" };
       await finishBotRun(database, botRun.id, summary);
       await writeBotLog(database, "info", "Radar Summary ohne Versand fertig", {
@@ -203,6 +222,8 @@ export async function radarSummary(
       patternEvents: [],
       globalEvents: [],
       marketRegimeContext: null,
+      discoveryCandidates: [],
+      discoveryCandidateCount: 0,
       summaryText: "Radar Summary konnte nicht erstellt werden.",
       webhookEnabled: settings.webhookEnabled,
       webhookSent: false,
@@ -241,6 +262,8 @@ function createDisabledSummary(
     patternEvents: [],
     globalEvents: [],
     marketRegimeContext: null,
+    discoveryCandidates: [],
+    discoveryCandidateCount: 0,
     summaryText: "Radar Summary deaktiviert.",
     webhookEnabled: settings.webhookEnabled,
     webhookSent: false
@@ -253,7 +276,7 @@ async function buildRadarSummary(
   from: Date,
   to: Date
 ): Promise<RadarSummaryResult> {
-  const [events, marketEvents, latestQuickRadar, latestMarketRegime] = await Promise.all([
+  const [events, marketEvents, latestQuickRadar, latestMarketRegime, latestDiscovery] = await Promise.all([
     database.radarEvent.findMany({
       where: {
         createdAt: {
@@ -298,7 +321,35 @@ async function buildRadarSummary(
       orderBy: {
         generatedAt: "desc"
       }
-    })
+    }),
+    settings.discoverySummaryEnabled
+      ? database.assetDiscoveryRun.findFirst({
+          where: {
+            kind: AssetDiscoveryRunKind.ACTIVE_SELECTION,
+            status: BotRunStatus.SUCCESS,
+            startedAt: { gte: from, lte: to }
+          },
+          orderBy: { startedAt: "desc" },
+          select: {
+            candidates: {
+              where: {
+                proposedAction: {
+                  in: [AssetDiscoveryAction.ADD, AssetDiscoveryAction.REMOVE]
+                }
+              },
+              orderBy: { score: "desc" },
+              take: 10,
+              select: {
+                score: true,
+                proposedAction: true,
+                reasonsJson: true,
+                createdAt: true,
+                asset: { select: { symbol: true } }
+              }
+            }
+          }
+        })
+      : Promise.resolve(null)
   ]);
 
   const checkedAssetCount = numberFromMetadata(latestQuickRadar?.metadataJson, "checkedAssetCount") ?? 0;
@@ -338,6 +389,19 @@ async function buildRadarSummary(
         riskNote: latestMarketRegime.riskNote
       }
     : null;
+  const discoveryCandidates: DiscoverySummaryItem[] = (latestDiscovery?.candidates ?? []).map(
+    (candidate) => ({
+      symbol: candidate.asset.symbol,
+      score: candidate.score,
+      action: candidate.proposedAction,
+      reasons: Array.isArray(candidate.reasonsJson)
+        ? candidate.reasonsJson.filter(
+            (reason): reason is string => typeof reason === "string"
+          )
+        : [],
+      createdAt: candidate.createdAt.toISOString()
+    })
+  );
 
   return {
     status: BotRunStatus.SUCCESS,
@@ -357,6 +421,8 @@ async function buildRadarSummary(
     patternEvents,
     globalEvents,
     marketRegimeContext,
+    discoveryCandidates,
+    discoveryCandidateCount: discoveryCandidates.length,
     summaryText: buildSummaryText({
       checkedAssetCount,
       notableAssetCount: notableSymbols.size,
@@ -367,6 +433,7 @@ async function buildRadarSummary(
       patternEvents,
       globalEvents,
       marketRegimeContext,
+      discoveryCandidates,
       period: {
         from: from.toISOString(),
         to: to.toISOString()
@@ -386,7 +453,8 @@ async function hasSentSummaryForCurrentEvents(
     ...[...summary.topMovers, ...summary.volumeSpikes, ...summary.volatilitySpikes, ...summary.patternEvents].map(
       (event) => new Date(event.createdAt).getTime()
     ),
-    ...summary.globalEvents.map((event) => new Date(event.detectedAt).getTime())
+    ...summary.globalEvents.map((event) => new Date(event.detectedAt).getTime()),
+    ...summary.discoveryCandidates.map((candidate) => new Date(candidate.createdAt).getTime())
   ]
     .filter(Number.isFinite)
     .sort((left, right) => right - left)[0];
@@ -433,6 +501,8 @@ async function sendRadarSummaryToN8n(
     volatilitySpikes: summary.volatilitySpikes,
     patternEvents: summary.patternEvents,
     globalEvents: summary.globalEvents,
+    discoveryCandidates: summary.discoveryCandidates,
+    discoveryCandidateCount: summary.discoveryCandidateCount,
     marketRegimeContext: summary.marketRegimeContext,
     shortMessage: summary.summaryText,
     context: {
@@ -518,6 +588,7 @@ function buildSummaryText(input: {
   patternEvents: RadarSummaryEvent[];
   globalEvents: GlobalEventSummaryItem[];
   marketRegimeContext: MarketRegimeContext | null;
+  discoveryCandidates: DiscoverySummaryItem[];
   period: { from: string; to: string };
 }) {
   const lines = [
@@ -545,6 +616,17 @@ function buildSummaryText(input: {
     lines.push(
       `Marktumfeld: ${input.marketRegimeContext.overallRegime} / ${input.marketRegimeContext.riskMode}`
     );
+  }
+
+  if (input.discoveryCandidates.length > 0) {
+    lines.push(`Discovery-Vorschläge (${input.discoveryCandidates.length}):`);
+    for (const candidate of input.discoveryCandidates.slice(0, 5)) {
+      lines.push(
+        `- ${candidate.action} ${candidate.symbol} · Score ${candidate.score.toFixed(1)} · ${
+          candidate.reasons[0] ?? "Policy-Auswahl"
+        }`
+      );
+    }
   }
 
   lines.push("Keine Handlungsempfehlung, nur Research/Beobachtung.");

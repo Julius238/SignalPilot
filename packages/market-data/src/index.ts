@@ -45,3 +45,13 @@ export type {
 } from "./retry.js";
 export { supportedBinanceIntervals, supportedFinnhubIntervals } from "./types.js";
 export type { BinanceInterval, FinnhubInterval, CandleSource, NormalizedCandle } from "./types.js";
+export {
+  BinanceDiscoveryProvider,
+  FinnhubDiscoveryProvider,
+  createDefaultDiscoveryProviders
+} from "./discovery.js";
+export type {
+  AssetDiscoveryProvider,
+  DiscoveryProviderResult,
+  DiscoveryProviderUsage
+} from "./discovery.js";

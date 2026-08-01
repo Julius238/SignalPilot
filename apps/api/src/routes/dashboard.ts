@@ -1,7 +1,11 @@
 import {
   AlertChannel,
   AlertStatus,
+  AssetDiscoveryAction,
+  AssetDiscoveryRunKind,
   AssetType,
+  AssetUniverseRole,
+  AssetUniverseSource,
   BacktestOutcome,
   BacktestOutcomeStatus,
   BacktestRunStatus,
@@ -321,6 +325,242 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
 
       throw error;
     }
+  });
+
+  server.get("/discovery/overview", async (request, reply) => {
+    const query = asQueryRecord(request.query);
+    const limit = parseLimit(query.limit, 100, 300, reply);
+    if (reply.sent) return reply;
+
+    const runs = await database.assetDiscoveryRun.findMany({
+      where: {
+        kind: AssetDiscoveryRunKind.ACTIVE_SELECTION,
+        status: BotRunStatus.SUCCESS
+      },
+      orderBy: { startedAt: "desc" },
+      take: 2,
+      include: {
+        candidates: {
+          orderBy: [{ rank: "asc" }, { score: "desc" }],
+          take: limit,
+          include: {
+            scoreSnapshot: true,
+            asset: {
+              include: {
+                universePreference: true,
+                universeMemberships: {
+                  where: { isCurrent: true },
+                  take: 1
+                }
+              }
+            }
+          }
+        }
+      }
+    });
+    const latest = runs[0] ?? null;
+    const previous = runs[1] ?? null;
+    const costRun = await database.assetDiscoveryRun.findFirst({
+      where: {
+        kind: AssetDiscoveryRunKind.FULL_PIPELINE,
+        status: { in: [BotRunStatus.SUCCESS, BotRunStatus.FAILED] }
+      },
+      orderBy: { startedAt: "desc" }
+    });
+    const previousScores = new Map(
+      (previous?.candidates ?? []).map((candidate) => [candidate.assetId, candidate.score])
+    );
+    const candidates = (latest?.candidates ?? []).map((candidate) =>
+      toDiscoveryCandidate(candidate, previousScores.get(candidate.assetId))
+    );
+    const currentMemberships = await database.assetUniverseMembership.findMany({
+      where: {
+        isCurrent: true,
+        role: { in: [AssetUniverseRole.CORE, AssetUniverseRole.ACTIVE] }
+      },
+      include: {
+        asset: {
+          include: {
+            universePreference: true,
+            watchlistItem: {
+              select: { alertEnabled: true }
+            },
+            discoveryCandidates: latest
+              ? {
+                  where: { discoveryRunId: latest.id },
+                  take: 1,
+                  include: { scoreSnapshot: true }
+                }
+              : false
+          }
+        }
+      },
+      orderBy: [{ role: "asc" }, { activatedAt: "asc" }]
+    });
+    const residenceMemberships = await database.assetUniverseMembership.findMany({
+      where: { role: AssetUniverseRole.ACTIVE, activatedAt: { not: null } },
+      select: { activatedAt: true, deactivatedAt: true, validTo: true }
+    });
+    const currentBySource = groupCurrentAssetsBySource(currentMemberships);
+    const paperComparison = await buildDiscoveryPaperComparison(
+      currentBySource.autoAssetIds,
+      currentBySource.manualAssetIds
+    );
+    const averageResidenceDays = average(
+      residenceMemberships.map((membership) => {
+        const end =
+          membership.deactivatedAt ?? membership.validTo ?? new Date();
+        return membership.activatedAt
+          ? (end.getTime() - membership.activatedAt.getTime()) / 86_400_000
+          : null;
+      })
+    );
+    const latestMetrics = isRecord(latest?.metricsJson) ? latest.metricsJson : {};
+
+    return {
+      config: {
+        enabled: process.env.ASSET_DISCOVERY_ENABLED === "true",
+        dryRun: process.env.ASSET_DISCOVERY_DRY_RUN !== "false",
+        cron: process.env.ASSET_DISCOVERY_CRON ?? "30 2 * * *",
+        policyVersion: latest?.policyVersion ?? process.env.ASSET_DISCOVERY_POLICY_VERSION ?? "discovery-v1.0.0"
+      },
+      latestRun: latest ? toDiscoveryRun(latest) : null,
+      summary: {
+        activeCount: currentMemberships.length,
+        coreCount: currentMemberships.filter(
+          (membership) => membership.role === AssetUniverseRole.CORE
+        ).length,
+        autoActiveCount: currentBySource.autoAssetIds.length,
+        candidateCount: candidates.length,
+        proposedAdditionCount: candidates.filter(
+          (candidate) => candidate.proposedAction === AssetDiscoveryAction.ADD
+        ).length,
+        proposedRemovalCount: candidates.filter(
+          (candidate) => candidate.proposedAction === AssetDiscoveryAction.REMOVE
+        ).length,
+        averageResidenceDays: averageResidenceDays ?? 0,
+        stabilityRate: numberFromRecord(latestMetrics, "stabilityRate") ?? 100,
+        providerRequestCount:
+          costRun?.providerRequestCount ?? latest?.providerRequestCount ?? 0,
+        estimatedApiUnits:
+          costRun?.estimatedApiUnits ?? latest?.estimatedApiUnits ?? 0,
+        paperComparison
+      },
+      activeAssets: currentMemberships.map(toActiveUniverseAsset),
+      candidates,
+      proposedAdditions: candidates.filter(
+        (candidate) => candidate.proposedAction === AssetDiscoveryAction.ADD
+      ),
+      proposedRemovals: candidates.filter(
+        (candidate) => candidate.proposedAction === AssetDiscoveryAction.REMOVE
+      ),
+      risers: candidates
+        .filter((candidate) => candidate.scoreDelta !== null && candidate.scoreDelta > 0)
+        .sort((left, right) => (right.scoreDelta ?? 0) - (left.scoreDelta ?? 0))
+        .slice(0, 10),
+      fallers: candidates
+        .filter((candidate) => candidate.scoreDelta !== null && candidate.scoreDelta < 0)
+        .sort((left, right) => (left.scoreDelta ?? 0) - (right.scoreDelta ?? 0))
+        .slice(0, 10)
+    };
+  });
+
+  server.get("/discovery/runs", async (request, reply) => {
+    const query = asQueryRecord(request.query);
+    const limit = parseLimit(query.limit, 30, 200, reply);
+    if (reply.sent) return reply;
+    const runs = await database.assetDiscoveryRun.findMany({
+      orderBy: { startedAt: "desc" },
+      take: limit
+    });
+    return runs.map(toDiscoveryRun);
+  });
+
+  server.get("/discovery/candidates/:id", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const candidate = await database.assetDiscoveryCandidate.findUnique({
+      where: { id },
+      include: {
+        scoreSnapshot: true,
+        discoveryRun: true,
+        asset: {
+          include: {
+            universePreference: true,
+            universeMemberships: {
+              where: { isCurrent: true },
+              take: 1
+            }
+          }
+        }
+      }
+    });
+    if (!candidate) return notFound(reply, "Discovery candidate not found");
+    return toDiscoveryCandidate(candidate);
+  });
+
+  server.patch("/assets/:id/universe-preference", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const body = asBodyRecord(request.body);
+    const fields = ["isPinned", "isExcluded", "manualActive", "observeOnly"] as const;
+    if (!fields.some((field) => hasOwn(body, field))) {
+      return badRequest(reply, "At least one universe preference field is required");
+    }
+    const parsed = Object.fromEntries(
+      fields.flatMap((field) => {
+        if (!hasOwn(body, field)) return [];
+        const value = parseOptionalBodyBoolean(body[field], field, reply);
+        return value === undefined ? [] : [[field, value]];
+      })
+    ) as Partial<Record<(typeof fields)[number], boolean>>;
+    if (reply.sent) return reply;
+
+    const asset = await database.asset.findUnique({
+      where: { id },
+      include: {
+        universePreference: true,
+        universeMemberships: {
+          where: { isCurrent: true },
+          take: 1
+        },
+        watchlistItem: { select: { alertEnabled: true } }
+      }
+    });
+    if (!asset) return notFound(reply, "Asset not found");
+    const current = asset.universeMemberships[0];
+    const isCore =
+      current?.role === AssetUniverseRole.CORE ||
+      current?.source === AssetUniverseSource.CORE;
+    const next = {
+      isPinned: parsed.isPinned ?? asset.universePreference?.isPinned ?? false,
+      isExcluded: parsed.isExcluded ?? asset.universePreference?.isExcluded ?? false,
+      manualActive:
+        parsed.manualActive ?? asset.universePreference?.manualActive ?? false,
+      observeOnly: parsed.observeOnly ?? asset.universePreference?.observeOnly ?? false
+    };
+    if (isCore && (next.isExcluded || next.observeOnly)) {
+      return conflict(reply, "Core assets cannot be excluded or moved to observe-only");
+    }
+    if (
+      (next.isExcluded && (next.isPinned || next.manualActive || next.observeOnly)) ||
+      (next.observeOnly && (next.isPinned || next.manualActive))
+    ) {
+      return conflict(reply, "Universe preferences are mutually exclusive");
+    }
+
+    const result = await applyUniversePreference(database, asset, next);
+    void logAudit({
+      action: "asset_universe_preference_update",
+      actor: "admin",
+      targetType: "Asset",
+      targetId: id,
+      metadata: {
+        before: asset.universePreference,
+        after: next,
+        alertEnabledPreserved: asset.watchlistItem?.alertEnabled ?? null
+      },
+      ...extractRequestContext(request)
+    });
+    return result;
   });
 
   server.get("/assets/:symbol", async (request, reply) => {
@@ -1959,10 +2199,369 @@ const assetSelect = {
   exchange: true,
   baseCurrency: true,
   quoteCurrency: true,
+  currency: true,
+  sector: true,
+  industry: true,
+  provider: true,
+  providerSymbol: true,
+  instrumentStatus: true,
+  isTradable: true,
+  isLeveraged: true,
+  isInverse: true,
+  isStablecoin: true,
   isActive: true,
   createdAt: true,
   updatedAt: true
 } satisfies Prisma.AssetSelect;
+
+type DiscoveryCandidateForDashboard = Prisma.AssetDiscoveryCandidateGetPayload<{
+  include: {
+    scoreSnapshot: true;
+    asset: {
+      include: {
+        universePreference: true;
+        universeMemberships: true;
+      };
+    };
+  };
+}>;
+
+type ActiveMembershipForDashboard = Prisma.AssetUniverseMembershipGetPayload<{
+  include: {
+    asset: {
+      include: {
+        universePreference: true;
+        watchlistItem: { select: { alertEnabled: true } };
+        discoveryCandidates: { include: { scoreSnapshot: true } };
+      };
+    };
+  };
+}>;
+
+function toDiscoveryCandidate(
+  candidate: DiscoveryCandidateForDashboard,
+  previousScore?: number
+) {
+  const membership = candidate.asset.universeMemberships[0] ?? null;
+  const preference = candidate.asset.universePreference;
+  return {
+    id: candidate.id,
+    discoveryRunId: candidate.discoveryRunId,
+    assetId: candidate.assetId,
+    symbol: candidate.asset.symbol,
+    name: candidate.asset.name,
+    assetType: candidate.asset.assetType,
+    exchange: candidate.asset.exchange,
+    sector: candidate.asset.sector,
+    provider: candidate.asset.provider,
+    status: candidate.status,
+    proposedAction: candidate.proposedAction,
+    score: candidate.score,
+    previousScore: previousScore ?? null,
+    scoreDelta:
+      previousScore === undefined
+        ? null
+        : Math.round((candidate.score - previousScore) * 10) / 10,
+    confidence: candidate.confidence,
+    dataQuality: candidate.dataQuality,
+    liquidity: candidate.liquidity,
+    rank: candidate.rank,
+    selected: candidate.selected,
+    reasons: stringArray(candidate.reasonsJson),
+    exclusionReasons: stringArray(candidate.exclusionReasonsJson),
+    metrics: isRecord(candidate.metricsJson) ? candidate.metricsJson : {},
+    components: isRecord(candidate.scoreSnapshot?.componentsJson)
+      ? candidate.scoreSnapshot.componentsJson
+      : {},
+    weights: isRecord(candidate.scoreSnapshot?.weightsJson)
+      ? candidate.scoreSnapshot.weightsJson
+      : {},
+    policyVersion: candidate.scoreSnapshot?.policyVersion ?? null,
+    sampleSize: candidate.scoreSnapshot?.sampleSize ?? 0,
+    isActive: candidate.asset.isActive,
+    universeRole: membership?.role ?? "INACTIVE",
+    universeSource: membership?.source ?? "INACTIVE",
+    isCore: membership?.role === AssetUniverseRole.CORE,
+    isPinned: preference?.isPinned ?? false,
+    isExcluded: preference?.isExcluded ?? false,
+    manualActive: preference?.manualActive ?? false,
+    observeOnly: preference?.observeOnly ?? false,
+    createdAt: candidate.createdAt
+  };
+}
+
+function toDiscoveryRun(run: {
+  id: string;
+  runKey: string;
+  kind: AssetDiscoveryRunKind;
+  status: BotRunStatus;
+  enabled: boolean;
+  dryRun: boolean;
+  policyVersion: string;
+  checkedAssetCount: number;
+  excludedAssetCount: number;
+  candidateCount: number;
+  proposedAdditionCount: number;
+  proposedRemovalCount: number;
+  activatedCount: number;
+  deactivatedCount: number;
+  providerRequestCount: number;
+  estimatedApiUnits: number;
+  errorCount: number;
+  exclusionReasonsJson: Prisma.JsonValue | null;
+  metricsJson: Prisma.JsonValue | null;
+  startedAt: Date;
+  finishedAt: Date | null;
+}) {
+  return {
+    id: run.id,
+    runKey: run.runKey,
+    kind: run.kind,
+    status: run.status,
+    enabled: run.enabled,
+    dryRun: run.dryRun,
+    policyVersion: run.policyVersion,
+    checkedAssetCount: run.checkedAssetCount,
+    excludedAssetCount: run.excludedAssetCount,
+    candidateCount: run.candidateCount,
+    proposedAdditionCount: run.proposedAdditionCount,
+    proposedRemovalCount: run.proposedRemovalCount,
+    activatedCount: run.activatedCount,
+    deactivatedCount: run.deactivatedCount,
+    providerRequestCount: run.providerRequestCount,
+    estimatedApiUnits: run.estimatedApiUnits,
+    errorCount: run.errorCount,
+    exclusionReasons: isRecord(run.exclusionReasonsJson)
+      ? run.exclusionReasonsJson
+      : {},
+    metrics: isRecord(run.metricsJson) ? run.metricsJson : {},
+    startedAt: run.startedAt,
+    finishedAt: run.finishedAt
+  };
+}
+
+function toActiveUniverseAsset(membership: ActiveMembershipForDashboard) {
+  const latestCandidate = membership.asset.discoveryCandidates[0] ?? null;
+  return {
+    asset: {
+      id: membership.asset.id,
+      symbol: membership.asset.symbol,
+      name: membership.asset.name,
+      assetType: membership.asset.assetType,
+      exchange: membership.asset.exchange,
+      sector: membership.asset.sector,
+      provider: membership.asset.provider,
+      isActive: membership.asset.isActive
+    },
+    role: membership.role,
+    source: membership.source,
+    reason: membership.reason,
+    activatedAt: membership.activatedAt,
+    cooldownUntil: membership.cooldownUntil,
+    score: latestCandidate?.score ?? null,
+    dataQuality: latestCandidate?.dataQuality ?? null,
+    isPinned: membership.asset.universePreference?.isPinned ?? false,
+    isExcluded: membership.asset.universePreference?.isExcluded ?? false,
+    manualActive: membership.asset.universePreference?.manualActive ?? false,
+    observeOnly: membership.asset.universePreference?.observeOnly ?? false,
+    alertEnabled: membership.asset.watchlistItem?.alertEnabled ?? false
+  };
+}
+
+function groupCurrentAssetsBySource(memberships: ActiveMembershipForDashboard[]) {
+  const autoAssetIds: string[] = [];
+  const manualAssetIds: string[] = [];
+  for (const membership of memberships) {
+    if (membership.source === AssetUniverseSource.AUTO_DISCOVERED) {
+      autoAssetIds.push(membership.assetId);
+    } else {
+      manualAssetIds.push(membership.assetId);
+    }
+  }
+  return { autoAssetIds, manualAssetIds };
+}
+
+async function buildDiscoveryPaperComparison(
+  autoAssetIds: string[],
+  manualAssetIds: string[]
+) {
+  const assetIds = [...new Set([...autoAssetIds, ...manualAssetIds])];
+  if (assetIds.length === 0) {
+    return {
+      auto: { sampleSize: 0, winRate: null, avgReturnAfter1d: null },
+      manual: { sampleSize: 0, winRate: null, avgReturnAfter1d: null }
+    };
+  }
+  const evaluations = await database.paperSignalEvaluation.findMany({
+    where: {
+      assetId: { in: assetIds },
+      evaluationStatus: PaperEvaluationStatus.EVALUATED
+    },
+    select: {
+      assetId: true,
+      outcome: true,
+      returnAfter1d: true
+    }
+  });
+  return {
+    auto: paperGroup(evaluations.filter((item) => autoAssetIds.includes(item.assetId))),
+    manual: paperGroup(
+      evaluations.filter((item) => manualAssetIds.includes(item.assetId))
+    )
+  };
+}
+
+function paperGroup(
+  evaluations: Array<{
+    outcome: PaperEvaluationOutcome | null;
+    returnAfter1d: number | null;
+  }>
+) {
+  const wins = evaluations.filter(
+    (item) =>
+      item.outcome === PaperEvaluationOutcome.POSITIVE ||
+      item.outcome === PaperEvaluationOutcome.TARGET_REACHED
+  ).length;
+  return {
+    sampleSize: evaluations.length,
+    winRate:
+      evaluations.length > 0 ? (wins / evaluations.length) * 100 : null,
+    avgReturnAfter1d: average(evaluations.map((item) => item.returnAfter1d))
+  };
+}
+
+export async function applyUniversePreference(
+  databaseClient: typeof prisma,
+  asset: {
+    id: string;
+    isActive: boolean;
+    universePreference: {
+      id: string;
+      isPinned: boolean;
+      isExcluded: boolean;
+      manualActive: boolean;
+      observeOnly: boolean;
+    } | null;
+    universeMemberships: Array<{
+      id: string;
+      role: AssetUniverseRole;
+      source: AssetUniverseSource;
+    }>;
+    watchlistItem: { alertEnabled: boolean } | null;
+  },
+  next: {
+    isPinned: boolean;
+    isExcluded: boolean;
+    manualActive: boolean;
+    observeOnly: boolean;
+  }
+) {
+  const now = new Date();
+  return databaseClient.$transaction(async (tx) => {
+    const preference = await tx.assetUniversePreference.upsert({
+      where: { assetId: asset.id },
+      create: { assetId: asset.id, ...next },
+      update: next
+    });
+    const current = asset.universeMemberships[0];
+    const core =
+      current?.role === AssetUniverseRole.CORE ||
+      current?.source === AssetUniverseSource.CORE;
+    let desired:
+      | {
+          role: AssetUniverseRole;
+          source: AssetUniverseSource;
+          reason: string;
+          active: boolean;
+        }
+      | undefined;
+    if (!core && next.isExcluded) {
+      desired = {
+        role: AssetUniverseRole.INACTIVE,
+        source: AssetUniverseSource.EXCLUDED,
+        reason: "USER_EXCLUDED",
+        active: false
+      };
+    } else if (!core && next.observeOnly) {
+      desired = {
+        role: AssetUniverseRole.DISCOVERY,
+        source: AssetUniverseSource.MANUAL,
+        reason: "USER_OBSERVE_ONLY",
+        active: false
+      };
+    } else if (!core && (next.isPinned || next.manualActive)) {
+      desired = {
+        role: AssetUniverseRole.ACTIVE,
+        source: next.isPinned
+          ? AssetUniverseSource.PINNED
+          : AssetUniverseSource.MANUAL,
+        reason: next.isPinned ? "USER_PINNED" : "USER_MANUAL_ACTIVE",
+        active: true
+      };
+    } else if (
+      !core &&
+      !(
+        current?.role === AssetUniverseRole.ACTIVE &&
+        current?.source === AssetUniverseSource.AUTO_DISCOVERED
+      )
+    ) {
+      desired = {
+        role: AssetUniverseRole.DISCOVERY,
+        source: AssetUniverseSource.AUTO_DISCOVERED,
+        reason: "USER_OVERRIDE_CLEARED",
+        active: false
+      };
+    }
+    let membership = current;
+    if (
+      desired &&
+      (!current ||
+        current.role !== desired.role ||
+        current.source !== desired.source)
+    ) {
+      if (current) {
+        await tx.assetUniverseMembership.update({
+          where: { id: current.id },
+          data: {
+            isCurrent: false,
+            validTo: now,
+            deactivatedAt: desired.active ? undefined : now
+          }
+        });
+      }
+      membership = await tx.assetUniverseMembership.create({
+        data: {
+          assetId: asset.id,
+          role: desired.role,
+          source: desired.source,
+          reason: desired.reason,
+          policyVersion:
+            process.env.ASSET_DISCOVERY_POLICY_VERSION ?? "discovery-v1.0.0",
+          activatedAt: desired.active ? now : null,
+          deactivatedAt: desired.active ? null : now,
+          validFrom: now
+        }
+      });
+      await tx.asset.update({
+        where: { id: asset.id },
+        data: { isActive: desired.active }
+      });
+    }
+    return {
+      assetId: asset.id,
+      preference,
+      membership,
+      isActive: desired?.active ?? asset.isActive,
+      alertEnabled: asset.watchlistItem?.alertEnabled ?? null
+    };
+  });
+}
+
+function stringArray(value: Prisma.JsonValue) {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
+}
 
 const watchlistItemSelect = {
   id: true,

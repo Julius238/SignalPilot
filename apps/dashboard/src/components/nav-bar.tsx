@@ -9,6 +9,7 @@ import { LogoutButton } from "./logout-button";
 type IconName =
   | "overview"
   | "radar"
+  | "discovery"
   | "signal"
   | "asset"
   | "watchlist"
@@ -50,6 +51,12 @@ const NAV_GROUPS: Array<{ label: string; items: NavItem[] }> = [
   {
     label: "Beobachten",
     items: [
+      {
+        href: "/dashboard/discovery",
+        label: "Markt entdecken",
+        description: "Dynamisches Asset-Universum",
+        icon: "discovery"
+      },
       {
         href: "/dashboard/scanner",
         label: "Markt-Radar",
@@ -269,6 +276,13 @@ function NavIcon({ name }: { name: IconName }) {
       <>
         <circle cx="11" cy="11" r="8" />
         <path d="m11 11 5-5M11 3v2M19 11h-2M11 19v-2M3 11h2" />
+      </>
+    ),
+    discovery: (
+      <>
+        <circle cx="11" cy="11" r="8" />
+        <path d="m14.5 7.5-2 5-5 2 2-5 5-2Z" />
+        <path d="M11 3v2M19 11h-2M11 19v-2M3 11h2" />
       </>
     ),
     signal: <path d="M3 15h3l2-8 4 12 3-9 2 5h2" />,

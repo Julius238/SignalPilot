@@ -11,7 +11,14 @@ const seedDir = dirname(fileURLToPath(import.meta.url));
 config({ path: resolve(seedDir, "../../../.env") });
 config();
 
-const { AssetType, prisma } = await import("./index.js");
+const {
+  AssetType,
+  AssetUniverseRole,
+  AssetUniverseSource,
+  prisma
+} = await import("./index.js");
+
+const coreSymbols = new Set(["SPY", "QQQ", "IWM", "BTCUSDT", "ETHUSDT"]);
 
 type WatchlistAsset = {
   symbol: string;
@@ -169,7 +176,7 @@ async function seedWatchlist() {
   const database: PrismaClient = prisma;
 
   for (const asset of watchlistAssets) {
-    await database.asset.upsert({
+    const storedAsset = await database.asset.upsert({
       where: {
         symbol_exchange_assetType: {
           symbol: asset.symbol,
@@ -179,15 +186,44 @@ async function seedWatchlist() {
       },
       create: {
         ...asset,
+        provider: asset.assetType === AssetType.CRYPTO ? "BINANCE" : "FINNHUB",
+        providerSymbol: asset.symbol,
         isActive: true
       },
       update: {
         name: asset.name,
         baseCurrency: asset.baseCurrency ?? null,
         quoteCurrency: asset.quoteCurrency ?? null,
-        isActive: true
-      }
+        provider: asset.assetType === AssetType.CRYPTO ? "BINANCE" : "FINNHUB",
+        providerSymbol: asset.symbol
+      },
+      select: { id: true }
     });
+    const core = coreSymbols.has(asset.symbol);
+    await database.assetUniversePreference.upsert({
+      where: { assetId: storedAsset.id },
+      create: {
+        assetId: storedAsset.id,
+        manualActive: !core
+      },
+      update: {}
+    });
+    const currentMembership = await database.assetUniverseMembership.findFirst({
+      where: { assetId: storedAsset.id, isCurrent: true },
+      select: { id: true }
+    });
+    if (!currentMembership) {
+      await database.assetUniverseMembership.create({
+        data: {
+          assetId: storedAsset.id,
+          role: core ? AssetUniverseRole.CORE : AssetUniverseRole.ACTIVE,
+          source: core ? AssetUniverseSource.CORE : AssetUniverseSource.MANUAL,
+          reason: "SEEDED_REFERENCE_UNIVERSE",
+          policyVersion: "discovery-v1.0.0",
+          activatedAt: new Date()
+        }
+      });
+    }
   }
 
   console.log(`Seeded ${watchlistAssets.length} SignalPilot watchlist assets.`);

@@ -1,6 +1,15 @@
 import { getApiUrl } from "./api-url";
 
 export type AssetType = "STOCK" | "ETF" | "CRYPTO";
+export type AssetUniverseRole = "CORE" | "DISCOVERY" | "ACTIVE" | "INACTIVE";
+export type AssetUniverseSource =
+  | "CORE"
+  | "PINNED"
+  | "AUTO_DISCOVERED"
+  | "MANUAL"
+  | "EXCLUDED"
+  | "INACTIVE";
+export type AssetDiscoveryAction = "ADD" | "REMOVE" | "KEEP" | "NONE";
 export type SignalStatus = "STRONG_WATCH" | "WATCH" | "WAIT" | "AVOID" | "NO_EDGE";
 export type SignalDirection = "BULLISH" | "BEARISH" | "NEUTRAL" | "MIXED";
 export type RiskLevel = "LOW" | "MEDIUM" | "HIGH";
@@ -283,9 +292,137 @@ export type Asset = {
   exchange: string;
   baseCurrency: string | null;
   quoteCurrency: string | null;
+  currency: string | null;
+  sector: string | null;
+  industry: string | null;
+  provider: string | null;
+  providerSymbol: string | null;
+  instrumentStatus: string;
+  isTradable: boolean;
+  isLeveraged: boolean;
+  isInverse: boolean;
+  isStablecoin: boolean;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
+};
+
+export type AssetDiscoveryRun = {
+  id: string;
+  runKey: string;
+  kind:
+    | "UNIVERSE_REFRESH"
+    | "DISCOVERY_SCAN"
+    | "ACTIVE_SELECTION"
+    | "RECONCILIATION"
+    | "FULL_PIPELINE";
+  status: BotRun["status"];
+  enabled: boolean;
+  dryRun: boolean;
+  policyVersion: string;
+  checkedAssetCount: number;
+  excludedAssetCount: number;
+  candidateCount: number;
+  proposedAdditionCount: number;
+  proposedRemovalCount: number;
+  activatedCount: number;
+  deactivatedCount: number;
+  providerRequestCount: number;
+  estimatedApiUnits: number;
+  errorCount: number;
+  exclusionReasons: Record<string, number>;
+  metrics: Record<string, unknown>;
+  startedAt: string;
+  finishedAt: string | null;
+};
+
+export type AssetDiscoveryCandidate = {
+  id: string;
+  discoveryRunId: string;
+  assetId: string;
+  symbol: string;
+  name: string;
+  assetType: AssetType;
+  exchange: string;
+  sector: string | null;
+  provider: string | null;
+  status: "ELIGIBLE" | "EXCLUDED" | "SELECTED" | "RETAINED" | "REMOVED" | "ERROR";
+  proposedAction: AssetDiscoveryAction;
+  score: number;
+  previousScore: number | null;
+  scoreDelta: number | null;
+  confidence: number;
+  dataQuality: number;
+  liquidity: number;
+  rank: number | null;
+  selected: boolean;
+  reasons: string[];
+  exclusionReasons: string[];
+  metrics: Record<string, unknown>;
+  components: Record<string, number>;
+  weights: Record<string, number>;
+  policyVersion: string | null;
+  sampleSize: number;
+  isActive: boolean;
+  universeRole: AssetUniverseRole;
+  universeSource: AssetUniverseSource;
+  isCore: boolean;
+  isPinned: boolean;
+  isExcluded: boolean;
+  manualActive: boolean;
+  observeOnly: boolean;
+  createdAt: string;
+};
+
+export type ActiveUniverseAsset = {
+  asset: Pick<
+    Asset,
+    "id" | "symbol" | "name" | "assetType" | "exchange" | "sector" | "provider" | "isActive"
+  >;
+  role: AssetUniverseRole;
+  source: AssetUniverseSource;
+  reason: string;
+  activatedAt: string | null;
+  cooldownUntil: string | null;
+  score: number | null;
+  dataQuality: number | null;
+  isPinned: boolean;
+  isExcluded: boolean;
+  manualActive: boolean;
+  observeOnly: boolean;
+  alertEnabled: boolean;
+};
+
+export type AssetDiscoveryOverview = {
+  config: {
+    enabled: boolean;
+    dryRun: boolean;
+    cron: string;
+    policyVersion: string;
+  };
+  latestRun: AssetDiscoveryRun | null;
+  summary: {
+    activeCount: number;
+    coreCount: number;
+    autoActiveCount: number;
+    candidateCount: number;
+    proposedAdditionCount: number;
+    proposedRemovalCount: number;
+    averageResidenceDays: number;
+    stabilityRate: number;
+    providerRequestCount: number;
+    estimatedApiUnits: number;
+    paperComparison: {
+      auto: { sampleSize: number; winRate: number | null; avgReturnAfter1d: number | null };
+      manual: { sampleSize: number; winRate: number | null; avgReturnAfter1d: number | null };
+    };
+  };
+  activeAssets: ActiveUniverseAsset[];
+  candidates: AssetDiscoveryCandidate[];
+  proposedAdditions: AssetDiscoveryCandidate[];
+  proposedRemovals: AssetDiscoveryCandidate[];
+  risers: AssetDiscoveryCandidate[];
+  fallers: AssetDiscoveryCandidate[];
 };
 
 export type SignalOutput = {

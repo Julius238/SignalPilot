@@ -1,5 +1,8 @@
 # SignalPilot
 
+Die Architektur und der sichere Rollout des dynamischen Marktuniversums sind in
+[docs/ASSET_DISCOVERY.md](docs/ASSET_DISCOVERY.md) dokumentiert.
+
 SignalPilot is a multi-asset market intelligence platform for stocks, ETFs, and crypto.
 
 The initial scope is market analysis infrastructure, dashboards, Telegram alerts, and paper-trading preparation. It does not run real market actions.

@@ -171,6 +171,7 @@ container schedules these jobs in-process — no host crontab entries are needed
 | Equity/ETF Radar | `EQUITY_RADAR_ENABLED=true` | `EQUITY_RADAR_CRON` | `15 */4 * * *` | `15 */4 * * *` (nach der Equity-Pipeline) |
 | Radar Summary / Daily Briefing | `RADAR_SUMMARY_ENABLED=true` | `RADAR_SUMMARY_CRON` | `0 * * * *` | `0 7,19 * * *` + `RADAR_SUMMARY_LOOKBACK_MINUTES=720` |
 | Global Event Monitor | `GLOBAL_EVENT_MONITOR_ENABLED=true` | `GLOBAL_EVENT_MONITOR_CRON` | `*/30 * * * *` | `*/30 * * * *` (Finnhub-Limits beachten) |
+| Asset Discovery | `ASSET_DISCOVERY_ENABLED=true` | `ASSET_DISCOVERY_CRON` | `30 2 * * *` | zunächst nur mit `ASSET_DISCOVERY_DRY_RUN=true` |
 
 Market Regime and Paper Evaluation run as steps inside the Crypto Full Pipeline
 (`ENABLE_MARKET_REGIME`, `ENABLE_PAPER_EVALUATION`) and do not need separate schedules.

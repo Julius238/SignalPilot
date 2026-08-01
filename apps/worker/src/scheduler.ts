@@ -21,6 +21,10 @@ import { quickEquityRadar, type QuickEquityRadarSummary } from "./jobs/quickEqui
 import { radarSummary, type RadarSummaryResult } from "./jobs/radarSummary.js";
 import { globalEventMonitor, type GlobalEventMonitorSummary } from "./jobs/globalEventMonitor.js";
 import { auditCandleGaps, type CandleGapAuditSummary } from "./jobs/auditCandleGaps.js";
+import {
+  runAssetDiscoveryPipeline,
+  type AssetDiscoveryPipelineSummary
+} from "./jobs/runAssetDiscoveryPipeline.js";
 
 const logger = pino({
   name: "signalpilot-worker-scheduler"
@@ -45,6 +49,7 @@ type RunEquityRadar = (database: PrismaClient) => Promise<QuickEquityRadarSummar
 type RunRadarSummary = (database: PrismaClient) => Promise<RadarSummaryResult>;
 type RunGlobalEventMonitor = (database: PrismaClient) => Promise<GlobalEventMonitorSummary>;
 type RunCandleGapAudit = (database: PrismaClient) => Promise<CandleGapAuditSummary>;
+type RunAssetDiscovery = (database: PrismaClient) => Promise<AssetDiscoveryPipelineSummary>;
 
 const defaultCryptoCron = "0 * * * *";
 const defaultEquityCron = "30 * * * *";
@@ -53,6 +58,7 @@ const defaultEquityRadarCron = "15 */4 * * *";
 const defaultRadarSummaryCron = "0 * * * *";
 const defaultGlobalEventMonitorCron = "*/30 * * * *";
 const defaultCandleGapAuditCron = "15 3 * * *";
+const defaultAssetDiscoveryCron = "30 2 * * *";
 const schedulerState: SchedulerState = {
   isRunning: false,
   isShuttingDown: false
@@ -81,6 +87,10 @@ const candleGapAuditSchedulerState: SchedulerState = {
   isRunning: false,
   isShuttingDown: false
 };
+const assetDiscoverySchedulerState: SchedulerState = {
+  isRunning: false,
+  isShuttingDown: false
+};
 
 export type SchedulerSettings = {
   cryptoCron: string;
@@ -100,6 +110,9 @@ export type SchedulerSettings = {
   globalEventMonitorCron: string;
   candleGapAuditEnabled: boolean;
   candleGapAuditCron: string;
+  assetDiscoveryEnabled: boolean;
+  assetDiscoveryDryRun: boolean;
+  assetDiscoveryCron: string;
 };
 
 export function resolveSchedulerSettings(env: NodeJS.ProcessEnv = process.env): SchedulerSettings {
@@ -120,7 +133,10 @@ export function resolveSchedulerSettings(env: NodeJS.ProcessEnv = process.env): 
     globalEventMonitorEnabled: env.GLOBAL_EVENT_MONITOR_ENABLED === "true",
     globalEventMonitorCron: env.GLOBAL_EVENT_MONITOR_CRON ?? defaultGlobalEventMonitorCron,
     candleGapAuditEnabled: env.CANDLE_GAP_AUDIT_ENABLED === "true",
-    candleGapAuditCron: env.CANDLE_GAP_AUDIT_CRON ?? defaultCandleGapAuditCron
+    candleGapAuditCron: env.CANDLE_GAP_AUDIT_CRON ?? defaultCandleGapAuditCron,
+    assetDiscoveryEnabled: env.ASSET_DISCOVERY_ENABLED === "true",
+    assetDiscoveryDryRun: env.ASSET_DISCOVERY_DRY_RUN !== "false",
+    assetDiscoveryCron: env.ASSET_DISCOVERY_CRON ?? defaultAssetDiscoveryCron
   };
 }
 
@@ -232,6 +248,14 @@ export async function runScheduledCandleGapAudit(
   return runScheduledJob(database, state, "candle gap audit", runJob);
 }
 
+export async function runScheduledAssetDiscovery(
+  database: PrismaClient,
+  state: SchedulerState,
+  runJob: RunAssetDiscovery = runAssetDiscoveryPipeline
+): Promise<ScheduledRunResult> {
+  return runScheduledJob(database, state, "asset discovery", runJob);
+}
+
 async function startScheduler() {
   const settings = resolveSchedulerSettings();
   const {
@@ -251,7 +275,10 @@ async function startScheduler() {
     globalEventMonitorEnabled,
     globalEventMonitorCron,
     candleGapAuditEnabled,
-    candleGapAuditCron
+    candleGapAuditCron,
+    assetDiscoveryEnabled,
+    assetDiscoveryDryRun,
+    assetDiscoveryCron
   } = settings;
 
   if (!cron.validate(cryptoCron)) {
@@ -280,6 +307,10 @@ async function startScheduler() {
 
   if (candleGapAuditEnabled && !cron.validate(candleGapAuditCron)) {
     throw new Error(`Invalid CANDLE_GAP_AUDIT_CRON expression: ${candleGapAuditCron}`);
+  }
+
+  if (assetDiscoveryEnabled && !cron.validate(assetDiscoveryCron)) {
+    throw new Error(`Invalid ASSET_DISCOVERY_CRON expression: ${assetDiscoveryCron}`);
   }
 
   await writeBotLog(prisma, "info", "Crypto pipeline scheduler started", {
@@ -381,6 +412,18 @@ async function startScheduler() {
     tasks.push(candleGapAuditTask);
   }
 
+  if (assetDiscoveryEnabled) {
+    await writeBotLog(prisma, "info", "Asset discovery scheduler started", {
+      cronExpression: assetDiscoveryCron,
+      dryRun: assetDiscoveryDryRun,
+      startedAt: new Date().toISOString()
+    });
+    const assetDiscoveryTask = cron.schedule(assetDiscoveryCron, () => {
+      void runScheduledAssetDiscovery(prisma, assetDiscoverySchedulerState);
+    });
+    tasks.push(assetDiscoveryTask);
+  }
+
   registerShutdownHandlers(tasks);
 
   if (runOnStart) {
@@ -401,6 +444,7 @@ function registerShutdownHandlers(tasks: ScheduledTask[]) {
     radarSummarySchedulerState.isShuttingDown = true;
     globalEventMonitorSchedulerState.isShuttingDown = true;
     candleGapAuditSchedulerState.isShuttingDown = true;
+    assetDiscoverySchedulerState.isShuttingDown = true;
     tasks.forEach((task) => task.stop());
 
     logger.info({ signal, isRunning: schedulerState.isRunning }, "Pipeline schedulers shutdown");

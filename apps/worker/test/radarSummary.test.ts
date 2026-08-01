@@ -18,6 +18,7 @@ describe("radarSummary", () => {
     assert.equal(settings.enabled, false);
     assert.equal(settings.minEventCount, 1);
     assert.equal(settings.webhookEnabled, false);
+    assert.equal(settings.discoverySummaryEnabled, true);
   });
 
   it("does not send a message when disabled", async () => {
@@ -200,6 +201,9 @@ function createDatabaseState({
           summary: "Gemischtes Marktumfeld.",
           riskNote: "Kontext beachten."
         })
+      },
+      assetDiscoveryRun: {
+        findFirst: async () => null
       },
       alert: {
         create: async (operation: { data: { payloadJson: unknown } }) => {

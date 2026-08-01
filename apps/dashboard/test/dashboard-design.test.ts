@@ -95,4 +95,18 @@ describe("dashboard comprehension and responsive states", () => {
     assert.doesNotMatch(source, /sendSignalAlert|sendMarketEventAlert|N8N_WEBHOOK/);
     assert.match(source, /keine Sofortmeldungen per Telegram/);
   });
+
+  it("explains discovery decisions and labels dry-run safety", async () => {
+    const source = await readFile(
+      resolve(appDir, "src/app/dashboard/discovery/page.tsx"),
+      "utf8"
+    );
+
+    assert.match(source, /Score erklären/);
+    assert.match(source, /Datenqualität/);
+    assert.match(source, /Liquidität/);
+    assert.match(source, /Vorgeschlagene Aufnahmen/);
+    assert.match(source, /Dry-Run: Vorschläge ohne produktive Änderungen/);
+    assert.match(source, /Discovery\s+erzeugt keine Telegram-Sofortmeldungen/);
+  });
 });

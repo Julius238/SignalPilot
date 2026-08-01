@@ -45,6 +45,7 @@ type BackfillDependencies = {
   binance?: Pick<BinanceMarketDataAdapter, "fetchKlines">;
   finnhub?: Pick<FinnhubMarketDataAdapter, "fetchStockCandles">;
   now?: Date;
+  assetIds?: string[];
 };
 
 export type CandleBackfillSummary = {
@@ -83,7 +84,8 @@ export async function backfillCandleHistory(
       status: BotRunStatus.RUNNING,
       startedAt: now,
       metadataJson: {
-        flow: "INITIAL_BACKFILL",
+        flow: dependencies.assetIds ? "DISCOVERY_ACTIVATION_BACKFILL" : "INITIAL_BACKFILL",
+        assetIds: dependencies.assetIds,
         providers: ["BINANCE", "FINNHUB"]
       }
     }
@@ -91,13 +93,15 @@ export async function backfillCandleHistory(
 
   await writeBotLog(database, "info", "Initial candle backfill started", {
     botRunId: botRun.id,
-    flow: "INITIAL_BACKFILL"
+    flow: dependencies.assetIds ? "DISCOVERY_ACTIVATION_BACKFILL" : "INITIAL_BACKFILL",
+    assetIds: dependencies.assetIds
   });
 
   try {
     const assets = await database.asset.findMany({
       where: {
         isActive: true,
+        id: dependencies.assetIds ? { in: dependencies.assetIds } : undefined,
         assetType: { in: [AssetType.CRYPTO, AssetType.STOCK, AssetType.ETF] }
       },
       orderBy: { symbol: "asc" },

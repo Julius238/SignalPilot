@@ -6,6 +6,5 @@
     "rootDir": "src",
     "tsBuildInfoFile": "dist/tsconfig.tsbuildinfo"
   },
-  "include": ["src/**/*.ts"],
-  "references": [{ "path": "../discovery" }]
+  "include": ["src/**/*.ts"]
 }

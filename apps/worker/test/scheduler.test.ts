@@ -9,6 +9,7 @@ import {
   runScheduledCandleGapAudit,
   runScheduledEquityPipeline,
   runScheduledGlobalEventMonitor,
+  runScheduledAssetDiscovery,
   runScheduledQuickRadar,
   runScheduledRadarSummary,
   type SchedulerState
@@ -40,6 +41,9 @@ describe("scheduler", () => {
     assert.equal(settings.globalEventMonitorCron, "*/30 * * * *");
     assert.equal(settings.candleGapAuditEnabled, false);
     assert.equal(settings.candleGapAuditCron, "15 3 * * *");
+    assert.equal(settings.assetDiscoveryEnabled, false);
+    assert.equal(settings.assetDiscoveryDryRun, true);
+    assert.equal(settings.assetDiscoveryCron, "30 2 * * *");
   });
 
   it("reads quick radar and radar summary schedules from the environment", () => {
@@ -164,6 +168,27 @@ describe("scheduler", () => {
       botLogs.some(
         (log) => log.data.level === "info" && log.data.message === "Scheduled crypto pipeline run finished"
       )
+    );
+  });
+});
+
+describe("asset discovery scheduler", () => {
+  it("runs through the shared overlap guard", async () => {
+    const botLogs: Array<{ data: { message: string; level: string } }> = [];
+    const state: SchedulerState = { isRunning: false, isShuttingDown: false };
+    const database = createSchedulerDatabase(botLogs);
+    const result = await runScheduledAssetDiscovery(database as never, state, async () =>
+      ({
+        status: BotRunStatus.SUCCESS,
+        enabled: true,
+        dryRun: true
+      }) as never
+    );
+
+    assert.equal(result, "success");
+    assert.equal(state.isRunning, false);
+    assert.ok(
+      botLogs.some((log) => log.data.message === "Scheduled asset discovery run finished")
     );
   });
 });

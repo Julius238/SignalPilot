@@ -1,5 +1,5 @@
 {
-  "name": "@signalpilot/market-data",
+  "name": "@signalpilot/discovery",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -13,13 +13,8 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "dev": "tsc -p tsconfig.json --watch",
     "lint": "eslint .",
     "test": "tsx --test test/*.test.ts"
-  },
-  "dependencies": {
-    "@signalpilot/discovery": "workspace:*",
-    "@signalpilot/database": "workspace:*"
   },
   "devDependencies": {
     "tsx": "^4.19.2"
