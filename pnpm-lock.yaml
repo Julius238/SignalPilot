@@ -184,6 +184,12 @@ importers:
       '@signalpilot/performance-intelligence':
         specifier: workspace:*
         version: link:../../packages/performance-intelligence
+      '@signalpilot/portfolio':
+        specifier: workspace:*
+        version: link:../../packages/portfolio
+      '@signalpilot/risk-engine':
+        specifier: workspace:*
+        version: link:../../packages/risk-engine
       '@signalpilot/scoring-engine':
         specifier: workspace:*
         version: link:../../packages/scoring-engine
@@ -193,9 +199,18 @@ importers:
       '@signalpilot/signal-rules':
         specifier: workspace:*
         version: link:../../packages/signal-rules
+      '@signalpilot/strategy-engine':
+        specifier: workspace:*
+        version: link:../../packages/strategy-engine
       '@signalpilot/strategy-lab':
         specifier: workspace:*
         version: link:../../packages/strategy-lab
+      '@signalpilot/trading-domain':
+        specifier: workspace:*
+        version: link:../../packages/trading-domain
+      '@signalpilot/trading-simulation':
+        specifier: workspace:*
+        version: link:../../packages/trading-simulation
       dotenv:
         specifier: ^16.4.7
         version: 16.6.1
@@ -266,6 +281,9 @@ importers:
         specifier: ^6.19.3
         version: 6.19.3(typescript@5.9.3)
     devDependencies:
+      '@signalpilot/trading-domain':
+        specifier: workspace:*
+        version: link:../trading-domain
       tsx:
         specifier: ^4.19.2
         version: 4.21.0
@@ -362,6 +380,29 @@ importers:
         specifier: ^4.19.2
         version: 4.21.0
 
+  packages/portfolio:
+    dependencies:
+      '@signalpilot/trading-domain':
+        specifier: workspace:*
+        version: link:../trading-domain
+      '@signalpilot/trading-simulation':
+        specifier: workspace:*
+        version: link:../trading-simulation
+    devDependencies:
+      tsx:
+        specifier: ^4.19.2
+        version: 4.21.0
+
+  packages/risk-engine:
+    dependencies:
+      '@signalpilot/trading-domain':
+        specifier: workspace:*
+        version: link:../trading-domain
+    devDependencies:
+      tsx:
+        specifier: ^4.19.2
+        version: 4.21.0
+
   packages/scoring-engine:
     dependencies:
       '@signalpilot/shared':
@@ -384,11 +425,40 @@ importers:
         specifier: ^4.19.2
         version: 4.21.0
 
+  packages/strategy-engine:
+    dependencies:
+      '@signalpilot/trading-domain':
+        specifier: workspace:*
+        version: link:../trading-domain
+    devDependencies:
+      '@signalpilot/indicators':
+        specifier: workspace:*
+        version: link:../indicators
+      tsx:
+        specifier: ^4.19.2
+        version: 4.21.0
+
   packages/strategy-lab:
     dependencies:
       '@signalpilot/shared':
         specifier: workspace:*
         version: link:../shared
+    devDependencies:
+      tsx:
+        specifier: ^4.19.2
+        version: 4.21.0
+
+  packages/trading-domain:
+    devDependencies:
+      tsx:
+        specifier: ^4.19.2
+        version: 4.21.0
+
+  packages/trading-simulation:
+    dependencies:
+      '@signalpilot/trading-domain':
+        specifier: workspace:*
+        version: link:../trading-domain
     devDependencies:
       tsx:
         specifier: ^4.19.2

@@ -1,0 +1,471 @@
+[
+  {
+    "name": "asset-symbol-not-allowed",
+    "expectedOutcome": "INVALID_INPUT",
+    "expectedReasonCode": "ASSET_NOT_ALLOWED",
+    "outcome": "INVALID_INPUT",
+    "primaryReasonCode": "ASSET_NOT_ALLOWED",
+    "reasonCodes": [
+      "ASSET_NOT_ALLOWED"
+    ],
+    "inputHash": "19d5dedf5725fa3da64a8861e3b79818b91a46dee8b1efa230024a1d37d9df80",
+    "outputHash": "75526b9cb53680bfcde3093661139facb0467a075efa66fd36dc79834c66f3b8"
+  },
+  {
+    "name": "asset-not-tradable",
+    "expectedOutcome": "INVALID_INPUT",
+    "expectedReasonCode": "ASSET_NOT_TRADABLE",
+    "outcome": "INVALID_INPUT",
+    "primaryReasonCode": "ASSET_NOT_TRADABLE",
+    "reasonCodes": [
+      "ASSET_NOT_TRADABLE"
+    ],
+    "inputHash": "79a597cb674a121fd9496ce4dcfc3bb23491f7472084638cab598da5302d2c01",
+    "outputHash": "7e7d59f407a6b5424c4a1aa96917019f8a4f6c38b75a1f0da1d58b34270be713"
+  },
+  {
+    "name": "asset-quote-currency-not-usdt",
+    "expectedOutcome": "INVALID_INPUT",
+    "expectedReasonCode": "ASSET_QUOTE_CURRENCY_NOT_USDT",
+    "outcome": "INVALID_INPUT",
+    "primaryReasonCode": "ASSET_QUOTE_CURRENCY_NOT_USDT",
+    "reasonCodes": [
+      "ASSET_QUOTE_CURRENCY_NOT_USDT"
+    ],
+    "inputHash": "a7149341e7eac418573fe11db30dcb8d08db6f811d8bd2d1845b1743cfce9e13",
+    "outputHash": "fad77d485fd53f9b55e731476ed9e05a6501a2033299293e6ef15d615afc353c"
+  },
+  {
+    "name": "asset-leveraged",
+    "expectedOutcome": "INVALID_INPUT",
+    "expectedReasonCode": "ASSET_LEVERAGED_FORBIDDEN",
+    "outcome": "INVALID_INPUT",
+    "primaryReasonCode": "ASSET_LEVERAGED_FORBIDDEN",
+    "reasonCodes": [
+      "ASSET_LEVERAGED_FORBIDDEN"
+    ],
+    "inputHash": "9a1593df708f580a23ddb77328d575b10b1239b7031a9da92711d6185804d0a4",
+    "outputHash": "ef77c346f9a2d39d26f466baaab7d847ccbec74fe79979887753ee1616d141cb"
+  },
+  {
+    "name": "assignment-disabled",
+    "expectedOutcome": "INVALID_INPUT",
+    "expectedReasonCode": "ASSIGNMENT_DISABLED",
+    "outcome": "INVALID_INPUT",
+    "primaryReasonCode": "ASSIGNMENT_DISABLED",
+    "reasonCodes": [
+      "ASSIGNMENT_DISABLED"
+    ],
+    "inputHash": "eb0b5797705b3d80663bcd3047b83b2e6ae247e9e993eeeea4b535bcfa0c91ce",
+    "outputHash": "a4cb907111ad055c7586d7d0937cd6719d7270b85ca6133bab14e2e21b87d3a1"
+  },
+  {
+    "name": "strategy-version-not-active",
+    "expectedOutcome": "INVALID_INPUT",
+    "expectedReasonCode": "STRATEGY_VERSION_NOT_ACTIVE",
+    "outcome": "INVALID_INPUT",
+    "primaryReasonCode": "STRATEGY_VERSION_NOT_ACTIVE",
+    "reasonCodes": [
+      "STRATEGY_VERSION_NOT_ACTIVE"
+    ],
+    "inputHash": "dd4a96b6bc9f96a134e59eda27cd4c510461da754165d5c53810b4c49c40fca2",
+    "outputHash": "1be1e67ad16d7c8c52856c4d82cbd557b3a3eda396cc5b1460901d5ba2a585a1"
+  },
+  {
+    "name": "execution-profile-missing",
+    "expectedOutcome": "INVALID_INPUT",
+    "expectedReasonCode": "EXECUTION_PROFILE_MISSING",
+    "outcome": "INVALID_INPUT",
+    "primaryReasonCode": "EXECUTION_PROFILE_MISSING",
+    "reasonCodes": [
+      "EXECUTION_PROFILE_MISSING"
+    ],
+    "inputHash": "b6fe2f37733df6c12eadfb72f7b07e21cd6048e79ed3dce63a7b2cbb0410f22c",
+    "outputHash": "7f012eb50520f6e05c9d2cb4749ad28cfbc6b327eaa7f32ca636958fc63ccf84"
+  },
+  {
+    "name": "insufficient-history",
+    "expectedOutcome": "INVALID_INPUT",
+    "expectedReasonCode": "CANDLES_INSUFFICIENT_HISTORY",
+    "outcome": "INVALID_INPUT",
+    "primaryReasonCode": "CANDLES_INSUFFICIENT_HISTORY",
+    "reasonCodes": [
+      "CANDLES_INSUFFICIENT_HISTORY"
+    ],
+    "inputHash": "33c5909c36f53c3c4e6f98c2e064953350b9032ab255cee039e9dffc35797bcc",
+    "outputHash": "2956c6258d640ac98f3d69f12daf1b274e0466f53d6fa8da74f8e10ad578bf42"
+  },
+  {
+    "name": "anchor-candle-not-closed",
+    "expectedOutcome": "INVALID_INPUT",
+    "expectedReasonCode": "CANDLE_NOT_CLOSED",
+    "outcome": "INVALID_INPUT",
+    "primaryReasonCode": "CANDLE_NOT_CLOSED",
+    "reasonCodes": [
+      "CANDLE_NOT_CLOSED"
+    ],
+    "inputHash": "0154c084047b510137c60276273b2cdd762796724479454c0cfe5d69db02cd09",
+    "outputHash": "a269432562677705359d09f49077cced868a344a744c222d99859c4a11f887c4"
+  },
+  {
+    "name": "candle-series-gap",
+    "expectedOutcome": "INVALID_INPUT",
+    "expectedReasonCode": "CANDLE_SERIES_GAP",
+    "outcome": "INVALID_INPUT",
+    "primaryReasonCode": "CANDLE_SERIES_GAP",
+    "reasonCodes": [
+      "CANDLE_SERIES_GAP"
+    ],
+    "inputHash": "acaab5aa014ae536787b12654f2f1ba8ef6632cf3d073185f5a0ad60b5f8105c",
+    "outputHash": "b55344dc46193542abb4dcfee2af6dd4a9111b2b286e30daf80d23e58a95afc2"
+  },
+  {
+    "name": "candle-duplicate-open-time",
+    "expectedOutcome": "INVALID_INPUT",
+    "expectedReasonCode": "CANDLE_OPEN_TIME_DUPLICATE",
+    "outcome": "INVALID_INPUT",
+    "primaryReasonCode": "CANDLE_OPEN_TIME_DUPLICATE",
+    "reasonCodes": [
+      "CANDLE_OPEN_TIME_DUPLICATE"
+    ],
+    "inputHash": "869b898b76ea18bacfa5a2f3bfe60cdebbc6e8bd39103f6bdf07a4139a00b906",
+    "outputHash": "8ab61e97667abea5eca21e9a3431239bb88746342949b435a957d763c3120abc"
+  },
+  {
+    "name": "candle-ohlc-invariant-violated",
+    "expectedOutcome": "INVALID_INPUT",
+    "expectedReasonCode": "CANDLE_OHLC_INVARIANT_VIOLATED",
+    "outcome": "INVALID_INPUT",
+    "primaryReasonCode": "CANDLE_OHLC_INVARIANT_VIOLATED",
+    "reasonCodes": [
+      "CANDLE_OHLC_INVARIANT_VIOLATED"
+    ],
+    "inputHash": "48ec47b81d9f9847cd82ae0e744d7af00e62d8262d37e07868ab41c94c87fca7",
+    "outputHash": "b6bee03ceb92369fac4ecd32cf73d503d4da4c1503d4e67742a8db2952b99dae"
+  },
+  {
+    "name": "candle-source-unknown",
+    "expectedOutcome": "INVALID_INPUT",
+    "expectedReasonCode": "CANDLE_SOURCE_UNKNOWN",
+    "outcome": "INVALID_INPUT",
+    "primaryReasonCode": "CANDLE_SOURCE_UNKNOWN",
+    "reasonCodes": [
+      "CANDLE_SOURCE_UNKNOWN"
+    ],
+    "inputHash": "aa6a26eba50bfcfdf11bcc4f7ad31ae9edcc1bcc1fef10a4236ea251425ea5a5",
+    "outputHash": "172bd5dc00e0da03b6c730101530e72dd8e6cfcea3ebdc9c8061b7a059407450"
+  },
+  {
+    "name": "stale-1h-candles",
+    "expectedOutcome": "INVALID_INPUT",
+    "expectedReasonCode": "DATA_STALE_CANDLES_1H",
+    "outcome": "INVALID_INPUT",
+    "primaryReasonCode": "DATA_STALE_CANDLES_1H",
+    "reasonCodes": [
+      "DATA_STALE_CANDLES_1H"
+    ],
+    "inputHash": "36b584bae67569473279cd6dcfbf36eaf190643202f01e1178d0a2c084c4d631",
+    "outputHash": "77d9147e19a185028855428d2da07dfd048206a9031ef0f5b46ae629763fd9bc"
+  },
+  {
+    "name": "stale-market-regime",
+    "expectedOutcome": "INVALID_INPUT",
+    "expectedReasonCode": "DATA_STALE_REGIME",
+    "outcome": "INVALID_INPUT",
+    "primaryReasonCode": "DATA_STALE_REGIME",
+    "reasonCodes": [
+      "DATA_STALE_REGIME"
+    ],
+    "inputHash": "70f3a7808aed1aec656a2bcbf649e7b03407b6b6e678cc0fc3c841e99e01e5d0",
+    "outputHash": "cda6f93f7a4dc113a35759f86388b845af5b35c9d7948e06b2f19c2dc7e3c7d6"
+  },
+  {
+    "name": "data-quality-gap-reported",
+    "expectedOutcome": "INVALID_INPUT",
+    "expectedReasonCode": "DATA_QUALITY_INSUFFICIENT",
+    "outcome": "INVALID_INPUT",
+    "primaryReasonCode": "DATA_QUALITY_INSUFFICIENT",
+    "reasonCodes": [
+      "DATA_QUALITY_INSUFFICIENT"
+    ],
+    "inputHash": "9ea4f18ea09ca8d2915b5fd8ead6a42929f404577f7991f7ebbcf57d3fb3a8b7",
+    "outputHash": "be0f20c2ee3c4723c9496f43019147e32ed8ca9ec2dace0b9a7b6250439baa74"
+  },
+  {
+    "name": "data-quality-missing",
+    "expectedOutcome": "INVALID_INPUT",
+    "expectedReasonCode": "DATA_QUALITY_MISSING",
+    "outcome": "INVALID_INPUT",
+    "primaryReasonCode": "DATA_QUALITY_MISSING",
+    "reasonCodes": [
+      "DATA_QUALITY_MISSING"
+    ],
+    "inputHash": "573ca2d23816e2415f9dc45795acbbadef9b4f555495615bfa5c0b4059fe1790",
+    "outputHash": "f4e70bcfe53003a74cb4bbdda17d59b74110ff95b5aa2cee56be026b048cd142"
+  },
+  {
+    "name": "signal-1h-missing",
+    "expectedOutcome": "INVALID_INPUT",
+    "expectedReasonCode": "SIGNAL_MISSING_1H",
+    "outcome": "INVALID_INPUT",
+    "primaryReasonCode": "SIGNAL_MISSING_1H",
+    "reasonCodes": [
+      "SIGNAL_MISSING_1H"
+    ],
+    "inputHash": "72ca361de72f134eed979a79340b271702d41d055197a861dde7cb6651083172",
+    "outputHash": "9729766bf950feaac14d690810864e1e60f907ecfd45af525c03afdaadaf0707"
+  },
+  {
+    "name": "signal-1h-not-anchored",
+    "expectedOutcome": "INVALID_INPUT",
+    "expectedReasonCode": "SIGNAL_NOT_ANCHORED_TO_CANDLE",
+    "outcome": "INVALID_INPUT",
+    "primaryReasonCode": "SIGNAL_NOT_ANCHORED_TO_CANDLE",
+    "reasonCodes": [
+      "SIGNAL_NOT_ANCHORED_TO_CANDLE"
+    ],
+    "inputHash": "8e93cf558dab62418d76b9f094570bf4e7f6d7280958952c589cb90509014d2c",
+    "outputHash": "cfcd570b529990ec09b3a2f1e5240063019c84a7dc4c0f417418cd8905abdeff"
+  },
+  {
+    "name": "no-breakout-above-prior-high",
+    "expectedOutcome": "NO_CANDIDATE",
+    "expectedReasonCode": "BREAKOUT_NOT_CONFIRMED",
+    "outcome": "NO_CANDIDATE",
+    "primaryReasonCode": "BREAKOUT_NOT_CONFIRMED",
+    "reasonCodes": [
+      "BREAKOUT_NOT_CONFIRMED"
+    ],
+    "inputHash": "674d8cd3a3ec894a0754be972d23c1ef258747fb006f3091089d693e2b5d0681",
+    "outputHash": "678a80364f68410e34b010cf74653db82aacadbc445ee78b604f05624693569e"
+  },
+  {
+    "name": "relative-volume-below-minimum",
+    "expectedOutcome": "NO_CANDIDATE",
+    "expectedReasonCode": "RELATIVE_VOLUME_BELOW_MINIMUM",
+    "outcome": "NO_CANDIDATE",
+    "primaryReasonCode": "RELATIVE_VOLUME_BELOW_MINIMUM",
+    "reasonCodes": [
+      "RELATIVE_VOLUME_BELOW_MINIMUM"
+    ],
+    "inputHash": "bd8eb8edebfbe9f93058e7c38cf2fa1dc1a37079ab2d46fd58146c3613ac6cc0",
+    "outputHash": "0e061e2acd6012162695b1796ada3942b05764acd5d2193a810550b5c2d0fabc"
+  },
+  {
+    "name": "relative-volume-unavailable",
+    "expectedOutcome": "NO_CANDIDATE",
+    "expectedReasonCode": "RELATIVE_VOLUME_UNAVAILABLE",
+    "outcome": "NO_CANDIDATE",
+    "primaryReasonCode": "RELATIVE_VOLUME_UNAVAILABLE",
+    "reasonCodes": [
+      "RELATIVE_VOLUME_UNAVAILABLE"
+    ],
+    "inputHash": "d60aec7a822f827f4ca0a52614afa0e8b3f8f6aef0f6dd2e96a20f0e59fbaed3",
+    "outputHash": "01416d20e76ad1bfbd7fca5ea0b700c581708767b078562a187f7cdf32c67b9f"
+  },
+  {
+    "name": "rsi-above-maximum",
+    "expectedOutcome": "NO_CANDIDATE",
+    "expectedReasonCode": "RSI_OUT_OF_RANGE",
+    "outcome": "NO_CANDIDATE",
+    "primaryReasonCode": "RSI_OUT_OF_RANGE",
+    "reasonCodes": [
+      "RSI_OUT_OF_RANGE"
+    ],
+    "inputHash": "426cabc456429b546ddac5bf2ecbbba52efb7a3289a0d41d80ee4bdb174262f0",
+    "outputHash": "ece76b2960cd0e9c0961a4e550da340f782685e6f75a0c39d3db7d4ce53baef2"
+  },
+  {
+    "name": "atr-ratio-below-minimum",
+    "expectedOutcome": "NO_CANDIDATE",
+    "expectedReasonCode": "ATR_RATIO_OUT_OF_RANGE",
+    "outcome": "NO_CANDIDATE",
+    "primaryReasonCode": "RSI_OUT_OF_RANGE",
+    "reasonCodes": [
+      "ATR_RATIO_OUT_OF_RANGE",
+      "RSI_OUT_OF_RANGE"
+    ],
+    "inputHash": "3003a3412d6743099fd903164302e457524a5dfea6260cfd315ab228fea08ccc",
+    "outputHash": "17f2e76b439010d5c1c46cdcaab8d276456a2bd3e7c25913ecf3f55e5f1eb227"
+  },
+  {
+    "name": "trend-1h-broken",
+    "expectedOutcome": "NO_CANDIDATE",
+    "expectedReasonCode": "TREND_FILTER_1H_FAILED",
+    "outcome": "NO_CANDIDATE",
+    "primaryReasonCode": "TREND_FILTER_1H_FAILED",
+    "reasonCodes": [
+      "TREND_FILTER_1H_FAILED"
+    ],
+    "inputHash": "8f426d591c6bc8636355e35f4e04489035e5f73bb7619bbb8eda6acb19fcf0be",
+    "outputHash": "0c314ee7b787d56100dc4b2295004df577ad1fcac3b78a7f17f506f1f91d6234"
+  },
+  {
+    "name": "trend-1d-broken",
+    "expectedOutcome": "NO_CANDIDATE",
+    "expectedReasonCode": "TREND_FILTER_1D_FAILED",
+    "outcome": "NO_CANDIDATE",
+    "primaryReasonCode": "TREND_FILTER_1D_FAILED",
+    "reasonCodes": [
+      "TREND_FILTER_1D_FAILED"
+    ],
+    "inputHash": "986927a7bf046fdefaf9e7351296afd544c04217a109ca6ecced02cd3cc2ed11",
+    "outputHash": "a0e92b8f1d7eb3b20f35d3f0fdfbac5e8a11c9575e4241cd4e3d116fadec8adb"
+  },
+  {
+    "name": "signal-1h-status-not-allowed",
+    "expectedOutcome": "NO_CANDIDATE",
+    "expectedReasonCode": "SIGNAL_1H_STATUS_NOT_ALLOWED",
+    "outcome": "NO_CANDIDATE",
+    "primaryReasonCode": "SIGNAL_1H_STATUS_NOT_ALLOWED",
+    "reasonCodes": [
+      "SIGNAL_1H_STATUS_NOT_ALLOWED"
+    ],
+    "inputHash": "46c3c1d88edbcea910f876c5d9ee17b8668451dc0fa9bf274aace53ef076aadc",
+    "outputHash": "1eb5867178e0a3f426097782355d9b5ee6d9649c60f00d560379ff308748c6b8"
+  },
+  {
+    "name": "signal-1h-score-below-minimum",
+    "expectedOutcome": "NO_CANDIDATE",
+    "expectedReasonCode": "SIGNAL_1H_SCORE_BELOW_MINIMUM",
+    "outcome": "NO_CANDIDATE",
+    "primaryReasonCode": "SIGNAL_1H_SCORE_BELOW_MINIMUM",
+    "reasonCodes": [
+      "SIGNAL_1H_SCORE_BELOW_MINIMUM"
+    ],
+    "inputHash": "02bfe014aaefc986b844f53e2f54150c5bed4dc365b9cd26a18c60ee0e5ee862",
+    "outputHash": "9c0cbadb92e05b60795073e7527357a03825eb447887be98c256551036904fd5"
+  },
+  {
+    "name": "signal-1h-risk-level-high",
+    "expectedOutcome": "NO_CANDIDATE",
+    "expectedReasonCode": "SIGNAL_1H_RISK_LEVEL_TOO_HIGH",
+    "outcome": "NO_CANDIDATE",
+    "primaryReasonCode": "SIGNAL_1H_RISK_LEVEL_TOO_HIGH",
+    "reasonCodes": [
+      "SIGNAL_1H_RISK_LEVEL_TOO_HIGH"
+    ],
+    "inputHash": "f77b4790beacb05fc8def3174d3f707916c99a541fe2648bea5305a443370dc8",
+    "outputHash": "7b4bd9f8b311301f21a70cf059787ca4f3aeb505aef3980b09804ea71d6fa371"
+  },
+  {
+    "name": "higher-timeframe-4h-conflict",
+    "expectedOutcome": "NO_CANDIDATE",
+    "expectedReasonCode": "HIGHER_TIMEFRAME_4H_CONFLICT",
+    "outcome": "NO_CANDIDATE",
+    "primaryReasonCode": "HIGHER_TIMEFRAME_4H_CONFLICT",
+    "reasonCodes": [
+      "HIGHER_TIMEFRAME_4H_CONFLICT"
+    ],
+    "inputHash": "1e549112d02b623d57aea1a410b8307e788a5e287deb1db886e6145f2274aa7e",
+    "outputHash": "13063c91549d85fae65e50eaa585e9abd189677b4e299e827b59ed6f62eaf7c2"
+  },
+  {
+    "name": "higher-timeframe-1d-conflict",
+    "expectedOutcome": "NO_CANDIDATE",
+    "expectedReasonCode": "HIGHER_TIMEFRAME_1D_CONFLICT",
+    "outcome": "NO_CANDIDATE",
+    "primaryReasonCode": "HIGHER_TIMEFRAME_1D_CONFLICT",
+    "reasonCodes": [
+      "HIGHER_TIMEFRAME_1D_CONFLICT"
+    ],
+    "inputHash": "41b318ec99a760323f68c67c3d1d982979ba107266bbe6e7a506519fdcb2a1e6",
+    "outputHash": "0c3251b444b912b0ebe2ada838e9424c53e17b0f23bdf5c663199ca0e0dc9049"
+  },
+  {
+    "name": "mtf-not-bullish-aligned",
+    "expectedOutcome": "NO_CANDIDATE",
+    "expectedReasonCode": "MTF_NOT_BULLISH_ALIGNED",
+    "outcome": "NO_CANDIDATE",
+    "primaryReasonCode": "MTF_NOT_BULLISH_ALIGNED",
+    "reasonCodes": [
+      "MTF_NOT_BULLISH_ALIGNED"
+    ],
+    "inputHash": "d7c382739a3a80287fa79fc5ea0721838e27db00f6c451a7692de75157d04492",
+    "outputHash": "380e23dee0dab47db40fc5f57e57ea46c5325cd62814f8de1944f0b67da6e317"
+  },
+  {
+    "name": "mtf-alignment-score-below-minimum",
+    "expectedOutcome": "NO_CANDIDATE",
+    "expectedReasonCode": "MTF_ALIGNMENT_SCORE_BELOW_MINIMUM",
+    "outcome": "NO_CANDIDATE",
+    "primaryReasonCode": "MTF_ALIGNMENT_SCORE_BELOW_MINIMUM",
+    "reasonCodes": [
+      "MTF_ALIGNMENT_SCORE_BELOW_MINIMUM"
+    ],
+    "inputHash": "1fafca5a12c7e67c7ed4a8ce6bac61de86167ad46eec35d484bc3cc4b67bf61f",
+    "outputHash": "a161c68233f58b2e8b58a38bb47d781ed8f139ce2cbf4df529eafaa46b589ca9"
+  },
+  {
+    "name": "regime-not-risk-on",
+    "expectedOutcome": "NO_CANDIDATE",
+    "expectedReasonCode": "REGIME_NOT_RISK_ON",
+    "outcome": "NO_CANDIDATE",
+    "primaryReasonCode": "REGIME_NOT_RISK_ON",
+    "reasonCodes": [
+      "REGIME_NOT_RISK_ON"
+    ],
+    "inputHash": "b9ebf1ac68a8e3b5e1f8799a10cf254c44601788a3893d1aecc43abf1ac57a01",
+    "outputHash": "ce364efcf43dac32ddd29052425fcfd285b139bb8c40ba97c3da90d737b3bf44"
+  },
+  {
+    "name": "regime-risk-mode-defensive",
+    "expectedOutcome": "NO_CANDIDATE",
+    "expectedReasonCode": "REGIME_RISK_MODE_BLOCKED",
+    "outcome": "NO_CANDIDATE",
+    "primaryReasonCode": "REGIME_RISK_MODE_BLOCKED",
+    "reasonCodes": [
+      "REGIME_RISK_MODE_BLOCKED"
+    ],
+    "inputHash": "81bc21073663446b8a93a1cfe870edaf5a698610009afff37526c5d85fbebb3e",
+    "outputHash": "f0fba590018557bf3a241674f3fa5eb4aeb0831cfa1ed0f5eeb1bf0c20bed021"
+  },
+  {
+    "name": "regime-confidence-below-minimum",
+    "expectedOutcome": "NO_CANDIDATE",
+    "expectedReasonCode": "REGIME_CONFIDENCE_BELOW_MINIMUM",
+    "outcome": "NO_CANDIDATE",
+    "primaryReasonCode": "REGIME_CONFIDENCE_BELOW_MINIMUM",
+    "reasonCodes": [
+      "REGIME_CONFIDENCE_BELOW_MINIMUM"
+    ],
+    "inputHash": "0585ee902c39394b0e73545f622272e2aca0556f7438086e8f163c1ef8bac68f",
+    "outputHash": "f8e7572e1eb0eba0f5b0f98d6cf2536ccad828f169568f94340b14713255fa7e"
+  },
+  {
+    "name": "critical-bearish-context-event",
+    "expectedOutcome": "NO_CANDIDATE",
+    "expectedReasonCode": "CONTEXT_CRITICAL_BEARISH_EVENT",
+    "outcome": "NO_CANDIDATE",
+    "primaryReasonCode": "CONTEXT_CRITICAL_BEARISH_EVENT",
+    "reasonCodes": [
+      "CONTEXT_CRITICAL_BEARISH_EVENT"
+    ],
+    "inputHash": "fe0e4bd13fe3d5aa28b6b8de9d71dd949fa8b77435a31c823a9238092c0ce26b",
+    "outputHash": "8cc325aad31516f4d47b51a8508311ed2bb24bc29fb82cf8d8bc45ab5e356a64"
+  },
+  {
+    "name": "stop-distance-above-cap",
+    "expectedOutcome": "NO_CANDIDATE",
+    "expectedReasonCode": "STOP_DISTANCE_ABOVE_MAXIMUM",
+    "outcome": "NO_CANDIDATE",
+    "primaryReasonCode": "STOP_DISTANCE_ABOVE_MAXIMUM",
+    "reasonCodes": [
+      "STOP_DISTANCE_ABOVE_MAXIMUM"
+    ],
+    "inputHash": "4caabc35e9c0a56b5c66ef9066f9312e2d9774afbd811701ff3b7c3b5db495e4",
+    "outputHash": "2a7d72072e914acbc987b406555831cc09d6d795f1232e5fff1fda32feb607b5"
+  },
+  {
+    "name": "candidate-already-expired",
+    "expectedOutcome": "NO_CANDIDATE",
+    "expectedReasonCode": "CANDIDATE_ALREADY_EXPIRED",
+    "outcome": "NO_CANDIDATE",
+    "primaryReasonCode": "CANDIDATE_ALREADY_EXPIRED",
+    "reasonCodes": [
+      "CANDIDATE_ALREADY_EXPIRED"
+    ],
+    "inputHash": "9b790d80c30535c3089e38181584ee3f9808b3976c1f38882dd9082650c4ad54",
+    "outputHash": "42b71b5666662528f6cb3cca2ca320759d2be6c149ece0c2fca3ea4765a4d5b1"
+  }
+]

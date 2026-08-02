@@ -89,12 +89,14 @@ Kandidat wird fachlich verworfen, wenn `stopDistancePct > 0,03` oder Stop <= 0. 
 
 ```text
 stopPrice       = referenceEntry - rawStopDistance
-takeProfitPrice = referenceEntry + 2.0 * rawStopDistance
+takeProfitPrice = referenceEntry + 2.5 * rawStopDistance
 plannedRR       = (takeProfitPrice - referenceEntry) /
-                  (referenceEntry - stopPrice) = 2.0
+                  (referenceEntry - stopPrice) = 2.5
 ```
 
-Preise werden im Candidate noch nicht günstig gerundet. Risk/Simulation quantisieren Stop advers: Stop für Long nach oben wäre weniger Risiko, deshalb wird für Risikorechnung auf den nächstniedrigeren Tick und TP auf den nächstniedrigeren Tick gerundet. Nach tatsächlichem Entry-Fill werden Risikobudget und RR mit dem adversen Fill erneut geprüft. Liegt RR dann unter 2,0, darf die Order vor Fill auslaufen/abgelehnt werden; ein bereits erfolgter Fill erhält unverzüglich einen gültigen ExitPlan und wird nicht „unsichtbar“ gemacht.
+Das Bruttoziel ist seit ADR 0008 (2026-08-02) 2,5R, nicht 2,0R: Spread, Slippage und Roundtrip-Gebühren verkleinern den Bruttogewinn, ohne das Risiko zu verkleinern, sodass ein exakt 2,0R-Bruttoziel das in Dokument 06 verbindliche **Netto**-Mindest-CRV von 2,0 (`R-008-MIN-RR`) bei keinem realistischen Kostenprofil erreichen konnte. Das Netto-Minimum der Risk Engine bleibt unverändert 2,0 und wird durch diese Änderung nicht abgesenkt; 2,5R brutto ist Kopfraum für Kosten, keine Freigabegarantie – bei ungewöhnlich hohem Spread/Slippage kann `R-008` weiterhin ablehnen.
+
+Preise werden im Candidate noch nicht günstig gerundet. Risk/Simulation quantisieren Stop advers: Stop für Long nach oben wäre weniger Risiko, deshalb wird für Risikorechnung auf den nächstniedrigeren Tick und TP auf den nächstniedrigeren Tick gerundet. Nach tatsächlichem Entry-Fill werden Risikobudget und RR mit dem adversen Fill erneut geprüft. Liegt das Netto-RR dann unter 2,0, darf die Order vor Fill auslaufen/abgelehnt werden; ein bereits erfolgter Fill erhält unverzüglich einen gültigen ExitPlan und wird nicht „unsichtbar“ gemacht.
 
 ## Candidate-Gültigkeit
 

@@ -1,0 +1,166 @@
+[
+  {
+    "name": "strategy-v1-2r-take-profit",
+    "expectedOutcome": "REJECTED",
+    "expectedReasonCode": "REWARD_RISK_BELOW_MINIMUM",
+    "outcome": "REJECTED",
+    "directive": "NONE",
+    "primaryReasonCode": "REWARD_RISK_BELOW_MINIMUM",
+    "approvedQuantity": "0.000000000000",
+    "riskAmount": "0.000000000000",
+    "netRewardRisk": "1.557831807575",
+    "failedRules": [
+      "R-008-MIN-RR:REWARD_RISK_BELOW_MINIMUM"
+    ],
+    "inputHash": "626ee7ae33ab55d4bc88d8f9c431e5001348d1e5d82027ca570bb7801b2ec756",
+    "outputHash": "654bbc3b3ec71924603cba83ba697dfbee83fa6c40fa4e21fa2a2e5af8009281"
+  },
+  {
+    "name": "daily-loss-exactly-one-percent",
+    "expectedOutcome": "REJECTED",
+    "expectedReasonCode": "DAILY_LOSS_LIMIT_REACHED",
+    "outcome": "REJECTED",
+    "directive": "ENGAGE_KILL_SWITCH",
+    "primaryReasonCode": "DAILY_LOSS_LIMIT_REACHED",
+    "approvedQuantity": "0.000000000000",
+    "riskAmount": "0.000000000000",
+    "netRewardRisk": "2.527458441600",
+    "failedRules": [
+      "R-010-DAILY-LOSS:DAILY_LOSS_LIMIT_REACHED"
+    ],
+    "inputHash": "21fac0681924525290007fca45bc6d2e57c594030dfb8fc7161afd816b20d259",
+    "outputHash": "4fe328c7d9f50fd5e0e3c8071de815c758ffc2fd2e70a9b87e31582e2dd52ac6"
+  },
+  {
+    "name": "ledger-drift-beyond-tolerance",
+    "expectedOutcome": "ERROR",
+    "expectedReasonCode": "PORTFOLIO_INCONSISTENT",
+    "outcome": "ERROR",
+    "directive": "ERROR_LOCK",
+    "primaryReasonCode": "PORTFOLIO_INCONSISTENT",
+    "approvedQuantity": "0.000000000000",
+    "riskAmount": "0.000000000000",
+    "netRewardRisk": "2.527458441600",
+    "failedRules": [
+      "R-003-PORTFOLIO-CONSISTENCY:PORTFOLIO_INCONSISTENT"
+    ],
+    "inputHash": "cbfc6de956560b4cf50d8317a90d1497a3cd925c4b4b98076d0692f70e13b24d",
+    "outputHash": "03a3c924b5642601d9259ce21ad98de24e00ceb49fea53d25f4710320fc10fd9"
+  },
+  {
+    "name": "correlated-exposure-capped-then-below-minimum-notional",
+    "expectedOutcome": "REJECTED",
+    "expectedReasonCode": "BELOW_INSTRUMENT_MINIMUM",
+    "outcome": "REJECTED",
+    "directive": "NONE",
+    "primaryReasonCode": "BELOW_INSTRUMENT_MINIMUM",
+    "approvedQuantity": "0.000000000000",
+    "riskAmount": "0.000000000000",
+    "netRewardRisk": "2.527458441600",
+    "failedRules": [
+      "R-025-INSTRUMENT-MINIMUMS:BELOW_INSTRUMENT_MINIMUM"
+    ],
+    "inputHash": "5306f8f7551027d1f663fe64eb29f2ebb1d3e933c9309c9c05c005f844fa7fdb",
+    "outputHash": "dd0262f082e5da15bef423d23525d3cb391663077f0c417f869063a7313ca375"
+  },
+  {
+    "name": "missing-execution-profile",
+    "expectedOutcome": "ERROR",
+    "expectedReasonCode": "EXECUTION_PROFILE_MISSING",
+    "outcome": "ERROR",
+    "directive": "ERROR_LOCK",
+    "primaryReasonCode": "REWARD_RISK_BELOW_MINIMUM",
+    "approvedQuantity": "0.000000000000",
+    "riskAmount": "0.000000000000",
+    "netRewardRisk": "0.000000000000",
+    "failedRules": [
+      "R-008-MIN-RR:REWARD_RISK_BELOW_MINIMUM",
+      "R-009-RISK-PER-TRADE:TRADE_RISK_NOT_COMPUTABLE",
+      "R-018-SPREAD:EXECUTION_PROFILE_MISSING",
+      "R-019-SLIPPAGE:EXECUTION_PROFILE_MISSING",
+      "R-025-INSTRUMENT-MINIMUMS:BELOW_INSTRUMENT_MINIMUM"
+    ],
+    "inputHash": "809265b433905cc1c89b180396de93e85eaa842370b8411dd9ee3018a252f546",
+    "outputHash": "906eda74d883eaa0d57de109fed92173ef506d963fd47fc152a6b1e33c30e9b5"
+  },
+  {
+    "name": "missing-regime-snapshot",
+    "expectedOutcome": "ERROR",
+    "expectedReasonCode": "REGIME_MISSING",
+    "outcome": "ERROR",
+    "directive": "BLOCK_NEW",
+    "primaryReasonCode": "REGIME_MISSING",
+    "approvedQuantity": "0.000000000000",
+    "riskAmount": "0.000000000000",
+    "netRewardRisk": "2.527458441600",
+    "failedRules": [
+      "R-020-REGIME:REGIME_MISSING"
+    ],
+    "inputHash": "bf5b457341d3f199d0ccd68ca9d22334b2a169b855556ae580c4753b3819acf1",
+    "outputHash": "6de675177f5c051581502c42cfbbc9b96b2f97e84b02557ca9116f362d310320"
+  },
+  {
+    "name": "post-loss-risk-multiplier",
+    "expectedOutcome": "ERROR",
+    "expectedReasonCode": "NON_DETERMINISTIC_SIZE_OVERRIDE",
+    "outcome": "ERROR",
+    "directive": "ERROR_LOCK",
+    "primaryReasonCode": "NON_DETERMINISTIC_SIZE_OVERRIDE",
+    "approvedQuantity": "0.000000000000",
+    "riskAmount": "0.000000000000",
+    "netRewardRisk": "2.527458441600",
+    "failedRules": [
+      "R-023-NO-MARTINGALE:NON_DETERMINISTIC_SIZE_OVERRIDE"
+    ],
+    "inputHash": "674d50a914acda46dc7585c92400187c1087489c1730a36e70670edf950f77e0",
+    "outputHash": "1fa94c4f08a4a93a2dfdd38f85a6003a03bba24e8b9d403dcdaaa42ab536931e"
+  },
+  {
+    "name": "kill-switch-engaged",
+    "expectedOutcome": "REJECTED",
+    "expectedReasonCode": "SESSION_KILL_SWITCH_ENGAGED",
+    "outcome": "REJECTED",
+    "directive": "BLOCK_NEW",
+    "primaryReasonCode": "SESSION_KILL_SWITCH_ENGAGED",
+    "approvedQuantity": "0.000000000000",
+    "riskAmount": "0.000000000000",
+    "netRewardRisk": "2.527458441600",
+    "failedRules": [
+      "R-002-SESSION:SESSION_KILL_SWITCH_ENGAGED"
+    ],
+    "inputHash": "bf5f41ef83dbe55c1076e0897cd47113f9afbdb4a21be8ea53b6263e9287284f",
+    "outputHash": "cc43671842b7b05f158f17e77820ec2f4f0afafcb1a3ce9c2ff95c774ca93c78"
+  },
+  {
+    "name": "three-consecutive-losses",
+    "expectedOutcome": "REJECTED",
+    "expectedReasonCode": "CONSECUTIVE_LOSS_LIMIT",
+    "outcome": "REJECTED",
+    "directive": "ENGAGE_KILL_SWITCH",
+    "primaryReasonCode": "CONSECUTIVE_LOSS_LIMIT",
+    "approvedQuantity": "0.000000000000",
+    "riskAmount": "0.000000000000",
+    "netRewardRisk": "2.527458441600",
+    "failedRules": [
+      "R-021-LOSS-STREAK:CONSECUTIVE_LOSS_LIMIT"
+    ],
+    "inputHash": "1d25eb60427bc2b30c9e99cd30ea48f36f9ee1726103e9c9f0198a0875e497cf",
+    "outputHash": "fa558995e8529494d664dd3ff0d7d9ae5ec9768a0c369b9bb621f673255023d3"
+  },
+  {
+    "name": "assessment-hash-conflict",
+    "expectedOutcome": "ERROR",
+    "expectedReasonCode": "IDEMPOTENCY_OR_VERSION_CONFLICT",
+    "outcome": "ERROR",
+    "directive": "ERROR_LOCK",
+    "primaryReasonCode": "IDEMPOTENCY_OR_VERSION_CONFLICT",
+    "approvedQuantity": "0.000000000000",
+    "riskAmount": "0.000000000000",
+    "netRewardRisk": "2.527458441600",
+    "failedRules": [
+      "R-026-IDEMPOTENCY-VERSION:IDEMPOTENCY_OR_VERSION_CONFLICT"
+    ],
+    "inputHash": "2f63290f227e06ba36948942b8d616824eefadea78c830c1a48e963f2daea0f2",
+    "outputHash": "ee644410dbbf7bd997e9e8c6eb2088929791e77645fb68929ba7faef2b68197d"
+  }
+]

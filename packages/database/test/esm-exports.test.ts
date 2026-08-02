@@ -12,6 +12,9 @@ import {
   BacktestOutcomeStatus,
   BacktestRunStatus,
   BotRunStatus,
+  ExitPlanStatus,
+  InstrumentExecutionProfileStatus,
+  IntrabarConflictPolicy,
   PaperEvaluationKind,
   PaperEvaluationOutcome,
   PaperEvaluationStatus,
@@ -19,12 +22,39 @@ import {
   PaperOrderSide,
   PaperOrderStatus,
   PaperPositionStatus,
+  PortfolioLedgerEntryType,
+  PortfolioStatus,
   Prisma,
+  RiskAssessmentStatus,
+  RiskEventType,
   RiskLevel,
+  RiskLimitScope,
+  RiskLimitSetStatus,
+  RiskRuleOutcome,
+  RiskSeverity,
+  ShadowFillTriggerType,
+  ShadowOrderPurpose,
+  ShadowOrderSide,
+  ShadowOrderStatus,
+  ShadowOrderTimeInForce,
+  ShadowOrderType,
+  ShadowPositionEventType,
+  ShadowPositionStatus,
   SignalDirection,
   SignalStatus,
   SignalType,
   StrategyComparisonStatus,
+  StrategyPerformanceWindow,
+  StrategyStatus,
+  StrategyVersionStatus,
+  TradeCandidateStatus,
+  TradeDecisionOutcome,
+  TradeDirection,
+  TradeEntryType,
+  TradeEvidenceType,
+  TradingActorType,
+  TradingSessionMode,
+  TradingSessionStatus,
   WatchlistPriority,
   prisma
 } from "../src/index.js";
@@ -84,6 +114,51 @@ describe("database package ESM exports", () => {
   it("exports Prisma namespace with PrismaClientKnownRequestError", () => {
     assert.ok(typeof Prisma === "object");
     assert.ok(typeof Prisma.PrismaClientKnownRequestError === "function");
+  });
+
+  it("exports the shadow trading enums at runtime", () => {
+    assert.equal(TradeCandidateStatus.READY_FOR_RISK, "READY_FOR_RISK");
+    assert.equal(TradeCandidateStatus.APPROVED_FOR_SHADOW, "APPROVED_FOR_SHADOW");
+    assert.equal(ShadowOrderStatus.WAITING_FOR_ENTRY, "WAITING_FOR_ENTRY");
+    assert.equal(ShadowPositionStatus.STOPPED_OUT, "STOPPED_OUT");
+    assert.equal(TradingSessionStatus.SHADOW_ACTIVE, "SHADOW_ACTIVE");
+    assert.equal(TradingSessionStatus.ERROR_LOCKED, "ERROR_LOCKED");
+    assert.equal(PortfolioLedgerEntryType.SELL_NOTIONAL, "SELL_NOTIONAL");
+    assert.equal(RiskSeverity.CRITICAL, "CRITICAL");
+  });
+
+  it("exposes no live trading and no limit order enum member", () => {
+    assert.deepEqual(Object.values(TradingSessionMode), ["SHADOW"]);
+    assert.deepEqual(Object.values(ShadowOrderType), ["MARKET"]);
+    assert.deepEqual(Object.values(TradeDirection), ["LONG"]);
+    assert.deepEqual(Object.values(TradeEntryType), ["MARKET"]);
+  });
+
+  it("exports the remaining shadow trading enum constants without throwing", () => {
+    for (const enumObject of [
+      ExitPlanStatus,
+      InstrumentExecutionProfileStatus,
+      IntrabarConflictPolicy,
+      PortfolioStatus,
+      RiskAssessmentStatus,
+      RiskEventType,
+      RiskLimitScope,
+      RiskLimitSetStatus,
+      RiskRuleOutcome,
+      ShadowFillTriggerType,
+      ShadowOrderPurpose,
+      ShadowOrderSide,
+      ShadowOrderTimeInForce,
+      ShadowPositionEventType,
+      StrategyPerformanceWindow,
+      StrategyStatus,
+      StrategyVersionStatus,
+      TradeDecisionOutcome,
+      TradeEvidenceType,
+      TradingActorType
+    ]) {
+      assert.ok(typeof enumObject === "object" && Object.keys(enumObject).length > 0);
+    }
   });
 
   it("exports prisma singleton with $connect method", () => {

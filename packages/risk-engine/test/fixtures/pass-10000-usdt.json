@@ -1,0 +1,778 @@
+{
+  "snapshot": {
+    "snapshotVersion": "RISK_INPUT_SNAPSHOT_V1",
+    "asOf": "2026-08-02T09:05:00.000Z",
+    "tradingDateUtc": "2026-08-02",
+    "capability": {
+      "buildCapability": "SHADOW_ONLY",
+      "tradingMode": "SHADOW",
+      "enableLiveTrading": false,
+      "shadowMasterFlagEnabled": true,
+      "riskJobEnabled": true
+    },
+    "candidate": {
+      "id": "trade-candidate-1",
+      "candidateKey": "candidate.v1|assignment-btcusdt|strategy-version-1|asset-btc|btcusdt-1h-249",
+      "status": "CREATED",
+      "direction": "LONG",
+      "entryType": "MARKET",
+      "symbol": "BTCUSDT",
+      "assetId": "asset-btc",
+      "portfolioId": "portfolio-shadow-1",
+      "strategyAssignmentId": "assignment-btcusdt",
+      "strategyVersionId": "strategy-version-1",
+      "strategyVersionStatus": "ACTIVE",
+      "strategyKey": "CRYPTO_MTF_BREAKOUT_V1",
+      "assignmentEnabled": true,
+      "anchorCandleId": "btcusdt-1h-249",
+      "referenceEntryPrice": "24100.000000000000",
+      "stopPrice": "23598.030000000000",
+      "takeProfitPrice": "25706.300000000000",
+      "minimumRewardRisk": "2.000000000000",
+      "stopDistance": "501.970000000000",
+      "stopDistancePct": "0.020828000000",
+      "plannedRewardRisk": "2.000000000000",
+      "plannedEntryMinimum": "23598.030000000000",
+      "plannedEntryMaximum": "24267.320000000000",
+      "maximumEntryGapDistance": "167.320000000000",
+      "validFrom": "2026-08-02T08:59:59.999Z",
+      "earliestFillAt": "2026-08-02T08:59:59.999Z",
+      "maxHoldHours": 72,
+      "dataAsOf": "2026-08-02T09:05:00.000Z",
+      "decisionTime": "2026-08-02T09:05:00.000Z",
+      "expiresAt": "2026-08-02T10:59:59.999Z",
+      "inputHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "strategyOutputHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "strategySpecificationHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "strategyEngineVersion": "crypto-mtf-breakout-v1/1.0.0",
+      "hasFinalDecision": false
+    },
+    "asset": {
+      "id": "asset-btc",
+      "symbol": "BTCUSDT",
+      "assetType": "CRYPTO",
+      "quoteCurrency": "USDT",
+      "isTradable": true,
+      "isActive": true,
+      "isLeveraged": false,
+      "isInverse": false,
+      "isStablecoin": false,
+      "instrumentStatus": "ACTIVE"
+    },
+    "session": {
+      "id": "session-1",
+      "sessionKey": "trading-session.v1|portfolio-shadow-1|1",
+      "portfolioId": "portfolio-shadow-1",
+      "mode": "SHADOW",
+      "status": "SHADOW_ACTIVE",
+      "killSwitchEngaged": false,
+      "reconciledAt": "2026-08-02T09:03:00.000Z",
+      "heartbeatAt": "2026-08-02T09:04:30.000Z",
+      "version": 2
+    },
+    "portfolio": {
+      "id": "portfolio-shadow-1",
+      "key": "SHADOW_V1",
+      "status": "ACTIVE",
+      "baseCurrency": "USDT",
+      "startingCash": "10000.000000000000",
+      "availableCash": "10000.000000000000",
+      "reservedCash": "0.000000000000",
+      "realizedPnl": "0.000000000000",
+      "feesPaid": "0.000000000000",
+      "equity": "10000.000000000000",
+      "highWaterMark": "10000.000000000000",
+      "ledgerSequence": 1,
+      "lastReconciledAt": "2026-08-02T09:03:00.000Z",
+      "version": 1
+    },
+    "ledgerReplay": {
+      "sequence": 1,
+      "entryCount": 1,
+      "availableCash": "10000.000000000000",
+      "reservedCash": "0.000000000000",
+      "realizedPnl": "0.000000000000",
+      "feesPaid": "0.000000000000",
+      "orphanReferenceCount": 0,
+      "sequenceGapCount": 0
+    },
+    "startOfDay": {
+      "asOf": "2026-08-02T00:02:00.000Z",
+      "sourceLedgerSequence": 1,
+      "equity": "10000.000000000000"
+    },
+    "openPositions": [],
+    "reservations": [],
+    "dailyCounters": {
+      "tradingDateUtc": "2026-08-02",
+      "filledEntryOrdersToday": 0,
+      "consecutiveLosses": 0,
+      "dailyPnl": "0.000000000000",
+      "closedTradeSequence": 0
+    },
+    "executionProfile": {
+      "id": "execution-profile-btc",
+      "assetId": "asset-btc",
+      "version": 1,
+      "status": "ACTIVE",
+      "tickSize": "0.010000000000",
+      "stepSize": "0.000010000000",
+      "minQuantity": "0.000010000000",
+      "minNotional": "10.000000000000",
+      "maxQuantity": null,
+      "feeBps": 10,
+      "fullSpreadBps": 10,
+      "slippageBps": 10,
+      "maxParticipationRate": "0.010000000000",
+      "sourceObservedAt": "2026-08-01T00:00:00.000Z",
+      "specificationHash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    },
+    "riskLimitSet": {
+      "id": "risk-limit-set-1",
+      "key": "SHADOW_V1",
+      "version": 1,
+      "status": "ACTIVE",
+      "scope": "PORTFOLIO",
+      "maxRiskPerTradePct": "0.0025",
+      "maxDailyLossPct": "0.01",
+      "minRewardRisk": "2",
+      "maxOpenPositions": 2,
+      "maxNewTradesPerDay": 4,
+      "maxConsecutiveLosses": 3,
+      "maxGrossExposurePct": "0.4",
+      "maxAssetExposurePct": "0.2",
+      "maxCorrelatedExposurePct": "0.3",
+      "maxSpreadBps": 20,
+      "maxSlippageBps": 15,
+      "specificationHash": "ff9ab29699eafaa3c2a558271d7123c33cca7732cfe29ad3f6a48443dd889864"
+    },
+    "freshness": {
+      "candleAgeMs": {
+        "1h": 300001,
+        "4h": 3900001,
+        "1d": 32700001
+      },
+      "dataQualityAgeMs": 300000,
+      "regimeAgeMs": 300000,
+      "portfolioSnapshotAgeMs": 120000,
+      "hasFutureTimestamp": false
+    },
+    "dataQuality": {
+      "minimumClosedCandles": {
+        "1h": 250,
+        "4h": 250,
+        "1d": 250
+      },
+      "gapCount": {
+        "1h": 0,
+        "4h": 0,
+        "1d": 0
+      },
+      "providerErrorCount": {
+        "1h": 0,
+        "4h": 0,
+        "1d": 0
+      },
+      "ohlcContradiction": false
+    },
+    "marketRegime": {
+      "id": "regime-1",
+      "generatedAt": "2026-08-02T09:00:00.000Z",
+      "cryptoRegime": "RISK_ON",
+      "riskMode": "NORMAL",
+      "confidence": 72
+    },
+    "correlationGroup": {
+      "key": "CRYPTO_MAJOR",
+      "memberSymbols": [
+        "BTCUSDT",
+        "ETHUSDT"
+      ]
+    },
+    "sizeOverride": {
+      "manualQuantity": null,
+      "riskMultiplier": null,
+      "requestedBy": null
+    },
+    "previousApproval": null,
+    "existingAssessment": null,
+    "policyVersions": {
+      "riskEngineVersion": "risk-engine-v1/1.0.0",
+      "ruleSetVersion": "risk-rules-v1/1.0.0",
+      "sizingPolicyVersion": "risk-sizing-v1/1.0.0",
+      "costPolicyVersion": "risk-cost-v1/1.0.0",
+      "inputAssemblerVersion": "risk-input-assembler-v1/1.0.0",
+      "codeVersion": "test-code-version"
+    }
+  },
+  "expected": {
+    "outcome": "APPROVED",
+    "directive": "NONE",
+    "primaryReasonCode": "RISK_APPROVED",
+    "ruleResults": [
+      {
+        "ruleCode": "R-001-SHADOW-MODE",
+        "ruleVersion": "risk-rules-v1/1.0.0",
+        "outcome": "PASS",
+        "severity": "INFO",
+        "reasonCode": "SHADOW_MODE_OK",
+        "message": "Shadow-only capability confirmed.",
+        "actualValue": null,
+        "limitValue": null,
+        "unit": null,
+        "inputJson": {
+          "buildCapability": "SHADOW_ONLY",
+          "tradingMode": "SHADOW",
+          "enableLiveTrading": false,
+          "shadowMasterFlagEnabled": true,
+          "riskJobEnabled": true
+        },
+        "evaluatedAt": "2026-08-02T09:05:00.000Z"
+      },
+      {
+        "ruleCode": "R-002-SESSION",
+        "ruleVersion": "risk-rules-v1/1.0.0",
+        "outcome": "PASS",
+        "severity": "INFO",
+        "reasonCode": "SESSION_OK",
+        "message": "Session is SHADOW_ACTIVE with the kill switch off.",
+        "actualValue": null,
+        "limitValue": null,
+        "unit": null,
+        "inputJson": {
+          "sessionId": "session-1",
+          "status": "SHADOW_ACTIVE",
+          "killSwitchEngaged": false,
+          "reconciledAt": "2026-08-02T09:03:00.000Z"
+        },
+        "evaluatedAt": "2026-08-02T09:05:00.000Z"
+      },
+      {
+        "ruleCode": "R-003-PORTFOLIO-CONSISTENCY",
+        "ruleVersion": "risk-rules-v1/1.0.0",
+        "outcome": "PASS",
+        "severity": "INFO",
+        "reasonCode": "PORTFOLIO_CONSISTENT",
+        "message": "Portfolio matches the ledger replay.",
+        "actualValue": null,
+        "limitValue": "0.00000001",
+        "unit": "USDT",
+        "inputJson": {
+          "portfolioStatus": "ACTIVE",
+          "ledgerSequence": 1,
+          "replaySequence": 1,
+          "orphanReferenceCount": 0,
+          "sequenceGapCount": 0,
+          "tolerance": "0.00000001"
+        },
+        "evaluatedAt": "2026-08-02T09:05:00.000Z"
+      },
+      {
+        "ruleCode": "R-004-ASSET-SCOPE",
+        "ruleVersion": "risk-rules-v1/1.0.0",
+        "outcome": "PASS",
+        "severity": "INFO",
+        "reasonCode": "ASSET_SCOPE_OK",
+        "message": "Approved BTC/ETH spot USDT instrument.",
+        "actualValue": null,
+        "limitValue": null,
+        "unit": null,
+        "inputJson": {
+          "symbol": "BTCUSDT",
+          "assetType": "CRYPTO",
+          "quoteCurrency": "USDT",
+          "assignmentEnabled": true
+        },
+        "evaluatedAt": "2026-08-02T09:05:00.000Z"
+      },
+      {
+        "ruleCode": "R-005-LONG-ONLY",
+        "ruleVersion": "risk-rules-v1/1.0.0",
+        "outcome": "PASS",
+        "severity": "INFO",
+        "reasonCode": "LONG_ONLY_OK",
+        "message": "Long market entry.",
+        "actualValue": null,
+        "limitValue": null,
+        "unit": null,
+        "inputJson": {
+          "direction": "LONG",
+          "entryType": "MARKET"
+        },
+        "evaluatedAt": "2026-08-02T09:05:00.000Z"
+      },
+      {
+        "ruleCode": "R-006-NO-LEVERAGE",
+        "ruleVersion": "risk-rules-v1/1.0.0",
+        "outcome": "PASS",
+        "severity": "INFO",
+        "reasonCode": "NO_LEVERAGE_OK",
+        "message": "Spot cash sizing, leverage 1, no margin.",
+        "actualValue": null,
+        "limitValue": null,
+        "unit": null,
+        "inputJson": {
+          "isLeveraged": false,
+          "isInverse": false,
+          "requestedLeverage": 1,
+          "marginEnabled": false,
+          "borrowedAmount": "0"
+        },
+        "evaluatedAt": "2026-08-02T09:05:00.000Z"
+      },
+      {
+        "ruleCode": "R-007-STOP-REQUIRED",
+        "ruleVersion": "risk-rules-v1/1.0.0",
+        "outcome": "PASS",
+        "severity": "INFO",
+        "reasonCode": "STOP_VALID",
+        "message": "Stop is present, positive and below the entry.",
+        "actualValue": "23598.030000000000",
+        "limitValue": "24100.000000000000",
+        "unit": "USDT",
+        "inputJson": {
+          "referenceEntryPrice": "24100.000000000000",
+          "stopPrice": "23598.030000000000",
+          "tickSize": "0.010000000000"
+        },
+        "evaluatedAt": "2026-08-02T09:05:00.000Z"
+      },
+      {
+        "ruleCode": "R-008-MIN-RR",
+        "ruleVersion": "risk-rules-v1/1.0.0",
+        "outcome": "PASS",
+        "severity": "INFO",
+        "reasonCode": "REWARD_RISK_OK",
+        "message": "Net reward/risk meets the minimum.",
+        "actualValue": "2.527458441600",
+        "limitValue": "2.000000000000",
+        "unit": "R",
+        "inputJson": {
+          "takeProfitPrice": "25706.300000000000",
+          "referenceEntryPrice": "24100.000000000000",
+          "worstEntryPrice": "24136.170000000000",
+          "worstStopFillPrice": "23562.640000000000",
+          "roundTripFeesPerUnit": "47.698810000000",
+          "perUnitRisk": "621.228810000000",
+          "conservativeRewardRisk": "2.385234000979"
+        },
+        "evaluatedAt": "2026-08-02T09:05:00.000Z"
+      },
+      {
+        "ruleCode": "R-009-RISK-PER-TRADE",
+        "ruleVersion": "risk-rules-v1/1.0.0",
+        "outcome": "PASS",
+        "severity": "INFO",
+        "reasonCode": "TRADE_RISK_WITHIN_LIMIT",
+        "message": "Worst-case loss is inside the budget.",
+        "actualValue": "24.998247314400",
+        "limitValue": "25.000000000000",
+        "unit": "USDT",
+        "inputJson": {
+          "equity": "10000.000000000000",
+          "maxRiskPerTradePct": "0.0025",
+          "approvedQuantity": "0.040240000000",
+          "perUnitRisk": "621.228810000000"
+        },
+        "evaluatedAt": "2026-08-02T09:05:00.000Z"
+      },
+      {
+        "ruleCode": "R-010-DAILY-LOSS",
+        "ruleVersion": "risk-rules-v1/1.0.0",
+        "outcome": "PASS",
+        "severity": "INFO",
+        "reasonCode": "DAILY_LOSS_WITHIN_LIMIT",
+        "message": "Daily loss is inside the limit.",
+        "actualValue": "0.000000000000",
+        "limitValue": "-100.000000000000",
+        "unit": "USDT",
+        "inputJson": {
+          "dailyPnl": "0.000000000000",
+          "startOfDayEquity": "10000.000000000000",
+          "tradingDateUtc": "2026-08-02"
+        },
+        "evaluatedAt": "2026-08-02T09:05:00.000Z"
+      },
+      {
+        "ruleCode": "R-011-OPEN-POSITIONS",
+        "ruleVersion": "risk-rules-v1/1.0.0",
+        "outcome": "PASS",
+        "severity": "INFO",
+        "reasonCode": "OPEN_POSITIONS_WITHIN_LIMIT",
+        "message": "Open-position count stays in range.",
+        "actualValue": "1",
+        "limitValue": "2",
+        "unit": "count",
+        "inputJson": {
+          "openPositionCount": 0,
+          "postTradeOpenPositionCount": 1,
+          "assetAlreadyOpen": false
+        },
+        "evaluatedAt": "2026-08-02T09:05:00.000Z"
+      },
+      {
+        "ruleCode": "R-012-TRADES-PER-DAY",
+        "ruleVersion": "risk-rules-v1/1.0.0",
+        "outcome": "PASS",
+        "severity": "INFO",
+        "reasonCode": "DAILY_TRADES_WITHIN_LIMIT",
+        "message": "Daily entry count stays in range.",
+        "actualValue": "0",
+        "limitValue": "4",
+        "unit": "count",
+        "inputJson": {
+          "filledEntryOrdersToday": 0,
+          "tradingDateUtc": "2026-08-02"
+        },
+        "evaluatedAt": "2026-08-02T09:05:00.000Z"
+      },
+      {
+        "ruleCode": "R-013-GROSS-EXPOSURE",
+        "ruleVersion": "risk-rules-v1/1.0.0",
+        "outcome": "PASS",
+        "severity": "INFO",
+        "reasonCode": "GROSS_EXPOSURE_WITHIN_LIMIT",
+        "message": "Gross exposure stays inside the cap.",
+        "actualValue": "971.239480800000",
+        "limitValue": "4000.000000000000",
+        "unit": "USDT",
+        "inputJson": {
+          "currentExposure": "0.000000000000",
+          "postTradeExposure": "971.239480800000",
+          "equity": "10000.000000000000",
+          "capPct": "0.4"
+        },
+        "evaluatedAt": "2026-08-02T09:05:00.000Z"
+      },
+      {
+        "ruleCode": "R-014-ASSET-EXPOSURE",
+        "ruleVersion": "risk-rules-v1/1.0.0",
+        "outcome": "PASS",
+        "severity": "INFO",
+        "reasonCode": "ASSET_EXPOSURE_WITHIN_LIMIT",
+        "message": "Asset exposure stays inside the cap.",
+        "actualValue": "971.239480800000",
+        "limitValue": "2000.000000000000",
+        "unit": "USDT",
+        "inputJson": {
+          "currentExposure": "0.000000000000",
+          "postTradeExposure": "971.239480800000",
+          "equity": "10000.000000000000",
+          "capPct": "0.2"
+        },
+        "evaluatedAt": "2026-08-02T09:05:00.000Z"
+      },
+      {
+        "ruleCode": "R-015-CORRELATION",
+        "ruleVersion": "risk-rules-v1/1.0.0",
+        "outcome": "PASS",
+        "severity": "INFO",
+        "reasonCode": "CORRELATED_EXPOSURE_WITHIN_LIMIT",
+        "message": "Correlated CRYPTO_MAJOR exposure stays inside the cap.",
+        "actualValue": "971.239480800000",
+        "limitValue": "3000.000000000000",
+        "unit": "USDT",
+        "inputJson": {
+          "currentExposure": "0.000000000000",
+          "postTradeExposure": "971.239480800000",
+          "equity": "10000.000000000000",
+          "capPct": "0.3"
+        },
+        "evaluatedAt": "2026-08-02T09:05:00.000Z"
+      },
+      {
+        "ruleCode": "R-016-DATA-FRESHNESS",
+        "ruleVersion": "risk-rules-v1/1.0.0",
+        "outcome": "PASS",
+        "severity": "INFO",
+        "reasonCode": "DATA_FRESH",
+        "message": "Every source is inside its freshness limit.",
+        "actualValue": null,
+        "limitValue": null,
+        "unit": null,
+        "inputJson": {
+          "candleAgeMs": {
+            "1h": 300001,
+            "4h": 3900001,
+            "1d": 32700001
+          },
+          "dataQualityAgeMs": 300000,
+          "regimeAgeMs": 300000,
+          "portfolioSnapshotAgeMs": 120000,
+          "candidateExpiresAt": "2026-08-02T10:59:59.999Z"
+        },
+        "evaluatedAt": "2026-08-02T09:05:00.000Z"
+      },
+      {
+        "ruleCode": "R-017-DATA-QUALITY",
+        "ruleVersion": "risk-rules-v1/1.0.0",
+        "outcome": "PASS",
+        "severity": "INFO",
+        "reasonCode": "DATA_QUALITY_OK",
+        "message": "Candle coverage and provider status are clean.",
+        "actualValue": null,
+        "limitValue": null,
+        "unit": null,
+        "inputJson": {
+          "minimumClosedCandles": {
+            "1h": 250,
+            "4h": 250,
+            "1d": 250
+          },
+          "gapCount": {
+            "1h": 0,
+            "4h": 0,
+            "1d": 0
+          },
+          "providerErrorCount": {
+            "1h": 0,
+            "4h": 0,
+            "1d": 0
+          },
+          "ohlcContradiction": false,
+          "minimumCandles": 200
+        },
+        "evaluatedAt": "2026-08-02T09:05:00.000Z"
+      },
+      {
+        "ruleCode": "R-018-SPREAD",
+        "ruleVersion": "risk-rules-v1/1.0.0",
+        "outcome": "PASS",
+        "severity": "INFO",
+        "reasonCode": "SPREAD_WITHIN_LIMIT",
+        "message": "Modelled full spread is inside the limit.",
+        "actualValue": "10",
+        "limitValue": "20",
+        "unit": "bp",
+        "inputJson": {
+          "executionProfileId": "execution-profile-btc",
+          "fullSpreadBps": 10,
+          "status": "ACTIVE"
+        },
+        "evaluatedAt": "2026-08-02T09:05:00.000Z"
+      },
+      {
+        "ruleCode": "R-019-SLIPPAGE",
+        "ruleVersion": "risk-rules-v1/1.0.0",
+        "outcome": "PASS",
+        "severity": "INFO",
+        "reasonCode": "SLIPPAGE_WITHIN_LIMIT",
+        "message": "Slippage is inside the limit and priced in.",
+        "actualValue": "10",
+        "limitValue": "15",
+        "unit": "bp",
+        "inputJson": {
+          "slippageBps": 10,
+          "slippageRate": "0.001000000000",
+          "pricedIntoSizing": true
+        },
+        "evaluatedAt": "2026-08-02T09:05:00.000Z"
+      },
+      {
+        "ruleCode": "R-020-REGIME",
+        "ruleVersion": "risk-rules-v1/1.0.0",
+        "outcome": "PASS",
+        "severity": "INFO",
+        "reasonCode": "REGIME_OK",
+        "message": "Crypto regime is RISK_ON with sufficient confidence.",
+        "actualValue": "72",
+        "limitValue": "60",
+        "unit": "score",
+        "inputJson": {
+          "regimeId": "regime-1",
+          "cryptoRegime": "RISK_ON",
+          "riskMode": "NORMAL",
+          "confidence": 72
+        },
+        "evaluatedAt": "2026-08-02T09:05:00.000Z"
+      },
+      {
+        "ruleCode": "R-021-LOSS-STREAK",
+        "ruleVersion": "risk-rules-v1/1.0.0",
+        "outcome": "PASS",
+        "severity": "INFO",
+        "reasonCode": "LOSS_STREAK_WITHIN_LIMIT",
+        "message": "Loss streak is inside the limit.",
+        "actualValue": "0",
+        "limitValue": "3",
+        "unit": "count",
+        "inputJson": {
+          "consecutiveLosses": 0,
+          "closedTradeSequence": 0
+        },
+        "evaluatedAt": "2026-08-02T09:05:00.000Z"
+      },
+      {
+        "ruleCode": "R-022-NO-SCALE-IN",
+        "ruleVersion": "risk-rules-v1/1.0.0",
+        "outcome": "PASS",
+        "severity": "INFO",
+        "reasonCode": "NO_SCALE_IN_OK",
+        "message": "No existing exposure or entry order for the asset.",
+        "actualValue": "0",
+        "limitValue": "0",
+        "unit": "count",
+        "inputJson": {
+          "assetId": "asset-btc",
+          "openPositionsForAsset": 0,
+          "openEntryOrdersForAsset": 0,
+          "entryType": "MARKET"
+        },
+        "evaluatedAt": "2026-08-02T09:05:00.000Z"
+      },
+      {
+        "ruleCode": "R-023-NO-MARTINGALE",
+        "ruleVersion": "risk-rules-v1/1.0.0",
+        "outcome": "PASS",
+        "severity": "INFO",
+        "reasonCode": "DETERMINISTIC_SIZE_OK",
+        "message": "Size comes from the pinned formula only.",
+        "actualValue": null,
+        "limitValue": null,
+        "unit": null,
+        "inputJson": {
+          "manualQuantity": null,
+          "riskMultiplier": null,
+          "requestedBy": null,
+          "sizingPolicyVersion": "risk-sizing-v1/1.0.0"
+        },
+        "evaluatedAt": "2026-08-02T09:05:00.000Z"
+      },
+      {
+        "ruleCode": "R-024-NO-POST-LOSS-INCREASE",
+        "ruleVersion": "risk-rules-v1/1.0.0",
+        "outcome": "PASS",
+        "severity": "INFO",
+        "reasonCode": "RISK_NOT_INCREASED_AFTER_LOSS",
+        "message": "Risk did not grow after a loss.",
+        "actualValue": "24.998247314400",
+        "limitValue": "25.000000000000",
+        "unit": "USDT",
+        "inputJson": {
+          "previousEquity": null,
+          "previousRiskAmount": null,
+          "currentEquity": "10000.000000000000",
+          "currentRiskAmount": "24.998247314400"
+        },
+        "evaluatedAt": "2026-08-02T09:05:00.000Z"
+      },
+      {
+        "ruleCode": "R-025-INSTRUMENT-MINIMUMS",
+        "ruleVersion": "risk-rules-v1/1.0.0",
+        "outcome": "PASS",
+        "severity": "INFO",
+        "reasonCode": "INSTRUMENT_MINIMUMS_OK",
+        "message": "Quantity, notional and cash all satisfy the instrument.",
+        "actualValue": "0.040240000000",
+        "limitValue": "0.000010000000",
+        "unit": "base",
+        "inputJson": {
+          "approvedQuantity": "0.040240000000",
+          "notional": "971.239480800000",
+          "reservedQuoteAmount": "972.210720280800",
+          "stepSize": "0.000010000000",
+          "minQuantity": "0.000010000000",
+          "minNotional": "10.000000000000",
+          "maxQuantity": null,
+          "availableCash": "10000.000000000000",
+          "cappedBy": "RISK_BUDGET"
+        },
+        "evaluatedAt": "2026-08-02T09:05:00.000Z"
+      },
+      {
+        "ruleCode": "R-026-IDEMPOTENCY-VERSION",
+        "ruleVersion": "risk-rules-v1/1.0.0",
+        "outcome": "PASS",
+        "severity": "INFO",
+        "reasonCode": "VERSIONS_CONSISTENT",
+        "message": "Versions, hashes and plan fields are consistent.",
+        "actualValue": null,
+        "limitValue": null,
+        "unit": null,
+        "inputJson": {
+          "candidateKey": "candidate.v1|assignment-btcusdt|strategy-version-1|asset-btc|btcusdt-1h-249",
+          "candidateInputHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "assessmentInputHash": "2f63290f227e06ba36948942b8d616824eefadea78c830c1a48e963f2daea0f2",
+          "existingAssessmentHash": null,
+          "strategyVersionStatus": "ACTIVE",
+          "riskLimitSetStatus": "ACTIVE",
+          "executionProfileStatus": "ACTIVE"
+        },
+        "evaluatedAt": "2026-08-02T09:05:00.000Z"
+      }
+    ],
+    "assessment": {
+      "assessmentKey": "risk-assessment.v1|trade-candidate-1|risk-limit-set-1|2f63290f227e06ba36948942b8d616824eefadea78c830c1a48e963f2daea0f2",
+      "tradeCandidateId": "trade-candidate-1",
+      "portfolioId": "portfolio-shadow-1",
+      "riskLimitSetId": "risk-limit-set-1",
+      "status": "PASS",
+      "ruleSetVersion": "risk-rules-v1/1.0.0",
+      "equity": "10000.000000000000",
+      "availableCash": "10000.000000000000",
+      "reservedCash": "0.000000000000",
+      "dailyPnl": "0.000000000000",
+      "openPositionCount": 0,
+      "newTradesToday": 0,
+      "consecutiveLosses": 0,
+      "grossExposure": "0.000000000000",
+      "assetExposure": "0.000000000000",
+      "correlatedExposure": "0.000000000000",
+      "requestedQuantity": "0.040240000000",
+      "approvedQuantity": "0.040240000000",
+      "riskAmount": "24.998247314400",
+      "tradingDateUtc": "2026-08-02",
+      "portfolioSnapshotAsOf": "2026-08-02T00:02:00.000Z",
+      "marketDataAsOf": "2026-08-02T09:05:00.000Z",
+      "sizing": {
+        "computable": true,
+        "riskBudget": "25.000000000000",
+        "fullSpreadRate": "0.001000000000",
+        "slippageRate": "0.001000000000",
+        "feeRate": "0.001000000000",
+        "worstEntryPrice": "24136.170000000000",
+        "worstStopFillPrice": "23562.640000000000",
+        "worstTakeProfitFillPrice": "25667.750000000000",
+        "entryFeePerUnit": "24.136170000000",
+        "stopExitFeePerUnit": "23.562640000000",
+        "roundTripFeesPerUnit": "47.698810000000",
+        "perUnitRisk": "621.228810000000",
+        "rawQuantity": "0.040242821320",
+        "cashCapQuantity": "0.413902039553",
+        "grossExposureCapQuantity": "0.165726376637",
+        "assetExposureCapQuantity": "0.082863188318",
+        "correlatedExposureCapQuantity": "0.124294782477",
+        "instrumentMaximumQuantity": null,
+        "cappedBy": "RISK_BUDGET",
+        "approvedQuantity": "0.040240000000",
+        "notional": "971.239480800000",
+        "entryFeeTotal": "0.971239480800",
+        "reservedQuoteAmount": "972.210720280800",
+        "riskAmount": "24.998247314400",
+        "netRewardRisk": "2.527458441600",
+        "conservativeRewardRisk": "2.385234000979",
+        "postTradeGrossExposure": "971.239480800000",
+        "postTradeAssetExposure": "971.239480800000",
+        "postTradeCorrelatedExposure": "971.239480800000"
+      },
+      "inputHash": "2f63290f227e06ba36948942b8d616824eefadea78c830c1a48e963f2daea0f2",
+      "assessedAt": "2026-08-02T09:05:00.000Z",
+      "outputHash": "092e7d212eea790ff194040c41b52fc8f7953773b8a6861066a6da5b3fa353bf"
+    },
+    "decision": {
+      "decisionKey": "trade-decision.v1|trade-candidate-1|risk-limit-set-1|2f63290f227e06ba36948942b8d616824eefadea78c830c1a48e963f2daea0f2",
+      "tradeCandidateId": "trade-candidate-1",
+      "outcome": "APPROVE_SHADOW",
+      "reasonCode": "RISK_APPROVED",
+      "inputHash": "2f63290f227e06ba36948942b8d616824eefadea78c830c1a48e963f2daea0f2",
+      "outputHash": "73f4217077c8a70351898719ebc843db44f55b0b69d9d802cedf3057402e1c47",
+      "decidedAt": "2026-08-02T09:05:00.000Z"
+    },
+    "inputHash": "2f63290f227e06ba36948942b8d616824eefadea78c830c1a48e963f2daea0f2",
+    "outputHash": "092e7d212eea790ff194040c41b52fc8f7953773b8a6861066a6da5b3fa353bf",
+    "policyHash": "c53f8dc30726b73b14e947353daee5eae7113a4c36816508066004bddc0c3e07",
+    "engineVersion": "risk-engine-v1/1.0.0",
+    "ruleSetVersion": "risk-rules-v1/1.0.0",
+    "evaluatedAt": "2026-08-02T09:05:00.000Z"
+  }
+}

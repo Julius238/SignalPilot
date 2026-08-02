@@ -243,6 +243,14 @@ model Asset {
   discoveryCandidates     AssetDiscoveryCandidate[]
   discoveryScoreSnapshots DiscoveryScoreSnapshot[]
 
+  // Shadow trading back-relations (no column on Asset, see docs/trading/03)
+  strategyAssignments StrategyAssignment[]
+  executionProfiles   InstrumentExecutionProfile[]
+  tradeCandidates     TradeCandidate[]
+  shadowOrders        ShadowOrder[]
+  shadowFills         ShadowFill[]
+  shadowPositions     ShadowPosition[]
+
   @@unique([symbol, exchange, assetType])
   @@index([symbol])
   @@index([assetType, isActive])
@@ -417,6 +425,14 @@ model Candle {
   createdAt DateTime @default(now())
   asset     Asset    @relation(fields: [assetId], references: [id], onDelete: Cascade)
 
+  // Shadow trading back-relations (no column on Candle, see docs/trading/03)
+  anchoredTradeCandidates TradeCandidate[]      @relation("TradeCandidateAnchorCandle")
+  shadowFills             ShadowFill[]          @relation("ShadowFillSourceCandle")
+  shadowOrderCursors      ShadowOrder[]         @relation("ShadowOrderLastProcessedCandle")
+  shadowPositionCursors   ShadowPosition[]      @relation("ShadowPositionLastProcessedCandle")
+  shadowPositionEvents    ShadowPositionEvent[] @relation("ShadowPositionEventSourceCandle")
+  tradingJobCursors       TradingJobCursor[]    @relation("TradingJobCursorLastCandle")
+
   @@unique([assetId, timeframe, openTime])
   @@index([symbol, timeframe, openTime])
   @@index([source])
@@ -483,6 +499,9 @@ model Signal {
   paperOrders     PaperOrder[]
   paperEvaluation PaperSignalEvaluation?
   ruleApplication SignalRuleApplication?
+
+  // Shadow trading back-relation (no column on Signal, see docs/trading/03)
+  tradeCandidates TradeCandidate[] @relation("TradeCandidateAnchorSignal")
 
   @@index([assetId, timeframe, createdAt])
   @@index([symbol, createdAt])
@@ -981,4 +1000,1031 @@ model MarketEvent {
   @@index([severity, detectedAt])
   @@index([detectedAt])
   @@index([publishedAt])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Shadow Trading v1
+//
+// Specification: docs/trading/03-domain-model.md and docs/trading/04-state-machines.md.
+// Additive only. The legacy PaperAccount / PaperOrder / PaperPosition models and
+// the PaperSignalEvaluation research model stay untouched (ADR 0002).
+//
+// Modelling rules (docs/trading/03, "Modellierungsregeln"):
+//   - money, price, quantity, rate and P&L are Decimal(30,12), never Float;
+//   - percentages are decimal rates, basis points are Int inside versioned profiles;
+//   - all timestamps are UTC; daily limits additionally carry tradingDateUtc;
+//   - financial history deletes with Restrict — no cascade from portfolio,
+//     strategy version, candidate, order, fill, position or audit;
+//   - evidence, fills, ledger, position events and audit rows are append-only.
+//
+// "At most one active row per scope" is expressed by a nullable unique key
+// column (PostgreSQL treats NULL as distinct), because Prisma cannot declare a
+// partial unique index. The domain package builds those keys.
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum StrategyStatus {
+  DRAFT
+  ACTIVE
+  RETIRED
+}
+
+enum StrategyVersionStatus {
+  DRAFT
+  APPROVED
+  ACTIVE
+  RETIRED
+}
+
+enum TradeDirection {
+  LONG
+}
+
+enum TradeEntryType {
+  MARKET
+}
+
+enum TradeCandidateStatus {
+  CREATED
+  VALIDATING
+  READY_FOR_RISK
+  APPROVED_FOR_SHADOW
+  INVALID
+  RISK_REJECTED
+  EXPIRED
+  CANCELLED
+}
+
+enum TradeEvidenceType {
+  CANDLE
+  SIGNAL
+  MTF
+  REGIME
+  DATA_QUALITY
+  RADAR
+  NEWS
+  EVENT
+  DISCOVERY
+  EXECUTION_PROFILE
+}
+
+enum TradeDecisionOutcome {
+  APPROVE_SHADOW
+  REJECT
+  EXPIRE
+  CANCEL
+  ERROR
+}
+
+enum RiskAssessmentStatus {
+  PASS
+  FAIL
+  ERROR
+}
+
+enum RiskRuleOutcome {
+  PASS
+  FAIL
+  WARN
+  ERROR
+}
+
+enum RiskSeverity {
+  INFO
+  WARNING
+  BLOCKER
+  CRITICAL
+}
+
+enum RiskLimitSetStatus {
+  DRAFT
+  ACTIVE
+  RETIRED
+}
+
+enum RiskLimitScope {
+  PORTFOLIO
+}
+
+enum RiskEventType {
+  RISK_RULE_BLOCK
+  DAILY_LOSS_LIMIT
+  CONSECUTIVE_LOSS_LIMIT
+  PORTFOLIO_INCONSISTENCY
+  IDEMPOTENCY_OR_VERSION_CONFLICT
+  CONFIGURATION_INVALID
+  DATA_STALE
+  DATA_QUALITY
+  EXECUTION_PROFILE_CHANGE
+  SIMULATION_ERROR
+  WORKER_ERROR
+  RECONCILIATION_FINDING
+  ADMIN_ACTION
+}
+
+enum InstrumentExecutionProfileStatus {
+  DRAFT
+  ACTIVE
+  RETIRED
+}
+
+enum ShadowOrderPurpose {
+  ENTRY
+  EXIT
+}
+
+enum ShadowOrderSide {
+  BUY
+  SELL
+}
+
+// v1 knows market orders only. LIMIT is deliberately absent so that no flag,
+// payload or migration can activate it before its own specification exists
+// (docs/trading/07, "Limit Orders – expliziter späterer Scope").
+enum ShadowOrderType {
+  MARKET
+}
+
+enum ShadowOrderTimeInForce {
+  NEXT_BARS
+}
+
+enum ShadowOrderStatus {
+  PROPOSED
+  ACCEPTED
+  WAITING_FOR_ENTRY
+  PARTIALLY_FILLED
+  FILLED
+  REJECTED
+  CANCELLED
+  EXPIRED
+}
+
+enum ShadowFillTriggerType {
+  ENTRY
+  STOP
+  TAKE_PROFIT
+  TIME_EXIT
+  INVALIDATION
+  MANUAL_RISK_CLOSE
+}
+
+enum ShadowPositionStatus {
+  OPENING
+  OPEN
+  PARTIALLY_CLOSED
+  CLOSED
+  STOPPED_OUT
+  INVALIDATED
+  ERROR
+}
+
+enum ShadowPositionEventType {
+  OPENING
+  OPENED
+  PARTIAL_CLOSE
+  CLOSED
+  STOPPED_OUT
+  INVALIDATED
+  MARKED
+  ERROR
+}
+
+enum ExitPlanStatus {
+  ACTIVE
+  TRIGGERED
+  COMPLETED
+  CANCELLED
+}
+
+enum IntrabarConflictPolicy {
+  STOP_FIRST
+}
+
+enum PortfolioStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  ERROR_LOCKED
+  ARCHIVED
+}
+
+enum PortfolioLedgerEntryType {
+  INITIAL_CASH
+  RESERVE
+  RELEASE
+  BUY_NOTIONAL
+  SELL_NOTIONAL
+  FEE
+  PNL_ADJUSTMENT
+  CORRECTION
+}
+
+// No LIVE member exists in v1 (docs/trading/03, TradingSession).
+enum TradingSessionMode {
+  SHADOW
+}
+
+enum TradingSessionStatus {
+  STOPPED
+  SHADOW_ACTIVE
+  PAUSED
+  KILLED
+  ERROR_LOCKED
+  CLOSED
+}
+
+enum StrategyPerformanceWindow {
+  DAILY
+  ROLLING_30D
+  ALL_TIME
+}
+
+enum TradingActorType {
+  SYSTEM
+  ADMIN
+  RECOVERY
+}
+
+/// Strategy family. A Strategy never decides; only an immutable StrategyVersion
+/// is executable (docs/trading/03).
+model Strategy {
+  id          String               @id @default(cuid())
+  key         String               @unique
+  name        String
+  description String
+  status      StrategyStatus       @default(DRAFT)
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+  versions    StrategyVersion[]
+  assignments StrategyAssignment[]
+
+  @@index([status])
+}
+
+/// Immutable, approved parameter set. Parameters and hashes may not change from
+/// APPROVED onwards; a change creates a new version (docs/trading/03).
+model StrategyVersion {
+  id                String                @id @default(cuid())
+  strategyId        String
+  version           Int
+  status            StrategyVersionStatus @default(DRAFT)
+  engineVersion     String
+  codeVersion       String
+  parametersJson    Json
+  specificationHash String
+  effectiveFrom     DateTime?
+  effectiveTo       DateTime?
+  createdBy         String
+  approvedBy        String?
+  approvedAt        DateTime?
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+  strategy          Strategy              @relation(fields: [strategyId], references: [id], onDelete: Restrict)
+  assignments       StrategyAssignment[]
+  tradeCandidates   TradeCandidate[]
+  shadowPositions   ShadowPosition[]
+  performances      StrategyPerformance[]
+
+  @@unique([strategyId, version])
+  @@index([status])
+  @@index([specificationHash])
+  @@index([effectiveFrom, effectiveTo])
+}
+
+/// Explicit, disabled-by-default permission to trade one asset with one strategy
+/// version. Asset.isActive or discovery membership never replaces it.
+model StrategyAssignment {
+  id                   String           @id @default(cuid())
+  strategyId           String
+  strategyVersionId    String
+  portfolioId          String
+  assetId              String
+  timeframe            String
+  enabled              Boolean          @default(false)
+  validFrom            DateTime?
+  validTo              DateTime?
+  assignmentConfigJson Json
+  /// Non-null only while the assignment is time-active — enforces
+  /// "at most one active assignment per portfolio, asset and strategy family".
+  activeScopeKey       String?          @unique
+  createdBy            String
+  version              Int              @default(0)
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+  strategy             Strategy         @relation(fields: [strategyId], references: [id], onDelete: Restrict)
+  strategyVersion      StrategyVersion  @relation(fields: [strategyVersionId], references: [id], onDelete: Restrict)
+  portfolio            Portfolio        @relation(fields: [portfolioId], references: [id], onDelete: Restrict)
+  asset                Asset            @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  tradeCandidates      TradeCandidate[]
+  shadowPositions      ShadowPosition[]
+
+  @@index([portfolioId, enabled])
+  @@index([assetId, enabled])
+  @@index([strategyVersionId])
+  @@index([validFrom, validTo])
+}
+
+/// Conservative, versioned execution filters. No strategy may guess these values
+/// from Asset.providerMetadataJson (docs/trading/03).
+model InstrumentExecutionProfile {
+  id                   String                           @id @default(cuid())
+  assetId              String
+  version              Int
+  status               InstrumentExecutionProfileStatus @default(DRAFT)
+  tickSize             Decimal                          @db.Decimal(30, 12)
+  stepSize             Decimal                          @db.Decimal(30, 12)
+  minQuantity          Decimal                          @db.Decimal(30, 12)
+  minNotional          Decimal                          @db.Decimal(30, 12)
+  /// Optional venue quantity cap. Null means the venue declares none.
+  maxQuantity          Decimal?                         @db.Decimal(30, 12)
+  feeBps               Int
+  fullSpreadBps        Int
+  slippageBps          Int
+  maxParticipationRate Decimal                          @db.Decimal(30, 12)
+  source               String
+  sourceObservedAt     DateTime
+  specificationHash    String
+  effectiveFrom        DateTime?
+  effectiveTo          DateTime?
+  /// Non-null only while the profile is ACTIVE — at most one active profile per asset.
+  activeAssetKey       String?                          @unique
+  createdAt            DateTime                         @default(now())
+  updatedAt            DateTime                         @updatedAt
+  asset                Asset                            @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  shadowOrders         ShadowOrder[]
+
+  @@unique([assetId, version])
+  @@index([status])
+  @@index([specificationHash])
+}
+
+/// Pre-trade candidate with an immutable, hashed input snapshot.
+model TradeCandidate {
+  id                        String                   @id @default(cuid())
+  candidateKey              String                   @unique
+  strategyAssignmentId      String
+  strategyVersionId         String
+  portfolioId               String
+  assetId                   String
+  anchorCandleId            String
+  anchorSignalId            String?
+  direction                 TradeDirection           @default(LONG)
+  entryType                 TradeEntryType           @default(MARKET)
+  status                    TradeCandidateStatus     @default(CREATED)
+  referenceEntryPrice       Decimal                  @db.Decimal(30, 12)
+  stopPrice                 Decimal                  @db.Decimal(30, 12)
+  takeProfitPrice           Decimal                  @db.Decimal(30, 12)
+  minimumRewardRisk         Decimal                  @db.Decimal(30, 12)
+  /// Typed strategy plan values the risk engine needs. Added additively in
+  /// 20260802120000_add_trade_candidate_plan_fields; nullable so the migration
+  /// stays safe on a table that may already hold work-package-2 rows. The risk
+  /// engine refuses a candidate with a null here (R-026,
+  /// CANDIDATE_PLAN_INCOMPLETE) instead of substituting a value.
+  stopDistance              Decimal?                 @db.Decimal(30, 12)
+  stopDistancePct           Decimal?                 @db.Decimal(30, 12)
+  plannedRewardRisk         Decimal?                 @db.Decimal(30, 12)
+  plannedEntryMinimum       Decimal?                 @db.Decimal(30, 12)
+  plannedEntryMaximum       Decimal?                 @db.Decimal(30, 12)
+  maximumEntryGapDistance   Decimal?                 @db.Decimal(30, 12)
+  validFrom                 DateTime?
+  earliestFillAt            DateTime?
+  maxHoldHours              Int?
+  strategyEngineVersion     String?
+  strategySpecificationHash String?
+  strategyOutputHash        String?
+  dataAsOf                  DateTime
+  decisionTime              DateTime
+  expiresAt                 DateTime
+  inputSnapshotJson         Json
+  inputHash                 String
+  strategyReasonCodes       Json
+  invalidReasonCode         String?
+  cancelReasonCode          String?
+  claimedBy                 String?
+  claimedAt                 DateTime?
+  claimExpiresAt            DateTime?
+  version                   Int                      @default(0)
+  createdAt                 DateTime                 @default(now())
+  updatedAt                 DateTime                 @updatedAt
+  strategyAssignment        StrategyAssignment       @relation(fields: [strategyAssignmentId], references: [id], onDelete: Restrict)
+  strategyVersion           StrategyVersion          @relation(fields: [strategyVersionId], references: [id], onDelete: Restrict)
+  portfolio                 Portfolio                @relation(fields: [portfolioId], references: [id], onDelete: Restrict)
+  asset                     Asset                    @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  anchorCandle              Candle                   @relation("TradeCandidateAnchorCandle", fields: [anchorCandleId], references: [id], onDelete: Restrict)
+  anchorSignal              Signal?                  @relation("TradeCandidateAnchorSignal", fields: [anchorSignalId], references: [id], onDelete: SetNull)
+  evidence                  TradeCandidateEvidence[]
+  riskAssessments           RiskAssessment[]
+  decision                  TradeDecision?
+  shadowOrders              ShadowOrder[]
+  riskEvents                RiskEvent[]
+
+  @@unique([strategyAssignmentId, strategyVersionId, assetId, anchorCandleId])
+  @@index([status, createdAt])
+  @@index([portfolioId, status])
+  @@index([assetId, decisionTime])
+  @@index([expiresAt])
+  @@index([claimExpiresAt])
+  @@index([inputHash])
+}
+
+/// Minimal reproducible evidence behind a candidate. Append-only.
+model TradeCandidateEvidence {
+  id               String            @id @default(cuid())
+  tradeCandidateId String
+  type             TradeEvidenceType
+  sourceType       String
+  sourceId         String?
+  /// Deterministic substitute when sourceId is null, so the unique key holds.
+  sourceKey        String
+  observedAt       DateTime
+  capturedAt       DateTime
+  required         Boolean           @default(false)
+  payloadJson      Json
+  payloadHash      String
+  createdAt        DateTime          @default(now())
+  tradeCandidate   TradeCandidate    @relation(fields: [tradeCandidateId], references: [id], onDelete: Restrict)
+
+  @@unique([tradeCandidateId, type, sourceType, sourceKey])
+  @@index([tradeCandidateId, type])
+  @@index([payloadHash])
+}
+
+/// Exactly one final pre-trade decision per candidate (docs/trading/03).
+model TradeDecision {
+  id               String               @id @default(cuid())
+  tradeCandidateId String               @unique
+  riskAssessmentId String?              @unique
+  decisionKey      String               @unique
+  outcome          TradeDecisionOutcome
+  reasonCode       String
+  inputHash        String
+  outputHash       String
+  decidedAt        DateTime
+  createdAt        DateTime             @default(now())
+  tradeCandidate   TradeCandidate       @relation(fields: [tradeCandidateId], references: [id], onDelete: Restrict)
+  riskAssessment   RiskAssessment?      @relation(fields: [riskAssessmentId], references: [id], onDelete: Restrict)
+  shadowOrders     ShadowOrder[]
+
+  @@index([outcome, decidedAt])
+  @@index([outputHash])
+}
+
+/// Deterministic pre-trade risk verdict including the portfolio state it used.
+model RiskAssessment {
+  id                    String               @id @default(cuid())
+  tradeCandidateId      String
+  portfolioId           String
+  riskLimitSetId        String
+  assessmentKey         String               @unique
+  status                RiskAssessmentStatus
+  ruleSetVersion        String
+  equity                Decimal              @db.Decimal(30, 12)
+  availableCash         Decimal              @db.Decimal(30, 12)
+  reservedCash          Decimal              @db.Decimal(30, 12)
+  dailyPnl              Decimal              @db.Decimal(30, 12)
+  openPositionCount     Int
+  newTradesToday        Int
+  consecutiveLosses     Int
+  grossExposure         Decimal              @db.Decimal(30, 12)
+  assetExposure         Decimal              @db.Decimal(30, 12)
+  correlatedExposure    Decimal              @db.Decimal(30, 12)
+  requestedQuantity     Decimal              @db.Decimal(30, 12)
+  approvedQuantity      Decimal              @db.Decimal(30, 12)
+  riskAmount            Decimal              @db.Decimal(30, 12)
+  tradingDateUtc        DateTime             @db.Date
+  portfolioSnapshotAsOf DateTime
+  marketDataAsOf        DateTime
+  inputsJson            Json
+  inputHash             String
+  outputHash            String
+  assessedAt            DateTime
+  createdAt             DateTime             @default(now())
+  tradeCandidate        TradeCandidate       @relation(fields: [tradeCandidateId], references: [id], onDelete: Restrict)
+  portfolio             Portfolio            @relation(fields: [portfolioId], references: [id], onDelete: Restrict)
+  riskLimitSet          RiskLimitSet         @relation(fields: [riskLimitSetId], references: [id], onDelete: Restrict)
+  ruleResults           RiskRuleResult[]
+  decision              TradeDecision?
+
+  @@index([tradeCandidateId, assessedAt])
+  @@index([portfolioId, tradingDateUtc])
+  @@index([status, assessedAt])
+  @@index([inputHash])
+}
+
+/// One row per evaluated rule, including PASS results (docs/trading/03).
+model RiskRuleResult {
+  id               String          @id @default(cuid())
+  riskAssessmentId String
+  ruleCode         String
+  ruleVersion      String
+  outcome          RiskRuleOutcome
+  severity         RiskSeverity
+  reasonCode       String
+  message          String
+  actualValue      Decimal?        @db.Decimal(30, 12)
+  limitValue       Decimal?        @db.Decimal(30, 12)
+  unit             String?
+  inputJson        Json
+  evaluatedAt      DateTime
+  createdAt        DateTime        @default(now())
+  riskAssessment   RiskAssessment  @relation(fields: [riskAssessmentId], references: [id], onDelete: Restrict)
+  riskEvents       RiskEvent[]
+
+  @@unique([riskAssessmentId, ruleCode])
+  @@index([ruleCode, outcome])
+  @@index([severity, evaluatedAt])
+}
+
+/// Immutable-from-ACTIVE risk rule book (docs/trading/06, "Verbindliches Limitset v1").
+model RiskLimitSet {
+  id                       String             @id @default(cuid())
+  key                      String
+  version                  Int
+  status                   RiskLimitSetStatus @default(DRAFT)
+  scope                    RiskLimitScope     @default(PORTFOLIO)
+  maxRiskPerTradePct       Decimal            @db.Decimal(30, 12)
+  maxDailyLossPct          Decimal            @db.Decimal(30, 12)
+  minRewardRisk            Decimal            @db.Decimal(30, 12)
+  maxOpenPositions         Int
+  maxNewTradesPerDay       Int
+  maxConsecutiveLosses     Int
+  maxGrossExposurePct      Decimal            @db.Decimal(30, 12)
+  maxAssetExposurePct      Decimal            @db.Decimal(30, 12)
+  maxCorrelatedExposurePct Decimal            @db.Decimal(30, 12)
+  maxSpreadBps             Int
+  maxSlippageBps           Int
+  parametersJson           Json
+  specificationHash        String
+  effectiveFrom            DateTime?
+  effectiveTo              DateTime?
+  /// Non-null only while the set is ACTIVE — at most one active set per scope.
+  activeScopeKey           String?            @unique
+  createdBy                String
+  approvedBy               String?
+  approvedAt               DateTime?
+  createdAt                DateTime           @default(now())
+  updatedAt                DateTime           @updatedAt
+  riskAssessments          RiskAssessment[]
+
+  @@unique([key, version])
+  @@index([status])
+  @@index([specificationHash])
+}
+
+/// Rule breach or system risk. BLOCKER and CRITICAL results always create one.
+model RiskEvent {
+  id               String          @id @default(cuid())
+  eventKey         String          @unique
+  type             RiskEventType
+  severity         RiskSeverity
+  reasonCode       String
+  portfolioId      String
+  tradeCandidateId String?
+  shadowOrderId    String?
+  shadowPositionId String?
+  tradingSessionId String?
+  riskRuleResultId String?
+  payloadJson      Json
+  inputHash        String
+  acknowledgedBy   String?
+  acknowledgedAt   DateTime?
+  resolutionNote   String?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  portfolio        Portfolio       @relation(fields: [portfolioId], references: [id], onDelete: Restrict)
+  tradeCandidate   TradeCandidate? @relation(fields: [tradeCandidateId], references: [id], onDelete: Restrict)
+  shadowOrder      ShadowOrder?    @relation(fields: [shadowOrderId], references: [id], onDelete: Restrict)
+  shadowPosition   ShadowPosition? @relation(fields: [shadowPositionId], references: [id], onDelete: Restrict)
+  tradingSession   TradingSession? @relation(fields: [tradingSessionId], references: [id], onDelete: Restrict)
+  riskRuleResult   RiskRuleResult? @relation(fields: [riskRuleResultId], references: [id], onDelete: Restrict)
+
+  @@index([portfolioId, createdAt])
+  @@index([severity, acknowledgedAt])
+  @@index([type, createdAt])
+  @@index([tradingSessionId])
+}
+
+/// Simulated order. Never leaves the process; there is no exchange adapter in v1.
+model ShadowOrder {
+  id                    String                     @id @default(cuid())
+  orderKey              String                     @unique
+  clientOrderId         String                     @unique
+  tradeCandidateId      String?
+  tradeDecisionId       String?
+  shadowPositionId      String?
+  portfolioId           String
+  assetId               String
+  tradingSessionId      String
+  executionProfileId    String
+  /// Non-null only for ENTRY orders — at most one entry order per candidate.
+  entryCandidateKey     String?                    @unique
+  purpose               ShadowOrderPurpose
+  side                  ShadowOrderSide
+  orderType             ShadowOrderType            @default(MARKET)
+  timeInForce           ShadowOrderTimeInForce     @default(NEXT_BARS)
+  status                ShadowOrderStatus          @default(PROPOSED)
+  requestedQuantity     Decimal                    @db.Decimal(30, 12)
+  filledQuantity        Decimal                    @default(0) @db.Decimal(30, 12)
+  remainingQuantity     Decimal                    @db.Decimal(30, 12)
+  referencePrice        Decimal                    @db.Decimal(30, 12)
+  reservedQuoteAmount   Decimal                    @default(0) @db.Decimal(30, 12)
+  earliestFillAt        DateTime?
+  expiresAt             DateTime?
+  precisionSnapshotJson Json
+  costModelSnapshotJson Json
+  lastProcessedCandleId String?
+  rejectionReasonCode   String?
+  cancelReasonCode      String?
+  claimedBy             String?
+  claimedAt             DateTime?
+  claimExpiresAt        DateTime?
+  version               Int                        @default(0)
+  createdAt             DateTime                   @default(now())
+  updatedAt             DateTime                   @updatedAt
+  tradeCandidate        TradeCandidate?            @relation(fields: [tradeCandidateId], references: [id], onDelete: Restrict)
+  tradeDecision         TradeDecision?             @relation(fields: [tradeDecisionId], references: [id], onDelete: Restrict)
+  exitForPosition       ShadowPosition?            @relation("ShadowOrderExitPosition", fields: [shadowPositionId], references: [id], onDelete: Restrict)
+  portfolio             Portfolio                  @relation(fields: [portfolioId], references: [id], onDelete: Restrict)
+  asset                 Asset                      @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  tradingSession        TradingSession             @relation(fields: [tradingSessionId], references: [id], onDelete: Restrict)
+  executionProfile      InstrumentExecutionProfile @relation(fields: [executionProfileId], references: [id], onDelete: Restrict)
+  lastProcessedCandle   Candle?                    @relation("ShadowOrderLastProcessedCandle", fields: [lastProcessedCandleId], references: [id], onDelete: SetNull)
+  fills                 ShadowFill[]
+  openedPosition        ShadowPosition?            @relation("ShadowPositionEntryOrder")
+  positionEvents        ShadowPositionEvent[]      @relation("ShadowPositionEventSourceOrder")
+  ledgerEntries         PortfolioLedgerEntry[]
+  riskEvents            RiskEvent[]
+
+  @@index([portfolioId, status])
+  @@index([assetId, status])
+  @@index([tradingSessionId, createdAt])
+  @@index([status, earliestFillAt])
+  @@index([claimExpiresAt])
+  @@index([expiresAt])
+}
+
+/// Append-only simulated fill with every assumption needed to reproduce it
+/// without re-reading candles or profiles (docs/trading/07).
+model ShadowFill {
+  id                 String                 @id @default(cuid())
+  fillKey            String                 @unique
+  shadowOrderId      String
+  shadowPositionId   String?
+  assetId            String
+  sourceCandleId     String
+  sequence           Int
+  side               ShadowOrderSide
+  quantity           Decimal                @db.Decimal(30, 12)
+  referencePrice     Decimal                @db.Decimal(30, 12)
+  spreadAmount       Decimal                @db.Decimal(30, 12)
+  slippageAmount     Decimal                @db.Decimal(30, 12)
+  fillPrice          Decimal                @db.Decimal(30, 12)
+  notional           Decimal                @db.Decimal(30, 12)
+  feeAmount          Decimal                @db.Decimal(30, 12)
+  feeAsset           String
+  liquidityAvailable Decimal                @db.Decimal(30, 12)
+  participationRate  Decimal                @db.Decimal(30, 12)
+  triggerType        ShadowFillTriggerType
+  simulationVersion  String
+  assumptionsJson    Json
+  inputHash          String
+  occurredAt         DateTime
+  createdAt          DateTime               @default(now())
+  shadowOrder        ShadowOrder            @relation(fields: [shadowOrderId], references: [id], onDelete: Restrict)
+  shadowPosition     ShadowPosition?        @relation(fields: [shadowPositionId], references: [id], onDelete: Restrict)
+  asset              Asset                  @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  sourceCandle       Candle                 @relation("ShadowFillSourceCandle", fields: [sourceCandleId], references: [id], onDelete: Restrict)
+  positionEvents     ShadowPositionEvent[]  @relation("ShadowPositionEventSourceFill")
+  ledgerEntries      PortfolioLedgerEntry[]
+
+  @@unique([shadowOrderId, sequence])
+  @@index([shadowPositionId, occurredAt])
+  @@index([assetId, occurredAt])
+  @@index([sourceCandleId])
+  @@index([triggerType, occurredAt])
+}
+
+/// Simulated position. At most one non-terminal position per portfolio and asset;
+/// no quantity increase after the entry window closed (docs/trading/04).
+model ShadowPosition {
+  id                    String                 @id @default(cuid())
+  positionKey           String                 @unique
+  portfolioId           String
+  assetId               String
+  strategyVersionId     String
+  strategyAssignmentId  String
+  entryOrderId          String                 @unique
+  status                ShadowPositionStatus   @default(OPENING)
+  /// Non-null while the position is non-terminal — at most one open position
+  /// per portfolio and asset.
+  openScopeKey          String?                @unique
+  initialQuantity       Decimal                @db.Decimal(30, 12)
+  openQuantity          Decimal                @db.Decimal(30, 12)
+  closedQuantity        Decimal                @default(0) @db.Decimal(30, 12)
+  averageEntryPrice     Decimal                @db.Decimal(30, 12)
+  averageExitPrice      Decimal?               @db.Decimal(30, 12)
+  grossEntryNotional    Decimal                @default(0) @db.Decimal(30, 12)
+  grossExitNotional     Decimal                @default(0) @db.Decimal(30, 12)
+  realizedPnl           Decimal                @default(0) @db.Decimal(30, 12)
+  feesPaid              Decimal                @default(0) @db.Decimal(30, 12)
+  stopPrice             Decimal                @db.Decimal(30, 12)
+  takeProfitPrice       Decimal                @db.Decimal(30, 12)
+  maxHoldUntil          DateTime
+  activeExitPlanVersion Int?
+  openedAt              DateTime?
+  closedAt              DateTime?
+  lastValuationAt       DateTime?
+  lastProcessedCandleId String?
+  version               Int                    @default(0)
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  portfolio             Portfolio              @relation(fields: [portfolioId], references: [id], onDelete: Restrict)
+  asset                 Asset                  @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  strategyVersion       StrategyVersion        @relation(fields: [strategyVersionId], references: [id], onDelete: Restrict)
+  strategyAssignment    StrategyAssignment     @relation(fields: [strategyAssignmentId], references: [id], onDelete: Restrict)
+  entryOrder            ShadowOrder            @relation("ShadowPositionEntryOrder", fields: [entryOrderId], references: [id], onDelete: Restrict)
+  lastProcessedCandle   Candle?                @relation("ShadowPositionLastProcessedCandle", fields: [lastProcessedCandleId], references: [id], onDelete: SetNull)
+  exitOrders            ShadowOrder[]          @relation("ShadowOrderExitPosition")
+  fills                 ShadowFill[]
+  events                ShadowPositionEvent[]
+  exitPlans             ExitPlan[]
+  ledgerEntries         PortfolioLedgerEntry[]
+  riskEvents            RiskEvent[]
+
+  @@index([portfolioId, status])
+  @@index([assetId, status])
+  @@index([strategyVersionId, closedAt])
+  @@index([status, openedAt])
+}
+
+/// Append-only, gapless event log of a position.
+model ShadowPositionEvent {
+  id               String                  @id @default(cuid())
+  eventKey         String                  @unique
+  shadowPositionId String
+  sequence         Int
+  type             ShadowPositionEventType
+  sourceOrderId    String?
+  sourceFillId     String?
+  sourceCandleId   String?
+  quantity         Decimal?                @db.Decimal(30, 12)
+  price            Decimal?                @db.Decimal(30, 12)
+  realizedPnlDelta Decimal?                @db.Decimal(30, 12)
+  payloadJson      Json
+  occurredAt       DateTime
+  createdAt        DateTime                @default(now())
+  shadowPosition   ShadowPosition          @relation(fields: [shadowPositionId], references: [id], onDelete: Restrict)
+  sourceOrder      ShadowOrder?            @relation("ShadowPositionEventSourceOrder", fields: [sourceOrderId], references: [id], onDelete: Restrict)
+  sourceFill       ShadowFill?             @relation("ShadowPositionEventSourceFill", fields: [sourceFillId], references: [id], onDelete: Restrict)
+  sourceCandle     Candle?                 @relation("ShadowPositionEventSourceCandle", fields: [sourceCandleId], references: [id], onDelete: SetNull)
+  performances     StrategyPerformance[]
+
+  @@unique([shadowPositionId, sequence])
+  @@index([shadowPositionId, occurredAt])
+  @@index([type, occurredAt])
+}
+
+/// Versioned exit plan. A new plan never replaces history; ShadowPosition
+/// denormalises the currently active version (docs/trading/03).
+model ExitPlan {
+  id                     String                 @id @default(cuid())
+  shadowPositionId       String
+  version                Int
+  status                 ExitPlanStatus         @default(ACTIVE)
+  stopPrice              Decimal                @db.Decimal(30, 12)
+  takeProfitPrice        Decimal                @db.Decimal(30, 12)
+  maxHoldUntil           DateTime
+  intrabarConflictPolicy IntrabarConflictPolicy @default(STOP_FIRST)
+  triggeredBy            String?
+  triggeredAt            DateTime?
+  specificationJson      Json
+  specificationHash      String
+  /// Non-null while the plan is non-terminal — at most one live plan per position.
+  activePositionKey      String?                @unique
+  createdAt              DateTime               @default(now())
+  updatedAt              DateTime               @updatedAt
+  shadowPosition         ShadowPosition         @relation(fields: [shadowPositionId], references: [id], onDelete: Restrict)
+
+  @@unique([shadowPositionId, version])
+  @@index([status, maxHoldUntil])
+  @@index([specificationHash])
+}
+
+/// Shadow portfolio. The cached money columns are projections of the append-only
+/// ledger and are never the primary truth (ADR 0004).
+model Portfolio {
+  id               String                 @id @default(cuid())
+  key              String                 @unique
+  name             String
+  baseCurrency     String                 @default("USDT")
+  status           PortfolioStatus        @default(DRAFT)
+  startingCash     Decimal                @default(0) @db.Decimal(30, 12)
+  availableCash    Decimal                @default(0) @db.Decimal(30, 12)
+  reservedCash     Decimal                @default(0) @db.Decimal(30, 12)
+  realizedPnl      Decimal                @default(0) @db.Decimal(30, 12)
+  feesPaid         Decimal                @default(0) @db.Decimal(30, 12)
+  equity           Decimal                @default(0) @db.Decimal(30, 12)
+  highWaterMark    Decimal                @default(0) @db.Decimal(30, 12)
+  ledgerSequence   Int                    @default(0)
+  lastReconciledAt DateTime?
+  version          Int                    @default(0)
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+  assignments      StrategyAssignment[]
+  tradeCandidates  TradeCandidate[]
+  riskAssessments  RiskAssessment[]
+  shadowOrders     ShadowOrder[]
+  shadowPositions  ShadowPosition[]
+  ledgerEntries    PortfolioLedgerEntry[]
+  snapshots        PortfolioSnapshot[]
+  riskEvents       RiskEvent[]
+  sessions         TradingSession[]
+  performances     StrategyPerformance[]
+
+  @@index([status])
+}
+
+/// Append-only cash and P&L ledger. Corrections are counter-entries, never updates.
+model PortfolioLedgerEntry {
+  id                 String                   @id @default(cuid())
+  entryKey           String                   @unique
+  portfolioId        String
+  sequence           Int
+  type               PortfolioLedgerEntryType
+  availableCashDelta Decimal                  @default(0) @db.Decimal(30, 12)
+  reservedCashDelta  Decimal                  @default(0) @db.Decimal(30, 12)
+  realizedPnlDelta   Decimal                  @default(0) @db.Decimal(30, 12)
+  feeDelta           Decimal                  @default(0) @db.Decimal(30, 12)
+  shadowOrderId      String?
+  shadowFillId       String?
+  shadowPositionId   String?
+  correctionOfId     String?                  @unique
+  balanceAfterJson   Json
+  occurredAt         DateTime
+  createdAt          DateTime                 @default(now())
+  portfolio          Portfolio                @relation(fields: [portfolioId], references: [id], onDelete: Restrict)
+  shadowOrder        ShadowOrder?             @relation(fields: [shadowOrderId], references: [id], onDelete: Restrict)
+  shadowFill         ShadowFill?              @relation(fields: [shadowFillId], references: [id], onDelete: Restrict)
+  shadowPosition     ShadowPosition?          @relation(fields: [shadowPositionId], references: [id], onDelete: Restrict)
+  correctionOf       PortfolioLedgerEntry?    @relation("PortfolioLedgerCorrection", fields: [correctionOfId], references: [id], onDelete: Restrict)
+  correctedBy        PortfolioLedgerEntry?    @relation("PortfolioLedgerCorrection")
+
+  @@unique([portfolioId, sequence])
+  @@index([portfolioId, occurredAt])
+  @@index([type, occurredAt])
+  @@index([shadowOrderId])
+  @@index([shadowFillId])
+  @@index([shadowPositionId])
+}
+
+/// Rebuildable equity projection at one ledger position.
+model PortfolioSnapshot {
+  id                   String    @id @default(cuid())
+  portfolioId          String
+  asOf                 DateTime
+  tradingDateUtc       DateTime  @db.Date
+  sourceLedgerSequence Int
+  availableCash        Decimal   @db.Decimal(30, 12)
+  reservedCash         Decimal   @db.Decimal(30, 12)
+  marketValue          Decimal   @db.Decimal(30, 12)
+  equity               Decimal   @db.Decimal(30, 12)
+  realizedPnl          Decimal   @db.Decimal(30, 12)
+  unrealizedPnl        Decimal   @db.Decimal(30, 12)
+  feesPaid             Decimal   @db.Decimal(30, 12)
+  dailyPnl             Decimal   @db.Decimal(30, 12)
+  highWaterMark        Decimal   @db.Decimal(30, 12)
+  drawdownAmount       Decimal   @db.Decimal(30, 12)
+  drawdownPct          Decimal   @db.Decimal(30, 12)
+  grossExposure        Decimal   @db.Decimal(30, 12)
+  openPositionCount    Int
+  valuationJson        Json
+  inputHash            String
+  createdAt            DateTime  @default(now())
+  portfolio            Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Restrict)
+
+  @@unique([portfolioId, asOf, sourceLedgerSequence])
+  @@index([portfolioId, tradingDateUtc])
+  @@index([asOf])
+}
+
+/// Operating state of shadow trading. Starts STOPPED with the kill switch on.
+/// SHADOW_ACTIVE additionally requires killSwitchEngaged=false, a successful
+/// reconcile and an active portfolio (docs/trading/03, ADR 0006).
+model TradingSession {
+  id                 String               @id @default(cuid())
+  sessionKey         String               @unique
+  portfolioId        String
+  mode               TradingSessionMode   @default(SHADOW)
+  status             TradingSessionStatus @default(STOPPED)
+  killSwitchEngaged  Boolean              @default(true)
+  killReasonCode     String?
+  killNote           String?
+  /// Non-null while the session is not CLOSED — at most one live session per portfolio.
+  activePortfolioKey String?              @unique
+  startedAt          DateTime?
+  pausedAt           DateTime?
+  killedAt           DateTime?
+  closedAt           DateTime?
+  activatedBy        String?
+  lastChangedBy      String?
+  reconciledAt       DateTime?
+  heartbeatAt        DateTime?
+  version            Int                  @default(0)
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+  portfolio          Portfolio            @relation(fields: [portfolioId], references: [id], onDelete: Restrict)
+  shadowOrders       ShadowOrder[]
+  riskEvents         RiskEvent[]
+  auditEvents        TradingAuditEvent[]
+
+  @@index([portfolioId, status])
+  @@index([status])
+  @@index([heartbeatAt])
+}
+
+/// Shadow-only performance projection. PaperSignalEvaluation is never an input.
+model StrategyPerformance {
+  id                           String                    @id @default(cuid())
+  strategyVersionId            String
+  portfolioId                  String
+  window                       StrategyPerformanceWindow
+  asOf                         DateTime
+  from                         DateTime
+  to                           DateTime
+  closedTrades                 Int                       @default(0)
+  wins                         Int                       @default(0)
+  losses                       Int                       @default(0)
+  breakeven                    Int                       @default(0)
+  grossPnl                     Decimal                   @default(0) @db.Decimal(30, 12)
+  netPnl                       Decimal                   @default(0) @db.Decimal(30, 12)
+  fees                         Decimal                   @default(0) @db.Decimal(30, 12)
+  averageR                     Decimal                   @default(0) @db.Decimal(30, 12)
+  profitFactor                 Decimal                   @default(0) @db.Decimal(30, 12)
+  maxDrawdownPct               Decimal                   @default(0) @db.Decimal(30, 12)
+  averageHoldMinutes           Decimal                   @default(0) @db.Decimal(30, 12)
+  expectancy                   Decimal                   @default(0) @db.Decimal(30, 12)
+  sourceThroughPositionEventId String?
+  inputHash                    String
+  createdAt                    DateTime                  @default(now())
+  strategyVersion              StrategyVersion           @relation(fields: [strategyVersionId], references: [id], onDelete: Restrict)
+  portfolio                    Portfolio                 @relation(fields: [portfolioId], references: [id], onDelete: Restrict)
+  sourceThroughPositionEvent   ShadowPositionEvent?      @relation(fields: [sourceThroughPositionEventId], references: [id], onDelete: Restrict)
+
+  @@unique([strategyVersionId, portfolioId, window, asOf])
+  @@index([portfolioId, window, asOf])
+  @@index([inputHash])
+}
+
+/// Append-only trading audit. The application offers no update or delete for it.
+model TradingAuditEvent {
+  id               String           @id @default(cuid())
+  eventKey         String           @unique
+  eventType        String
+  aggregateType    String
+  aggregateId      String
+  actorType        TradingActorType
+  actorId          String?
+  correlationId    String
+  causationId      String
+  idempotencyKey   String
+  reasonCode       String
+  tradingSessionId String?
+  beforeState      Json?
+  afterState       Json?
+  metadataJson     Json?
+  inputHash        String?
+  outputHash       String?
+  engineVersion    String?
+  codeVersion      String?
+  occurredAt       DateTime
+  createdAt        DateTime         @default(now())
+  tradingSession   TradingSession?  @relation(fields: [tradingSessionId], references: [id], onDelete: Restrict)
+
+  @@index([aggregateType, aggregateId, occurredAt])
+  @@index([eventType, occurredAt])
+  @@index([correlationId])
+  @@index([causationId])
+  @@index([idempotencyKey])
+  @@index([occurredAt])
+}
+
+/// Worker progress cursor. Complements, never replaces, the aggregate unique keys.
+model TradingJobCursor {
+  id              String    @id @default(cuid())
+  jobKey          String
+  scopeKey        String
+  lastCandleId    String?
+  lastProcessedAt DateTime?
+  claimedBy       String?
+  claimedAt       DateTime?
+  claimExpiresAt  DateTime?
+  inputHash       String?
+  version         Int       @default(0)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  lastCandle      Candle?   @relation("TradingJobCursorLastCandle", fields: [lastCandleId], references: [id], onDelete: SetNull)
+
+  @@unique([jobKey, scopeKey])
+  @@index([jobKey, lastProcessedAt])
+  @@index([claimExpiresAt])
 }

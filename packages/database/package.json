@@ -29,6 +29,7 @@
     "prisma": "^6.19.3"
   },
   "devDependencies": {
+    "@signalpilot/trading-domain": "workspace:*",
     "tsx": "^4.19.2"
   }
 }
