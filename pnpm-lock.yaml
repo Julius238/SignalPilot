@@ -68,9 +68,18 @@ importers:
       '@signalpilot/performance-intelligence':
         specifier: workspace:*
         version: link:../../packages/performance-intelligence
+      '@signalpilot/portfolio':
+        specifier: workspace:*
+        version: link:../../packages/portfolio
       '@signalpilot/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@signalpilot/trading-domain':
+        specifier: workspace:*
+        version: link:../../packages/trading-domain
+      '@signalpilot/trading-worker':
+        specifier: workspace:*
+        version: link:../trading-worker
       bcryptjs:
         specifier: ^3.0.2
         version: 3.0.3
@@ -140,6 +149,55 @@ importers:
         specifier: ^1.0.5
         version: 1.0.5
 
+  apps/trading-worker:
+    dependencies:
+      '@prisma/client':
+        specifier: ^6.19.3
+        version: 6.19.3(prisma@6.19.3(typescript@5.9.3))(typescript@5.9.3)
+      '@signalpilot/alerts':
+        specifier: workspace:*
+        version: link:../../packages/alerts
+      '@signalpilot/database':
+        specifier: workspace:*
+        version: link:../../packages/database
+      '@signalpilot/multi-timeframe':
+        specifier: workspace:*
+        version: link:../../packages/multi-timeframe
+      '@signalpilot/performance-intelligence':
+        specifier: workspace:*
+        version: link:../../packages/performance-intelligence
+      '@signalpilot/portfolio':
+        specifier: workspace:*
+        version: link:../../packages/portfolio
+      '@signalpilot/risk-engine':
+        specifier: workspace:*
+        version: link:../../packages/risk-engine
+      '@signalpilot/strategy-engine':
+        specifier: workspace:*
+        version: link:../../packages/strategy-engine
+      '@signalpilot/trading-domain':
+        specifier: workspace:*
+        version: link:../../packages/trading-domain
+      '@signalpilot/trading-simulation':
+        specifier: workspace:*
+        version: link:../../packages/trading-simulation
+      dotenv:
+        specifier: ^16.4.7
+        version: 16.6.1
+      node-cron:
+        specifier: ^4.2.1
+        version: 4.2.1
+      pino:
+        specifier: ^9.6.0
+        version: 9.14.0
+      prisma:
+        specifier: ^6.19.3
+        version: 6.19.3(typescript@5.9.3)
+    devDependencies:
+      tsx:
+        specifier: ^4.19.2
+        version: 4.21.0
+
   apps/worker:
     dependencies:
       '@prisma/client':
@@ -184,12 +242,6 @@ importers:
       '@signalpilot/performance-intelligence':
         specifier: workspace:*
         version: link:../../packages/performance-intelligence
-      '@signalpilot/portfolio':
-        specifier: workspace:*
-        version: link:../../packages/portfolio
-      '@signalpilot/risk-engine':
-        specifier: workspace:*
-        version: link:../../packages/risk-engine
       '@signalpilot/scoring-engine':
         specifier: workspace:*
         version: link:../../packages/scoring-engine
@@ -199,18 +251,9 @@ importers:
       '@signalpilot/signal-rules':
         specifier: workspace:*
         version: link:../../packages/signal-rules
-      '@signalpilot/strategy-engine':
-        specifier: workspace:*
-        version: link:../../packages/strategy-engine
       '@signalpilot/strategy-lab':
         specifier: workspace:*
         version: link:../../packages/strategy-lab
-      '@signalpilot/trading-domain':
-        specifier: workspace:*
-        version: link:../../packages/trading-domain
-      '@signalpilot/trading-simulation':
-        specifier: workspace:*
-        version: link:../../packages/trading-simulation
       dotenv:
         specifier: ^16.4.7
         version: 16.6.1
@@ -375,6 +418,10 @@ importers:
         version: 4.21.0
 
   packages/performance-intelligence:
+    dependencies:
+      '@signalpilot/trading-domain':
+        specifier: workspace:*
+        version: link:../trading-domain
     devDependencies:
       tsx:
         specifier: ^4.19.2

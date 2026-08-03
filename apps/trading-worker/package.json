@@ -1,0 +1,135 @@
+{
+  "name": "@signalpilot/trading-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    "./lib/tradingSafety": {
+      "types": "./dist/lib/tradingSafety.d.ts",
+      "default": "./dist/lib/tradingSafety.js"
+    },
+    "./lib/shadowSessionOps": {
+      "types": "./dist/lib/shadowSessionOps.d.ts",
+      "default": "./dist/lib/shadowSessionOps.js"
+    },
+    "./lib/manualRiskClose": {
+      "types": "./dist/lib/manualRiskClose.d.ts",
+      "default": "./dist/lib/manualRiskClose.js"
+    },
+    "./lib/circuitBreaker": {
+      "types": "./dist/lib/circuitBreaker.d.ts",
+      "default": "./dist/lib/circuitBreaker.js"
+    },
+    "./jobs/shadowGenerateCandidates": {
+      "types": "./dist/jobs/shadowGenerateCandidates.d.ts",
+      "default": "./dist/jobs/shadowGenerateCandidates.js"
+    },
+    "./jobs/shadowAssessRisk": {
+      "types": "./dist/jobs/shadowAssessRisk.d.ts",
+      "default": "./dist/jobs/shadowAssessRisk.js"
+    },
+    "./jobs/shadowCreateOrders": {
+      "types": "./dist/jobs/shadowCreateOrders.d.ts",
+      "default": "./dist/jobs/shadowCreateOrders.js"
+    },
+    "./jobs/shadowProcessFills": {
+      "types": "./dist/jobs/shadowProcessFills.d.ts",
+      "default": "./dist/jobs/shadowProcessFills.js"
+    },
+    "./jobs/shadowMonitorPositions": {
+      "types": "./dist/jobs/shadowMonitorPositions.d.ts",
+      "default": "./dist/jobs/shadowMonitorPositions.js"
+    },
+    "./jobs/shadowReconcilePortfolio": {
+      "types": "./dist/jobs/shadowReconcilePortfolio.d.ts",
+      "default": "./dist/jobs/shadowReconcilePortfolio.js"
+    },
+    "./jobs/shadowStartTradingDay": {
+      "types": "./dist/jobs/shadowStartTradingDay.d.ts",
+      "default": "./dist/jobs/shadowStartTradingDay.js"
+    },
+    "./lib/alertOutbox": {
+      "types": "./dist/lib/alertOutbox.d.ts",
+      "default": "./dist/lib/alertOutbox.js"
+    },
+    "./lib/alertCollector": {
+      "types": "./dist/lib/alertCollector.d.ts",
+      "default": "./dist/lib/alertCollector.js"
+    },
+    "./lib/alertDispatcher": {
+      "types": "./dist/lib/alertDispatcher.d.ts",
+      "default": "./dist/lib/alertDispatcher.js"
+    },
+    "./lib/shadowEligibility": {
+      "types": "./dist/lib/shadowEligibility.d.ts",
+      "default": "./dist/lib/shadowEligibility.js"
+    },
+    "./lib/tradingRetention": {
+      "types": "./dist/lib/tradingRetention.d.ts",
+      "default": "./dist/lib/tradingRetention.js"
+    },
+    "./lib/shadowPerformancePersistence": {
+      "types": "./dist/lib/shadowPerformancePersistence.d.ts",
+      "default": "./dist/lib/shadowPerformancePersistence.js"
+    },
+    "./jobs/shadowPerformanceRefresh": {
+      "types": "./dist/jobs/shadowPerformanceRefresh.d.ts",
+      "default": "./dist/jobs/shadowPerformanceRefresh.js"
+    },
+    "./jobs/shadowAlertOutbox": {
+      "types": "./dist/jobs/shadowAlertOutbox.d.ts",
+      "default": "./dist/jobs/shadowAlertOutbox.js"
+    },
+    "./jobs/shadowRetention": {
+      "types": "./dist/jobs/shadowRetention.d.ts",
+      "default": "./dist/jobs/shadowRetention.js"
+    },
+    "./jobs/shadowEligibilityReport": {
+      "types": "./dist/jobs/shadowEligibilityReport.d.ts",
+      "default": "./dist/jobs/shadowEligibilityReport.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/index.ts",
+    "shadow:generate-candidates": "tsx src/jobs/shadowGenerateCandidates.ts",
+    "shadow:assess-risk": "tsx src/jobs/shadowAssessRisk.ts",
+    "shadow:bootstrap": "tsx src/jobs/shadowBootstrap.ts",
+    "shadow:create-orders": "tsx src/jobs/shadowCreateOrders.ts",
+    "shadow:process-fills": "tsx src/jobs/shadowProcessFills.ts",
+    "shadow:monitor-positions": "tsx src/jobs/shadowMonitorPositions.ts",
+    "shadow:reconcile-portfolio": "tsx src/jobs/shadowReconcilePortfolio.ts",
+    "shadow:start-trading-day": "tsx src/jobs/shadowStartTradingDay.ts",
+    "shadow:ops": "tsx src/jobs/shadowOps.ts",
+    "scheduler": "tsx src/index.ts",
+    "start": "node dist/index.js",
+    "lint": "eslint .",
+    "test": "tsx --test test/*.test.ts",
+    "shadow:performance-refresh": "tsx src/jobs/shadowPerformanceRefresh.ts",
+    "shadow:alert-outbox": "tsx src/jobs/shadowAlertOutbox.ts",
+    "shadow:retention": "tsx src/jobs/shadowRetention.ts",
+    "shadow:eligibility": "tsx src/jobs/shadowEligibilityReport.ts"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.19.3",
+    "@signalpilot/alerts": "workspace:*",
+    "@signalpilot/database": "workspace:*",
+    "@signalpilot/multi-timeframe": "workspace:*",
+    "@signalpilot/performance-intelligence": "workspace:*",
+    "@signalpilot/portfolio": "workspace:*",
+    "@signalpilot/risk-engine": "workspace:*",
+    "@signalpilot/strategy-engine": "workspace:*",
+    "@signalpilot/trading-domain": "workspace:*",
+    "@signalpilot/trading-simulation": "workspace:*",
+    "dotenv": "^16.4.7",
+    "node-cron": "^4.2.1",
+    "pino": "^9.6.0",
+    "prisma": "^6.19.3"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2"
+  }
+}

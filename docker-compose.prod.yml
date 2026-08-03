@@ -118,6 +118,34 @@ services:
     networks:
       - internal
 
+  # Shadow trading orchestration only — no exchange adapter, no API, no
+  # dashboard, no real-money trading (docs/trading P5). Every flag that lets
+  # it do anything at all defaults to false and is read exclusively from
+  # .env.production; nothing here overrides that default, so a deployment
+  # that never sets those flags starts this container fully idle.
+  trading-worker:
+    build:
+      context: .
+      dockerfile: apps/trading-worker/Dockerfile
+      target: runtime
+    restart: unless-stopped
+    env_file:
+      - path: .env.production
+        required: false
+    environment:
+      NODE_ENV: production
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "find /tmp/trading-worker-heartbeat -mmin -2 2>/dev/null | grep -q ."]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - internal
+
   # ── Ops (run on-demand, not started by default) ────────────────────────────
 
   migrate:

@@ -9,6 +9,9 @@
   "references": [
     { "path": "../../packages/shared" },
     { "path": "../../packages/market-regime" },
-    { "path": "../../packages/multi-timeframe" }
+    { "path": "../../packages/multi-timeframe" },
+    { "path": "../../packages/trading-domain" },
+    { "path": "../../packages/portfolio" },
+    { "path": "../trading-worker" }
   ]
 }

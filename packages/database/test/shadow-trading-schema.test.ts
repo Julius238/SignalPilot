@@ -119,7 +119,12 @@ describe("shadow trading schema — models", () => {
       ["Portfolio", "key"],
       ["PortfolioLedgerEntry", "entryKey"],
       ["TradingSession", "sessionKey"],
-      ["TradingAuditEvent", "eventKey"]
+      ["TradingAuditEvent", "eventKey"],
+      // P8: replaces the former composite key on StrategyPerformance, which
+      // could not hold once one window carries several segments and several
+      // engine versions side by side.
+      ["StrategyPerformance", "snapshotKey"],
+      ["TradingAlertOutbox", "idempotencyKey"]
     ];
     for (const [model, field] of keyColumns) {
       assert.match(fieldLine(model, field), /@unique/, `${model}.${field} must be unique`);
@@ -139,7 +144,6 @@ describe("shadow trading schema — models", () => {
       ["ExitPlan", "@@unique([shadowPositionId, version])"],
       ["PortfolioLedgerEntry", "@@unique([portfolioId, sequence])"],
       ["PortfolioSnapshot", "@@unique([portfolioId, asOf, sourceLedgerSequence])"],
-      ["StrategyPerformance", "@@unique([strategyVersionId, portfolioId, window, asOf])"],
       ["TradingJobCursor", "@@unique([jobKey, scopeKey])"]
     ];
     for (const [model, constraint] of composites) {
@@ -590,5 +594,100 @@ describe("shadow trading migration is strictly additive", () => {
     const migrationsDir = join(here, "..", "prisma", "migrations");
     const shadowMigrations = readdirSync(migrationsDir).filter((entry) => entry.includes("shadow_trading"));
     assert.deepEqual(shadowMigrations, ["20260802090000_add_shadow_trading_domain"]);
+  });
+});
+
+// ── Work package 8 ──────────────────────────────────────────────────────────
+
+describe("shadow performance and alert outbox schema (P8)", () => {
+  it("identifies a performance snapshot by portfolio, window, asOf, segment, engine version and input hash", () => {
+    // The identity lives in `snapshotKey` (built by
+    // `buildStrategyPerformanceSnapshotKey`), not in a composite column key —
+    // a recomputation with a changed engine version or changed source data
+    // must add a row, never overwrite one.
+    const body = bodyLines("model", "StrategyPerformance");
+    assert.match(fieldLine("StrategyPerformance", "snapshotKey"), /@unique/);
+    assert.ok(body.some((line) => line.startsWith("segmentType")));
+    assert.ok(body.some((line) => line.startsWith("segmentKey")));
+    assert.ok(body.some((line) => line.startsWith("engineVersion")));
+    assert.ok(body.some((line) => line.startsWith("inputHash")));
+    assert.ok(body.some((line) => line.startsWith("outputHash")));
+    assert.ok(body.some((line) => line.startsWith("dataThroughAt")));
+  });
+
+  it("keeps strategyVersionId nullable so cross-version segments can exist", () => {
+    // An ASSET, MARKET_REGIME or EXIT_REASON segment aggregates across
+    // strategy versions and has no single version to point at.
+    assert.match(fieldLine("StrategyPerformance", "strategyVersionId"), /String\?/);
+  });
+
+  it("models every new P8 metric as Decimal, never Float", () => {
+    const body = bodyLines("model", "StrategyPerformance");
+    const metricFields = [
+      "winRatePct",
+      "grossProfit",
+      "grossLoss",
+      "simulatedExecutionCost",
+      "averageWin",
+      "averageLoss",
+      "cumulativeR",
+      "maxDrawdownAmount",
+      "recoveryFactor",
+      "exposureMinutes",
+      "exposurePct",
+      "averageMaePct",
+      "averageMfePct",
+      "sharpeRatio",
+      "sortinoRatio",
+      "riskRejectionRatePct"
+    ];
+    for (const field of metricFields) {
+      const line = body.find((entry) => entry.startsWith(`${field} `));
+      assert.ok(line, `StrategyPerformance.${field} must exist`);
+      assert.match(line, /Decimal/, `${field} must be Decimal`);
+      assert.match(line, /@db\.Decimal\(30, 12\)/, `${field} must use Decimal(30,12)`);
+      assert.doesNotMatch(line, /Float/, `${field} must never be Float`);
+    }
+  });
+
+  it("gives the alert outbox a stable idempotency key and a bounded retry budget", () => {
+    const body = bodyLines("model", "TradingAlertOutbox");
+    assert.match(fieldLine("TradingAlertOutbox", "idempotencyKey"), /@unique/);
+    for (const field of ["attemptCount", "maxAttempts", "nextAttemptAt", "payloadHash", "status"]) {
+      assert.ok(body.some((line) => line.startsWith(`${field} `)), `TradingAlertOutbox.${field} must exist`);
+    }
+  });
+
+  it("declares every documented outbox status, including a terminal DEAD", () => {
+    const statuses = bodyLines("enum", "TradingAlertOutboxStatus");
+    assert.deepEqual(statuses.sort(), ["DEAD", "FAILED", "PENDING", "PROCESSING", "SENT"].sort());
+  });
+
+  it("limits the alert catalogue to safety- and operations-relevant events", () => {
+    const events = bodyLines("enum", "TradingAlertEventType");
+    assert.deepEqual(
+      events.sort(),
+      [
+        "CIRCUIT_BREAKER_OPEN",
+        "CRITICAL_RISK_EVENT",
+        "DAILY_LOSS_LIMIT_REACHED",
+        "KILL_SWITCH_ENGAGED",
+        "PORTFOLIO_LEDGER_CONFLICT",
+        "POSITION_MONITOR_STALE",
+        "POSITION_WITHOUT_SAFE_EXIT",
+        "RECONCILIATION_FAILED",
+        "SESSION_ERROR_LOCKED",
+        "WORKER_HEARTBEAT_STALE"
+      ].sort(),
+      "no ordinary candidate or trade notification may enter the catalogue"
+    );
+  });
+
+  it("logs one row per delivery attempt, uniquely numbered per entry", () => {
+    const body = bodyLines("model", "TradingAlertOutboxAttempt");
+    assert.ok(body.includes("@@unique([outboxId, attempt])"));
+    for (const field of ["attempt", "status", "startedAt", "finishedAt"]) {
+      assert.ok(body.some((line) => line.startsWith(`${field} `)), `${field} must exist`);
+    }
   });
 });

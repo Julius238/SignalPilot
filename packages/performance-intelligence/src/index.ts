@@ -1,3 +1,9 @@
+// Shadow-Trading-Performance (P8). Eigener Namensraum, weil er dieselbe
+// Aufgabe erfüllt, aber niemals dieselbe Datenquelle nutzt: der Report unten
+// wertet PaperSignalEvaluations aus, `./shadow` ausschließlich abgeschlossene
+// ShadowPositions.
+export * from "./shadow/index.js";
+
 export type ConfidenceLevel = "LOW" | "MEDIUM" | "HIGH";
 export type PerformanceGroupBy =
   | "signalType"

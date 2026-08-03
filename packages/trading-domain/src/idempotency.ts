@@ -385,3 +385,68 @@ export function assertNextSequence(lastSequence: number, nextSequenceValue: numb
   const result = checkNextSequence(lastSequence, nextSequenceValue);
   if (!result.ok) throw new TradingDomainError(result.reasonCode, result.message);
 }
+
+// ───────────────────────────────────────────────────────────────────────────
+// Work package 8: performance snapshots and the alert outbox
+// ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * A key part that may legitimately contain characters the readable key format
+ * forbids (a regime name with a space, an operator note). Such a part is
+ * replaced by a short hash instead of throwing — the key stays unique and
+ * stable, it just stops being readable for that one part.
+ */
+function safeKeyPart(value: string): string {
+  if (value === "") {
+    throw new TradingDomainError(
+      TradingReasonCode.IDEMPOTENCY_KEY_PART_EMPTY,
+      "An idempotency key part must not be empty."
+    );
+  }
+  return KEY_PART_PATTERN.test(value) ? value : `h.${canonicalHash(value).slice(0, 16)}`;
+}
+
+/**
+ * `StrategyPerformance.snapshotKey` — the full identity of one computed
+ * segment. It includes `engineVersion` and `inputHash`, so a recomputation
+ * with changed logic or changed source data writes a NEW row and never
+ * overwrites a historical result (P8, "2. Persistenz").
+ */
+export const buildStrategyPerformanceSnapshotKey = (input: {
+  readonly portfolioId: string;
+  readonly window: string;
+  readonly asOf: string;
+  readonly segmentType: string;
+  readonly segmentKey: string;
+  readonly engineVersion: string;
+  readonly inputHash: string;
+}): string =>
+  buildKey("strategy-performance", [
+    input.portfolioId,
+    input.window,
+    safeKeyPart(input.asOf),
+    input.segmentType,
+    safeKeyPart(input.segmentKey),
+    safeKeyPart(input.engineVersion),
+    input.inputHash
+  ]);
+
+/**
+ * `TradingAlertOutbox.idempotencyKey` — derived from the triggering aggregate
+ * so the same observed condition never enqueues a second alert. `occurrence`
+ * is what makes a *repeat* of the same condition a new alert (a new
+ * `RiskEvent.eventKey`, a new session version, a new UTC day) — it is never a
+ * timestamp of the observation itself, which would defeat deduplication.
+ */
+export const buildTradingAlertIdempotencyKey = (input: {
+  readonly eventType: string;
+  readonly aggregateType: string;
+  readonly aggregateId: string;
+  readonly occurrence: string;
+}): string =>
+  buildKey("trading-alert", [
+    input.eventType,
+    input.aggregateType,
+    input.aggregateId,
+    safeKeyPart(input.occurrence)
+  ]);

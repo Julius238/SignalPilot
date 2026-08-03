@@ -59,6 +59,7 @@ export const ShadowOrderTimeInForce = p.ShadowOrderTimeInForce;
 export const ShadowOrderType = p.ShadowOrderType;
 export const ShadowPositionEventType = p.ShadowPositionEventType;
 export const ShadowPositionStatus = p.ShadowPositionStatus;
+export const StrategyPerformanceSegment = p.StrategyPerformanceSegment;
 export const StrategyPerformanceWindow = p.StrategyPerformanceWindow;
 export const StrategyStatus = p.StrategyStatus;
 export const StrategyVersionStatus = p.StrategyVersionStatus;
@@ -68,6 +69,9 @@ export const TradeDirection = p.TradeDirection;
 export const TradeEntryType = p.TradeEntryType;
 export const TradeEvidenceType = p.TradeEvidenceType;
 export const TradingActorType = p.TradingActorType;
+// ── Work package 8 (P8: performance segmentation, alert outbox) ──────────
+export const TradingAlertEventType = p.TradingAlertEventType;
+export const TradingAlertOutboxStatus = p.TradingAlertOutboxStatus;
 export const TradingSessionMode = p.TradingSessionMode;
 export const TradingSessionStatus = p.TradingSessionStatus;
 

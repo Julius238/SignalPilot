@@ -1,0 +1,18 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "outDir": "dist",
+    "rootDir": "src",
+    "tsBuildInfoFile": "dist/tsconfig.tsbuildinfo"
+  },
+  "include": ["src/**/*.ts"],
+  "references": [
+    { "path": "../../packages/multi-timeframe" },
+    { "path": "../../packages/portfolio" },
+    { "path": "../../packages/risk-engine" },
+    { "path": "../../packages/strategy-engine" },
+    { "path": "../../packages/trading-domain" },
+    { "path": "../../packages/trading-simulation" }
+  ]
+}

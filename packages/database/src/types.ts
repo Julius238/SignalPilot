@@ -60,6 +60,7 @@ export {
   ShadowOrderType,
   ShadowPositionEventType,
   ShadowPositionStatus,
+  StrategyPerformanceSegment,
   StrategyPerformanceWindow,
   StrategyStatus,
   StrategyVersionStatus,
@@ -69,6 +70,8 @@ export {
   TradeEntryType,
   TradeEvidenceType,
   TradingActorType,
+  TradingAlertEventType,
+  TradingAlertOutboxStatus,
   TradingSessionMode,
   TradingSessionStatus
 } from "@prisma/client";

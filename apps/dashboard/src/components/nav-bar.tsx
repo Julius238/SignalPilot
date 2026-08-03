@@ -5,6 +5,7 @@ import { useState } from "react";
 import { usePathname } from "next/navigation";
 
 import { LogoutButton } from "./logout-button";
+import { TRADING_DASHBOARD_ENABLED } from "../lib/trading-flag";
 
 type IconName =
   | "overview"
@@ -25,7 +26,8 @@ type IconName =
   | "quality"
   | "system"
   | "logs"
-  | "audit";
+  | "audit"
+  | "trading";
 
 type NavItem = {
   href: string;
@@ -175,7 +177,24 @@ const NAV_GROUPS: Array<{ label: string; items: NavItem[] }> = [
         icon: "audit"
       }
     ]
-  }
+  },
+  // Nur sichtbar, wenn NEXT_PUBLIC_TRADING_DASHBOARD_ENABLED=true — sonst
+  // keine Navigation, keine erreichbare Route, keine Trading-API-Aufrufe.
+  ...(TRADING_DASHBOARD_ENABLED
+    ? [
+        {
+          label: "Shadow Trading",
+          items: [
+            {
+              href: "/dashboard/trading",
+              label: "Shadow Trading",
+              description: "Keine echten Börsenorders",
+              icon: "trading" as const
+            }
+          ]
+        }
+      ]
+    : [])
 ];
 
 function isActive(pathname: string, href: string, exact?: boolean): boolean {
@@ -356,6 +375,12 @@ function NavIcon({ name }: { name: IconName }) {
       <>
         <path d="M5 3h12v16H5z" />
         <path d="m8 11 2 2 4-4M8 6h6" />
+      </>
+    ),
+    trading: (
+      <>
+        <path d="M4 17V9l4-4 4 4 6-7" />
+        <path d="M14 2h4v4" />
       </>
     )
   };

@@ -89,11 +89,31 @@ const zeroResult = (): RiskSizingResultV1 => {
   };
 };
 
-/** Basis points to a decimal rate, e.g. `20` → `0.002`. */
-const rateFromBps = (bps: number): DecimalValue | null => {
+/** Basis points to a decimal rate, e.g. `20` → `0.002`. Exact: bps/10000 always terminates. */
+export const rateFromBps = (bps: number): DecimalValue | null => {
   if (!Number.isSafeInteger(bps) || bps < 0) return null;
   return DecimalValue.fromSafeInteger(bps).div(BPS_DIVISOR, RoundingMode.EXACT);
 };
+
+/**
+ * Worst realistic sell fill for a given mid price: half spread and adverse
+ * slippage against the seller, then down-tick. Shared by the pre-trade
+ * worst-case sizing below and the post-fill net-CRV recheck
+ * (`post-fill-recheck.ts`), which apply it to different prices (the
+ * candidate's planned stop both times) but must use the exact same adverse
+ * cost model — anything else would silently loosen or tighten the risk
+ * limits the two call sites are supposed to share.
+ */
+export function computeWorstSellFill(
+  price: DecimalValue,
+  fullSpreadRate: DecimalValue,
+  slippageRate: DecimalValue,
+  tickSize: DecimalValue
+): DecimalValue {
+  const halfSpread = fullSpreadRate.div(TWO, RoundingMode.CEIL);
+  const sellFactor = DecimalValue.ONE.sub(halfSpread).mul(DecimalValue.ONE.sub(slippageRate), RoundingMode.FLOOR);
+  return price.mul(sellFactor, RoundingMode.FLOOR).quantizeToStep(tickSize, RoundingMode.FLOOR);
+}
 
 /** Remaining headroom under a percentage cap, never negative. */
 function headroom(
@@ -142,16 +162,13 @@ export function computePositionSizing(input: PositionSizingInput): RiskSizingRes
     .quantizeToStep(input.tickSize, RoundingMode.CEIL);
 
   // Worst realistic sell: mid − half spread, then adverse slippage, then down-tick.
-  const sellFactor = DecimalValue.ONE.sub(halfSpread).mul(
-    DecimalValue.ONE.sub(slippageRate),
-    RoundingMode.FLOOR
+  const worstStopFillPrice = computeWorstSellFill(input.stopPrice, fullSpreadRate, slippageRate, input.tickSize);
+  const worstTakeProfitFillPrice = computeWorstSellFill(
+    input.takeProfitPrice,
+    fullSpreadRate,
+    slippageRate,
+    input.tickSize
   );
-  const worstStopFillPrice = input.stopPrice
-    .mul(sellFactor, RoundingMode.FLOOR)
-    .quantizeToStep(input.tickSize, RoundingMode.FLOOR);
-  const worstTakeProfitFillPrice = input.takeProfitPrice
-    .mul(sellFactor, RoundingMode.FLOOR)
-    .quantizeToStep(input.tickSize, RoundingMode.FLOOR);
 
   if (!worstEntryPrice.isPositive() || !worstStopFillPrice.isPositive()) return zeroResult();
 

@@ -1239,6 +1239,45 @@ enum StrategyPerformanceWindow {
   ALL_TIME
 }
 
+/// Segmentation axis of one `StrategyPerformance` row (P8, "1. Performance
+/// Engine": "Segmentiere nach StrategyVersion, Asset, Marktregime, UTC-Zeitraum,
+/// Exit-Grund"). The UTC period is the row's own `from`/`to`, not an axis.
+enum StrategyPerformanceSegment {
+  OVERALL
+  STRATEGY_VERSION
+  ASSET
+  MARKET_REGIME
+  EXIT_REASON
+}
+
+/// Delivery lifecycle of a `TradingAlertOutbox` entry. `DEAD` is terminal:
+/// every attempt was used up, an operator has to look at it — the dispatcher
+/// never retries it again (P8: "keine Endlosschleifen").
+enum TradingAlertOutboxStatus {
+  PENDING
+  PROCESSING
+  SENT
+  FAILED
+  DEAD
+}
+
+/// The closed catalogue of safety- and operations-relevant events that may
+/// produce a trading alert. Ordinary candidate or trade notifications are
+/// deliberately absent (P8: "Noch keine normalen Candidate- oder
+/// Trade-Benachrichtigungen senden").
+enum TradingAlertEventType {
+  SESSION_ERROR_LOCKED
+  KILL_SWITCH_ENGAGED
+  RECONCILIATION_FAILED
+  CRITICAL_RISK_EVENT
+  POSITION_WITHOUT_SAFE_EXIT
+  CIRCUIT_BREAKER_OPEN
+  WORKER_HEARTBEAT_STALE
+  POSITION_MONITOR_STALE
+  DAILY_LOSS_LIMIT_REACHED
+  PORTFOLIO_LEDGER_CONFLICT
+}
+
 enum TradingActorType {
   SYSTEM
   ADMIN
@@ -1945,9 +1984,24 @@ model TradingSession {
 /// Shadow-only performance projection. PaperSignalEvaluation is never an input.
 model StrategyPerformance {
   id                           String                    @id @default(cuid())
-  strategyVersionId            String
+  /// Deterministic identity of one computed snapshot: portfolio, window, asOf,
+  /// segment, engine version and input hash. It replaces the former
+  /// `@@unique([strategyVersionId, portfolioId, window, asOf])`, which could
+  /// not hold once one window carries several segments and several engine
+  /// versions side by side (P8: "Keine historischen Ergebnisse überschreiben,
+  /// wenn sich Berechnungslogik oder Version ändert"). Built by
+  /// `@signalpilot/trading-domain`'s `buildStrategyPerformanceSnapshotKey`.
+  snapshotKey                  String                    @unique
+  /// Null for every segment that is not a single strategy version (OVERALL,
+  /// ASSET, MARKET_REGIME, EXIT_REASON) — those aggregate across versions.
+  strategyVersionId            String?
   portfolioId                  String
   window                       StrategyPerformanceWindow
+  segmentType                  StrategyPerformanceSegment @default(OVERALL)
+  /// Bucket identity inside `segmentType`: "ALL", an assetId, a regime name,
+  /// a `ShadowFillTriggerType`, a strategyVersionId, or "UNKNOWN".
+  segmentKey                   String                    @default("ALL")
+  segmentLabel                 String                    @default("ALL")
   asOf                         DateTime
   from                         DateTime
   to                           DateTime
@@ -1963,16 +2017,120 @@ model StrategyPerformance {
   maxDrawdownPct               Decimal                   @default(0) @db.Decimal(30, 12)
   averageHoldMinutes           Decimal                   @default(0) @db.Decimal(30, 12)
   expectancy                   Decimal                   @default(0) @db.Decimal(30, 12)
+  // ── P8 metrics ──────────────────────────────────────────────────────────
+  // Nullable columns are the metrics that are genuinely not always derivable.
+  // A null here is never "zero"; `metricsJson` carries the machine-readable
+  // `MetricNullReason` for every one of them.
+  winRatePct                   Decimal?                  @db.Decimal(30, 12)
+  grossProfit                  Decimal                   @default(0) @db.Decimal(30, 12)
+  grossLoss                    Decimal                   @default(0) @db.Decimal(30, 12)
+  simulatedExecutionCost       Decimal                   @default(0) @db.Decimal(30, 12)
+  averageWin                   Decimal?                  @db.Decimal(30, 12)
+  averageLoss                  Decimal?                  @db.Decimal(30, 12)
+  cumulativeR                  Decimal?                  @db.Decimal(30, 12)
+  tradesWithPlannedRisk        Int                       @default(0)
+  maxWinStreak                 Int                       @default(0)
+  maxLossStreak                Int                       @default(0)
+  maxDrawdownAmount            Decimal?                  @db.Decimal(30, 12)
+  recoveryFactor               Decimal?                  @db.Decimal(30, 12)
+  exposureMinutes              Decimal                   @default(0) @db.Decimal(30, 12)
+  exposurePct                  Decimal?                  @db.Decimal(30, 12)
+  averageMaePct                Decimal?                  @db.Decimal(30, 12)
+  averageMfePct                Decimal?                  @db.Decimal(30, 12)
+  sharpeRatio                  Decimal?                  @db.Decimal(30, 12)
+  sortinoRatio                 Decimal?                  @db.Decimal(30, 12)
+  returnObservations           Int                       @default(0)
+  assessedCandidates           Int                       @default(0)
+  riskRejectedCandidates       Int                       @default(0)
+  invalidCandidates            Int                       @default(0)
+  expiredCandidates            Int                       @default(0)
+  riskRejectionRatePct         Decimal?                  @db.Decimal(30, 12)
+  /// The complete engine result for this segment, including every
+  /// `{ value, reason }` pair. The typed columns above are a query-friendly
+  /// projection of it, never a separate source of truth.
+  metricsJson                  Json?
+  engineVersion                String                    @default("legacy")
+  codeVersion                  String                    @default("legacy")
+  /// Latest source timestamp the computation saw — the data cut it is bound to.
+  dataThroughAt                DateTime?
+  computedAt                   DateTime?
   sourceThroughPositionEventId String?
   inputHash                    String
+  outputHash                   String                    @default("")
   createdAt                    DateTime                  @default(now())
-  strategyVersion              StrategyVersion           @relation(fields: [strategyVersionId], references: [id], onDelete: Restrict)
+  strategyVersion              StrategyVersion?          @relation(fields: [strategyVersionId], references: [id], onDelete: Restrict)
   portfolio                    Portfolio                 @relation(fields: [portfolioId], references: [id], onDelete: Restrict)
   sourceThroughPositionEvent   ShadowPositionEvent?      @relation(fields: [sourceThroughPositionEventId], references: [id], onDelete: Restrict)
 
-  @@unique([strategyVersionId, portfolioId, window, asOf])
   @@index([portfolioId, window, asOf])
+  @@index([portfolioId, segmentType, segmentKey, asOf])
+  @@index([strategyVersionId, window, asOf])
   @@index([inputHash])
+  @@index([outputHash])
+  @@index([engineVersion, asOf])
+}
+
+/// Transactional outbox for safety- and operations-relevant shadow trading
+/// alerts only (P8, "4. Alert-Outbox"). It never carries ordinary candidate or
+/// trade notifications, and a delivery failure must never block trading
+/// monitoring or a risk-reducing exit.
+model TradingAlertOutbox {
+  id               String                    @id @default(cuid())
+  /// Stable, derived from the triggering aggregate — the same condition
+  /// observed twice never produces a second alert.
+  idempotencyKey   String                    @unique
+  eventType        TradingAlertEventType
+  severity         RiskSeverity
+  status           TradingAlertOutboxStatus  @default(PENDING)
+  aggregateType    String
+  aggregateId      String
+  portfolioId      String?
+  tradingSessionId String?
+  reasonCode       String
+  /// Server-side sanitised payload. Never secrets, tokens, env values or raw
+  /// internal state (P8: "keine Secrets oder unbereinigten internen Payloads").
+  payloadJson      Json
+  payloadHash      String
+  attemptCount     Int                       @default(0)
+  maxAttempts      Int                       @default(5)
+  nextAttemptAt    DateTime
+  lastAttemptAt    DateTime?
+  lastError        String?
+  claimedBy        String?
+  claimedAt        DateTime?
+  claimExpiresAt   DateTime?
+  sentAt           DateTime?
+  deadLetteredAt   DateTime?
+  /// The `Alert` row the existing n8n dispatcher created, when one was reached.
+  alertId          String?
+  version          Int                       @default(0)
+  createdAt        DateTime                  @default(now())
+  updatedAt        DateTime                  @updatedAt
+  attempts         TradingAlertOutboxAttempt[]
+
+  @@index([status, nextAttemptAt])
+  @@index([severity, createdAt])
+  @@index([eventType, createdAt])
+  @@index([portfolioId, createdAt])
+  @@index([claimExpiresAt])
+}
+
+/// Append-only delivery attempt log of one outbox entry.
+model TradingAlertOutboxAttempt {
+  id         String                   @id @default(cuid())
+  outboxId   String
+  attempt    Int
+  status     TradingAlertOutboxStatus
+  /// Sanitised failure message; never a payload dump.
+  error      String?
+  startedAt  DateTime
+  finishedAt DateTime
+  createdAt  DateTime                 @default(now())
+  outbox     TradingAlertOutbox       @relation(fields: [outboxId], references: [id], onDelete: Cascade)
+
+  @@unique([outboxId, attempt])
+  @@index([outboxId, createdAt])
+  @@index([status, createdAt])
 }
 
 /// Append-only trading audit. The application offers no update or delete for it.
