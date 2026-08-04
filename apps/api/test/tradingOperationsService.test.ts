@@ -7,7 +7,8 @@ import {
   manualRiskCloseOperation,
   pauseSessionOperation,
   runJobOperation,
-  RUN_JOB_ALLOWLIST
+  RUN_JOB_ALLOWLIST,
+  setAssignmentOperation
 } from "../src/services/trading/operationsService.js";
 import { createFakeTradingDatabase } from "./support/tradingFixtures.js";
 
@@ -16,7 +17,11 @@ const NOW = new Date("2026-06-01T12:00:00.000Z");
 describe("activatePortfolioOperation", () => {
   it("executes once, then replays idempotently on a repeated call with the same key", async () => {
     const { database, tables } = createFakeTradingDatabase();
-    const portfolio = tables.get("portfolio")!.create({ data: { key: "SHADOW_V1", name: "Shadow v1", status: "DRAFT" } });
+    const portfolio = tables
+      .get("portfolio")!
+      .create({
+        data: { key: "SHADOW_V1", name: "Shadow v1", status: "DRAFT" }
+      });
 
     const first = await activatePortfolioOperation(database as never, {
       portfolioId: portfolio.id,
@@ -36,13 +41,23 @@ describe("activatePortfolioOperation", () => {
     });
     assert.equal(second.kind, "replayed");
 
-    const auditEvents = tables.get("tradingAuditEvent")!.rows.filter((row) => row.aggregateId === portfolio.id);
-    assert.equal(auditEvents.length, 1, "a replay must never create a second audit event");
+    const auditEvents = tables
+      .get("tradingAuditEvent")!
+      .rows.filter((row) => row.aggregateId === portfolio.id);
+    assert.equal(
+      auditEvents.length,
+      1,
+      "a replay must never create a second audit event"
+    );
   });
 
   it("reports a version conflict when expectedVersion is stale", async () => {
     const { database, tables } = createFakeTradingDatabase();
-    const portfolio = tables.get("portfolio")!.create({ data: { key: "SHADOW_V1", name: "Shadow v1", status: "DRAFT" } });
+    const portfolio = tables
+      .get("portfolio")!
+      .create({
+        data: { key: "SHADOW_V1", name: "Shadow v1", status: "DRAFT" }
+      });
 
     const result = await activatePortfolioOperation(database as never, {
       portfolioId: portfolio.id,
@@ -69,12 +84,104 @@ describe("activatePortfolioOperation", () => {
   });
 });
 
+describe("setAssignmentOperation", () => {
+  it("enables and disables one pinned SHORT assignment only with the exact versioned confirmation", async () => {
+    const { database, tables } = createFakeTradingDatabase();
+    const portfolio = tables.get("portfolio")!.create({
+      data: { key: "SHADOW_V1", name: "Shadow v1", status: "ACTIVE" }
+    });
+    const asset = tables.get("asset")!.create({ data: { symbol: "BTCUSDT" } });
+    const strategy = tables.get("strategy")!.create({
+      data: {
+        key: "CRYPTO_MTF_BREAKDOWN_SHORT_V1",
+        name: "Short v1",
+        status: "ACTIVE"
+      }
+    });
+    const strategyVersion = tables.get("strategyVersion")!.create({
+      data: {
+        strategyId: strategy.id,
+        version: 1,
+        status: "ACTIVE",
+        parametersJson: { direction: "SHORT" }
+      }
+    });
+    const assignment = tables.get("strategyAssignment")!.create({
+      data: {
+        portfolioId: portfolio.id,
+        assetId: asset.id,
+        strategyId: strategy.id,
+        strategyVersionId: strategyVersion.id,
+        enabled: false,
+        assignmentConfigJson: { direction: "SHORT" }
+      }
+    });
+
+    const badConfirmation = await setAssignmentOperation(database as never, {
+      assignmentId: assignment.id as string,
+      actorId: "admin",
+      enabled: true,
+      confirmation: "ENABLE_BTCUSDT_SHORT",
+      idempotencyKey: "short-enable-bad-confirmation",
+      expectedVersion: 0,
+      asOf: NOW
+    });
+    assert.equal(badConfirmation.kind, "guard_failed");
+
+    const enabled = await setAssignmentOperation(database as never, {
+      assignmentId: assignment.id as string,
+      actorId: "admin",
+      enabled: true,
+      confirmation: "ENABLE_BTCUSDT_SHORT_CRYPTO_MTF_BREAKDOWN_SHORT_V1_V0",
+      idempotencyKey: "short-enable-1",
+      expectedVersion: 0,
+      asOf: NOW
+    });
+    assert.equal(enabled.kind, "executed");
+    assert.equal(assignment.enabled, true);
+    assert.equal(assignment.version, 1);
+
+    const replay = await setAssignmentOperation(database as never, {
+      assignmentId: assignment.id as string,
+      actorId: "admin",
+      enabled: true,
+      confirmation: "ENABLE_BTCUSDT_SHORT_CRYPTO_MTF_BREAKDOWN_SHORT_V1_V0",
+      idempotencyKey: "short-enable-1",
+      expectedVersion: 0,
+      asOf: NOW
+    });
+    assert.equal(replay.kind, "replayed");
+
+    const disabled = await setAssignmentOperation(database as never, {
+      assignmentId: assignment.id as string,
+      actorId: "admin",
+      enabled: false,
+      confirmation: "DISABLE_BTCUSDT_SHORT_CRYPTO_MTF_BREAKDOWN_SHORT_V1_V1",
+      idempotencyKey: "short-disable-1",
+      expectedVersion: 1,
+      asOf: new Date("2026-06-01T12:01:00.000Z")
+    });
+    assert.equal(disabled.kind, "executed");
+    assert.equal(assignment.enabled, false);
+    assert.equal(assignment.version, 2);
+  });
+});
+
 describe("pauseSessionOperation", () => {
   it("refuses to pause a session that is not SHADOW_ACTIVE (guard_failed, not a silent no-op)", async () => {
     const { database, tables } = createFakeTradingDatabase();
-    const portfolio = tables.get("portfolio")!.create({ data: { key: "SHADOW_V1", name: "Shadow v1", status: "ACTIVE" } });
+    const portfolio = tables
+      .get("portfolio")!
+      .create({
+        data: { key: "SHADOW_V1", name: "Shadow v1", status: "ACTIVE" }
+      });
     const session = tables.get("tradingSession")!.create({
-      data: { portfolioId: portfolio.id, sessionKey: "S1", status: "STOPPED", killSwitchEngaged: true }
+      data: {
+        portfolioId: portfolio.id,
+        sessionKey: "S1",
+        status: "STOPPED",
+        killSwitchEngaged: true
+      }
     });
 
     const result = await pauseSessionOperation(database as never, {
@@ -91,7 +198,11 @@ describe("pauseSessionOperation", () => {
 describe("manualRiskCloseOperation", () => {
   it("checks the position's version before filing the request", async () => {
     const { database, tables } = createFakeTradingDatabase();
-    const portfolio = tables.get("portfolio")!.create({ data: { key: "SHADOW_V1", name: "Shadow v1", status: "ACTIVE" } });
+    const portfolio = tables
+      .get("portfolio")!
+      .create({
+        data: { key: "SHADOW_V1", name: "Shadow v1", status: "ACTIVE" }
+      });
     const position = tables.get("shadowPosition")!.create({
       data: {
         portfolioId: portfolio.id,
@@ -123,7 +234,9 @@ describe("manualRiskCloseOperation", () => {
     assert.equal(executed.kind, "executed");
 
     // The position itself must be untouched — only a RiskEvent was filed.
-    const stillOpen = tables.get("shadowPosition")!.rows.find((row) => row.id === position.id);
+    const stillOpen = tables
+      .get("shadowPosition")!
+      .rows.find((row) => row.id === position.id);
     assert.equal(stillOpen?.status, "OPEN");
     assert.equal(stillOpen?.openQuantity, "1");
   });
@@ -132,7 +245,12 @@ describe("manualRiskCloseOperation", () => {
 describe("runJobOperation / run-job allowlist", () => {
   it("rejects anything outside the fixed allowlist, including a shell-injection-shaped value", async () => {
     const { database } = createFakeTradingDatabase();
-    for (const malicious of ["; rm -rf /", "$(whoami)", "shadow-generate-candidates; echo pwned", "not-a-job"]) {
+    for (const malicious of [
+      "; rm -rf /",
+      "$(whoami)",
+      "shadow-generate-candidates; echo pwned",
+      "not-a-job"
+    ]) {
       assert.equal(isAllowlistedJobName(malicious), false);
       const result = await runJobOperation(database as never, {
         jobName: malicious,
@@ -141,7 +259,8 @@ describe("runJobOperation / run-job allowlist", () => {
         asOf: NOW
       });
       assert.equal(result.kind, "guard_failed");
-      if (result.kind === "guard_failed") assert.equal(result.reasonCode, "JOB_NOT_ALLOWLISTED");
+      if (result.kind === "guard_failed")
+        assert.equal(result.reasonCode, "JOB_NOT_ALLOWLISTED");
     }
   });
 
@@ -177,7 +296,10 @@ describe("runJobOperation / run-job allowlist", () => {
 
     assert.equal(outcome.kind, "executed");
     if (outcome.kind !== "executed") return;
-    const summary = outcome.result as { result: { applied: boolean } | null; blocked: boolean };
+    const summary = outcome.result as {
+      result: { applied: boolean } | null;
+      blocked: boolean;
+    };
     // Blocked by the retention feature flag in this environment; either way,
     // nothing may report itself as an applied deletion.
     assert.notEqual(summary.result?.applied, true);

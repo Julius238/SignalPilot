@@ -20,7 +20,12 @@
  * than a guess.
  */
 
-import { DecimalValue, RoundingMode } from "@signalpilot/trading-domain";
+import {
+  DecimalValue,
+  RoundingMode,
+  TradeDirection,
+  type TradeDirection as TradeDirectionValue
+} from "@signalpilot/trading-domain";
 
 import { SizingCap, type RiskSizingResultV1 } from "./contracts.js";
 
@@ -28,6 +33,7 @@ const BPS_DIVISOR = DecimalValue.fromSafeInteger(10_000);
 const TWO = DecimalValue.fromSafeInteger(2);
 
 export interface PositionSizingInput {
+  readonly direction: TradeDirectionValue;
   readonly referenceEntryPrice: DecimalValue;
   readonly stopPrice: DecimalValue;
   readonly takeProfitPrice: DecimalValue;
@@ -79,6 +85,7 @@ const zeroResult = (): RiskSizingResultV1 => {
     approvedQuantity: zero,
     notional: zero,
     entryFeeTotal: zero,
+    collateralPerUnit: zero,
     reservedQuoteAmount: zero,
     riskAmount: zero,
     netRewardRisk: zero,
@@ -111,8 +118,27 @@ export function computeWorstSellFill(
   tickSize: DecimalValue
 ): DecimalValue {
   const halfSpread = fullSpreadRate.div(TWO, RoundingMode.CEIL);
-  const sellFactor = DecimalValue.ONE.sub(halfSpread).mul(DecimalValue.ONE.sub(slippageRate), RoundingMode.FLOOR);
-  return price.mul(sellFactor, RoundingMode.FLOOR).quantizeToStep(tickSize, RoundingMode.FLOOR);
+  const sellFactor = DecimalValue.ONE.sub(halfSpread).mul(
+    DecimalValue.ONE.sub(slippageRate),
+    RoundingMode.FLOOR
+  );
+  return price
+    .mul(sellFactor, RoundingMode.FLOOR)
+    .quantizeToStep(tickSize, RoundingMode.FLOOR);
+}
+
+/** Worst realistic buy fill: ask plus adverse slippage, rounded up to tick. */
+export function computeWorstBuyFill(
+  price: DecimalValue,
+  fullSpreadRate: DecimalValue,
+  slippageRate: DecimalValue,
+  tickSize: DecimalValue
+): DecimalValue {
+  const halfSpread = fullSpreadRate.div(TWO, RoundingMode.CEIL);
+  return price
+    .mul(DecimalValue.ONE.add(halfSpread), RoundingMode.CEIL)
+    .mul(DecimalValue.ONE.add(slippageRate), RoundingMode.CEIL)
+    .quantizeToStep(tickSize, RoundingMode.CEIL);
 }
 
 /** Remaining headroom under a percentage cap, never negative. */
@@ -127,12 +153,17 @@ function headroom(
 }
 
 /** Largest quantity whose notional at `unitCost` stays within `budget`. */
-function quantityForBudget(budget: DecimalValue, unitCost: DecimalValue): DecimalValue {
+function quantityForBudget(
+  budget: DecimalValue,
+  unitCost: DecimalValue
+): DecimalValue {
   if (!unitCost.isPositive()) return DecimalValue.ZERO;
   return budget.div(unitCost, RoundingMode.FLOOR);
 }
 
-export function computePositionSizing(input: PositionSizingInput): RiskSizingResultV1 {
+export function computePositionSizing(
+  input: PositionSizingInput
+): RiskSizingResultV1 {
   const fullSpreadRate = rateFromBps(input.fullSpreadBps);
   const slippageRate = rateFromBps(input.slippageBps);
   const feeRate = rateFromBps(input.feeBps);
@@ -147,57 +178,115 @@ export function computePositionSizing(input: PositionSizingInput): RiskSizingRes
     !input.tickSize.isPositive() ||
     !input.stepSize.isPositive() ||
     !input.equity.isPositive() ||
-    input.stopPrice.gte(input.referenceEntryPrice) ||
-    input.takeProfitPrice.lte(input.referenceEntryPrice)
+    (input.direction !== TradeDirection.LONG &&
+      input.direction !== TradeDirection.SHORT) ||
+    (input.direction === TradeDirection.LONG &&
+      (input.stopPrice.gte(input.referenceEntryPrice) ||
+        input.takeProfitPrice.lte(input.referenceEntryPrice))) ||
+    (input.direction === TradeDirection.SHORT &&
+      (input.stopPrice.lte(input.referenceEntryPrice) ||
+        input.takeProfitPrice.gte(input.referenceEntryPrice)))
   ) {
     return zeroResult();
   }
 
-  const halfSpread = fullSpreadRate.div(TWO, RoundingMode.CEIL);
+  const worstEntryPrice =
+    input.direction === TradeDirection.LONG
+      ? computeWorstBuyFill(
+          input.referenceEntryPrice,
+          fullSpreadRate,
+          slippageRate,
+          input.tickSize
+        )
+      : computeWorstSellFill(
+          input.referenceEntryPrice,
+          fullSpreadRate,
+          slippageRate,
+          input.tickSize
+        );
+  const worstStopFillPrice =
+    input.direction === TradeDirection.LONG
+      ? computeWorstSellFill(
+          input.stopPrice,
+          fullSpreadRate,
+          slippageRate,
+          input.tickSize
+        )
+      : computeWorstBuyFill(
+          input.stopPrice,
+          fullSpreadRate,
+          slippageRate,
+          input.tickSize
+        );
+  const worstTakeProfitFillPrice =
+    input.direction === TradeDirection.LONG
+      ? computeWorstSellFill(
+          input.takeProfitPrice,
+          fullSpreadRate,
+          slippageRate,
+          input.tickSize
+        )
+      : computeWorstBuyFill(
+          input.takeProfitPrice,
+          fullSpreadRate,
+          slippageRate,
+          input.tickSize
+        );
 
-  // Worst realistic buy: mid + half spread, then adverse slippage, then up-tick.
-  const worstEntryPrice = input.referenceEntryPrice
-    .mul(DecimalValue.ONE.add(halfSpread), RoundingMode.CEIL)
-    .mul(DecimalValue.ONE.add(slippageRate), RoundingMode.CEIL)
-    .quantizeToStep(input.tickSize, RoundingMode.CEIL);
-
-  // Worst realistic sell: mid − half spread, then adverse slippage, then down-tick.
-  const worstStopFillPrice = computeWorstSellFill(input.stopPrice, fullSpreadRate, slippageRate, input.tickSize);
-  const worstTakeProfitFillPrice = computeWorstSellFill(
-    input.takeProfitPrice,
-    fullSpreadRate,
-    slippageRate,
-    input.tickSize
-  );
-
-  if (!worstEntryPrice.isPositive() || !worstStopFillPrice.isPositive()) return zeroResult();
+  if (!worstEntryPrice.isPositive() || !worstStopFillPrice.isPositive())
+    return zeroResult();
 
   const entryFeePerUnit = worstEntryPrice.mul(feeRate, RoundingMode.CEIL);
   const stopExitFeePerUnit = worstStopFillPrice.mul(feeRate, RoundingMode.CEIL);
   const roundTripFeesPerUnit = entryFeePerUnit.add(stopExitFeePerUnit);
 
   // Loss to the stop plus both fees — the money genuinely at risk per unit.
-  const perUnitRisk = worstEntryPrice.sub(worstStopFillPrice).add(roundTripFeesPerUnit);
+  const priceRisk =
+    input.direction === TradeDirection.LONG
+      ? worstEntryPrice.sub(worstStopFillPrice)
+      : worstStopFillPrice.sub(worstEntryPrice);
+  const perUnitRisk = priceRisk.add(roundTripFeesPerUnit);
   if (!perUnitRisk.isPositive()) return zeroResult();
 
-  const riskBudget = input.equity.mul(input.maxRiskPerTradePct, RoundingMode.FLOOR);
+  const riskBudget = input.equity.mul(
+    input.maxRiskPerTradePct,
+    RoundingMode.FLOOR
+  );
   const rawQuantity = riskBudget.div(perUnitRisk, RoundingMode.FLOOR);
 
-  // Cash must cover the worst entry notional plus its fee.
+  // Long buys reserve entry cash. Synthetic shorts reserve unleveraged
+  // collateral large enough to buy-to-close at the adverse stop, including
+  // both fees; synthetic sell proceeds are never credited as spendable cash.
+  const collateralPerUnit =
+    input.direction === TradeDirection.LONG
+      ? worstEntryPrice.add(entryFeePerUnit)
+      : worstStopFillPrice.add(stopExitFeePerUnit).add(entryFeePerUnit);
   const cashCapQuantity = quantityForBudget(
     input.availableCash,
-    worstEntryPrice.add(entryFeePerUnit)
+    collateralPerUnit
   );
   const grossExposureCapQuantity = quantityForBudget(
-    headroom(input.equity, input.maxGrossExposurePct, input.currentGrossExposure),
+    headroom(
+      input.equity,
+      input.maxGrossExposurePct,
+      input.currentGrossExposure
+    ),
     worstEntryPrice
   );
   const assetExposureCapQuantity = quantityForBudget(
-    headroom(input.equity, input.maxAssetExposurePct, input.currentAssetExposure),
+    headroom(
+      input.equity,
+      input.maxAssetExposurePct,
+      input.currentAssetExposure
+    ),
     worstEntryPrice
   );
   const correlatedExposureCapQuantity = quantityForBudget(
-    headroom(input.equity, input.maxCorrelatedExposurePct, input.currentCorrelatedExposure),
+    headroom(
+      input.equity,
+      input.maxCorrelatedExposurePct,
+      input.currentCorrelatedExposure
+    ),
     worstEntryPrice
   );
 
@@ -228,21 +317,25 @@ export function computePositionSizing(input: PositionSizingInput): RiskSizingRes
 
   const notional = approvedQuantity.mul(worstEntryPrice, RoundingMode.FLOOR);
   const entryFeeTotal = notional.mul(feeRate, RoundingMode.CEIL);
-  const reservedQuoteAmount = notional.add(entryFeeTotal);
+  const reservedQuoteAmount = approvedQuantity.mul(
+    collateralPerUnit,
+    RoundingMode.CEIL
+  );
   const riskAmount = approvedQuantity.mul(perUnitRisk, RoundingMode.CEIL);
 
-  // R-008 measure: gross reward against the fully costed risk.
-  const netRewardRisk = input.takeProfitPrice
-    .sub(worstEntryPrice)
-    .div(perUnitRisk, RoundingMode.FLOOR);
-
-  // Stricter variant: adverse take-profit fill minus its own exit fee.
-  const takeProfitExitFeePerUnit = worstTakeProfitFillPrice.mul(feeRate, RoundingMode.CEIL);
-  const conservativeReward = worstTakeProfitFillPrice
-    .sub(worstEntryPrice)
+  const takeProfitExitFeePerUnit = worstTakeProfitFillPrice.mul(
+    feeRate,
+    RoundingMode.CEIL
+  );
+  const grossReward =
+    input.direction === TradeDirection.LONG
+      ? worstTakeProfitFillPrice.sub(worstEntryPrice)
+      : worstEntryPrice.sub(worstTakeProfitFillPrice);
+  const conservativeReward = grossReward
     .sub(entryFeePerUnit)
     .sub(takeProfitExitFeePerUnit);
-  const conservativeRewardRisk = conservativeReward.div(perUnitRisk, RoundingMode.FLOOR);
+  const netRewardRisk = conservativeReward.div(perUnitRisk, RoundingMode.FLOOR);
+  const conservativeRewardRisk = netRewardRisk;
 
   return {
     computable: true,
@@ -267,12 +360,15 @@ export function computePositionSizing(input: PositionSizingInput): RiskSizingRes
     approvedQuantity: approvedQuantity.toString(),
     notional: notional.toString(),
     entryFeeTotal: entryFeeTotal.toString(),
+    collateralPerUnit: collateralPerUnit.toString(),
     reservedQuoteAmount: reservedQuoteAmount.toString(),
     riskAmount: riskAmount.toString(),
     netRewardRisk: netRewardRisk.toString(),
     conservativeRewardRisk: conservativeRewardRisk.toString(),
     postTradeGrossExposure: input.currentGrossExposure.add(notional).toString(),
     postTradeAssetExposure: input.currentAssetExposure.add(notional).toString(),
-    postTradeCorrelatedExposure: input.currentCorrelatedExposure.add(notional).toString()
+    postTradeCorrelatedExposure: input.currentCorrelatedExposure
+      .add(notional)
+      .toString()
   };
 }

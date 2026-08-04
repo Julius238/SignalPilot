@@ -12,6 +12,7 @@
 
 export * from "./types.js";
 export * from "./decimal.js";
+export * from "./direction.js";
 export * from "./canonical-json.js";
 export * from "./state-machines.js";
 export * from "./idempotency.js";

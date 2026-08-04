@@ -14,7 +14,14 @@ import { randomUUID } from "node:crypto";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { BotRunStatus, Prisma, TradeCandidateStatus, prisma, type PrismaClient } from "@signalpilot/database";
+import {
+  BotRunStatus,
+  Prisma,
+  TradeCandidateStatus,
+  TradeDirection,
+  prisma,
+  type PrismaClient
+} from "@signalpilot/database";
 import { config } from "dotenv";
 import pino from "pino";
 
@@ -23,7 +30,10 @@ import {
   SHADOW_ORDER_JOB_KEY,
   createShadowOrderForCandidate
 } from "../lib/shadowOrderPersistence.js";
-import { checkShadowExecutionJobAllowed, type TradingFlagSnapshot } from "../lib/tradingSafety.js";
+import {
+  checkShadowExecutionJobAllowed,
+  type TradingFlagSnapshot
+} from "../lib/tradingSafety.js";
 
 const logger = pino({ name: "signalpilot-worker" });
 const jobDir = dirname(fileURLToPath(import.meta.url));
@@ -54,7 +64,9 @@ export interface ShadowCreateOrdersSummary {
   readonly flags: TradingFlagSnapshot | null;
 }
 
-function resolveCodeVersion(env: Readonly<Record<string, string | undefined>>): string {
+function resolveCodeVersion(
+  env: Readonly<Record<string, string | undefined>>
+): string {
   const candidate = env.TRADING_CODE_VERSION ?? env.GIT_COMMIT_SHA ?? "";
   return candidate.trim() === "" ? "unversioned-local-build" : candidate.trim();
 }
@@ -75,12 +87,17 @@ export async function runShadowCreateOrders(
       jobName: JOB_NAME,
       status: BotRunStatus.RUNNING,
       startedAt: new Date(),
-      metadataJson: { correlationId, asOf: asOf.toISOString() } as Prisma.InputJsonObject
+      metadataJson: {
+        correlationId,
+        asOf: asOf.toISOString()
+      } as Prisma.InputJsonObject
     }
   });
 
   if (!gate.allowed) {
-    await finishBotRun(database, botRun.id, BotRunStatus.FAILED, { blockReasonCode: gate.reasonCode });
+    await finishBotRun(database, botRun.id, BotRunStatus.FAILED, {
+      blockReasonCode: gate.reasonCode
+    });
     return {
       status: BotRunStatus.FAILED,
       blocked: true,
@@ -95,7 +112,18 @@ export async function runShadowCreateOrders(
   }
 
   const candidates = await database.tradeCandidate.findMany({
-    where: { status: TradeCandidateStatus.APPROVED_FOR_SHADOW, shadowOrders: { none: {} } },
+    where: {
+      status: TradeCandidateStatus.APPROVED_FOR_SHADOW,
+      shadowOrders: { none: {} },
+      direction: {
+        in: [
+          ...(gate.flags.strategyLongV1Enabled ? [TradeDirection.LONG] : []),
+          ...(gate.flags.shadowShortEnabled && gate.flags.strategyShortV1Enabled
+            ? [TradeDirection.SHORT]
+            : [])
+        ]
+      }
+    },
     orderBy: { decisionTime: "asc" },
     take: batchSize,
     select: { id: true }
@@ -110,20 +138,37 @@ export async function runShadowCreateOrders(
       tradeCandidateId: id,
       asOf,
       codeVersion,
-      correlationId
+      correlationId,
+      capability: {
+        strategyV1Enabled: gate.flags.strategyV1Enabled,
+        strategyLongV1Enabled: gate.flags.strategyLongV1Enabled,
+        strategyShortV1Enabled: gate.flags.strategyShortV1Enabled,
+        shadowShortEnabled: gate.flags.shadowShortEnabled,
+        shadowOnlyBuild: gate.flags.buildCapability === "SHADOW_ONLY",
+        enableLiveTrading: gate.flags.enableLiveTrading,
+        exchangeExecutionEnabled: false,
+        marginTradingEnabled: false,
+        futuresTradingEnabled: false
+      }
     });
     if (result.outcome === ShadowOrderOutcome.CREATED) created += 1;
-    else if (result.outcome === ShadowOrderOutcome.IDEMPOTENT_REPLAY) idempotentReplays += 1;
+    else if (result.outcome === ShadowOrderOutcome.IDEMPOTENT_REPLAY)
+      idempotentReplays += 1;
     else blockedByGuard += 1;
 
-    await writeBotLog(database, result.outcome === ShadowOrderOutcome.BLOCKED ? "warn" : "info", `${JOB_NAME} processed a candidate`, {
-      botRunId: botRun.id,
-      correlationId,
-      tradeCandidateId: id,
-      outcome: result.outcome,
-      reasonCode: result.reasonCode,
-      shadowOrderId: result.shadowOrderId
-    });
+    await writeBotLog(
+      database,
+      result.outcome === ShadowOrderOutcome.BLOCKED ? "warn" : "info",
+      `${JOB_NAME} processed a candidate`,
+      {
+        botRunId: botRun.id,
+        correlationId,
+        tradeCandidateId: id,
+        outcome: result.outcome,
+        reasonCode: result.reasonCode,
+        shadowOrderId: result.shadowOrderId
+      }
+    );
   }
 
   const summary: ShadowCreateOrdersSummary = {
@@ -149,7 +194,11 @@ async function finishBotRun(
 ): Promise<void> {
   await database.botRun.update({
     where: { id: botRunId },
-    data: { status, finishedAt: new Date(), metadataJson: metadataJson as Prisma.InputJsonObject }
+    data: {
+      status,
+      finishedAt: new Date(),
+      metadataJson: metadataJson as Prisma.InputJsonObject
+    }
   });
 }
 
@@ -160,15 +209,26 @@ async function writeBotLog(
   metadataJson: Record<string, unknown>
 ): Promise<void> {
   await database.botLog.create({
-    data: { level, service: "worker", message, metadataJson: metadataJson as Prisma.InputJsonObject }
+    data: {
+      level,
+      service: "worker",
+      message,
+      metadataJson: metadataJson as Prisma.InputJsonObject
+    }
   });
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+if (
+  process.argv[1] &&
+  fileURLToPath(import.meta.url) === resolve(process.argv[1])
+) {
   runShadowCreateOrders()
     .then((summary) => {
       if (summary.blocked) {
-        logger.error({ reasonCode: summary.blockReasonCode }, `${SHADOW_ORDER_JOB_KEY} refused to run`);
+        logger.error(
+          { reasonCode: summary.blockReasonCode },
+          `${SHADOW_ORDER_JOB_KEY} refused to run`
+        );
         process.exitCode = 1;
         return;
       }

@@ -12,10 +12,23 @@ COPY . .
 # Install all dependencies (dev + prod — needed to build TypeScript)
 RUN pnpm install --frozen-lockfile
 
-# Build: packages first (Prisma generate runs here for the correct linux binary),
-# then the API
-RUN pnpm -r --filter "./packages/**" build
-RUN pnpm --filter @signalpilot/api build
+# Build the API together with its COMPLETE workspace dependency closure, in
+# pnpm's topological order (dependencies first).
+#
+# The trailing "..." is load-bearing: `--filter "<pkg>..."` selects <pkg> plus
+# everything it depends on. The previous `-r --filter "./packages/**"` selected
+# only packages/, which silently excluded `apps/trading-worker` — and the API
+# imports its export paths (`@signalpilot/trading-worker/lib/tradingSafety`,
+# `/jobs/*`, ...). Locally that resolved against a stale `dist/` left over from
+# an earlier host build; inside Docker `.dockerignore` strips every `dist/`, so
+# the API compile failed with TS2307 and took the migrate target down with it.
+#
+# Expressing this as a dependency closure rather than a hand-maintained list of
+# build steps means a future workspace dependency is picked up automatically
+# instead of reintroducing exactly this bug. Prisma generate still runs here
+# (it is `@signalpilot/database`'s own build script) and therefore still
+# produces the linux engine binary.
+RUN pnpm --filter "@signalpilot/api..." build
 
 # Create a minimal standalone deployment with only production dependencies.
 #
@@ -47,6 +60,12 @@ RUN cd /standalone/api && \
       --schema ./node_modules/@signalpilot/database/prisma/schema.prisma
 
 # ── Migrate (uses full builder with devDeps + Prisma CLI) ─────────────────────
+#
+# This target deliberately keeps the builder's devDependencies: `prisma` is a
+# devDependency and `db:migrate:deploy` needs the CLI plus the migration files.
+# It is a run-on-demand ops image (Compose profile `migration`), never a
+# long-running service, so its size is not a runtime cost. The lean, prod-only
+# image is `runtime` below.
 FROM builder AS migrate
 
 WORKDIR /repo

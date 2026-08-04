@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-COMPOSE="docker compose -f docker-compose.prod.yml"
+# shellcheck source=./_common.sh
+source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
+require_production_env
 
 if [ $# -eq 0 ]; then
   echo "Usage: $0 <backup-file>"
@@ -20,10 +22,9 @@ if [ ! -f "$BACKUP_FILE" ]; then
 fi
 
 # Resolve DB config from the running container
-DB_USER=$(${COMPOSE} exec -T postgres sh -c 'echo "$POSTGRES_USER"' 2>/dev/null | tr -d '\r') || true
-DB_NAME=$(${COMPOSE} exec -T postgres sh -c 'echo "$POSTGRES_DB"' 2>/dev/null | tr -d '\r') || true
-DB_USER="${DB_USER:-signalpilot}"
-DB_NAME="${DB_NAME:-signalpilot}"
+require_service_running postgres
+DB_USER=$("${COMPOSE[@]}" exec -T postgres sh -c 'printf "%s" "$POSTGRES_USER"')
+DB_NAME=$("${COMPOSE[@]}" exec -T postgres sh -c 'printf "%s" "$POSTGRES_DB"')
 
 echo "=== SignalPilot: PostgreSQL Restore ==="
 echo ""
@@ -41,16 +42,10 @@ if [ "$CONFIRM" != "yes" ]; then
   exit 0
 fi
 
-# Verify postgres is running
-if ! ${COMPOSE} ps postgres | grep -q "running\|Up"; then
-  echo "ERROR: postgres service is not running."
-  exit 1
-fi
-
 echo ""
 echo "Step 1/2: Terminating active connections and dropping existing objects..."
 
-${COMPOSE} exec -T postgres psql -U "$DB_USER" -d postgres <<SQL
+"${COMPOSE[@]}" exec -T postgres psql -U "$DB_USER" -d postgres <<SQL
 SELECT pg_terminate_backend(pid)
 FROM pg_stat_activity
 WHERE datname = '${DB_NAME}' AND pid <> pg_backend_pid();
@@ -58,11 +53,11 @@ SQL
 
 echo "Step 2/2: Restoring from backup..."
 
-${COMPOSE} exec -T postgres \
+"${COMPOSE[@]}" exec -T postgres \
   pg_restore -U "$DB_USER" -d "$DB_NAME" \
     --clean --if-exists --no-owner \
     < "$BACKUP_FILE"
 
 echo ""
 echo "Restore complete. Restart services if they were running:"
-echo "  pnpm ops:prod:up"
+echo "  ./scripts/ops/prod-up.sh"

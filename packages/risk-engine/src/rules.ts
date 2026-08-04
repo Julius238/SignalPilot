@@ -36,7 +36,11 @@ import {
 } from "./policy-v1.js";
 import { RiskReasonCode, RiskRuleCode } from "./reason-codes.js";
 
-export type RiskDirective = "NONE" | "BLOCK_NEW" | "ENGAGE_KILL_SWITCH" | "ERROR_LOCK";
+export type RiskDirective =
+  | "NONE"
+  | "BLOCK_NEW"
+  | "ENGAGE_KILL_SWITCH"
+  | "ERROR_LOCK";
 
 export interface RuleVerdict {
   readonly outcome: "PASS" | "FAIL" | "WARN" | "ERROR";
@@ -67,6 +71,7 @@ export interface RiskEvaluationContext {
   readonly assetAlreadyOpen: boolean;
   readonly totalReserved: DecimalValue;
   readonly marketValue: DecimalValue;
+  readonly equityContribution: DecimalValue;
   /** Assessment input hash, computed without the `existingAssessment` probe. */
   readonly inputHash: string;
 }
@@ -114,7 +119,12 @@ const critical = (
 });
 
 const decimal = (value: string | null | undefined): DecimalValue | null => {
-  if (value === null || value === undefined || !DecimalValue.isDecimalString(value)) return null;
+  if (
+    value === null ||
+    value === undefined ||
+    !DecimalValue.isDecimalString(value)
+  )
+    return null;
   try {
     return DecimalValue.fromString(value);
   } catch {
@@ -141,12 +151,20 @@ function ruleShadowMode(ctx: RiskEvaluationContext): RuleVerdict {
     );
   }
   if (capability.enableLiveTrading) {
-    return critical(RiskReasonCode.LIVE_TRADING_FORBIDDEN, "ENABLE_LIVE_TRADING is true.", {
-      inputJson
-    });
+    return critical(
+      RiskReasonCode.LIVE_TRADING_FORBIDDEN,
+      "ENABLE_LIVE_TRADING is true.",
+      {
+        inputJson
+      }
+    );
   }
   if (capability.tradingMode === "DISABLED") {
-    return critical(RiskReasonCode.MODE_NOT_SHADOW, "TRADING_MODE is DISABLED.", { inputJson });
+    return critical(
+      RiskReasonCode.MODE_NOT_SHADOW,
+      "TRADING_MODE is DISABLED.",
+      { inputJson }
+    );
   }
   if (capability.tradingMode !== "SHADOW") {
     return critical(
@@ -156,23 +174,57 @@ function ruleShadowMode(ctx: RiskEvaluationContext): RuleVerdict {
     );
   }
   if (!capability.shadowMasterFlagEnabled) {
-    return block(RiskReasonCode.MODE_NOT_SHADOW, "TRADING_SHADOW_ENABLED is off.", { inputJson });
+    return block(
+      RiskReasonCode.MODE_NOT_SHADOW,
+      "TRADING_SHADOW_ENABLED is off.",
+      { inputJson }
+    );
   }
   if (!capability.riskJobEnabled) {
-    return block(RiskReasonCode.RISK_JOB_DISABLED, "TRADING_RISK_V1_ENABLED is off.", {
-      inputJson
-    });
+    return block(
+      RiskReasonCode.RISK_JOB_DISABLED,
+      "TRADING_RISK_V1_ENABLED is off.",
+      {
+        inputJson
+      }
+    );
   }
-  return pass(RiskReasonCode.SHADOW_MODE_OK, "Shadow-only capability confirmed.", { inputJson });
+  for (const [key, value] of Object.entries({
+    strategyLongV1Enabled: capability.strategyLongV1Enabled,
+    strategyShortV1Enabled: capability.strategyShortV1Enabled,
+    shadowShortEnabled: capability.shadowShortEnabled,
+    exchangeExecutionEnabled: capability.exchangeExecutionEnabled,
+    marginTradingEnabled: capability.marginTradingEnabled,
+    futuresTradingEnabled: capability.futuresTradingEnabled
+  })) {
+    if (typeof value !== "boolean") {
+      return critical(
+        RiskReasonCode.CONFIG_INVALID,
+        `${key} is not a strict boolean.`,
+        {
+          inputJson
+        }
+      );
+    }
+  }
+  return pass(
+    RiskReasonCode.SHADOW_MODE_OK,
+    "Shadow-only capability confirmed.",
+    { inputJson }
+  );
 }
 
 function ruleSession(ctx: RiskEvaluationContext): RuleVerdict {
   const session = ctx.snapshot.session;
   if (session === null) {
-    return block(RiskReasonCode.SESSION_MISSING, "No trading session for this portfolio.", {
-      inputJson: {},
-      directive: "BLOCK_NEW"
-    });
+    return block(
+      RiskReasonCode.SESSION_MISSING,
+      "No trading session for this portfolio.",
+      {
+        inputJson: {},
+        directive: "BLOCK_NEW"
+      }
+    );
   }
 
   const inputJson = {
@@ -183,10 +235,14 @@ function ruleSession(ctx: RiskEvaluationContext): RuleVerdict {
   };
 
   if (session.killSwitchEngaged) {
-    return block(RiskReasonCode.SESSION_KILL_SWITCH_ENGAGED, "Kill switch is engaged.", {
-      inputJson,
-      directive: "BLOCK_NEW"
-    });
+    return block(
+      RiskReasonCode.SESSION_KILL_SWITCH_ENGAGED,
+      "Kill switch is engaged.",
+      {
+        inputJson,
+        directive: "BLOCK_NEW"
+      }
+    );
   }
   if (session.status !== "SHADOW_ACTIVE") {
     return block(
@@ -196,14 +252,22 @@ function ruleSession(ctx: RiskEvaluationContext): RuleVerdict {
     );
   }
   if (session.reconciledAt === null) {
-    return block(RiskReasonCode.SESSION_RECONCILE_STALE, "Session was never reconciled.", {
-      inputJson,
-      directive: "BLOCK_NEW"
-    });
+    return block(
+      RiskReasonCode.SESSION_RECONCILE_STALE,
+      "Session was never reconciled.",
+      {
+        inputJson,
+        directive: "BLOCK_NEW"
+      }
+    );
   }
-  return pass(RiskReasonCode.SESSION_OK, "Session is SHADOW_ACTIVE with the kill switch off.", {
-    inputJson
-  });
+  return pass(
+    RiskReasonCode.SESSION_OK,
+    "Session is SHADOW_ACTIVE with the kill switch off.",
+    {
+      inputJson
+    }
+  );
 }
 
 function rulePortfolioConsistency(ctx: RiskEvaluationContext): RuleVerdict {
@@ -232,20 +296,32 @@ function rulePortfolioConsistency(ctx: RiskEvaluationContext): RuleVerdict {
     realizedPnl === null ||
     feesPaid === null
   ) {
-    return critical(RiskReasonCode.PORTFOLIO_INCONSISTENT, "Portfolio or ledger value unreadable.", {
-      inputJson
-    });
+    return critical(
+      RiskReasonCode.PORTFOLIO_INCONSISTENT,
+      "Portfolio or ledger value unreadable.",
+      {
+        inputJson
+      }
+    );
   }
 
   if (portfolio.status !== "ACTIVE") {
-    return block(RiskReasonCode.PORTFOLIO_NOT_ACTIVE, `Portfolio is ${portfolio.status}.`, {
-      inputJson
-    });
+    return block(
+      RiskReasonCode.PORTFOLIO_NOT_ACTIVE,
+      `Portfolio is ${portfolio.status}.`,
+      {
+        inputJson
+      }
+    );
   }
   if (ctx.availableCash.isNegative() || ctx.reservedCash.isNegative()) {
-    return critical(RiskReasonCode.PORTFOLIO_NEGATIVE_CASH, "Cash or reserve is negative.", {
-      inputJson
-    });
+    return critical(
+      RiskReasonCode.PORTFOLIO_NEGATIVE_CASH,
+      "Cash or reserve is negative.",
+      {
+        inputJson
+      }
+    );
   }
   if (ledgerReplay.orphanReferenceCount > 0) {
     return critical(
@@ -254,7 +330,10 @@ function rulePortfolioConsistency(ctx: RiskEvaluationContext): RuleVerdict {
       { inputJson, actualValue: null, limitValue: null }
     );
   }
-  if (ledgerReplay.sequenceGapCount > 0 || ledgerReplay.sequence !== portfolio.ledgerSequence) {
+  if (
+    ledgerReplay.sequenceGapCount > 0 ||
+    ledgerReplay.sequence !== portfolio.ledgerSequence
+  ) {
     return critical(
       RiskReasonCode.PORTFOLIO_INCONSISTENT,
       "Ledger sequence does not match the portfolio cache.",
@@ -288,11 +367,13 @@ function rulePortfolioConsistency(ctx: RiskEvaluationContext): RuleVerdict {
     );
   }
 
-  const expectedEquity = ctx.availableCash.add(ctx.reservedCash).add(ctx.marketValue);
+  const expectedEquity = ctx.availableCash
+    .add(ctx.reservedCash)
+    .add(ctx.equityContribution);
   if (!withinTolerance(ctx.equity, expectedEquity)) {
     return critical(
       RiskReasonCode.PORTFOLIO_INCONSISTENT,
-      "Equity does not equal availableCash + reservedCash + market value.",
+      "Equity does not equal availableCash + reservedCash + directional position value.",
       {
         inputJson,
         actualValue: ctx.equity.toString(),
@@ -304,6 +385,22 @@ function rulePortfolioConsistency(ctx: RiskEvaluationContext): RuleVerdict {
 
   const scopes = new Set<string>();
   for (const position of openPositions) {
+    const collateral = decimal(position.reservedCollateral);
+    if (
+      (position.direction !== "LONG" && position.direction !== "SHORT") ||
+      collateral === null ||
+      collateral.isNegative() ||
+      (position.direction === "LONG" && !collateral.isZero()) ||
+      (position.direction === "SHORT" &&
+        decimal(position.openQuantity)?.isPositive() === true &&
+        !collateral.isPositive())
+    ) {
+      return critical(
+        RiskReasonCode.PORTFOLIO_INCONSISTENT,
+        "Position direction or synthetic-short collateral is inconsistent.",
+        { inputJson }
+      );
+    }
     const scope = `${position.assetId}`;
     if (scopes.has(scope)) {
       return critical(
@@ -315,11 +412,15 @@ function rulePortfolioConsistency(ctx: RiskEvaluationContext): RuleVerdict {
     scopes.add(scope);
   }
 
-  return pass(RiskReasonCode.PORTFOLIO_CONSISTENT, "Portfolio matches the ledger replay.", {
-    inputJson,
-    limitValue: PORTFOLIO_TOLERANCE,
-    unit: "USDT"
-  });
+  return pass(
+    RiskReasonCode.PORTFOLIO_CONSISTENT,
+    "Portfolio matches the ledger replay.",
+    {
+      inputJson,
+      limitValue: PORTFOLIO_TOLERANCE,
+      unit: "USDT"
+    }
+  );
 }
 
 function ruleAssetScope(ctx: RiskEvaluationContext): RuleVerdict {
@@ -332,11 +433,15 @@ function ruleAssetScope(ctx: RiskEvaluationContext): RuleVerdict {
   };
 
   if (!RISK_ASSET_SCOPE.allowedSymbols.includes(asset.symbol as never)) {
-    return block(RiskReasonCode.ASSET_NOT_ALLOWED, `${asset.symbol} is not an approved symbol.`, {
-      inputJson,
-      actualValue: null,
-      limitValue: null
-    });
+    return block(
+      RiskReasonCode.ASSET_NOT_ALLOWED,
+      `${asset.symbol} is not an approved symbol.`,
+      {
+        inputJson,
+        actualValue: null,
+        limitValue: null
+      }
+    );
   }
   if (
     asset.assetType !== RISK_ASSET_SCOPE.assetType ||
@@ -345,37 +450,152 @@ function ruleAssetScope(ctx: RiskEvaluationContext): RuleVerdict {
     asset.isInverse ||
     asset.isStablecoin
   ) {
-    return block(RiskReasonCode.NOT_SPOT_USDT, "Instrument is not a plain USDT spot asset.", {
-      inputJson
-    });
+    return block(
+      RiskReasonCode.NOT_SPOT_USDT,
+      "Instrument is not a plain USDT spot asset.",
+      {
+        inputJson
+      }
+    );
   }
-  if (!asset.isTradable || !asset.isActive || asset.instrumentStatus !== "ACTIVE") {
-    return block(RiskReasonCode.ASSET_NOT_ALLOWED, "Instrument is not tradable.", { inputJson });
+  if (
+    !asset.isTradable ||
+    !asset.isActive ||
+    asset.instrumentStatus !== "ACTIVE"
+  ) {
+    return block(
+      RiskReasonCode.ASSET_NOT_ALLOWED,
+      "Instrument is not tradable.",
+      { inputJson }
+    );
   }
   if (!candidate.assignmentEnabled) {
-    return block(RiskReasonCode.ASSIGNMENT_NOT_ACTIVE, "Strategy assignment is not enabled.", {
-      inputJson
-    });
+    return block(
+      RiskReasonCode.ASSIGNMENT_NOT_ACTIVE,
+      "Strategy assignment is not enabled.",
+      {
+        inputJson
+      }
+    );
   }
-  return pass(RiskReasonCode.ASSET_SCOPE_OK, "Approved BTC/ETH spot USDT instrument.", {
-    inputJson
-  });
+  return pass(
+    RiskReasonCode.ASSET_SCOPE_OK,
+    "Approved BTC/ETH spot USDT instrument.",
+    {
+      inputJson
+    }
+  );
 }
 
 function ruleLongOnly(ctx: RiskEvaluationContext): RuleVerdict {
-  const { direction, entryType } = ctx.snapshot.candidate;
-  const inputJson = { direction, entryType };
-  if (direction === "LONG" && entryType === "MARKET") {
-    return pass(RiskReasonCode.LONG_ONLY_OK, "Long market entry.", { inputJson });
-  }
+  const candidate = ctx.snapshot.candidate;
+  const capability = ctx.snapshot.capability;
+  const {
+    direction,
+    entryType,
+    strategyDirection,
+    assignmentDirection,
+    strategyKey
+  } = candidate;
+  const inputJson = {
+    direction,
+    entryType,
+    strategyDirection,
+    assignmentDirection,
+    strategyKey,
+    strategyLongV1Enabled: capability.strategyLongV1Enabled,
+    strategyShortV1Enabled: capability.strategyShortV1Enabled,
+    shadowShortEnabled: capability.shadowShortEnabled,
+    exchangeExecutionEnabled: capability.exchangeExecutionEnabled,
+    marginTradingEnabled: capability.marginTradingEnabled,
+    futuresTradingEnabled: capability.futuresTradingEnabled
+  };
   if (direction !== "LONG" && direction !== "SHORT") {
-    return critical(RiskReasonCode.SIDE_NOT_ALLOWED, `Unknown direction ${direction}.`, {
-      inputJson
-    });
+    return critical(
+      RiskReasonCode.SIDE_NOT_ALLOWED,
+      `Unknown direction ${direction}.`,
+      {
+        inputJson
+      }
+    );
   }
-  return block(RiskReasonCode.SIDE_NOT_ALLOWED, "v1 supports long market entries only.", {
-    inputJson
-  });
+  if (entryType !== "MARKET") {
+    return block(
+      RiskReasonCode.SIDE_NOT_ALLOWED,
+      "Only deterministic shadow market entries are allowed.",
+      {
+        inputJson
+      }
+    );
+  }
+  if (strategyDirection !== direction || assignmentDirection !== direction) {
+    return critical(
+      RiskReasonCode.STRATEGY_DIRECTION_MISMATCH,
+      "Candidate, StrategyVersion and Assignment do not declare the same direction.",
+      { inputJson }
+    );
+  }
+  if (direction === "LONG") {
+    if (
+      strategyKey !== "CRYPTO_MTF_BREAKOUT_V1" &&
+      strategyKey !== "CRYPTO_MTF_BREAKOUT_LONG_V1"
+    ) {
+      return critical(
+        RiskReasonCode.STRATEGY_DIRECTION_MISMATCH,
+        "LONG candidate references an unapproved strategy identity.",
+        { inputJson }
+      );
+    }
+    if (!capability.strategyLongV1Enabled) {
+      return block(
+        RiskReasonCode.SIDE_NOT_ALLOWED,
+        "TRADING_STRATEGY_LONG_V1_ENABLED is not true.",
+        {
+          inputJson
+        }
+      );
+    }
+    return pass(
+      RiskReasonCode.LONG_ONLY_OK,
+      "Long shadow market entry is explicitly enabled.",
+      {
+        inputJson
+      }
+    );
+  }
+
+  if (strategyKey !== "CRYPTO_MTF_BREAKDOWN_SHORT_V1") {
+    return critical(
+      RiskReasonCode.STRATEGY_DIRECTION_MISMATCH,
+      "SHORT candidate references an unapproved strategy identity.",
+      { inputJson }
+    );
+  }
+  if (
+    capability.exchangeExecutionEnabled ||
+    capability.marginTradingEnabled ||
+    capability.futuresTradingEnabled ||
+    capability.enableLiveTrading ||
+    capability.buildCapability !== "SHADOW_ONLY"
+  ) {
+    return critical(
+      RiskReasonCode.EXCHANGE_SHORT_CAPABILITY_FORBIDDEN,
+      "Synthetic shorts cannot coexist with exchange, live, margin or futures capability.",
+      { inputJson }
+    );
+  }
+  if (!capability.shadowShortEnabled || !capability.strategyShortV1Enabled) {
+    return block(
+      RiskReasonCode.SHORT_FLAGS_DISABLED,
+      "Synthetic short requires both shadow-short and short-strategy flags.",
+      { inputJson }
+    );
+  }
+  return pass(
+    RiskReasonCode.DIRECTION_ALLOWED,
+    "Synthetic unleveraged shadow short is explicitly enabled without exchange capability.",
+    { inputJson }
+  );
 }
 
 function ruleNoLeverage(ctx: RiskEvaluationContext): RuleVerdict {
@@ -395,9 +615,13 @@ function ruleNoLeverage(ctx: RiskEvaluationContext): RuleVerdict {
     );
   }
   // Sizing is funded from availableCash only; there is no borrow path in v1.
-  return pass(RiskReasonCode.NO_LEVERAGE_OK, "Spot cash sizing, leverage 1, no margin.", {
-    inputJson
-  });
+  return pass(
+    RiskReasonCode.NO_LEVERAGE_OK,
+    "Spot cash sizing, leverage 1, no margin.",
+    {
+      inputJson
+    }
+  );
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -408,7 +632,8 @@ function ruleStopRequired(ctx: RiskEvaluationContext): RuleVerdict {
   const { candidate, executionProfile } = ctx.snapshot;
   const entry = decimal(candidate.referenceEntryPrice);
   const stop = decimal(candidate.stopPrice);
-  const tick = executionProfile === null ? null : decimal(executionProfile.tickSize);
+  const tick =
+    executionProfile === null ? null : decimal(executionProfile.tickSize);
   const inputJson = {
     referenceEntryPrice: candidate.referenceEntryPrice,
     stopPrice: candidate.stopPrice,
@@ -416,47 +641,85 @@ function ruleStopRequired(ctx: RiskEvaluationContext): RuleVerdict {
   };
 
   if (entry === null || stop === null) {
-    return block(RiskReasonCode.STOP_MISSING_OR_INVALID, "Entry or stop price unreadable.", {
-      inputJson
-    });
-  }
-  if (!stop.isPositive()) {
-    return block(RiskReasonCode.STOP_MISSING_OR_INVALID, "Stop price must be greater than zero.", {
-      inputJson,
-      actualValue: stop.toString(),
-      limitValue: "0.000000000000",
-      unit: "USDT"
-    });
-  }
-  if (stop.gte(entry)) {
     return block(
       RiskReasonCode.STOP_MISSING_OR_INVALID,
-      "Stop price must sit below the reference entry for a long.",
-      { inputJson, actualValue: stop.toString(), limitValue: entry.toString(), unit: "USDT" }
+      "Entry or stop price unreadable.",
+      {
+        inputJson
+      }
+    );
+  }
+  if (!stop.isPositive()) {
+    return block(
+      RiskReasonCode.STOP_MISSING_OR_INVALID,
+      "Stop price must be greater than zero.",
+      {
+        inputJson,
+        actualValue: stop.toString(),
+        limitValue: "0.000000000000",
+        unit: "USDT"
+      }
+    );
+  }
+  const invalidOrdering =
+    candidate.direction === "LONG"
+      ? stop.gte(entry)
+      : candidate.direction === "SHORT"
+        ? stop.lte(entry)
+        : true;
+  if (invalidOrdering) {
+    return block(
+      RiskReasonCode.STOP_MISSING_OR_INVALID,
+      `Stop price is on the wrong side of the ${candidate.direction} reference entry.`,
+      {
+        inputJson,
+        actualValue: stop.toString(),
+        limitValue: entry.toString(),
+        unit: "USDT"
+      }
     );
   }
   const worstEntry = decimal(ctx.sizing.worstEntryPrice);
-  if (worstEntry !== null && worstEntry.isPositive() && stop.gte(worstEntry)) {
+  const invalidAgainstWorst =
+    worstEntry !== null &&
+    worstEntry.isPositive() &&
+    (candidate.direction === "LONG"
+      ? stop.gte(worstEntry)
+      : stop.lte(worstEntry));
+  if (invalidAgainstWorst) {
     return block(
       RiskReasonCode.STOP_MISSING_OR_INVALID,
-      "Stop price is not below the worst-case entry fill.",
-      { inputJson, actualValue: stop.toString(), limitValue: worstEntry.toString(), unit: "USDT" }
+      "Stop price is not on the adverse side of the worst-case entry fill.",
+      {
+        inputJson,
+        actualValue: stop.toString(),
+        limitValue: worstEntry.toString(),
+        unit: "USDT"
+      }
     );
   }
   if (tick !== null && tick.isPositive() && !stop.isMultipleOf(tick)) {
-    return block(RiskReasonCode.STOP_MISSING_OR_INVALID, "Stop price is not tick conformant.", {
+    return block(
+      RiskReasonCode.STOP_MISSING_OR_INVALID,
+      "Stop price is not tick conformant.",
+      {
+        inputJson,
+        actualValue: stop.toString(),
+        limitValue: tick.toString(),
+        unit: "USDT"
+      }
+    );
+  }
+  return pass(
+    RiskReasonCode.STOP_VALID,
+    "Stop is present, positive and directionally valid.",
+    {
       inputJson,
       actualValue: stop.toString(),
-      limitValue: tick.toString(),
+      limitValue: entry.toString(),
       unit: "USDT"
-    });
-  }
-  return pass(RiskReasonCode.STOP_VALID, "Stop is present, positive and below the entry.", {
-    inputJson,
-    actualValue: stop.toString(),
-    limitValue: entry.toString(),
-    unit: "USDT"
-  });
+    }
+  );
 }
 
 function ruleMinRewardRisk(ctx: RiskEvaluationContext): RuleVerdict {
@@ -478,20 +741,36 @@ function ruleMinRewardRisk(ctx: RiskEvaluationContext): RuleVerdict {
 
   // An unusable price plan is a business rejection, not an engine error, so the
   // TP-above-entry check runs before the cost model is consulted.
-  if (takeProfit !== null && entry !== null && takeProfit.lte(entry)) {
-    return block(RiskReasonCode.REWARD_RISK_BELOW_MINIMUM, "Take profit is not above the entry.", {
-      inputJson,
-      actualValue: takeProfit.toString(),
-      limitValue: entry.toString(),
-      unit: "USDT"
-    });
+  const invalidTakeProfit =
+    takeProfit !== null &&
+    entry !== null &&
+    (candidate.direction === "LONG"
+      ? takeProfit.lte(entry)
+      : takeProfit.gte(entry));
+  if (invalidTakeProfit) {
+    return block(
+      RiskReasonCode.REWARD_RISK_BELOW_MINIMUM,
+      "Take profit is on the wrong side of the entry.",
+      {
+        inputJson,
+        actualValue: takeProfit.toString(),
+        limitValue: entry.toString(),
+        unit: "USDT"
+      }
+    );
   }
-  if (minimum === null || takeProfit === null || entry === null || !ctx.sizing.computable) {
+  if (
+    minimum === null ||
+    takeProfit === null ||
+    entry === null ||
+    !ctx.sizing.computable
+  ) {
     return {
       outcome: "ERROR",
       severity: "BLOCKER",
       reasonCode: RiskReasonCode.REWARD_RISK_BELOW_MINIMUM,
-      message: "Reward/risk cannot be evaluated without limits, prices and a cost model.",
+      message:
+        "Reward/risk cannot be evaluated without limits, prices and a cost model.",
       inputJson,
       actualValue: null,
       limitValue: minimum?.toString() ?? null,
@@ -510,12 +789,16 @@ function ruleMinRewardRisk(ctx: RiskEvaluationContext): RuleVerdict {
       }
     );
   }
-  return pass(RiskReasonCode.REWARD_RISK_OK, "Net reward/risk meets the minimum.", {
-    inputJson,
-    actualValue: actual.toString(),
-    limitValue: minimum.toString(),
-    unit: "R"
-  });
+  return pass(
+    RiskReasonCode.REWARD_RISK_OK,
+    "Net reward/risk meets the minimum.",
+    {
+      inputJson,
+      actualValue: actual.toString(),
+      limitValue: minimum.toString(),
+      unit: "R"
+    }
+  );
 }
 
 function ruleRiskPerTrade(ctx: RiskEvaluationContext): RuleVerdict {
@@ -529,12 +812,16 @@ function ruleRiskPerTrade(ctx: RiskEvaluationContext): RuleVerdict {
   };
 
   if (!ctx.equity.isPositive()) {
-    return block(RiskReasonCode.EQUITY_NOT_POSITIVE, "Equity is not positive.", {
-      inputJson,
-      actualValue: ctx.equity.toString(),
-      limitValue: "0.000000000000",
-      unit: "USDT"
-    });
+    return block(
+      RiskReasonCode.EQUITY_NOT_POSITIVE,
+      "Equity is not positive.",
+      {
+        inputJson,
+        actualValue: ctx.equity.toString(),
+        limitValue: "0.000000000000",
+        unit: "USDT"
+      }
+    );
   }
   if (!ctx.sizing.computable || riskAmount === null || riskBudget === null) {
     return {
@@ -560,12 +847,16 @@ function ruleRiskPerTrade(ctx: RiskEvaluationContext): RuleVerdict {
       }
     );
   }
-  return pass(RiskReasonCode.TRADE_RISK_WITHIN_LIMIT, "Worst-case loss is inside the budget.", {
-    inputJson,
-    actualValue: riskAmount.toString(),
-    limitValue: riskBudget.toString(),
-    unit: "USDT"
-  });
+  return pass(
+    RiskReasonCode.TRADE_RISK_WITHIN_LIMIT,
+    "Worst-case loss is inside the budget.",
+    {
+      inputJson,
+      actualValue: riskAmount.toString(),
+      limitValue: riskBudget.toString(),
+      unit: "USDT"
+    }
+  );
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -589,7 +880,11 @@ function ruleDailyLoss(ctx: RiskEvaluationContext): RuleVerdict {
     );
   }
   const startEquity = decimal(startOfDay.equity);
-  if (maxLossPct === null || startEquity === null || !startEquity.isPositive()) {
+  if (
+    maxLossPct === null ||
+    startEquity === null ||
+    !startEquity.isPositive()
+  ) {
     return {
       outcome: "ERROR",
       severity: "BLOCKER",
@@ -609,7 +904,8 @@ function ruleDailyLoss(ctx: RiskEvaluationContext): RuleVerdict {
       outcome: "FAIL",
       severity: "CRITICAL",
       reasonCode: RiskReasonCode.DAILY_LOSS_LIMIT_REACHED,
-      message: "Daily loss limit reached; new entries stop until the next UTC day and a review.",
+      message:
+        "Daily loss limit reached; new entries stop until the next UTC day and a review.",
       inputJson,
       actualValue: ctx.dailyPnl.toString(),
       limitValue: lossLimit.toString(),
@@ -617,12 +913,16 @@ function ruleDailyLoss(ctx: RiskEvaluationContext): RuleVerdict {
       directive: "ENGAGE_KILL_SWITCH"
     };
   }
-  return pass(RiskReasonCode.DAILY_LOSS_WITHIN_LIMIT, "Daily loss is inside the limit.", {
-    inputJson,
-    actualValue: ctx.dailyPnl.toString(),
-    limitValue: lossLimit.toString(),
-    unit: "USDT"
-  });
+  return pass(
+    RiskReasonCode.DAILY_LOSS_WITHIN_LIMIT,
+    "Daily loss is inside the limit.",
+    {
+      inputJson,
+      actualValue: ctx.dailyPnl.toString(),
+      limitValue: lossLimit.toString(),
+      unit: "USDT"
+    }
+  );
 }
 
 function ruleOpenPositions(ctx: RiskEvaluationContext): RuleVerdict {
@@ -656,12 +956,16 @@ function ruleOpenPositions(ctx: RiskEvaluationContext): RuleVerdict {
       }
     );
   }
-  return pass(RiskReasonCode.OPEN_POSITIONS_WITHIN_LIMIT, "Open-position count stays in range.", {
-    inputJson,
-    actualValue: String(ctx.postTradeOpenPositionCount),
-    limitValue: String(limit),
-    unit: "count"
-  });
+  return pass(
+    RiskReasonCode.OPEN_POSITIONS_WITHIN_LIMIT,
+    "Open-position count stays in range.",
+    {
+      inputJson,
+      actualValue: String(ctx.postTradeOpenPositionCount),
+      limitValue: String(limit),
+      unit: "count"
+    }
+  );
 }
 
 function ruleTradesPerDay(ctx: RiskEvaluationContext): RuleVerdict {
@@ -684,19 +988,27 @@ function ruleTradesPerDay(ctx: RiskEvaluationContext): RuleVerdict {
     };
   }
   if (today >= limit) {
-    return block(RiskReasonCode.MAX_DAILY_TRADES, "Daily filled-entry limit reached.", {
+    return block(
+      RiskReasonCode.MAX_DAILY_TRADES,
+      "Daily filled-entry limit reached.",
+      {
+        inputJson,
+        actualValue: String(today),
+        limitValue: String(limit),
+        unit: "count"
+      }
+    );
+  }
+  return pass(
+    RiskReasonCode.DAILY_TRADES_WITHIN_LIMIT,
+    "Daily entry count stays in range.",
+    {
       inputJson,
       actualValue: String(today),
       limitValue: String(limit),
       unit: "count"
-    });
-  }
-  return pass(RiskReasonCode.DAILY_TRADES_WITHIN_LIMIT, "Daily entry count stays in range.", {
-    inputJson,
-    actualValue: String(today),
-    limitValue: String(limit),
-    unit: "count"
-  });
+    }
+  );
 }
 
 function exposureRule(
@@ -734,12 +1046,16 @@ function exposureRule(
 
   const limit = ctx.equity.mul(capPct, RoundingMode.FLOOR);
   if (postTrade.gt(limit)) {
-    return block(args.failCode, `${args.label} exposure would exceed the cap.`, {
-      inputJson,
-      actualValue: postTrade.toString(),
-      limitValue: limit.toString(),
-      unit: "USDT"
-    });
+    return block(
+      args.failCode,
+      `${args.label} exposure would exceed the cap.`,
+      {
+        inputJson,
+        actualValue: postTrade.toString(),
+        limitValue: limit.toString(),
+        unit: "USDT"
+      }
+    );
   }
   return pass(args.passCode, `${args.label} exposure stays inside the cap.`, {
     inputJson,
@@ -766,7 +1082,10 @@ function ruleAssetExposure(ctx: RiskEvaluationContext): RuleVerdict {
       RiskReasonCode.DUPLICATE_ASSET_POSITION,
       "A non-terminal position for this asset already exists.",
       {
-        inputJson: { assetId: ctx.snapshot.candidate.assetId, assetAlreadyOpen: true },
+        inputJson: {
+          assetId: ctx.snapshot.candidate.assetId,
+          assetAlreadyOpen: true
+        },
         actualValue: null,
         limitValue: null
       }
@@ -801,7 +1120,8 @@ function ruleCorrelation(ctx: RiskEvaluationContext): RuleVerdict {
       outcome: "ERROR",
       severity: "BLOCKER",
       reasonCode: RiskReasonCode.CORRELATION_GROUP_MISSING,
-      message: "The candidate symbol is not part of the fixed correlation group.",
+      message:
+        "The candidate symbol is not part of the fixed correlation group.",
       inputJson: { group, symbol: ctx.snapshot.asset.symbol },
       actualValue: null,
       limitValue: null,
@@ -833,17 +1153,51 @@ function ruleDataFreshness(ctx: RiskEvaluationContext): RuleVerdict {
   };
 
   if (freshness.hasFutureTimestamp) {
-    return block(RiskReasonCode.DATA_TIMESTAMP_IN_FUTURE, "A source timestamp lies after asOf.", {
-      inputJson
-    });
+    return block(
+      RiskReasonCode.DATA_TIMESTAMP_IN_FUTURE,
+      "A source timestamp lies after asOf.",
+      {
+        inputJson
+      }
+    );
   }
 
-  const checks: readonly (readonly [number | null, number, RiskReasonCode, string])[] = [
-    [freshness.candleAgeMs["1h"], RISK_FRESHNESS_LIMITS_MS.candle1h, RiskReasonCode.DATA_STALE_CANDLES_1H, "1h candles"],
-    [freshness.candleAgeMs["4h"], RISK_FRESHNESS_LIMITS_MS.candle4h, RiskReasonCode.DATA_STALE_CANDLES_4H, "4h candles"],
-    [freshness.candleAgeMs["1d"], RISK_FRESHNESS_LIMITS_MS.candle1d, RiskReasonCode.DATA_STALE_CANDLES_1D, "1d candles"],
-    [freshness.dataQualityAgeMs, RISK_FRESHNESS_LIMITS_MS.dataQuality, RiskReasonCode.DATA_STALE_DATA_QUALITY, "data quality"],
-    [freshness.regimeAgeMs, RISK_FRESHNESS_LIMITS_MS.regime, RiskReasonCode.DATA_STALE_REGIME, "market regime"],
+  const checks: readonly (readonly [
+    number | null,
+    number,
+    RiskReasonCode,
+    string
+  ])[] = [
+    [
+      freshness.candleAgeMs["1h"],
+      RISK_FRESHNESS_LIMITS_MS.candle1h,
+      RiskReasonCode.DATA_STALE_CANDLES_1H,
+      "1h candles"
+    ],
+    [
+      freshness.candleAgeMs["4h"],
+      RISK_FRESHNESS_LIMITS_MS.candle4h,
+      RiskReasonCode.DATA_STALE_CANDLES_4H,
+      "4h candles"
+    ],
+    [
+      freshness.candleAgeMs["1d"],
+      RISK_FRESHNESS_LIMITS_MS.candle1d,
+      RiskReasonCode.DATA_STALE_CANDLES_1D,
+      "1d candles"
+    ],
+    [
+      freshness.dataQualityAgeMs,
+      RISK_FRESHNESS_LIMITS_MS.dataQuality,
+      RiskReasonCode.DATA_STALE_DATA_QUALITY,
+      "data quality"
+    ],
+    [
+      freshness.regimeAgeMs,
+      RISK_FRESHNESS_LIMITS_MS.regime,
+      RiskReasonCode.DATA_STALE_REGIME,
+      "market regime"
+    ],
     [
       freshness.portfolioSnapshotAgeMs,
       RISK_FRESHNESS_LIMITS_MS.portfolioSnapshot,
@@ -891,12 +1245,16 @@ function ruleDataFreshness(ctx: RiskEvaluationContext): RuleVerdict {
     };
   }
   if (ctx.asOfMs >= expiresAtMs) {
-    return block(RiskReasonCode.CANDIDATE_EXPIRED, "Candidate validity window has passed.", {
-      inputJson,
-      actualValue: String(ctx.asOfMs),
-      limitValue: String(expiresAtMs),
-      unit: "epochMs"
-    });
+    return block(
+      RiskReasonCode.CANDIDATE_EXPIRED,
+      "Candidate validity window has passed.",
+      {
+        inputJson,
+        actualValue: String(ctx.asOfMs),
+        limitValue: String(expiresAtMs),
+        unit: "epochMs"
+      }
+    );
   }
   if (candidate.status !== "CREATED" && candidate.status !== "READY_FOR_RISK") {
     return block(
@@ -906,9 +1264,13 @@ function ruleDataFreshness(ctx: RiskEvaluationContext): RuleVerdict {
     );
   }
 
-  return pass(RiskReasonCode.DATA_FRESH, "Every source is inside its freshness limit.", {
-    inputJson
-  });
+  return pass(
+    RiskReasonCode.DATA_FRESH,
+    "Every source is inside its freshness limit.",
+    {
+      inputJson
+    }
+  );
 }
 
 function ruleDataQuality(ctx: RiskEvaluationContext): RuleVerdict {
@@ -939,17 +1301,25 @@ function ruleDataQuality(ctx: RiskEvaluationContext): RuleVerdict {
       };
     }
     if (closed < RISK_MINIMUM_CANDLES || gaps > 0 || providerErrors > 0) {
-      return block(RiskReasonCode.DATA_QUALITY_INSUFFICIENT, `Data quality for ${timeframe} is insufficient.`, {
-        inputJson,
-        actualValue: String(closed),
-        limitValue: String(RISK_MINIMUM_CANDLES),
-        unit: "count"
-      });
+      return block(
+        RiskReasonCode.DATA_QUALITY_INSUFFICIENT,
+        `Data quality for ${timeframe} is insufficient.`,
+        {
+          inputJson,
+          actualValue: String(closed),
+          limitValue: String(RISK_MINIMUM_CANDLES),
+          unit: "count"
+        }
+      );
     }
   }
-  return pass(RiskReasonCode.DATA_QUALITY_OK, "Candle coverage and provider status are clean.", {
-    inputJson
-  });
+  return pass(
+    RiskReasonCode.DATA_QUALITY_OK,
+    "Candle coverage and provider status are clean.",
+    {
+      inputJson
+    }
+  );
 }
 
 function ruleSpread(ctx: RiskEvaluationContext): RuleVerdict {
@@ -962,9 +1332,13 @@ function ruleSpread(ctx: RiskEvaluationContext): RuleVerdict {
   };
 
   if (profile === null) {
-    return critical(RiskReasonCode.EXECUTION_PROFILE_MISSING, "No execution profile for the asset.", {
-      inputJson
-    });
+    return critical(
+      RiskReasonCode.EXECUTION_PROFILE_MISSING,
+      "No execution profile for the asset.",
+      {
+        inputJson
+      }
+    );
   }
   if (profile.status !== "ACTIVE") {
     return critical(
@@ -973,10 +1347,17 @@ function ruleSpread(ctx: RiskEvaluationContext): RuleVerdict {
       { inputJson }
     );
   }
-  if (!Number.isSafeInteger(profile.fullSpreadBps) || profile.fullSpreadBps < 0) {
-    return critical(RiskReasonCode.EXECUTION_PROFILE_INVALID, "Full spread is negative or unusable.", {
-      inputJson
-    });
+  if (
+    !Number.isSafeInteger(profile.fullSpreadBps) ||
+    profile.fullSpreadBps < 0
+  ) {
+    return critical(
+      RiskReasonCode.EXECUTION_PROFILE_INVALID,
+      "Full spread is negative or unusable.",
+      {
+        inputJson
+      }
+    );
   }
   if (limit === null) {
     return {
@@ -991,19 +1372,27 @@ function ruleSpread(ctx: RiskEvaluationContext): RuleVerdict {
     };
   }
   if (profile.fullSpreadBps > limit) {
-    return block(RiskReasonCode.SPREAD_LIMIT_EXCEEDED, "Modelled full spread exceeds the limit.", {
+    return block(
+      RiskReasonCode.SPREAD_LIMIT_EXCEEDED,
+      "Modelled full spread exceeds the limit.",
+      {
+        inputJson,
+        actualValue: String(profile.fullSpreadBps),
+        limitValue: String(limit),
+        unit: "bp"
+      }
+    );
+  }
+  return pass(
+    RiskReasonCode.SPREAD_WITHIN_LIMIT,
+    "Modelled full spread is inside the limit.",
+    {
       inputJson,
       actualValue: String(profile.fullSpreadBps),
       limitValue: String(limit),
       unit: "bp"
-    });
-  }
-  return pass(RiskReasonCode.SPREAD_WITHIN_LIMIT, "Modelled full spread is inside the limit.", {
-    inputJson,
-    actualValue: String(profile.fullSpreadBps),
-    limitValue: String(limit),
-    unit: "bp"
-  });
+    }
+  );
 }
 
 function ruleSlippage(ctx: RiskEvaluationContext): RuleVerdict {
@@ -1016,14 +1405,22 @@ function ruleSlippage(ctx: RiskEvaluationContext): RuleVerdict {
   };
 
   if (profile === null) {
-    return critical(RiskReasonCode.EXECUTION_PROFILE_MISSING, "No execution profile for the asset.", {
-      inputJson
-    });
+    return critical(
+      RiskReasonCode.EXECUTION_PROFILE_MISSING,
+      "No execution profile for the asset.",
+      {
+        inputJson
+      }
+    );
   }
   if (!Number.isSafeInteger(profile.slippageBps) || profile.slippageBps < 0) {
-    return critical(RiskReasonCode.EXECUTION_PROFILE_INVALID, "Slippage is negative or unusable.", {
-      inputJson
-    });
+    return critical(
+      RiskReasonCode.EXECUTION_PROFILE_INVALID,
+      "Slippage is negative or unusable.",
+      {
+        inputJson
+      }
+    );
   }
   if (limit === null) {
     return {
@@ -1038,12 +1435,16 @@ function ruleSlippage(ctx: RiskEvaluationContext): RuleVerdict {
     };
   }
   if (profile.slippageBps > limit) {
-    return block(RiskReasonCode.SLIPPAGE_LIMIT_EXCEEDED, "Modelled slippage exceeds the limit.", {
-      inputJson,
-      actualValue: String(profile.slippageBps),
-      limitValue: String(limit),
-      unit: "bp"
-    });
+    return block(
+      RiskReasonCode.SLIPPAGE_LIMIT_EXCEEDED,
+      "Modelled slippage exceeds the limit.",
+      {
+        inputJson,
+        actualValue: String(profile.slippageBps),
+        limitValue: String(limit),
+        unit: "bp"
+      }
+    );
   }
   if (profile.slippageBps > 0 && !ctx.sizing.computable) {
     return {
@@ -1057,12 +1458,16 @@ function ruleSlippage(ctx: RiskEvaluationContext): RuleVerdict {
       unit: "bp"
     };
   }
-  return pass(RiskReasonCode.SLIPPAGE_WITHIN_LIMIT, "Slippage is inside the limit and priced in.", {
-    inputJson,
-    actualValue: String(profile.slippageBps),
-    limitValue: String(limit),
-    unit: "bp"
-  });
+  return pass(
+    RiskReasonCode.SLIPPAGE_WITHIN_LIMIT,
+    "Slippage is inside the limit and priced in.",
+    {
+      inputJson,
+      actualValue: String(profile.slippageBps),
+      limitValue: String(limit),
+      unit: "bp"
+    }
+  );
 }
 
 function ruleRegime(ctx: RiskEvaluationContext): RuleVerdict {
@@ -1085,36 +1490,63 @@ function ruleRegime(ctx: RiskEvaluationContext): RuleVerdict {
       unit: null
     };
   }
-  if (regime.cryptoRegime !== RISK_REGIME_POLICY.requiredCryptoRegime) {
-    return block(RiskReasonCode.MARKET_REGIME_CONFLICT, "Crypto regime is not RISK_ON.", {
-      inputJson,
-      actualValue: null,
-      limitValue: null,
-      unit: null
-    });
+  const requiredRegime =
+    ctx.snapshot.candidate.direction === "LONG"
+      ? RISK_REGIME_POLICY.requiredCryptoRegimeByDirection.LONG
+      : ctx.snapshot.candidate.direction === "SHORT"
+        ? RISK_REGIME_POLICY.requiredCryptoRegimeByDirection.SHORT
+        : null;
+  if (requiredRegime === null || regime.cryptoRegime !== requiredRegime) {
+    return block(
+      RiskReasonCode.MARKET_REGIME_CONFLICT,
+      `Crypto regime is not ${requiredRegime ?? "known"}.`,
+      {
+        inputJson,
+        actualValue: null,
+        limitValue: null,
+        unit: null
+      }
+    );
   }
-  if (RISK_REGIME_POLICY.forbiddenRiskModes.includes(regime.riskMode as never)) {
-    return block(RiskReasonCode.MARKET_REGIME_CONFLICT, `Risk mode ${regime.riskMode} blocks entries.`, {
-      inputJson,
-      actualValue: null,
-      limitValue: null,
-      unit: null
-    });
+  if (
+    RISK_REGIME_POLICY.forbiddenRiskModes.includes(regime.riskMode as never)
+  ) {
+    return block(
+      RiskReasonCode.MARKET_REGIME_CONFLICT,
+      `Risk mode ${regime.riskMode} blocks entries.`,
+      {
+        inputJson,
+        actualValue: null,
+        limitValue: null,
+        unit: null
+      }
+    );
   }
-  if (!Number.isFinite(regime.confidence) || regime.confidence < RISK_REGIME_POLICY.minimumConfidence) {
-    return block(RiskReasonCode.MARKET_REGIME_CONFLICT, "Regime confidence is below the minimum.", {
+  if (
+    !Number.isFinite(regime.confidence) ||
+    regime.confidence < RISK_REGIME_POLICY.minimumConfidence
+  ) {
+    return block(
+      RiskReasonCode.MARKET_REGIME_CONFLICT,
+      "Regime confidence is below the minimum.",
+      {
+        inputJson,
+        actualValue: String(regime.confidence),
+        limitValue: String(RISK_REGIME_POLICY.minimumConfidence),
+        unit: "score"
+      }
+    );
+  }
+  return pass(
+    RiskReasonCode.REGIME_OK,
+    `Crypto regime is ${requiredRegime} with sufficient confidence.`,
+    {
       inputJson,
       actualValue: String(regime.confidence),
       limitValue: String(RISK_REGIME_POLICY.minimumConfidence),
       unit: "score"
-    });
-  }
-  return pass(RiskReasonCode.REGIME_OK, "Crypto regime is RISK_ON with sufficient confidence.", {
-    inputJson,
-    actualValue: String(regime.confidence),
-    limitValue: String(RISK_REGIME_POLICY.minimumConfidence),
-    unit: "score"
-  });
+    }
+  );
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -1145,7 +1577,8 @@ function ruleLossStreak(ctx: RiskEvaluationContext): RuleVerdict {
       outcome: "FAIL",
       severity: "CRITICAL",
       reasonCode: RiskReasonCode.CONSECUTIVE_LOSS_LIMIT,
-      message: "Consecutive net losses reached the limit; new entries stop until a review.",
+      message:
+        "Consecutive net losses reached the limit; new entries stop until a review.",
       inputJson,
       actualValue: String(actual),
       limitValue: String(limit),
@@ -1153,19 +1586,26 @@ function ruleLossStreak(ctx: RiskEvaluationContext): RuleVerdict {
       directive: "ENGAGE_KILL_SWITCH"
     };
   }
-  return pass(RiskReasonCode.LOSS_STREAK_WITHIN_LIMIT, "Loss streak is inside the limit.", {
-    inputJson,
-    actualValue: String(actual),
-    limitValue: String(limit),
-    unit: "count"
-  });
+  return pass(
+    RiskReasonCode.LOSS_STREAK_WITHIN_LIMIT,
+    "Loss streak is inside the limit.",
+    {
+      inputJson,
+      actualValue: String(actual),
+      limitValue: String(limit),
+      unit: "count"
+    }
+  );
 }
 
 function ruleNoScaleIn(ctx: RiskEvaluationContext): RuleVerdict {
   const assetId = ctx.snapshot.candidate.assetId;
-  const openForAsset = ctx.snapshot.openPositions.filter((position) => position.assetId === assetId);
+  const openForAsset = ctx.snapshot.openPositions.filter(
+    (position) => position.assetId === assetId
+  );
   const reservedForAsset = ctx.snapshot.reservations.filter(
-    (reservation) => reservation.assetId === assetId
+    (reservation) =>
+      reservation.assetId === assetId && reservation.purpose === "ENTRY"
   );
   const inputJson = {
     assetId,
@@ -1179,7 +1619,8 @@ function ruleNoScaleIn(ctx: RiskEvaluationContext): RuleVerdict {
       outcome: "FAIL",
       severity: "CRITICAL",
       reasonCode: RiskReasonCode.AVERAGING_OR_SCALE_IN_FORBIDDEN,
-      message: "A non-terminal position or entry order for this asset already exists.",
+      message:
+        "A non-terminal position or entry order for this asset already exists.",
       inputJson,
       actualValue: String(openForAsset.length + reservedForAsset.length),
       limitValue: "0",
@@ -1187,12 +1628,16 @@ function ruleNoScaleIn(ctx: RiskEvaluationContext): RuleVerdict {
       directive: "ERROR_LOCK"
     };
   }
-  return pass(RiskReasonCode.NO_SCALE_IN_OK, "No existing exposure or entry order for the asset.", {
-    inputJson,
-    actualValue: "0",
-    limitValue: "0",
-    unit: "count"
-  });
+  return pass(
+    RiskReasonCode.NO_SCALE_IN_OK,
+    "No existing exposure or entry order for the asset.",
+    {
+      inputJson,
+      actualValue: "0",
+      limitValue: "0",
+      unit: "count"
+    }
+  );
 }
 
 function ruleNoMartingale(ctx: RiskEvaluationContext): RuleVerdict {
@@ -1217,13 +1662,21 @@ function ruleNoMartingale(ctx: RiskEvaluationContext): RuleVerdict {
       return critical(
         RiskReasonCode.NON_DETERMINISTIC_SIZE_OVERRIDE,
         "A risk multiplier other than 1 is forbidden.",
-        { inputJson, actualValue: override.riskMultiplier, limitValue: "1.000000000000" }
+        {
+          inputJson,
+          actualValue: override.riskMultiplier,
+          limitValue: "1.000000000000"
+        }
       );
     }
   }
-  return pass(RiskReasonCode.DETERMINISTIC_SIZE_OK, "Size comes from the pinned formula only.", {
-    inputJson
-  });
+  return pass(
+    RiskReasonCode.DETERMINISTIC_SIZE_OK,
+    "Size comes from the pinned formula only.",
+    {
+      inputJson
+    }
+  );
 }
 
 function ruleNoPostLossIncrease(ctx: RiskEvaluationContext): RuleVerdict {
@@ -1242,7 +1695,8 @@ function ruleNoPostLossIncrease(ctx: RiskEvaluationContext): RuleVerdict {
       outcome: "ERROR",
       severity: "BLOCKER",
       reasonCode: RiskReasonCode.RISK_INCREASE_AFTER_LOSS,
-      message: "Risk amount is not computable, so a post-loss increase cannot be excluded.",
+      message:
+        "Risk amount is not computable, so a post-loss increase cannot be excluded.",
       inputJson,
       actualValue: null,
       limitValue: null,
@@ -1291,12 +1745,16 @@ function ruleNoPostLossIncrease(ctx: RiskEvaluationContext): RuleVerdict {
       };
     }
   }
-  return pass(RiskReasonCode.RISK_NOT_INCREASED_AFTER_LOSS, "Risk did not grow after a loss.", {
-    inputJson,
-    actualValue: riskAmount.toString(),
-    limitValue: riskBudget.toString(),
-    unit: "USDT"
-  });
+  return pass(
+    RiskReasonCode.RISK_NOT_INCREASED_AFTER_LOSS,
+    "Risk did not grow after a loss.",
+    {
+      inputJson,
+      actualValue: riskAmount.toString(),
+      limitValue: riskBudget.toString(),
+      unit: "USDT"
+    }
+  );
 }
 
 function ruleInstrumentMinimums(ctx: RiskEvaluationContext): RuleVerdict {
@@ -1318,7 +1776,8 @@ function ruleInstrumentMinimums(ctx: RiskEvaluationContext): RuleVerdict {
       outcome: "ERROR",
       severity: "BLOCKER",
       reasonCode: RiskReasonCode.BELOW_INSTRUMENT_MINIMUM,
-      message: "Instrument minimums cannot be checked without a computable size.",
+      message:
+        "Instrument minimums cannot be checked without a computable size.",
       inputJson,
       actualValue: null,
       limitValue: null,
@@ -1355,62 +1814,92 @@ function ruleInstrumentMinimums(ctx: RiskEvaluationContext): RuleVerdict {
   }
 
   if (!quantity.isPositive()) {
-    return block(RiskReasonCode.QUANTITY_NOT_POSITIVE, "Rounded quantity is zero or negative.", {
-      inputJson,
-      actualValue: quantity.toString(),
-      limitValue: "0.000000000000",
-      unit: "base"
-    });
+    return block(
+      RiskReasonCode.QUANTITY_NOT_POSITIVE,
+      "Rounded quantity is zero or negative.",
+      {
+        inputJson,
+        actualValue: quantity.toString(),
+        limitValue: "0.000000000000",
+        unit: "base"
+      }
+    );
   }
   if (!step.isPositive() || !quantity.isMultipleOf(step)) {
-    return block(RiskReasonCode.BELOW_INSTRUMENT_MINIMUM, "Quantity is not a multiple of the step size.", {
-      inputJson,
-      actualValue: quantity.toString(),
-      limitValue: step.toString(),
-      unit: "base"
-    });
+    return block(
+      RiskReasonCode.BELOW_INSTRUMENT_MINIMUM,
+      "Quantity is not a multiple of the step size.",
+      {
+        inputJson,
+        actualValue: quantity.toString(),
+        limitValue: step.toString(),
+        unit: "base"
+      }
+    );
   }
   if (quantity.lt(minQuantity)) {
-    return block(RiskReasonCode.BELOW_INSTRUMENT_MINIMUM, "Quantity is below the instrument minimum.", {
-      inputJson,
-      actualValue: quantity.toString(),
-      limitValue: minQuantity.toString(),
-      unit: "base"
-    });
+    return block(
+      RiskReasonCode.BELOW_INSTRUMENT_MINIMUM,
+      "Quantity is below the instrument minimum.",
+      {
+        inputJson,
+        actualValue: quantity.toString(),
+        limitValue: minQuantity.toString(),
+        unit: "base"
+      }
+    );
   }
   if (maxQuantity !== null && quantity.gt(maxQuantity)) {
     return block(
       RiskReasonCode.QUANTITY_ABOVE_INSTRUMENT_MAXIMUM,
       "Quantity exceeds the instrument maximum.",
-      { inputJson, actualValue: quantity.toString(), limitValue: maxQuantity.toString(), unit: "base" }
+      {
+        inputJson,
+        actualValue: quantity.toString(),
+        limitValue: maxQuantity.toString(),
+        unit: "base"
+      }
     );
   }
   if (notional.lt(minNotional)) {
-    return block(RiskReasonCode.BELOW_INSTRUMENT_MINIMUM, "Notional is below the instrument minimum.", {
-      inputJson,
-      actualValue: notional.toString(),
-      limitValue: minNotional.toString(),
-      unit: "USDT"
-    });
+    return block(
+      RiskReasonCode.BELOW_INSTRUMENT_MINIMUM,
+      "Notional is below the instrument minimum.",
+      {
+        inputJson,
+        actualValue: notional.toString(),
+        limitValue: minNotional.toString(),
+        unit: "USDT"
+      }
+    );
   }
   if (reserved.gt(ctx.availableCash)) {
-    return block(RiskReasonCode.INSUFFICIENT_CASH, "Reserve including fee exceeds available cash.", {
-      inputJson,
-      actualValue: reserved.toString(),
-      limitValue: ctx.availableCash.toString(),
-      unit: "USDT"
-    });
+    return block(
+      RiskReasonCode.INSUFFICIENT_CASH,
+      "Reserve including fee exceeds available cash.",
+      {
+        inputJson,
+        actualValue: reserved.toString(),
+        limitValue: ctx.availableCash.toString(),
+        unit: "USDT"
+      }
+    );
   }
-  return pass(RiskReasonCode.INSTRUMENT_MINIMUMS_OK, "Quantity, notional and cash all satisfy the instrument.", {
-    inputJson,
-    actualValue: quantity.toString(),
-    limitValue: minQuantity.toString(),
-    unit: "base"
-  });
+  return pass(
+    RiskReasonCode.INSTRUMENT_MINIMUMS_OK,
+    "Quantity, notional and cash all satisfy the instrument.",
+    {
+      inputJson,
+      actualValue: quantity.toString(),
+      limitValue: minQuantity.toString(),
+      unit: "base"
+    }
+  );
 }
 
 function ruleIdempotencyVersion(ctx: RiskEvaluationContext): RuleVerdict {
-  const { candidate, riskLimitSet, existingAssessment, executionProfile } = ctx.snapshot;
+  const { candidate, riskLimitSet, existingAssessment, executionProfile } =
+    ctx.snapshot;
   const inputJson = {
     candidateKey: candidate.candidateKey,
     candidateInputHash: candidate.inputHash,
@@ -1455,9 +1944,13 @@ function ruleIdempotencyVersion(ctx: RiskEvaluationContext): RuleVerdict {
     );
   }
   if (riskLimitSet === null) {
-    return critical(RiskReasonCode.RISK_LIMIT_SET_NOT_ACTIVE, "No risk limit set was supplied.", {
-      inputJson
-    });
+    return critical(
+      RiskReasonCode.RISK_LIMIT_SET_NOT_ACTIVE,
+      "No risk limit set was supplied.",
+      {
+        inputJson
+      }
+    );
   }
   if (riskLimitSet.status !== "ACTIVE") {
     return critical(
@@ -1476,7 +1969,8 @@ function ruleIdempotencyVersion(ctx: RiskEvaluationContext): RuleVerdict {
   const limitsMatchPolicy =
     riskLimitSet.maxOpenPositions === RISK_LIMIT_SET_V1.maxOpenPositions &&
     riskLimitSet.maxNewTradesPerDay === RISK_LIMIT_SET_V1.maxNewTradesPerDay &&
-    riskLimitSet.maxConsecutiveLosses === RISK_LIMIT_SET_V1.maxConsecutiveLosses &&
+    riskLimitSet.maxConsecutiveLosses ===
+      RISK_LIMIT_SET_V1.maxConsecutiveLosses &&
     riskLimitSet.maxSpreadBps === RISK_LIMIT_SET_V1.maxSpreadBps &&
     riskLimitSet.maxSlippageBps === RISK_LIMIT_SET_V1.maxSlippageBps;
   if (!limitsMatchPolicy) {
@@ -1496,9 +1990,13 @@ function ruleIdempotencyVersion(ctx: RiskEvaluationContext): RuleVerdict {
       { inputJson }
     );
   }
-  return pass(RiskReasonCode.VERSIONS_CONSISTENT, "Versions, hashes and plan fields are consistent.", {
-    inputJson
-  });
+  return pass(
+    RiskReasonCode.VERSIONS_CONSISTENT,
+    "Versions, hashes and plan fields are consistent.",
+    {
+      inputJson
+    }
+  );
 }
 
 // ───────────────────────────────────────────────────────────────────────────

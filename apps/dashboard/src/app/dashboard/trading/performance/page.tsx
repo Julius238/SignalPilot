@@ -1,6 +1,9 @@
 import { EmptyState, ErrorState } from "../../../../components/empty-state";
 import { PageHeader, SectionCard } from "../../../../components/ui";
-import { TradingBarChart, TradingLineChart } from "../../../../components/trading/trading-line-chart";
+import {
+  TradingBarChart,
+  TradingLineChart
+} from "../../../../components/trading/trading-line-chart";
 import { TradingDisabled } from "../../../../components/trading/trading-disabled";
 import {
   PerformanceOverallCard,
@@ -36,7 +39,12 @@ export default async function PerformancePage({ searchParams }: PageProps) {
   const params = await searchParams;
   const window = params.window || "ALL_TIME";
 
-  const [performanceResult, snapshotsResult, closedPositionsResult, latestRunResult] = await Promise.all([
+  const [
+    performanceResult,
+    snapshotsResult,
+    closedPositionsResult,
+    latestRunResult
+  ] = await Promise.all([
     fetchStrategyPerformance({ window, limit: 50 }),
     fetchTradingPortfolioSnapshots({ limit: SNAPSHOT_LIMIT }),
     fetchShadowPositions({ open: "false", limit: CLOSED_POSITION_LIMIT }),
@@ -48,15 +56,30 @@ export default async function PerformancePage({ searchParams }: PageProps) {
   const segments = latestRun?.segments ?? [];
   // Alle Segmente stammen per Konstruktion aus demselben inputHash — die API
   // gruppiert den Lauf, damit hier nie zwei Datenstände vermischt werden.
-  const overallSegment = segments.find((segment) => segment.segmentType === "OVERALL") ?? null;
-  const assetSegments = segments.filter((segment) => segment.segmentType === "ASSET");
-  const regimeSegments = segments.filter((segment) => segment.segmentType === "MARKET_REGIME");
-  const versionSegments = segments.filter((segment) => segment.segmentType === "STRATEGY_VERSION");
-  const exitSegments = segments.filter((segment) => segment.segmentType === "EXIT_REASON");
+  const overallSegment =
+    segments.find((segment) => segment.segmentType === "OVERALL") ?? null;
+  const directionSegments = segments.filter(
+    (segment) => segment.segmentType === "DIRECTION"
+  );
+  const assetSegments = segments.filter(
+    (segment) => segment.segmentType === "ASSET"
+  );
+  const regimeSegments = segments.filter(
+    (segment) => segment.segmentType === "MARKET_REGIME"
+  );
+  const versionSegments = segments.filter(
+    (segment) => segment.segmentType === "STRATEGY_VERSION"
+  );
+  const exitSegments = segments.filter(
+    (segment) => segment.segmentType === "EXIT_REASON"
+  );
   const snapshots = snapshotsResult.data ?? [];
   const closedPositions = closedPositionsResult.data ?? [];
 
-  const equityPoints = snapshots.map((snapshot) => ({ time: snapshot.asOf, value: snapshot.equity }));
+  const equityPoints = snapshots.map((snapshot) => ({
+    time: snapshot.asOf,
+    value: snapshot.equity
+  }));
   const cumulativePnlPoints = snapshots.map((snapshot) => ({
     time: snapshot.asOf,
     value: snapshot.realizedPnl
@@ -67,7 +90,10 @@ export default async function PerformancePage({ searchParams }: PageProps) {
   }));
   const perTradePnlPoints = closedPositions
     .filter((position) => position.closedAt)
-    .map((position) => ({ time: position.closedAt as string, value: position.realizedPnl }));
+    .map((position) => ({
+      time: position.closedAt as string,
+      value: position.realizedPnl
+    }));
 
   return (
     <>
@@ -78,10 +104,16 @@ export default async function PerformancePage({ searchParams }: PageProps) {
       />
 
       {performanceResult.error ? (
-        <ErrorState title="Performance konnte nicht geladen werden" message={performanceResult.error} />
+        <ErrorState
+          title="Performance konnte nicht geladen werden"
+          message={performanceResult.error}
+        />
       ) : null}
       {snapshotsResult.error ? (
-        <ErrorState title="Portfolio-Snapshots konnten nicht geladen werden" message={snapshotsResult.error} />
+        <ErrorState
+          title="Portfolio-Snapshots konnten nicht geladen werden"
+          message={snapshotsResult.error}
+        />
       ) : null}
 
       <form className="filter-bar" method="GET">
@@ -94,7 +126,11 @@ export default async function PerformancePage({ searchParams }: PageProps) {
       </form>
 
       <div className="grid two">
-        <TradingLineChart points={equityPoints} title="Equity-Kurve" emptyLabel="Keine Portfolio-Snapshots vorhanden." />
+        <TradingLineChart
+          points={equityPoints}
+          title="Equity-Kurve"
+          emptyLabel="Keine Portfolio-Snapshots vorhanden."
+        />
         <TradingLineChart
           points={drawdownPoints}
           title="Drawdown"
@@ -109,11 +145,17 @@ export default async function PerformancePage({ searchParams }: PageProps) {
           lineColor="#62d69b"
           emptyLabel="Keine Portfolio-Snapshots vorhanden."
         />
-        <TradingBarChart points={perTradePnlPoints} title="P&L je abgeschlossenem Trade" />
+        <TradingBarChart
+          points={perTradePnlPoints}
+          title="P&L je abgeschlossenem Trade"
+        />
       </div>
 
       <div style={{ marginTop: 16 }}>
-        <SectionCard title="Strategy Performance je StrategyVersion" subtitle={`Fenster: ${window}`}>
+        <SectionCard
+          title="Strategy Performance je StrategyVersion"
+          subtitle={`Fenster: ${window}`}
+        >
           {performance.length > 0 ? (
             <div className="table-wrap">
               <table>
@@ -138,7 +180,8 @@ export default async function PerformancePage({ searchParams }: PageProps) {
                     <tr key={row.id}>
                       <td>{row.strategyVersionId}</td>
                       <td className="nowrap">
-                        {formatUtcDateTime(row.from)} – {formatUtcDateTime(row.to)}
+                        {formatUtcDateTime(row.from)} –{" "}
+                        {formatUtcDateTime(row.to)}
                       </td>
                       <td>{row.closedTrades}</td>
                       <td>{row.wins}</td>
@@ -146,7 +189,9 @@ export default async function PerformancePage({ searchParams }: PageProps) {
                       <td>{row.breakeven}</td>
                       <td>{formatDecimalAmount(row.grossPnl)}</td>
                       <td>
-                        <span style={{ color: toneColor(decimalTone(row.netPnl)) }}>
+                        <span
+                          style={{ color: toneColor(decimalTone(row.netPnl)) }}
+                        >
                           {formatSignedDecimal(row.netPnl)}
                         </span>
                       </td>
@@ -175,7 +220,10 @@ export default async function PerformancePage({ searchParams }: PageProps) {
       ) : null}
 
       <div style={{ marginTop: 16 }}>
-        <SectionCard title="Datenbasis und Berechnungsversion" subtitle={`Fenster: ${window}`}>
+        <SectionCard
+          title="Datenbasis und Berechnungsversion"
+          subtitle={`Fenster: ${window}`}
+        >
           {latestRun?.provenance ? (
             <div className="table-wrap">
               <table>
@@ -184,14 +232,19 @@ export default async function PerformancePage({ searchParams }: PageProps) {
                     <th>Stand (asOf)</th>
                     <td>{formatUtcDateTime(latestRun.provenance.asOf)}</td>
                     <th>Berechnet am</th>
-                    <td>{formatUtcDateTime(latestRun.provenance.computedAt)}</td>
+                    <td>
+                      {formatUtcDateTime(latestRun.provenance.computedAt)}
+                    </td>
                   </tr>
                   <tr>
                     <th>Datenstand bis</th>
-                    <td>{formatUtcDateTime(latestRun.provenance.dataThroughAt)}</td>
+                    <td>
+                      {formatUtcDateTime(latestRun.provenance.dataThroughAt)}
+                    </td>
                     <th>Zeitraum (UTC)</th>
                     <td className="nowrap">
-                      {formatUtcDateTime(latestRun.provenance.from)} – {formatUtcDateTime(latestRun.provenance.to)}
+                      {formatUtcDateTime(latestRun.provenance.from)} –{" "}
+                      {formatUtcDateTime(latestRun.provenance.to)}
                     </td>
                   </tr>
                   <tr>
@@ -202,9 +255,13 @@ export default async function PerformancePage({ searchParams }: PageProps) {
                   </tr>
                   <tr>
                     <th>Input-Hash</th>
-                    <td className="mono">{latestRun.provenance.inputHash.slice(0, 16)}…</td>
+                    <td className="mono">
+                      {latestRun.provenance.inputHash.slice(0, 16)}…
+                    </td>
                     <th>Output-Hash</th>
-                    <td className="mono">{latestRun.provenance.outputHash.slice(0, 16)}…</td>
+                    <td className="mono">
+                      {latestRun.provenance.outputHash.slice(0, 16)}…
+                    </td>
                   </tr>
                 </tbody>
               </table>
@@ -223,6 +280,16 @@ export default async function PerformancePage({ searchParams }: PageProps) {
           <PerformanceOverallCard segment={overallSegment} />
         </div>
       ) : null}
+
+      <div style={{ marginTop: 16 }}>
+        <PerformanceSegmentTable
+          title="Performance nach Richtung"
+          subtitle="Long und Short werden getrennt ausgewertet und nicht gegeneinander genettet"
+          segments={directionSegments}
+          keyHeader="Richtung"
+          emptyLabel="Keine Aufschlüsselung nach Richtung vorhanden."
+        />
+      </div>
 
       <div style={{ marginTop: 16 }}>
         <PerformanceSegmentTable
@@ -262,7 +329,10 @@ export default async function PerformancePage({ searchParams }: PageProps) {
       </div>
 
       <div style={{ marginTop: 16 }}>
-        <SectionCard title="Portfolio-Snapshots" subtitle={`Letzte ${snapshots.length} Snapshots`}>
+        <SectionCard
+          title="Portfolio-Snapshots"
+          subtitle={`Letzte ${snapshots.length} Snapshots`}
+        >
           {snapshots.length > 0 ? (
             <div className="table-wrap">
               <table>
@@ -283,7 +353,9 @@ export default async function PerformancePage({ searchParams }: PageProps) {
                 <tbody>
                   {snapshots.map((snapshot) => (
                     <tr key={snapshot.id}>
-                      <td className="nowrap">{formatUtcDateTime(snapshot.asOf)}</td>
+                      <td className="nowrap">
+                        {formatUtcDateTime(snapshot.asOf)}
+                      </td>
                       <td>{formatDecimalAmount(snapshot.equity)}</td>
                       <td>{formatDecimalAmount(snapshot.availableCash)}</td>
                       <td>{formatDecimalAmount(snapshot.reservedCash)}</td>
@@ -291,12 +363,17 @@ export default async function PerformancePage({ searchParams }: PageProps) {
                       <td>{formatDecimalAmount(snapshot.realizedPnl)}</td>
                       <td>{formatDecimalAmount(snapshot.unrealizedPnl)}</td>
                       <td>
-                        <span style={{ color: toneColor(decimalTone(snapshot.dailyPnl)) }}>
+                        <span
+                          style={{
+                            color: toneColor(decimalTone(snapshot.dailyPnl))
+                          }}
+                        >
                           {formatSignedDecimal(snapshot.dailyPnl)}
                         </span>
                       </td>
                       <td>
-                        {formatDecimalAmount(snapshot.drawdownAmount)} ({formatDecimalAmount(snapshot.drawdownPct)}%)
+                        {formatDecimalAmount(snapshot.drawdownAmount)} (
+                        {formatDecimalAmount(snapshot.drawdownPct)}%)
                       </td>
                       <td>{snapshot.openPositionCount}</td>
                     </tr>

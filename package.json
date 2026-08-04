@@ -47,6 +47,7 @@
     "trading-worker:shadow-generate-candidates": "pnpm --filter @signalpilot/trading-worker shadow:generate-candidates",
     "trading-worker:shadow-assess-risk": "pnpm --filter @signalpilot/trading-worker shadow:assess-risk",
     "trading-worker:shadow-bootstrap": "pnpm --filter @signalpilot/trading-worker shadow:bootstrap",
+    "trading-worker:shadow-strategy-setup": "pnpm --filter @signalpilot/trading-worker shadow:strategy-setup",
     "trading-worker:shadow-create-orders": "pnpm --filter @signalpilot/trading-worker shadow:create-orders",
     "trading-worker:shadow-process-fills": "pnpm --filter @signalpilot/trading-worker shadow:process-fills",
     "trading-worker:shadow-monitor-positions": "pnpm --filter @signalpilot/trading-worker shadow:monitor-positions",
@@ -63,6 +64,7 @@
     "auth:hash-password": "tsx apps/api/scripts/hash-password.ts",
     "auth:verify-password": "tsx apps/api/scripts/verify-password.ts",
     "ops:prod:build": "bash scripts/ops/prod-build.sh",
+    "ops:prod:config": "bash scripts/ops/validate-prod-config.sh",
     "ops:prod:up": "bash scripts/ops/prod-up.sh",
     "ops:prod:down": "bash scripts/ops/prod-down.sh",
     "ops:prod:logs": "bash scripts/ops/prod-logs.sh",
@@ -75,7 +77,9 @@
     "ops:prod:restore": "bash scripts/ops/restore-postgres.sh",
     "ops:prod:health": "bash scripts/ops/healthcheck.sh",
     "ops:prod:reset-db-volume": "bash scripts/ops/prod-reset-db-volume.sh",
-    "ops:prod:prisma-smoke": "bash scripts/ops/prisma-smoke.sh"
+    "ops:prod:prisma-smoke": "bash scripts/ops/prisma-smoke.sh",
+    "ops:prod:trading": "bash scripts/ops/trading-shadow.sh",
+    "ops:test:scripts": "bash scripts/ops/test-ops-scripts.sh"
   },
   "devDependencies": {
     "@eslint/js": "^9.18.0",

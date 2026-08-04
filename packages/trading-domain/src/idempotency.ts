@@ -48,8 +48,13 @@ function keyPart(value: string | number): string {
   return text;
 }
 
-function buildKey(namespace: string, parts: readonly (string | number)[]): string {
-  return [`${namespace}.${KEY_VERSION}`, ...parts.map(keyPart)].join(KEY_SEPARATOR);
+function buildKey(
+  namespace: string,
+  parts: readonly (string | number)[]
+): string {
+  return [`${namespace}.${KEY_VERSION}`, ...parts.map(keyPart)].join(
+    KEY_SEPARATOR
+  );
 }
 
 function assertNonNegativeInteger(value: number, label: string): number {
@@ -67,17 +72,20 @@ function assertNonNegativeInteger(value: number, label: string): number {
 // ───────────────────────────────────────────────────────────────────────────
 
 /** SHA-256 over the canonical input snapshot of an engine call. */
-export const buildInputHash = (snapshot: unknown): string => canonicalHash(snapshot);
+export const buildInputHash = (snapshot: unknown): string =>
+  canonicalHash(snapshot);
 
 /** SHA-256 over the canonical output of an engine call. */
-export const buildOutputHash = (output: unknown): string => canonicalHash(output);
+export const buildOutputHash = (output: unknown): string =>
+  canonicalHash(output);
 
 /** SHA-256 over a canonical specification (strategy, limit set, exit plan, profile). */
 export const buildSpecificationHash = (specification: unknown): string =>
   canonicalHash(specification);
 
 /** SHA-256 over a canonical evidence payload. */
-export const buildPayloadHash = (payload: unknown): string => canonicalHash(payload);
+export const buildPayloadHash = (payload: unknown): string =>
+  canonicalHash(payload);
 
 export interface DecisionHashInput {
   readonly tradeCandidateId: string;
@@ -95,7 +103,8 @@ export interface DecisionHashInput {
  * identical engine versions must produce an identical hash on every host
  * (docs/trading/03, TradeDecision `outputHash`).
  */
-export const buildDecisionHash = (input: DecisionHashInput): string => canonicalHash(input);
+export const buildDecisionHash = (input: DecisionHashInput): string =>
+  canonicalHash(input);
 
 // ───────────────────────────────────────────────────────────────────────────
 // Aggregate keys
@@ -135,7 +144,11 @@ export const buildAssessmentKey = (input: {
   readonly riskLimitSetId: string;
   readonly inputHash: string;
 }): string =>
-  buildKey("risk-assessment", [input.tradeCandidateId, input.riskLimitSetId, input.inputHash]);
+  buildKey("risk-assessment", [
+    input.tradeCandidateId,
+    input.riskLimitSetId,
+    input.inputHash
+  ]);
 
 /** `TradeDecision.decisionKey` — same scope as the risk job's idempotency key. */
 export const buildDecisionKey = (input: {
@@ -143,11 +156,16 @@ export const buildDecisionKey = (input: {
   readonly riskLimitSetId: string;
   readonly inputHash: string;
 }): string =>
-  buildKey("trade-decision", [input.tradeCandidateId, input.riskLimitSetId, input.inputHash]);
+  buildKey("trade-decision", [
+    input.tradeCandidateId,
+    input.riskLimitSetId,
+    input.inputHash
+  ]);
 
 /** `ShadowOrder.orderKey` for the single entry order of a decision. */
-export const buildEntryOrderKey = (input: { readonly tradeDecisionId: string }): string =>
-  buildKey("shadow-order.entry", [input.tradeDecisionId]);
+export const buildEntryOrderKey = (input: {
+  readonly tradeDecisionId: string;
+}): string => buildKey("shadow-order.entry", [input.tradeDecisionId]);
 
 /** `ShadowOrder.orderKey` for an exit order of a position. */
 export const buildExitOrderKey = (input: {
@@ -195,7 +213,12 @@ export const buildPositionKey = (input: {
   readonly portfolioId: string;
   readonly assetId: string;
   readonly entryOrderId: string;
-}): string => buildKey("shadow-position", [input.portfolioId, input.assetId, input.entryOrderId]);
+}): string =>
+  buildKey("shadow-position", [
+    input.portfolioId,
+    input.assetId,
+    input.entryOrderId
+  ]);
 
 /** `ShadowPositionEvent.eventKey` — position and gapless sequence. */
 export const buildPositionEventKey = (input: {
@@ -214,7 +237,12 @@ export const buildLedgerEntryKey = (input: {
   readonly causeType: string;
   readonly causeId: string;
 }): string =>
-  buildKey("ledger-entry", [input.portfolioId, input.type, input.causeType, input.causeId]);
+  buildKey("ledger-entry", [
+    input.portfolioId,
+    input.type,
+    input.causeType,
+    input.causeId
+  ]);
 
 /** `RiskEvent.eventKey` — type, affected aggregate and evidence hash. */
 export const buildRiskEventKey = (input: {
@@ -223,7 +251,12 @@ export const buildRiskEventKey = (input: {
   readonly aggregateId: string;
   readonly inputHash: string;
 }): string =>
-  buildKey("risk-event", [input.type, input.aggregateType, input.aggregateId, input.inputHash]);
+  buildKey("risk-event", [
+    input.type,
+    input.aggregateType,
+    input.aggregateId,
+    input.inputHash
+  ]);
 
 /** `TradingAuditEvent.eventKey` — action, target and the caller's idempotency key. */
 export const buildAuditEventKey = (input: {
@@ -250,7 +283,8 @@ export const buildSessionKey = (input: {
   ]);
 
 /** `TradingJobCursor.scopeKey` — assignment, order or position scope of a job. */
-export const buildJobScopeKey = (parts: readonly string[]): string => buildKey("job-scope", parts);
+export const buildJobScopeKey = (parts: readonly string[]): string =>
+  buildKey("job-scope", parts);
 
 // ───────────────────────────────────────────────────────────────────────────
 // "At most one active" keys
@@ -267,37 +301,60 @@ export const buildActiveAssignmentScopeKey = (input: {
   readonly assetId: string;
   readonly strategyId: string;
 }): string =>
-  buildKey("active-assignment", [input.portfolioId, input.assetId, input.strategyId]);
+  buildKey("active-assignment", [
+    input.portfolioId,
+    input.assetId,
+    input.strategyId
+  ]);
 
 /** At most one active execution profile per asset. */
-export const buildActiveExecutionProfileKey = (input: { readonly assetId: string }): string =>
-  buildKey("active-execution-profile", [input.assetId]);
+export const buildActiveExecutionProfileKey = (input: {
+  readonly assetId: string;
+}): string => buildKey("active-execution-profile", [input.assetId]);
 
 /** At most one active risk limit set per scope. */
-export const buildActiveRiskLimitSetKey = (input: { readonly scope: RiskLimitScope }): string =>
-  buildKey("active-risk-limit-set", [input.scope]);
+export const buildActiveRiskLimitSetKey = (input: {
+  readonly scope: RiskLimitScope;
+}): string => buildKey("active-risk-limit-set", [input.scope]);
 
-/** At most one non-terminal position per portfolio and asset. */
+/**
+ * At most one non-terminal position per portfolio and asset.
+ *
+ * Deliberately **direction-free**, which is what makes long and short exposure
+ * on the same asset mutually exclusive by database constraint rather than by
+ * convention (ADR 0013). Do not add `direction` to this key.
+ */
 export const buildOpenPositionScopeKey = (input: {
   readonly portfolioId: string;
   readonly assetId: string;
 }): string => buildKey("open-position", [input.portfolioId, input.assetId]);
 
 /** At most one non-closed session per portfolio. */
-export const buildActiveSessionScopeKey = (input: { readonly portfolioId: string }): string =>
-  buildKey("active-session", [input.portfolioId]);
+export const buildActiveSessionScopeKey = (input: {
+  readonly portfolioId: string;
+}): string => buildKey("active-session", [input.portfolioId]);
 
 /** At most one non-terminal exit plan per position. */
 export const buildActiveExitPlanScopeKey = (input: {
   readonly shadowPositionId: string;
 }): string => buildKey("active-exit-plan", [input.shadowPositionId]);
 
-/** At most one non-terminal entry order per portfolio and asset (no scale-in). */
+/**
+ * At most one non-terminal entry order per portfolio and asset (no scale-in).
+ *
+ * Deliberately **direction-free**: this is the key that makes a long and a
+ * short entry order for the same asset mutually exclusive at the database
+ * level, not merely at scheduler level (ADR 0013). Adding `direction` here
+ * would let a long and a short entry order coexist and is therefore forbidden;
+ * `ShadowPosition.openScopeKey` (`buildOpenPositionScopeKey`) is direction-free
+ * for exactly the same reason.
+ */
 export const buildOpenEntryOrderScopeKey = (input: {
   readonly portfolioId: string;
   readonly assetId: string;
   readonly purpose: ShadowOrderPurpose;
-}): string => buildKey("open-order", [input.portfolioId, input.assetId, input.purpose]);
+}): string =>
+  buildKey("open-order", [input.portfolioId, input.assetId, input.purpose]);
 
 // ───────────────────────────────────────────────────────────────────────────
 // Concurrency and replay guards
@@ -308,7 +365,10 @@ export const buildOpenEntryOrderScopeKey = (input: {
  * `UPDATE ... WHERE id = ? AND status = ? AND version = ?`. Zero affected rows
  * means a concurrent update, never a blind overwrite (docs/trading/02).
  */
-export function checkExpectedVersion(actualVersion: number, expectedVersion: number): GuardResult {
+export function checkExpectedVersion(
+  actualVersion: number,
+  expectedVersion: number
+): GuardResult {
   return actualVersion === expectedVersion
     ? guardOk()
     : guardFail(
@@ -317,9 +377,13 @@ export function checkExpectedVersion(actualVersion: number, expectedVersion: num
       );
 }
 
-export function assertExpectedVersion(actualVersion: number, expectedVersion: number): void {
+export function assertExpectedVersion(
+  actualVersion: number,
+  expectedVersion: number
+): void {
   const result = checkExpectedVersion(actualVersion, expectedVersion);
-  if (!result.ok) throw new TradingDomainError(result.reasonCode, result.message);
+  if (!result.ok)
+    throw new TradingDomainError(result.reasonCode, result.message);
 }
 
 /** The next version an aggregate must carry after a successful transition. */
@@ -360,7 +424,11 @@ export function assertNoIdempotencyConflict(
     throw new TradingDomainError(
       TradingReasonCode.IDEMPOTENCY_OR_VERSION_CONFLICT,
       `Idempotency key ${key} was already used with a different payload hash.`,
-      { key, existingPayloadHash: existingPayloadHash ?? "", incomingPayloadHash }
+      {
+        key,
+        existingPayloadHash: existingPayloadHash ?? "",
+        incomingPayloadHash
+      }
     );
   }
   return verdict;
@@ -370,7 +438,10 @@ export function assertNoIdempotencyConflict(
  * Ledger, fill and position-event sequences must be gapless and monotonic so a
  * replay reproduces the exact same aggregate state (docs/trading/03).
  */
-export function checkNextSequence(lastSequence: number, nextSequenceValue: number): GuardResult {
+export function checkNextSequence(
+  lastSequence: number,
+  nextSequenceValue: number
+): GuardResult {
   assertNonNegativeInteger(lastSequence, "lastSequence");
   assertNonNegativeInteger(nextSequenceValue, "nextSequence");
   return nextSequenceValue === lastSequence + 1
@@ -381,9 +452,13 @@ export function checkNextSequence(lastSequence: number, nextSequenceValue: numbe
       );
 }
 
-export function assertNextSequence(lastSequence: number, nextSequenceValue: number): void {
+export function assertNextSequence(
+  lastSequence: number,
+  nextSequenceValue: number
+): void {
   const result = checkNextSequence(lastSequence, nextSequenceValue);
-  if (!result.ok) throw new TradingDomainError(result.reasonCode, result.message);
+  if (!result.ok)
+    throw new TradingDomainError(result.reasonCode, result.message);
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -403,7 +478,9 @@ function safeKeyPart(value: string): string {
       "An idempotency key part must not be empty."
     );
   }
-  return KEY_PART_PATTERN.test(value) ? value : `h.${canonicalHash(value).slice(0, 16)}`;
+  return KEY_PART_PATTERN.test(value)
+    ? value
+    : `h.${canonicalHash(value).slice(0, 16)}`;
 }
 
 /**

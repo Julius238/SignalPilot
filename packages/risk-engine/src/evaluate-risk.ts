@@ -50,7 +50,12 @@ import {
 const ZERO = DecimalValue.ZERO;
 
 const decimalOrZero = (value: string | null | undefined): DecimalValue => {
-  if (value === null || value === undefined || !DecimalValue.isDecimalString(value)) return ZERO;
+  if (
+    value === null ||
+    value === undefined ||
+    !DecimalValue.isDecimalString(value)
+  )
+    return ZERO;
   try {
     return DecimalValue.fromString(value);
   } catch {
@@ -66,18 +71,30 @@ const DIRECTIVE_RANK: Readonly<Record<RiskDirective, number>> = {
 };
 
 /** A position still ties up capital while it holds quantity or sits in ERROR. */
-const carriesExposure = (position: { openQuantity: string; status: string }): boolean =>
-  decimalOrZero(position.openQuantity).isPositive() || position.status === "ERROR";
+const carriesExposure = (position: {
+  openQuantity: string;
+  status: string;
+}): boolean =>
+  decimalOrZero(position.openQuantity).isPositive() ||
+  position.status === "ERROR";
 
 function sumDecimals(values: readonly string[]): DecimalValue {
-  return values.reduce<DecimalValue>((total, value) => total.add(decimalOrZero(value)), ZERO);
+  return values.reduce<DecimalValue>(
+    (total, value) => total.add(decimalOrZero(value)),
+    ZERO
+  );
 }
 
 /** Assessment key placeholder when no risk limit set is available. */
 const MISSING_LIMIT_SET_ID = "MISSING-RISK-LIMIT-SET";
 
-export function evaluateRisk(snapshot: RiskInputSnapshotV1): RiskEvaluationResultV1 {
-  const evaluatedAt = typeof snapshot?.asOf === "string" ? snapshot.asOf : "1970-01-01T00:00:00.000Z";
+export function evaluateRisk(
+  snapshot: RiskInputSnapshotV1
+): RiskEvaluationResultV1 {
+  const evaluatedAt =
+    typeof snapshot?.asOf === "string"
+      ? snapshot.asOf
+      : "1970-01-01T00:00:00.000Z";
 
   // The `existingAssessment` probe describes what is already stored; it must not
   // change the hash it is compared against, otherwise a conflict could never
@@ -95,32 +112,61 @@ export function evaluateRisk(snapshot: RiskInputSnapshotV1): RiskEvaluationResul
   const assetId = snapshot.candidate.assetId;
   const groupSymbols = new Set(snapshot.correlationGroup?.memberSymbols ?? []);
 
-  const marketValue = sumDecimals(exposurePositions.map((position) => position.marketValue));
-  const totalReserved = sumDecimals(
-    snapshot.reservations.map((reservation) => reservation.reservedQuoteAmount)
+  const marketValue = sumDecimals(
+    exposurePositions.map((position) => position.marketValue)
+  );
+  const equityContribution = sumDecimals(
+    exposurePositions.map((position) => position.equityContribution)
+  );
+  const totalReserved = sumDecimals([
+    ...snapshot.reservations.map(
+      (reservation) => reservation.reservedQuoteAmount
+    ),
+    ...exposurePositions.map((position) => position.reservedCollateral)
+  ]);
+  const entryOrderReserve = sumDecimals(
+    snapshot.reservations
+      .filter((reservation) => reservation.purpose === "ENTRY")
+      .map((reservation) => reservation.reservedQuoteAmount)
   );
 
-  const grossExposure = marketValue.add(totalReserved);
+  // Synthetic-short collateral is already cash backing, not a second market
+  // exposure. Gross exposure is absolute position notional plus pending ENTRY
+  // reserves; LONG and SHORT market values are never netted.
+  const grossExposure = marketValue.add(entryOrderReserve);
   const assetExposure = sumDecimals(
-    exposurePositions.filter((position) => position.assetId === assetId).map((p) => p.marketValue)
+    exposurePositions
+      .filter((position) => position.assetId === assetId)
+      .map((p) => p.marketValue)
   ).add(
     sumDecimals(
       snapshot.reservations
-        .filter((reservation) => reservation.assetId === assetId)
+        .filter(
+          (reservation) =>
+            reservation.assetId === assetId && reservation.purpose === "ENTRY"
+        )
         .map((reservation) => reservation.reservedQuoteAmount)
     )
   );
   const correlatedExposure = sumDecimals(
-    exposurePositions.filter((position) => groupSymbols.has(position.symbol)).map((p) => p.marketValue)
+    exposurePositions
+      .filter((position) => groupSymbols.has(position.symbol))
+      .map((p) => p.marketValue)
   ).add(
     sumDecimals(
       snapshot.reservations
-        .filter((reservation) => groupSymbols.has(reservation.symbol))
+        .filter(
+          (reservation) =>
+            groupSymbols.has(reservation.symbol) &&
+            reservation.purpose === "ENTRY"
+        )
         .map((reservation) => reservation.reservedQuoteAmount)
     )
   );
 
-  const assetAlreadyOpen = exposurePositions.some((position) => position.assetId === assetId);
+  const assetAlreadyOpen = exposurePositions.some(
+    (position) => position.assetId === assetId
+  );
   const openPositionCount = exposurePositions.length;
 
   const equity = decimalOrZero(snapshot.portfolio.equity);
@@ -134,6 +180,8 @@ export function evaluateRisk(snapshot: RiskInputSnapshotV1): RiskEvaluationResul
   const sizing: RiskSizingResultV1 =
     profile === null || limits === null
       ? computePositionSizing({
+          direction:
+            snapshot?.candidate?.direction === "SHORT" ? "SHORT" : "LONG",
           // Deliberately unsatisfiable so the result reports `computable: false`
           // instead of inventing a cost model.
           referenceEntryPrice: ZERO,
@@ -158,7 +206,15 @@ export function evaluateRisk(snapshot: RiskInputSnapshotV1): RiskEvaluationResul
           slippageBps: 0
         })
       : computePositionSizing({
-          referenceEntryPrice: decimalOrZero(snapshot.candidate.referenceEntryPrice),
+          direction:
+            snapshot.candidate.direction === "SHORT"
+              ? "SHORT"
+              : snapshot.candidate.direction === "LONG"
+                ? "LONG"
+                : (snapshot.candidate.direction as "LONG"),
+          referenceEntryPrice: decimalOrZero(
+            snapshot.candidate.referenceEntryPrice
+          ),
           stopPrice: decimalOrZero(snapshot.candidate.stopPrice),
           takeProfitPrice: decimalOrZero(snapshot.candidate.takeProfitPrice),
           equity,
@@ -169,13 +225,17 @@ export function evaluateRisk(snapshot: RiskInputSnapshotV1): RiskEvaluationResul
           maxRiskPerTradePct: decimalOrZero(limits.maxRiskPerTradePct),
           maxGrossExposurePct: decimalOrZero(limits.maxGrossExposurePct),
           maxAssetExposurePct: decimalOrZero(limits.maxAssetExposurePct),
-          maxCorrelatedExposurePct: decimalOrZero(limits.maxCorrelatedExposurePct),
+          maxCorrelatedExposurePct: decimalOrZero(
+            limits.maxCorrelatedExposurePct
+          ),
           tickSize: decimalOrZero(profile.tickSize),
           stepSize: decimalOrZero(profile.stepSize),
           minQuantity: decimalOrZero(profile.minQuantity),
           minNotional: decimalOrZero(profile.minNotional),
           maxQuantity:
-            profile.maxQuantity === null ? null : decimalOrZero(profile.maxQuantity),
+            profile.maxQuantity === null
+              ? null
+              : decimalOrZero(profile.maxQuantity),
           feeBps: profile.feeBps,
           fullSpreadBps: profile.fullSpreadBps,
           slippageBps: profile.slippageBps
@@ -198,6 +258,7 @@ export function evaluateRisk(snapshot: RiskInputSnapshotV1): RiskEvaluationResul
     assetAlreadyOpen,
     totalReserved,
     marketValue,
+    equityContribution,
     inputHash
   };
 
@@ -213,7 +274,10 @@ export function evaluateRisk(snapshot: RiskInputSnapshotV1): RiskEvaluationResul
     const verdict = rule(context);
     ruleResults.push(toRuleResult(ruleCode, verdict, evaluatedAt));
 
-    if (verdict.directive !== undefined && DIRECTIVE_RANK[verdict.directive] > DIRECTIVE_RANK[directive]) {
+    if (
+      verdict.directive !== undefined &&
+      DIRECTIVE_RANK[verdict.directive] > DIRECTIVE_RANK[directive]
+    ) {
       directive = verdict.directive;
     }
     if (verdict.outcome === "ERROR") {
@@ -232,7 +296,10 @@ export function evaluateRisk(snapshot: RiskInputSnapshotV1): RiskEvaluationResul
       : RiskEvaluationOutcome.APPROVED;
 
   // An unresolved error must at least stop new exposure.
-  if (outcome === RiskEvaluationOutcome.ERROR && DIRECTIVE_RANK[directive] < DIRECTIVE_RANK.BLOCK_NEW) {
+  if (
+    outcome === RiskEvaluationOutcome.ERROR &&
+    DIRECTIVE_RANK[directive] < DIRECTIVE_RANK.BLOCK_NEW
+  ) {
     directive = "BLOCK_NEW";
   }
 
@@ -241,9 +308,13 @@ export function evaluateRisk(snapshot: RiskInputSnapshotV1): RiskEvaluationResul
   // Only an approval carries a quantity. A rejected or errored assessment
   // records the size it would have taken as `requestedQuantity` and approves 0.
   const approvedQuantity =
-    outcome === RiskEvaluationOutcome.APPROVED ? sizing.approvedQuantity : ZERO.toString();
+    outcome === RiskEvaluationOutcome.APPROVED
+      ? sizing.approvedQuantity
+      : ZERO.toString();
   const riskAmount =
-    outcome === RiskEvaluationOutcome.APPROVED ? sizing.riskAmount : ZERO.toString();
+    outcome === RiskEvaluationOutcome.APPROVED
+      ? sizing.riskAmount
+      : ZERO.toString();
 
   const riskLimitSetId = limits?.id ?? null;
   const assessmentKey = buildAssessmentKey({
@@ -358,19 +429,22 @@ function unreadableSnapshot(
       ? RiskReasonCode.RISK_SNAPSHOT_MALFORMED
       : RiskReasonCode.RISK_SNAPSHOT_VERSION_UNSUPPORTED;
 
-  const ruleResults: RiskRuleResultDraftV1[] = RISK_RULE_ORDER.map((ruleCode: RiskRuleCode) => ({
-    ruleCode,
-    ruleVersion: RISK_RULE_SET_VERSION,
-    outcome: "ERROR" as const,
-    severity: "CRITICAL" as const,
-    reasonCode,
-    message: "The risk input snapshot could not be read; no rule was evaluated.",
-    actualValue: null,
-    limitValue: null,
-    unit: null,
-    inputJson: { snapshotVersion: snapshot?.snapshotVersion ?? null },
-    evaluatedAt
-  }));
+  const ruleResults: RiskRuleResultDraftV1[] = RISK_RULE_ORDER.map(
+    (ruleCode: RiskRuleCode) => ({
+      ruleCode,
+      ruleVersion: RISK_RULE_SET_VERSION,
+      outcome: "ERROR" as const,
+      severity: "CRITICAL" as const,
+      reasonCode,
+      message:
+        "The risk input snapshot could not be read; no rule was evaluated.",
+      actualValue: null,
+      limitValue: null,
+      unit: null,
+      inputJson: { snapshotVersion: snapshot?.snapshotVersion ?? null },
+      evaluatedAt
+    })
+  );
 
   const zero = ZERO.toString();
   const candidateId = snapshot?.candidate?.id ?? "UNKNOWN-CANDIDATE";
@@ -380,6 +454,7 @@ function unreadableSnapshot(
     inputHash
   });
   const sizing = computePositionSizing({
+    direction: "LONG",
     referenceEntryPrice: ZERO,
     stopPrice: ZERO,
     takeProfitPrice: ZERO,

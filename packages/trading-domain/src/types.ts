@@ -29,7 +29,8 @@ export const TradingActorType = {
   ADMIN: "ADMIN",
   RECOVERY: "RECOVERY"
 } as const;
-export type TradingActorType = (typeof TradingActorType)[keyof typeof TradingActorType];
+export type TradingActorType =
+  (typeof TradingActorType)[keyof typeof TradingActorType];
 
 // ───────────────────────────────────────────────────────────────────────────
 // Reason codes
@@ -70,9 +71,16 @@ export const TradingReasonCode = {
   TERMINAL_STATE_IMMUTABLE: "TERMINAL_STATE_IMMUTABLE",
   UNKNOWN_STATE: "UNKNOWN_STATE",
 
+  // ── Direction and price plan ────────────────────────────────────────────
+  DIRECTION_UNKNOWN: "DIRECTION_UNKNOWN",
+  PRICE_PLAN_NOT_ORDERED: "PRICE_PLAN_NOT_ORDERED",
+  PRICE_PLAN_NOT_POSITIVE: "PRICE_PLAN_NOT_POSITIVE",
+
   // ── Trade candidate ─────────────────────────────────────────────────────
-  CANDIDATE_INVALID_REASON_CODE_REQUIRED: "CANDIDATE_INVALID_REASON_CODE_REQUIRED",
-  CANDIDATE_CANCEL_REASON_CODE_REQUIRED: "CANDIDATE_CANCEL_REASON_CODE_REQUIRED",
+  CANDIDATE_INVALID_REASON_CODE_REQUIRED:
+    "CANDIDATE_INVALID_REASON_CODE_REQUIRED",
+  CANDIDATE_CANCEL_REASON_CODE_REQUIRED:
+    "CANDIDATE_CANCEL_REASON_CODE_REQUIRED",
   CANDIDATE_NOT_EXPIRED: "CANDIDATE_NOT_EXPIRED",
   CANDIDATE_HAS_ENTRY_ORDER: "CANDIDATE_HAS_ENTRY_ORDER",
   CANDIDATE_SNAPSHOT_INCOMPLETE: "CANDIDATE_SNAPSHOT_INCOMPLETE",
@@ -106,7 +114,8 @@ export const TradingReasonCode = {
   POSITION_EXIT_PLAN_REQUIRED: "POSITION_EXIT_PLAN_REQUIRED",
   POSITION_ENTRY_NOT_SETTLED: "POSITION_ENTRY_NOT_SETTLED",
   POSITION_OPEN_QUANTITY_MUST_BE_ZERO: "POSITION_OPEN_QUANTITY_MUST_BE_ZERO",
-  POSITION_OPEN_QUANTITY_MUST_BE_POSITIVE: "POSITION_OPEN_QUANTITY_MUST_BE_POSITIVE",
+  POSITION_OPEN_QUANTITY_MUST_BE_POSITIVE:
+    "POSITION_OPEN_QUANTITY_MUST_BE_POSITIVE",
   POSITION_FINAL_TRIGGER_MISMATCH: "POSITION_FINAL_TRIGGER_MISMATCH",
   POSITION_SCALE_IN_FORBIDDEN: "POSITION_SCALE_IN_FORBIDDEN",
 
@@ -133,7 +142,8 @@ export const TradingReasonCode = {
   SESSION_EXECUTION_PROFILE_REQUIRED: "SESSION_EXECUTION_PROFILE_REQUIRED",
   SESSION_ASSIGNMENT_REQUIRED: "SESSION_ASSIGNMENT_REQUIRED",
   SESSION_ASSIGNMENT_SCOPE_NOT_ALLOWED: "SESSION_ASSIGNMENT_SCOPE_NOT_ALLOWED",
-  SESSION_UNACKNOWLEDGED_CRITICAL_RISK_EVENT: "SESSION_UNACKNOWLEDGED_CRITICAL_RISK_EVENT",
+  SESSION_UNACKNOWLEDGED_CRITICAL_RISK_EVENT:
+    "SESSION_UNACKNOWLEDGED_CRITICAL_RISK_EVENT",
   SESSION_EXPIRED_CLAIMS_PRESENT: "SESSION_EXPIRED_CLAIMS_PRESENT",
   SESSION_UNKNOWN_OPEN_AGGREGATES: "SESSION_UNKNOWN_OPEN_AGGREGATES",
   SESSION_OPEN_EXPOSURE_PRESENT: "SESSION_OPEN_EXPOSURE_PRESENT",
@@ -142,8 +152,10 @@ export const TradingReasonCode = {
   SESSION_RISK_EVENT_NOT_ACKNOWLEDGED: "SESSION_RISK_EVENT_NOT_ACKNOWLEDGED",
   SESSION_UNCLEAR_ORDERS_PRESENT: "SESSION_UNCLEAR_ORDERS_PRESENT",
   SESSION_CLOSED_READ_ONLY: "SESSION_CLOSED_READ_ONLY",
-  SESSION_UNLOCK_AND_ACTIVATE_MUST_BE_SEPARATE: "SESSION_UNLOCK_AND_ACTIVATE_MUST_BE_SEPARATE",
-  SESSION_KILL_SWITCH_RELEASE_NOT_ALLOWED: "SESSION_KILL_SWITCH_RELEASE_NOT_ALLOWED",
+  SESSION_UNLOCK_AND_ACTIVATE_MUST_BE_SEPARATE:
+    "SESSION_UNLOCK_AND_ACTIVATE_MUST_BE_SEPARATE",
+  SESSION_KILL_SWITCH_RELEASE_NOT_ALLOWED:
+    "SESSION_KILL_SWITCH_RELEASE_NOT_ALLOWED",
 
   // ── Build / configuration capability (fail-closed) ──────────────────────
   BUILD_CAPABILITY_NOT_SHADOW_ONLY: "BUILD_CAPABILITY_NOT_SHADOW_ONLY",
@@ -156,12 +168,12 @@ export const TradingReasonCode = {
   PORTFOLIO_INCONSISTENT: "PORTFOLIO_INCONSISTENT",
   PORTFOLIO_NOT_ACTIVE: "PORTFOLIO_NOT_ACTIVE"
 } as const;
-export type TradingReasonCode = (typeof TradingReasonCode)[keyof typeof TradingReasonCode];
+export type TradingReasonCode =
+  (typeof TradingReasonCode)[keyof typeof TradingReasonCode];
 
 /** Every reason code, sorted, for exhaustiveness and stability tests. */
-export const ALL_TRADING_REASON_CODES: readonly TradingReasonCode[] = Object.freeze(
-  Object.values(TradingReasonCode).sort()
-);
+export const ALL_TRADING_REASON_CODES: readonly TradingReasonCode[] =
+  Object.freeze(Object.values(TradingReasonCode).sort());
 
 /** Domain failure carrying a stable, persistable reason code. */
 export class TradingDomainError extends Error {
@@ -183,11 +195,18 @@ export class TradingDomainError extends Error {
 /** Result of a pure guard: either allowed, or refused with a stable code. */
 export type GuardResult =
   | { readonly ok: true }
-  | { readonly ok: false; readonly reasonCode: TradingReasonCode; readonly message: string };
+  | {
+      readonly ok: false;
+      readonly reasonCode: TradingReasonCode;
+      readonly message: string;
+    };
 
 export const guardOk = (): GuardResult => ({ ok: true });
 
-export const guardFail = (reasonCode: TradingReasonCode, message: string): GuardResult => ({
+export const guardFail = (
+  reasonCode: TradingReasonCode,
+  message: string
+): GuardResult => ({
   ok: false,
   reasonCode,
   message
@@ -202,7 +221,8 @@ export const StrategyStatus = {
   ACTIVE: "ACTIVE",
   RETIRED: "RETIRED"
 } as const;
-export type StrategyStatus = (typeof StrategyStatus)[keyof typeof StrategyStatus];
+export type StrategyStatus =
+  (typeof StrategyStatus)[keyof typeof StrategyStatus];
 
 export const StrategyVersionStatus = {
   DRAFT: "DRAFT",
@@ -210,23 +230,40 @@ export const StrategyVersionStatus = {
   ACTIVE: "ACTIVE",
   RETIRED: "RETIRED"
 } as const;
-export type StrategyVersionStatus = (typeof StrategyVersionStatus)[keyof typeof StrategyVersionStatus];
+export type StrategyVersionStatus =
+  (typeof StrategyVersionStatus)[keyof typeof StrategyVersionStatus];
 
 // ───────────────────────────────────────────────────────────────────────────
 // Trade candidate, evidence, decision
 // ───────────────────────────────────────────────────────────────────────────
 
 /** v1 is long-only (docs/trading/06, R-005-LONG-ONLY). */
+/**
+ * Trade direction.
+ *
+ * `SHORT` is a **synthetic, unleveraged shadow simulation only** — there is no
+ * borrow, no funding, no liquidation and no margin anywhere in this system, and
+ * no exchange adapter exists at all (ADR 0011, ADR 0012). A real short would
+ * require an explicit futures- or margin-capable exchange capability, which the
+ * shadow-only build refuses by construction.
+ */
 export const TradeDirection = {
-  LONG: "LONG"
+  LONG: "LONG",
+  SHORT: "SHORT"
 } as const;
-export type TradeDirection = (typeof TradeDirection)[keyof typeof TradeDirection];
+export type TradeDirection =
+  (typeof TradeDirection)[keyof typeof TradeDirection];
+
+export function isTradeDirection(value: unknown): value is TradeDirection {
+  return value === TradeDirection.LONG || value === TradeDirection.SHORT;
+}
 
 /** v1 is market-only (docs/trading/07, "Limit Orders – expliziter späterer Scope"). */
 export const TradeEntryType = {
   MARKET: "MARKET"
 } as const;
-export type TradeEntryType = (typeof TradeEntryType)[keyof typeof TradeEntryType];
+export type TradeEntryType =
+  (typeof TradeEntryType)[keyof typeof TradeEntryType];
 
 export const TradeCandidateStatus = {
   CREATED: "CREATED",
@@ -238,7 +275,8 @@ export const TradeCandidateStatus = {
   EXPIRED: "EXPIRED",
   CANCELLED: "CANCELLED"
 } as const;
-export type TradeCandidateStatus = (typeof TradeCandidateStatus)[keyof typeof TradeCandidateStatus];
+export type TradeCandidateStatus =
+  (typeof TradeCandidateStatus)[keyof typeof TradeCandidateStatus];
 
 export const TradeEvidenceType = {
   CANDLE: "CANDLE",
@@ -252,7 +290,8 @@ export const TradeEvidenceType = {
   DISCOVERY: "DISCOVERY",
   EXECUTION_PROFILE: "EXECUTION_PROFILE"
 } as const;
-export type TradeEvidenceType = (typeof TradeEvidenceType)[keyof typeof TradeEvidenceType];
+export type TradeEvidenceType =
+  (typeof TradeEvidenceType)[keyof typeof TradeEvidenceType];
 
 export const TradeDecisionOutcome = {
   APPROVE_SHADOW: "APPROVE_SHADOW",
@@ -261,7 +300,8 @@ export const TradeDecisionOutcome = {
   CANCEL: "CANCEL",
   ERROR: "ERROR"
 } as const;
-export type TradeDecisionOutcome = (typeof TradeDecisionOutcome)[keyof typeof TradeDecisionOutcome];
+export type TradeDecisionOutcome =
+  (typeof TradeDecisionOutcome)[keyof typeof TradeDecisionOutcome];
 
 // ───────────────────────────────────────────────────────────────────────────
 // Risk
@@ -272,7 +312,8 @@ export const RiskAssessmentStatus = {
   FAIL: "FAIL",
   ERROR: "ERROR"
 } as const;
-export type RiskAssessmentStatus = (typeof RiskAssessmentStatus)[keyof typeof RiskAssessmentStatus];
+export type RiskAssessmentStatus =
+  (typeof RiskAssessmentStatus)[keyof typeof RiskAssessmentStatus];
 
 export const RiskRuleOutcome = {
   PASS: "PASS",
@@ -280,7 +321,8 @@ export const RiskRuleOutcome = {
   WARN: "WARN",
   ERROR: "ERROR"
 } as const;
-export type RiskRuleOutcome = (typeof RiskRuleOutcome)[keyof typeof RiskRuleOutcome];
+export type RiskRuleOutcome =
+  (typeof RiskRuleOutcome)[keyof typeof RiskRuleOutcome];
 
 export const RiskSeverity = {
   INFO: "INFO",
@@ -295,13 +337,15 @@ export const RiskLimitSetStatus = {
   ACTIVE: "ACTIVE",
   RETIRED: "RETIRED"
 } as const;
-export type RiskLimitSetStatus = (typeof RiskLimitSetStatus)[keyof typeof RiskLimitSetStatus];
+export type RiskLimitSetStatus =
+  (typeof RiskLimitSetStatus)[keyof typeof RiskLimitSetStatus];
 
 /** v1 evaluates limits per portfolio only (docs/trading/03, RiskLimitSet). */
 export const RiskLimitScope = {
   PORTFOLIO: "PORTFOLIO"
 } as const;
-export type RiskLimitScope = (typeof RiskLimitScope)[keyof typeof RiskLimitScope];
+export type RiskLimitScope =
+  (typeof RiskLimitScope)[keyof typeof RiskLimitScope];
 
 export const RiskEventType = {
   RISK_RULE_BLOCK: "RISK_RULE_BLOCK",
@@ -353,13 +397,15 @@ export const ShadowOrderPurpose = {
   ENTRY: "ENTRY",
   EXIT: "EXIT"
 } as const;
-export type ShadowOrderPurpose = (typeof ShadowOrderPurpose)[keyof typeof ShadowOrderPurpose];
+export type ShadowOrderPurpose =
+  (typeof ShadowOrderPurpose)[keyof typeof ShadowOrderPurpose];
 
 export const ShadowOrderSide = {
   BUY: "BUY",
   SELL: "SELL"
 } as const;
-export type ShadowOrderSide = (typeof ShadowOrderSide)[keyof typeof ShadowOrderSide];
+export type ShadowOrderSide =
+  (typeof ShadowOrderSide)[keyof typeof ShadowOrderSide];
 
 /**
  * v1 knows market orders only. `LIMIT` is deliberately absent from the enum so
@@ -369,7 +415,8 @@ export type ShadowOrderSide = (typeof ShadowOrderSide)[keyof typeof ShadowOrderS
 export const ShadowOrderType = {
   MARKET: "MARKET"
 } as const;
-export type ShadowOrderType = (typeof ShadowOrderType)[keyof typeof ShadowOrderType];
+export type ShadowOrderType =
+  (typeof ShadowOrderType)[keyof typeof ShadowOrderType];
 
 export const ShadowOrderTimeInForce = {
   NEXT_BARS: "NEXT_BARS"
@@ -387,7 +434,8 @@ export const ShadowOrderStatus = {
   CANCELLED: "CANCELLED",
   EXPIRED: "EXPIRED"
 } as const;
-export type ShadowOrderStatus = (typeof ShadowOrderStatus)[keyof typeof ShadowOrderStatus];
+export type ShadowOrderStatus =
+  (typeof ShadowOrderStatus)[keyof typeof ShadowOrderStatus];
 
 export const ShadowFillTriggerType = {
   ENTRY: "ENTRY",
@@ -409,7 +457,8 @@ export const ShadowPositionStatus = {
   INVALIDATED: "INVALIDATED",
   ERROR: "ERROR"
 } as const;
-export type ShadowPositionStatus = (typeof ShadowPositionStatus)[keyof typeof ShadowPositionStatus];
+export type ShadowPositionStatus =
+  (typeof ShadowPositionStatus)[keyof typeof ShadowPositionStatus];
 
 export const ShadowPositionEventType = {
   OPENING: "OPENING",
@@ -434,7 +483,8 @@ export const ExitPlanStatus = {
   COMPLETED: "COMPLETED",
   CANCELLED: "CANCELLED"
 } as const;
-export type ExitPlanStatus = (typeof ExitPlanStatus)[keyof typeof ExitPlanStatus];
+export type ExitPlanStatus =
+  (typeof ExitPlanStatus)[keyof typeof ExitPlanStatus];
 
 /** v1 resolves a stop/take-profit collision inside one candle conservatively. */
 export const IntrabarConflictPolicy = {
@@ -454,7 +504,8 @@ export const PortfolioStatus = {
   ERROR_LOCKED: "ERROR_LOCKED",
   ARCHIVED: "ARCHIVED"
 } as const;
-export type PortfolioStatus = (typeof PortfolioStatus)[keyof typeof PortfolioStatus];
+export type PortfolioStatus =
+  (typeof PortfolioStatus)[keyof typeof PortfolioStatus];
 
 export const PortfolioLedgerEntryType = {
   INITIAL_CASH: "INITIAL_CASH",
@@ -477,7 +528,8 @@ export type PortfolioLedgerEntryType =
 export const TradingSessionMode = {
   SHADOW: "SHADOW"
 } as const;
-export type TradingSessionMode = (typeof TradingSessionMode)[keyof typeof TradingSessionMode];
+export type TradingSessionMode =
+  (typeof TradingSessionMode)[keyof typeof TradingSessionMode];
 
 export const TradingSessionStatus = {
   STOPPED: "STOPPED",
@@ -487,7 +539,8 @@ export const TradingSessionStatus = {
   ERROR_LOCKED: "ERROR_LOCKED",
   CLOSED: "CLOSED"
 } as const;
-export type TradingSessionStatus = (typeof TradingSessionStatus)[keyof typeof TradingSessionStatus];
+export type TradingSessionStatus =
+  (typeof TradingSessionStatus)[keyof typeof TradingSessionStatus];
 
 // ───────────────────────────────────────────────────────────────────────────
 // Performance

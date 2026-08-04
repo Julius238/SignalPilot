@@ -11,9 +11,13 @@
  * "Exit-Modell").
  */
 
-import { DecimalValue } from "@signalpilot/trading-domain";
+import { DecimalValue, TradeDirection } from "@signalpilot/trading-domain";
 
-import { ExitTrigger, type ExitCandleInputV1, type ExitResolutionResultV1 } from "./contracts.js";
+import {
+  ExitTrigger,
+  type ExitCandleInputV1,
+  type ExitResolutionResultV1
+} from "./contracts.js";
 import { SimulationReasonCode } from "./reason-codes.js";
 
 export const EXIT_RESOLUTION_SIMULATION_VERSION = "exit-resolution-v1/1.0.0";
@@ -27,7 +31,9 @@ function decimalOrNull(value: string): DecimalValue | null {
   }
 }
 
-function notTriggered(reasonCode: SimulationReasonCode): ExitResolutionResultV1 {
+function notTriggered(
+  reasonCode: SimulationReasonCode
+): ExitResolutionResultV1 {
   return {
     triggered: false,
     trigger: null,
@@ -45,7 +51,9 @@ function notTriggered(reasonCode: SimulationReasonCode): ExitResolutionResultV1 
  * the caller must treat as a data invalidation (docs/trading/07, "Ist
  * Open/Range ungültig oder fehlt die Candle, kein erfundener Fill").
  */
-export function resolveCandleExit(input: ExitCandleInputV1): ExitResolutionResultV1 {
+export function resolveCandleExit(
+  input: ExitCandleInputV1
+): ExitResolutionResultV1 {
   const stop = decimalOrNull(input.stopPrice);
   const takeProfit = decimalOrNull(input.takeProfitPrice);
   const open = decimalOrNull(input.candle.open);
@@ -54,11 +62,15 @@ export function resolveCandleExit(input: ExitCandleInputV1): ExitResolutionResul
   const close = decimalOrNull(input.candle.close);
 
   if (
+    (input.direction !== TradeDirection.LONG &&
+      input.direction !== TradeDirection.SHORT) ||
     stop === null ||
     !stop.isPositive() ||
     takeProfit === null ||
     !takeProfit.isPositive() ||
-    takeProfit.lte(stop)
+    (input.direction === TradeDirection.LONG
+      ? takeProfit.lte(stop)
+      : stop.lte(takeProfit))
   ) {
     return notTriggered(SimulationReasonCode.INVALID_EXIT_PLAN);
   }
@@ -83,12 +95,15 @@ export function resolveCandleExit(input: ExitCandleInputV1): ExitResolutionResul
   const assumptions = {
     simulationVersion: EXIT_RESOLUTION_SIMULATION_VERSION,
     sourceCandleId: input.candle.id,
+    direction: input.direction,
     stopPrice: input.stopPrice,
     takeProfitPrice: input.takeProfitPrice
   };
 
-  // 1. Gap through stop: open <= stop -> stop, referenced at the (adverse) open.
-  if (open.lte(stop)) {
+  const stopGap =
+    input.direction === TradeDirection.LONG ? open.lte(stop) : open.gte(stop);
+  // 1. Gap through stop: reference the adverse open for either direction.
+  if (stopGap) {
     return {
       triggered: true,
       trigger: ExitTrigger.STOP,
@@ -99,9 +114,12 @@ export function resolveCandleExit(input: ExitCandleInputV1): ExitResolutionResul
     };
   }
 
-  // 2. Gap over take profit: open >= TP -> TP, capped at the target (no
-  //    favourable-gap bonus).
-  if (open.gte(takeProfit)) {
+  const takeProfitGap =
+    input.direction === TradeDirection.LONG
+      ? open.gte(takeProfit)
+      : open.lte(takeProfit);
+  // 2. Gap past take profit: cap at target, never grant a favourable bonus.
+  if (takeProfitGap) {
     return {
       triggered: true,
       trigger: ExitTrigger.TAKE_PROFIT,
@@ -112,8 +130,12 @@ export function resolveCandleExit(input: ExitCandleInputV1): ExitResolutionResul
     };
   }
 
-  const stopInRange = low.lte(stop);
-  const takeProfitInRange = high.gte(takeProfit);
+  const stopInRange =
+    input.direction === TradeDirection.LONG ? low.lte(stop) : high.gte(stop);
+  const takeProfitInRange =
+    input.direction === TradeDirection.LONG
+      ? high.gte(takeProfit)
+      : low.lte(takeProfit);
 
   // 3. Both thresholds reachable within the range, order unknown -> stop first
   //    (docs/trading/04, IntrabarConflictPolicy STOP_FIRST).
@@ -156,7 +178,11 @@ export function resolveCandleExit(input: ExitCandleInputV1): ExitResolutionResul
   //    close time is at/after maxHoldUntil.
   const maxHoldUntilMs = Date.parse(input.maxHoldUntil);
   const closeTimeMs = Date.parse(input.candle.closeTime);
-  if (Number.isFinite(maxHoldUntilMs) && Number.isFinite(closeTimeMs) && closeTimeMs >= maxHoldUntilMs) {
+  if (
+    Number.isFinite(maxHoldUntilMs) &&
+    Number.isFinite(closeTimeMs) &&
+    closeTimeMs >= maxHoldUntilMs
+  ) {
     return {
       triggered: true,
       trigger: ExitTrigger.TIME_EXIT,

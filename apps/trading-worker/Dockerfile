@@ -10,10 +10,14 @@ COPY . .
 
 RUN pnpm install --frozen-lockfile
 
-# Build packages first (ensures Prisma client is generated for linux),
-# then the trading worker.
-RUN pnpm -r --filter "./packages/**" build
-RUN pnpm --filter @signalpilot/trading-worker build
+# Build the trading worker together with its complete workspace dependency
+# closure, in pnpm's topological order. Same `<pkg>...` filter as
+# apps/api/Dockerfile — see the long note there for why a hand-maintained
+# "packages first, then the app" pair is the shape that lets an app-to-app
+# dependency go unbuilt. Prisma generate runs as part of
+# `@signalpilot/database`'s own build, so the linux engine binary is still
+# produced here.
+RUN pnpm --filter "@signalpilot/trading-worker..." build
 
 # Create a minimal standalone deployment with only production dependencies.
 # @prisma/client and prisma are direct deps so pnpm deploy includes them with

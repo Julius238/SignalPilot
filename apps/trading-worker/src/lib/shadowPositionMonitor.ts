@@ -33,6 +33,7 @@
 
 import {
   ExitPlanStatus,
+  PortfolioStatus,
   RiskEventType,
   RiskSeverity,
   ShadowFillTriggerType,
@@ -43,10 +44,14 @@ import {
   ShadowOrderType,
   ShadowPositionEventType,
   ShadowPositionStatus,
+  TradeDirection,
   TradingActorType,
   type PrismaClient
 } from "@signalpilot/database";
-import { applyExitFillLedger, applyExitFillToPosition } from "@signalpilot/portfolio";
+import {
+  applyExitFillLedger,
+  applyExitFillToPosition
+} from "@signalpilot/portfolio";
 import {
   computeMarketFill,
   resolveCandleExit,
@@ -56,6 +61,7 @@ import {
 } from "@signalpilot/trading-simulation";
 import {
   DecimalValue,
+  EXIT_SIDE,
   buildAuditEventKey,
   buildClientOrderId,
   buildExitOrderKey,
@@ -72,10 +78,14 @@ import {
   ledgerEntryCreateData,
   portfolioState as toPortfolioState
 } from "./shadowPortfolioIo.js";
+import { loadShadowPortfolioValuation } from "./shadowPortfolioValuation.js";
 
 export const SHADOW_MONITOR_JOB_KEY = "trading:shadow-monitor-positions";
 
-const OPEN_POSITION_STATUSES = [ShadowPositionStatus.OPEN, ShadowPositionStatus.PARTIALLY_CLOSED];
+const OPEN_POSITION_STATUSES = [
+  ShadowPositionStatus.OPEN,
+  ShadowPositionStatus.PARTIALLY_CLOSED
+];
 const OPEN_EXIT_ORDER_STATUSES = [
   ShadowOrderStatus.PROPOSED,
   ShadowOrderStatus.ACCEPTED,
@@ -92,7 +102,8 @@ export const ShadowMonitorOutcome = {
   ERROR_LOCKED: "ERROR_LOCKED",
   NOT_APPLICABLE: "NOT_APPLICABLE"
 } as const;
-export type ShadowMonitorOutcome = (typeof ShadowMonitorOutcome)[keyof typeof ShadowMonitorOutcome];
+export type ShadowMonitorOutcome =
+  (typeof ShadowMonitorOutcome)[keyof typeof ShadowMonitorOutcome];
 
 export interface MonitorPositionInput {
   readonly shadowPositionId: string;
@@ -108,11 +119,12 @@ export interface MonitorPositionResult {
   readonly message?: string;
 }
 
-const FINAL_STATUS_FOR_TRIGGER: Readonly<Record<string, ShadowPositionStatus>> = {
-  STOP: ShadowPositionStatus.STOPPED_OUT,
-  TAKE_PROFIT: ShadowPositionStatus.CLOSED,
-  TIME_EXIT: ShadowPositionStatus.CLOSED
-};
+const FINAL_STATUS_FOR_TRIGGER: Readonly<Record<string, ShadowPositionStatus>> =
+  {
+    STOP: ShadowPositionStatus.STOPPED_OUT,
+    TAKE_PROFIT: ShadowPositionStatus.CLOSED,
+    TIME_EXIT: ShadowPositionStatus.CLOSED
+  };
 
 function toCandleSnapshot(candle: {
   readonly id: string;
@@ -138,7 +150,11 @@ function toCandleSnapshot(candle: {
 
 async function raiseErrorLock(
   database: PrismaClient,
-  args: { readonly portfolioId: string; readonly reasonCode: string; readonly aggregateId: string }
+  args: {
+    readonly portfolioId: string;
+    readonly reasonCode: string;
+    readonly aggregateId: string;
+  }
 ): Promise<void> {
   const eventKey = buildRiskEventKey({
     type: RiskEventType.SIMULATION_ERROR,
@@ -168,9 +184,21 @@ async function raiseErrorLock(
     if (session !== null) {
       await tx.tradingSession.updateMany({
         where: { id: session.id, status: { not: "ERROR_LOCKED" } },
-        data: { status: "ERROR_LOCKED", killSwitchEngaged: true, killReasonCode: args.reasonCode, version: { increment: 1 } }
+        data: {
+          status: "ERROR_LOCKED",
+          killSwitchEngaged: true,
+          killReasonCode: args.reasonCode,
+          version: { increment: 1 }
+        }
       });
     }
+    await tx.portfolio.updateMany({
+      where: {
+        id: args.portfolioId,
+        status: { not: PortfolioStatus.ERROR_LOCKED }
+      },
+      data: { status: PortfolioStatus.ERROR_LOCKED, version: { increment: 1 } }
+    });
   });
 }
 
@@ -188,20 +216,46 @@ export async function monitorPositionForCandle(
     where: { id: input.shadowPositionId },
     include: { portfolio: true }
   });
-  if (position === null || !OPEN_POSITION_STATUSES.includes(position.status as never)) {
+  if (
+    position === null ||
+    !OPEN_POSITION_STATUSES.includes(position.status as never)
+  ) {
     return { outcome: ShadowMonitorOutcome.NOT_APPLICABLE, shadowFillId: null };
   }
+  if (
+    position.direction !== TradeDirection.LONG &&
+    position.direction !== TradeDirection.SHORT
+  ) {
+    await raiseErrorLock(database, {
+      portfolioId: position.portfolioId,
+      reasonCode: "SIMULATION_DIRECTION_MISMATCH",
+      aggregateId: position.id
+    });
+    return { outcome: ShadowMonitorOutcome.ERROR_LOCKED, shadowFillId: null };
+  }
   if (position.lastProcessedCandleId === input.candleId) {
-    return { outcome: ShadowMonitorOutcome.ALREADY_PROCESSED, shadowFillId: null };
+    return {
+      outcome: ShadowMonitorOutcome.ALREADY_PROCESSED,
+      shadowFillId: null
+    };
   }
 
-  const candle = await database.candle.findUnique({ where: { id: input.candleId } });
+  const candle = await database.candle.findUnique({
+    where: { id: input.candleId }
+  });
   if (candle === null || candle.closeTime.getTime() > input.asOf.getTime()) {
-    return { outcome: ShadowMonitorOutcome.WAITING_FOR_LIQUIDITY, shadowFillId: null, message: "Candle not closed yet." };
+    return {
+      outcome: ShadowMonitorOutcome.WAITING_FOR_LIQUIDITY,
+      shadowFillId: null,
+      message: "Candle not closed yet."
+    };
   }
 
   const activePlan = await database.exitPlan.findFirst({
-    where: { shadowPositionId: position.id, status: { in: [ExitPlanStatus.ACTIVE, ExitPlanStatus.TRIGGERED] } },
+    where: {
+      shadowPositionId: position.id,
+      status: { in: [ExitPlanStatus.ACTIVE, ExitPlanStatus.TRIGGERED] }
+    },
     orderBy: { version: "desc" }
   });
   if (activePlan === null) {
@@ -213,7 +267,10 @@ export async function monitorPositionForCandle(
     return { outcome: ShadowMonitorOutcome.ERROR_LOCKED, shadowFillId: null };
   }
 
-  const executionProfile = await resolveExecutionProfile(database, position.assetId);
+  const executionProfile = await resolveExecutionProfile(
+    database,
+    position.assetId
+  );
   if (executionProfile === null) {
     await raiseErrorLock(database, {
       portfolioId: position.portfolioId,
@@ -236,6 +293,17 @@ export async function monitorPositionForCandle(
   let triggerType: string;
 
   if (existingExitOrder !== null) {
+    if (
+      existingExitOrder.direction !== position.direction ||
+      existingExitOrder.side !== EXIT_SIDE[position.direction]
+    ) {
+      await raiseErrorLock(database, {
+        portfolioId: position.portfolioId,
+        reasonCode: "SIMULATION_DIRECTION_MISMATCH",
+        aggregateId: position.id
+      });
+      return { outcome: ShadowMonitorOutcome.ERROR_LOCKED, shadowFillId: null };
+    }
     // Continuing a partially filled exit order: the trigger and its
     // reference price are fixed at the candle that produced them, recorded on
     // the ExitPlan when it moved to TRIGGERED — never re-derived here.
@@ -251,19 +319,30 @@ export async function monitorPositionForCandle(
     triggerType = activePlan.triggeredBy;
   } else {
     const resolution = resolveCandleExit({
+      direction: position.direction,
       stopPrice: decimalString(position.stopPrice),
       takeProfitPrice: decimalString(position.takeProfitPrice),
       maxHoldUntil: position.maxHoldUntil.toISOString(),
       candle: toCandleSnapshot(candle)
     });
-    if (!resolution.triggered || resolution.trigger === null || resolution.referencePrice === null) {
-      if (resolution.reasonCode === "SIMULATION_INVALID_CANDLE" || resolution.reasonCode === "EXIT_INVALID_PLAN") {
+    if (
+      !resolution.triggered ||
+      resolution.trigger === null ||
+      resolution.referencePrice === null
+    ) {
+      if (
+        resolution.reasonCode === "SIMULATION_INVALID_CANDLE" ||
+        resolution.reasonCode === "EXIT_INVALID_PLAN"
+      ) {
         await raiseErrorLock(database, {
           portfolioId: position.portfolioId,
           reasonCode: resolution.reasonCode,
           aggregateId: position.id
         });
-        return { outcome: ShadowMonitorOutcome.ERROR_LOCKED, shadowFillId: null };
+        return {
+          outcome: ShadowMonitorOutcome.ERROR_LOCKED,
+          shadowFillId: null
+        };
       }
 
       // No harder price/time trigger fired on this candle — but a fill that
@@ -282,14 +361,22 @@ export async function monitorPositionForCandle(
           shadowPositionId: position.id,
           severity: "CRITICAL",
           acknowledgedAt: null,
-          reasonCode: { in: ["POST_FILL_NET_CRV_BELOW_MINIMUM", "MANUAL_RISK_CLOSE_REQUESTED"] }
+          reasonCode: {
+            in: [
+              "POST_FILL_NET_CRV_BELOW_MINIMUM",
+              "MANUAL_RISK_CLOSE_REQUESTED"
+            ]
+          }
         }
       });
       if (forcedExit === null) {
-        await database.shadowPosition.update({
-          where: { id: position.id },
-          data: { lastProcessedCandleId: candle.id, lastValuationAt: input.asOf, version: { increment: 1 } }
-        });
+        await markPositionCandleAndPortfolio(
+          database,
+          position.id,
+          position.portfolioId,
+          candle.id,
+          input.asOf
+        );
         return { outcome: ShadowMonitorOutcome.NO_TRIGGER, shadowFillId: null };
       }
 
@@ -303,7 +390,11 @@ export async function monitorPositionForCandle(
     if (activePlan.status === ExitPlanStatus.ACTIVE) {
       await database.exitPlan.update({
         where: { id: activePlan.id },
-        data: { status: ExitPlanStatus.TRIGGERED, triggeredBy: triggerType, triggeredAt: candle.closeTime }
+        data: {
+          status: ExitPlanStatus.TRIGGERED,
+          triggeredBy: triggerType,
+          triggeredAt: candle.closeTime
+        }
       });
     }
 
@@ -320,15 +411,20 @@ export async function monitorPositionForCandle(
         shadowPositionId: position.id,
         portfolioId: position.portfolioId,
         assetId: position.assetId,
-        tradingSessionId: (
-          await database.tradingSession.findFirst({
-            where: { portfolioId: position.portfolioId, status: { not: "CLOSED" } },
-            orderBy: { createdAt: "desc" }
-          })
-        )?.id ?? "",
+        tradingSessionId:
+          (
+            await database.tradingSession.findFirst({
+              where: {
+                portfolioId: position.portfolioId,
+                status: { not: "CLOSED" }
+              },
+              orderBy: { createdAt: "desc" }
+            })
+          )?.id ?? "",
         executionProfileId: executionProfile.id,
+        direction: position.direction,
         purpose: ShadowOrderPurpose.EXIT,
-        side: ShadowOrderSide.SELL,
+        side: EXIT_SIDE[position.direction] as ShadowOrderSide,
         orderType: ShadowOrderType.MARKET,
         timeInForce: ShadowOrderTimeInForce.NEXT_BARS,
         status: ShadowOrderStatus.WAITING_FOR_ENTRY,
@@ -356,7 +452,10 @@ export async function monitorPositionForCandle(
     });
   }
 
-  if (existingExitOrder.tradingSessionId === "" || existingExitOrder.tradingSessionId === null) {
+  if (
+    existingExitOrder.tradingSessionId === "" ||
+    existingExitOrder.tradingSessionId === null
+  ) {
     await raiseErrorLock(database, {
       portfolioId: position.portfolioId,
       reasonCode: "SESSION_MISSING",
@@ -366,7 +465,7 @@ export async function monitorPositionForCandle(
   }
 
   const fill = computeMarketFill({
-    side: MarketSide.SELL,
+    side: EXIT_SIDE[position.direction] as MarketSide,
     referencePrice,
     requestedQuantity: decimalString(existingExitOrder.remainingQuantity),
     candle: toCandleSnapshot(candle),
@@ -375,7 +474,10 @@ export async function monitorPositionForCandle(
   });
 
   if (!fill.fillable) {
-    if (fill.reasonCode.startsWith("SIMULATION_INVALID") || fill.reasonCode === "SIMULATION_SELL_EXCEEDS_OPEN_QUANTITY") {
+    if (
+      fill.reasonCode.startsWith("SIMULATION_INVALID") ||
+      fill.reasonCode === "SIMULATION_SELL_EXCEEDS_OPEN_QUANTITY"
+    ) {
       await raiseErrorLock(database, {
         portfolioId: position.portfolioId,
         reasonCode: fill.reasonCode,
@@ -383,23 +485,37 @@ export async function monitorPositionForCandle(
       });
       return { outcome: ShadowMonitorOutcome.ERROR_LOCKED, shadowFillId: null };
     }
-    await database.shadowPosition.update({
-      where: { id: position.id },
-      data: { lastProcessedCandleId: candle.id, lastValuationAt: input.asOf, version: { increment: 1 } }
-    });
-    return { outcome: ShadowMonitorOutcome.WAITING_FOR_LIQUIDITY, shadowFillId: null };
+    await markPositionCandleAndPortfolio(
+      database,
+      position.id,
+      position.portfolioId,
+      candle.id,
+      input.asOf
+    );
+    return {
+      outcome: ShadowMonitorOutcome.WAITING_FOR_LIQUIDITY,
+      shadowFillId: null
+    };
   }
 
   const entryFeesAggregate = await database.shadowFill.aggregate({
-    where: { shadowPositionId: position.id, triggerType: ShadowFillTriggerType.ENTRY },
+    where: {
+      shadowPositionId: position.id,
+      triggerType: ShadowFillTriggerType.ENTRY
+    },
     _sum: { feeAmount: true }
   });
-  const entryFeesPaidTotal = decimalString(entryFeesAggregate._sum.feeAmount ?? "0");
+  const entryFeesPaidTotal = decimalString(
+    entryFeesAggregate._sum.feeAmount ?? "0"
+  );
 
-  const existingFillCount = await database.shadowFill.count({ where: { shadowOrderId: existingExitOrder.id } });
+  const existingFillCount = await database.shadowFill.count({
+    where: { shadowOrderId: existingExitOrder.id }
+  });
   const orderIdForFill = existingExitOrder.id;
   const portfolio = position.portfolio;
-  if (portfolio === null) return { outcome: ShadowMonitorOutcome.NOT_APPLICABLE, shadowFillId: null };
+  if (portfolio === null)
+    return { outcome: ShadowMonitorOutcome.NOT_APPLICABLE, shadowFillId: null };
 
   const result = await database.$transaction(async (tx) => {
     const fillKey = buildFillKey({
@@ -415,7 +531,7 @@ export async function monitorPositionForCandle(
         assetId: position.assetId,
         sourceCandleId: candle.id,
         sequence: existingFillCount + 1,
-        side: ShadowOrderSide.SELL,
+        side: EXIT_SIDE[position.direction] as ShadowOrderSide,
         quantity: fill.fillQuantity,
         referencePrice: fill.referencePrice,
         spreadAmount: fill.fullSpreadAmount,
@@ -437,35 +553,56 @@ export async function monitorPositionForCandle(
 
     const positionUpdate = applyExitFillToPosition(
       {
+        direction: position.direction,
         initialQuantity: decimalString(position.initialQuantity),
         openQuantity: decimalString(position.openQuantity),
         closedQuantity: decimalString(position.closedQuantity),
         averageEntryPrice: decimalString(position.averageEntryPrice),
-        averageExitPrice: position.averageExitPrice === null ? null : decimalString(position.averageExitPrice),
+        averageExitPrice:
+          position.averageExitPrice === null
+            ? null
+            : decimalString(position.averageExitPrice),
         grossEntryNotional: decimalString(position.grossEntryNotional),
         grossExitNotional: decimalString(position.grossExitNotional),
         realizedPnl: decimalString(position.realizedPnl),
         feesPaid: decimalString(position.feesPaid),
-        allocatedEntryFees: "0.000000000000"
+        allocatedEntryFees: "0.000000000000",
+        reservedCollateral: decimalString(position.reservedCollateral)
       },
-      { quantity: fill.fillQuantity, fillPrice: fill.fillPrice, notional: fill.notional, feeAmount: fill.feeAmount },
+      {
+        quantity: fill.fillQuantity,
+        fillPrice: fill.fillPrice,
+        notional: fill.notional,
+        feeAmount: fill.feeAmount
+      },
       entryFeesPaidTotal
     );
-    if (!positionUpdate.ok || positionUpdate.position === null || positionUpdate.realizedPnlDelta === null) {
-      throw new Error(`Exit fill could not be applied to position ${position.id}: ${positionUpdate.reasonCode}`);
+    if (
+      !positionUpdate.ok ||
+      positionUpdate.position === null ||
+      positionUpdate.realizedPnlDelta === null
+    ) {
+      throw new Error(
+        `Exit fill could not be applied to position ${position.id}: ${positionUpdate.reasonCode}`
+      );
     }
 
-    const isFullyClosed = positionUpdate.position.openQuantity === "0.000000000000";
-    const newOrderStatus = isFullyClosed ? ShadowOrderStatus.FILLED : ShadowOrderStatus.PARTIALLY_FILLED;
+    const isFullyClosed =
+      positionUpdate.position.openQuantity === "0.000000000000";
+    const newOrderStatus = isFullyClosed
+      ? ShadowOrderStatus.FILLED
+      : ShadowOrderStatus.PARTIALLY_FILLED;
     const finalPositionStatus = isFullyClosed
-      ? FINAL_STATUS_FOR_TRIGGER[triggerType] ?? ShadowPositionStatus.CLOSED
+      ? (FINAL_STATUS_FOR_TRIGGER[triggerType] ?? ShadowPositionStatus.CLOSED)
       : ShadowPositionStatus.PARTIALLY_CLOSED;
 
     await tx.shadowOrder.update({
       where: { id: orderIdForFill },
       data: {
         status: newOrderStatus,
-        filledQuantity: DecimalValue.fromString(decimalString(existingExitOrder!.filledQuantity))
+        filledQuantity: DecimalValue.fromString(
+          decimalString(existingExitOrder!.filledQuantity)
+        )
           .add(DecimalValue.fromString(fill.fillQuantity))
           .toString(),
         remainingQuantity: positionUpdate.position.openQuantity,
@@ -483,8 +620,14 @@ export async function monitorPositionForCandle(
         grossExitNotional: positionUpdate.position.grossExitNotional,
         realizedPnl: positionUpdate.position.realizedPnl,
         feesPaid: positionUpdate.position.feesPaid,
+        reservedCollateral: positionUpdate.position.reservedCollateral,
         status: finalPositionStatus,
-        openScopeKey: isFullyClosed ? null : buildOpenPositionScopeKey({ portfolioId: position.portfolioId, assetId: position.assetId }),
+        openScopeKey: isFullyClosed
+          ? null
+          : buildOpenPositionScopeKey({
+              portfolioId: position.portfolioId,
+              assetId: position.assetId
+            }),
         closedAt: isFullyClosed ? candle.closeTime : null,
         lastProcessedCandleId: candle.id,
         lastValuationAt: input.asOf,
@@ -499,10 +642,16 @@ export async function monitorPositionForCandle(
       });
     }
 
-    const eventSequence = (await tx.shadowPositionEvent.count({ where: { shadowPositionId: position.id } })) + 1;
+    const eventSequence =
+      (await tx.shadowPositionEvent.count({
+        where: { shadowPositionId: position.id }
+      })) + 1;
     await tx.shadowPositionEvent.create({
       data: {
-        eventKey: buildPositionEventKey({ shadowPositionId: position.id, sequence: eventSequence }),
+        eventKey: buildPositionEventKey({
+          shadowPositionId: position.id,
+          sequence: eventSequence
+        }),
         shadowPositionId: position.id,
         sequence: eventSequence,
         type: isFullyClosed
@@ -516,40 +665,73 @@ export async function monitorPositionForCandle(
         quantity: fill.fillQuantity,
         price: fill.fillPrice,
         realizedPnlDelta: positionUpdate.realizedPnlDelta,
-        payloadJson: asJson({ jobKey: SHADOW_MONITOR_JOB_KEY, triggerType }),
+        payloadJson: asJson({
+          jobKey: SHADOW_MONITOR_JOB_KEY,
+          triggerType,
+          direction: position.direction,
+          releasedCollateral: positionUpdate.releasedCollateralDelta
+        }),
         occurredAt: candle.closeTime
       }
     });
 
     const ledger = applyExitFillLedger({
+      direction: position.direction,
       state: toPortfolioState(portfolio),
-      proceedsEntryKey: `${fillKey}|SELL_NOTIONAL`,
+      proceedsEntryKey: `${fillKey}|${position.direction === TradeDirection.LONG ? "SELL" : "BUY"}_NOTIONAL`,
       feeEntryKey: `${fillKey}|FEE`,
       pnlEntryKey: `${fillKey}|PNL_ADJUSTMENT`,
-      fill: { quantity: fill.fillQuantity, fillPrice: fill.fillPrice, notional: fill.notional, feeAmount: fill.feeAmount },
+      fill: {
+        quantity: fill.fillQuantity,
+        fillPrice: fill.fillPrice,
+        notional: fill.notional,
+        feeAmount: fill.feeAmount
+      },
       realizedPnlDelta: positionUpdate.realizedPnlDelta,
+      grossPnlDelta: positionUpdate.grossPnlDelta ?? "0.000000000000",
+      releasedCollateral:
+        positionUpdate.releasedCollateralDelta ?? "0.000000000000",
       shadowOrderId: orderIdForFill,
       shadowFillId: createdFill.id,
       shadowPositionId: position.id,
       occurredAt: candle.closeTime.toISOString()
     });
     if (!ledger.ok || ledger.nextState === null) {
-      throw new Error(`Exit fill ledger booking failed for position ${position.id}: ${ledger.reasonCode}`);
+      throw new Error(
+        `Exit fill ledger booking failed for position ${position.id}: ${ledger.reasonCode}`
+      );
     }
     for (const entry of ledger.entries) {
-      await tx.portfolioLedgerEntry.create({ data: ledgerEntryCreateData(entry, portfolio.id) });
+      await tx.portfolioLedgerEntry.create({
+        data: ledgerEntryCreateData(entry, portfolio.id)
+      });
     }
+    const markedPortfolio = await loadShadowPortfolioValuation(tx, {
+      portfolioId: portfolio.id,
+      asOf: input.asOf,
+      availableCash: ledger.nextState.availableCash,
+      reservedCash: ledger.nextState.reservedCash,
+      realizedPnl: ledger.nextState.realizedPnl,
+      feesPaid: ledger.nextState.feesPaid,
+      highWaterMark: decimalString(portfolio.highWaterMark),
+      startOfDayEquity: null
+    });
     const updated = await tx.portfolio.updateMany({
       where: { id: portfolio.id, version: portfolio.version },
       data: {
         availableCash: ledger.nextState.availableCash,
+        reservedCash: ledger.nextState.reservedCash,
         realizedPnl: ledger.nextState.realizedPnl,
         feesPaid: ledger.nextState.feesPaid,
+        equity: markedPortfolio.valuation.equity,
         ledgerSequence: ledger.nextState.ledgerSequence,
         version: { increment: 1 }
       }
     });
-    if (updated.count === 0) throw new Error(`Portfolio ${portfolio.id} version conflict while booking an exit fill.`);
+    if (updated.count === 0)
+      throw new Error(
+        `Portfolio ${portfolio.id} version conflict while booking an exit fill.`
+      );
 
     await tx.tradingAuditEvent.create({
       data: {
@@ -568,7 +750,15 @@ export async function monitorPositionForCandle(
         causationId: input.correlationId,
         idempotencyKey: buildPayloadHash(fillKey),
         reasonCode: triggerType,
-        afterState: asJson({ fill, triggerType, isFullyClosed, realizedPnlDelta: positionUpdate.realizedPnlDelta }),
+        afterState: asJson({
+          fill,
+          triggerType,
+          direction: position.direction,
+          syntheticShadowShort: position.direction === TradeDirection.SHORT,
+          isFullyClosed,
+          realizedPnlDelta: positionUpdate.realizedPnlDelta,
+          releasedCollateral: positionUpdate.releasedCollateralDelta
+        }),
         codeVersion: input.codeVersion,
         occurredAt: input.asOf
       }
@@ -578,9 +768,53 @@ export async function monitorPositionForCandle(
   });
 
   return {
-    outcome: result.isFullyClosed ? ShadowMonitorOutcome.TRIGGERED_CLOSED : ShadowMonitorOutcome.TRIGGERED_PARTIAL,
+    outcome: result.isFullyClosed
+      ? ShadowMonitorOutcome.TRIGGERED_CLOSED
+      : ShadowMonitorOutcome.TRIGGERED_PARTIAL,
     shadowFillId: result.fillId
   };
+}
+
+async function markPositionCandleAndPortfolio(
+  database: PrismaClient,
+  shadowPositionId: string,
+  portfolioId: string,
+  candleId: string,
+  asOf: Date
+): Promise<void> {
+  await database.$transaction(async (tx) => {
+    const portfolio = await tx.portfolio.findUnique({
+      where: { id: portfolioId }
+    });
+    if (portfolio === null)
+      throw new Error(`Portfolio ${portfolioId} is missing during valuation.`);
+    await tx.shadowPosition.update({
+      where: { id: shadowPositionId },
+      data: {
+        lastProcessedCandleId: candleId,
+        lastValuationAt: asOf,
+        version: { increment: 1 }
+      }
+    });
+    const marked = await loadShadowPortfolioValuation(tx, {
+      portfolioId,
+      asOf,
+      availableCash: decimalString(portfolio.availableCash),
+      reservedCash: decimalString(portfolio.reservedCash),
+      realizedPnl: decimalString(portfolio.realizedPnl),
+      feesPaid: decimalString(portfolio.feesPaid),
+      highWaterMark: decimalString(portfolio.highWaterMark),
+      startOfDayEquity: null
+    });
+    const updated = await tx.portfolio.updateMany({
+      where: { id: portfolioId, version: portfolio.version },
+      data: { equity: marked.valuation.equity, version: { increment: 1 } }
+    });
+    if (updated.count === 0)
+      throw new Error(
+        `Portfolio ${portfolioId} version conflict during valuation.`
+      );
+  });
 }
 
 async function resolveExecutionProfile(
@@ -598,7 +832,8 @@ async function resolveExecutionProfile(
     stepSize: decimalString(active.stepSize),
     minQuantity: decimalString(active.minQuantity),
     minNotional: decimalString(active.minNotional),
-    maxQuantity: active.maxQuantity === null ? null : decimalString(active.maxQuantity),
+    maxQuantity:
+      active.maxQuantity === null ? null : decimalString(active.maxQuantity),
     feeBps: active.feeBps,
     fullSpreadBps: active.fullSpreadBps,
     slippageBps: active.slippageBps,

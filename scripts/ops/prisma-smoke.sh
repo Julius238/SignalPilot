@@ -5,7 +5,9 @@ set -euo pipefail
 # worker-scheduler containers. This catches the "did not initialize yet"
 # error without requiring a live database connection.
 
-COMPOSE="docker compose -f docker-compose.prod.yml"
+# shellcheck source=./_common.sh
+source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
+require_production_env
 PASS=0
 FAIL=0
 
@@ -15,12 +17,9 @@ check_prisma() {
   local service="$1"
   local result
 
-  # Run the check in a one-off container so services do not need to be running.
+  # Check the already-built runtime in the existing running service.
   result=$(
-    $COMPOSE run --rm --no-deps \
-      --entrypoint "" \
-      "$service" \
-      node -e "$PRISMA_CHECK" 2>&1
+    compose_exec "$service" node -e "$PRISMA_CHECK" 2>&1
   )
 
   if echo "$result" | grep -q "^function"; then
@@ -38,13 +37,14 @@ echo ""
 
 check_prisma "api"
 check_prisma "worker-scheduler"
+check_prisma "trading-worker"
 
 echo ""
 echo "─────────────────────"
 if [ "$FAIL" -eq 0 ]; then
   echo "  All checks passed ($PASS/$((PASS + FAIL)))"
 else
-  echo "  $FAIL check(s) failed — rebuild images with: pnpm ops:prod:build"
+  echo "  $FAIL check(s) failed — rebuild images with: ./scripts/ops/prod-build.sh"
 fi
 
 [ "$FAIL" -eq 0 ]

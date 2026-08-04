@@ -15,15 +15,20 @@
  * reference to compare against.
  */
 
-import { ShadowPositionStatus, TradingActorType, type PrismaClient } from "@signalpilot/database";
 import {
-  computeConservativeBidMark,
-  computePortfolioValuation,
-  computePositionMark
-} from "@signalpilot/portfolio";
-import { DecimalValue, buildAuditEventKey, buildSpecificationHash } from "@signalpilot/trading-domain";
+  ShadowPositionStatus,
+  TradingActorType,
+  type PrismaClient
+} from "@signalpilot/database";
+import {
+  DecimalValue,
+  TradeDirection,
+  buildAuditEventKey,
+  buildSpecificationHash
+} from "@signalpilot/trading-domain";
 
 import { asJson, decimalString } from "./shadowPortfolioIo.js";
+import { loadShadowPortfolioValuation } from "./shadowPortfolioValuation.js";
 
 export const SHADOW_TRADING_DAY_JOB_KEY = "trading:shadow-start-trading-day";
 
@@ -48,7 +53,9 @@ export interface StartTradingDayResult {
 }
 
 const startOfUtcDay = (value: Date): Date =>
-  new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()));
+  new Date(
+    Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate())
+  );
 
 export async function startTradingDay(
   database: PrismaClient,
@@ -61,50 +68,51 @@ export async function startTradingDay(
     orderBy: { asOf: "asc" }
   });
   if (existing !== null) {
-    return { outcome: "ALREADY_STARTED", portfolioSnapshotId: existing.id, tradingDateUtc: tradingDateUtc.toISOString() };
+    return {
+      outcome: "ALREADY_STARTED",
+      portfolioSnapshotId: existing.id,
+      tradingDateUtc: tradingDateUtc.toISOString()
+    };
   }
 
-  const portfolio = await database.portfolio.findUnique({ where: { id: input.portfolioId } });
-  if (portfolio === null) throw new Error(`Portfolio ${input.portfolioId} not found.`);
+  const portfolio = await database.portfolio.findUnique({
+    where: { id: input.portfolioId }
+  });
+  if (portfolio === null)
+    throw new Error(`Portfolio ${input.portfolioId} not found.`);
 
   const openPositions = await database.shadowPosition.findMany({
     where: { portfolioId: portfolio.id, status: { in: OPEN_POSITION_STATUSES } }
   });
 
-  const marks: { marketValue: string; unrealizedPnl: string }[] = [];
-  for (const position of openPositions) {
-    const latestCandle = await database.candle.findFirst({
-      where: { assetId: position.assetId, timeframe: "1h", closeTime: { lte: input.asOf } },
-      orderBy: { closeTime: "desc" }
-    });
-    const profile = await database.instrumentExecutionProfile.findFirst({
-      where: { assetId: position.assetId, status: "ACTIVE" },
-      orderBy: { version: "desc" }
-    });
-    if (latestCandle === null || profile === null) continue;
-    const bidMark = computeConservativeBidMark(decimalString(latestCandle.close), profile.fullSpreadBps, decimalString(profile.tickSize));
-    if (bidMark === null) continue;
-    const mark = computePositionMark({
-      openQuantity: decimalString(position.openQuantity),
-      averageEntryPrice: decimalString(position.averageEntryPrice),
-      conservativeBidMark: bidMark,
-      estimatedExitFeeRate: (profile.feeBps / 10_000).toFixed(12)
-    });
-    if (mark !== null) marks.push(mark);
-  }
-
-  const valuation = computePortfolioValuation({
+  const loadedValuation = await loadShadowPortfolioValuation(database, {
+    portfolioId: portfolio.id,
+    asOf: input.asOf,
     availableCash: decimalString(portfolio.availableCash),
     reservedCash: decimalString(portfolio.reservedCash),
     realizedPnl: decimalString(portfolio.realizedPnl),
     feesPaid: decimalString(portfolio.feesPaid),
-    openPositionMarks: marks,
     highWaterMark: decimalString(portfolio.highWaterMark),
     startOfDayEquity: null
   });
-  if (valuation === null) throw new Error(`Portfolio ${portfolio.id} valuation inputs are unreadable.`);
+  const { valuation, marks } = loadedValuation;
 
-  const grossExposure = DecimalValue.fromString(decimalString(portfolio.reservedCash))
+  const shortCollateral = DecimalValue.sum(
+    openPositions
+      .filter((position) => position.direction === TradeDirection.SHORT)
+      .map((position) =>
+        DecimalValue.fromString(decimalString(position.reservedCollateral))
+      )
+  );
+  const openOrderReserve = DecimalValue.fromString(
+    decimalString(portfolio.reservedCash)
+  ).sub(shortCollateral);
+  if (openOrderReserve.isNegative()) {
+    throw new Error(
+      `Portfolio ${portfolio.id} reserved cash is below typed short collateral.`
+    );
+  }
+  const grossExposure = openOrderReserve
     .add(DecimalValue.fromString(valuation.marketValue))
     .toString();
 
@@ -137,11 +145,22 @@ export async function startTradingDay(
       }
     });
 
-    if (DecimalValue.fromString(valuation.highWaterMark).gt(DecimalValue.fromString(decimalString(portfolio.highWaterMark)))) {
-      await tx.portfolio.updateMany({
-        where: { id: portfolio.id, version: portfolio.version },
-        data: { highWaterMark: valuation.highWaterMark, version: { increment: 1 } }
-      });
+    const portfolioUpdate = await tx.portfolio.updateMany({
+      where: { id: portfolio.id, version: portfolio.version },
+      data: {
+        equity: valuation.equity,
+        ...(DecimalValue.fromString(valuation.highWaterMark).gt(
+          DecimalValue.fromString(decimalString(portfolio.highWaterMark))
+        )
+          ? { highWaterMark: valuation.highWaterMark }
+          : {}),
+        version: { increment: 1 }
+      }
+    });
+    if (portfolioUpdate.count === 0) {
+      throw new Error(
+        `Portfolio ${portfolio.id} version conflict during day-start valuation.`
+      );
     }
 
     await tx.tradingAuditEvent.create({
@@ -161,7 +180,10 @@ export async function startTradingDay(
         causationId: input.correlationId,
         idempotencyKey: tradingDateUtc.toISOString(),
         reasonCode: "SHADOW_TRADING_DAY_STARTED",
-        afterState: asJson({ portfolioSnapshotId: snapshot.id, equity: valuation.equity }),
+        afterState: asJson({
+          portfolioSnapshotId: snapshot.id,
+          equity: valuation.equity
+        }),
         codeVersion: input.codeVersion,
         occurredAt: input.asOf
       }
@@ -170,5 +192,9 @@ export async function startTradingDay(
     return snapshot;
   });
 
-  return { outcome: "CREATED", portfolioSnapshotId: created.id, tradingDateUtc: tradingDateUtc.toISOString() };
+  return {
+    outcome: "CREATED",
+    portfolioSnapshotId: created.id,
+    tradingDateUtc: tradingDateUtc.toISOString()
+  };
 }

@@ -8,12 +8,10 @@
     "primaryReasonCode": "REWARD_RISK_BELOW_MINIMUM",
     "approvedQuantity": "0.000000000000",
     "riskAmount": "0.000000000000",
-    "netRewardRisk": "1.557831807575",
-    "failedRules": [
-      "R-008-MIN-RR:REWARD_RISK_BELOW_MINIMUM"
-    ],
-    "inputHash": "626ee7ae33ab55d4bc88d8f9c431e5001348d1e5d82027ca570bb7801b2ec756",
-    "outputHash": "654bbc3b3ec71924603cba83ba697dfbee83fa6c40fa4e21fa2a2e5af8009281"
+    "netRewardRisk": "1.418024286413",
+    "failedRules": ["R-008-MIN-RR:REWARD_RISK_BELOW_MINIMUM"],
+    "inputHash": "a9693abf9b9a8639d2ce9b8d46f89f921d8ef5ff55614178dbdc508be1cfcd4d",
+    "outputHash": "7962a244371944abc9c0e8a466c2aa0c4cac4df282d2a8b9e1586ba2639cf014"
   },
   {
     "name": "daily-loss-exactly-one-percent",
@@ -24,12 +22,10 @@
     "primaryReasonCode": "DAILY_LOSS_LIMIT_REACHED",
     "approvedQuantity": "0.000000000000",
     "riskAmount": "0.000000000000",
-    "netRewardRisk": "2.527458441600",
-    "failedRules": [
-      "R-010-DAILY-LOSS:DAILY_LOSS_LIMIT_REACHED"
-    ],
-    "inputHash": "21fac0681924525290007fca45bc6d2e57c594030dfb8fc7161afd816b20d259",
-    "outputHash": "4fe328c7d9f50fd5e0e3c8071de815c758ffc2fd2e70a9b87e31582e2dd52ac6"
+    "netRewardRisk": "2.385234000979",
+    "failedRules": ["R-010-DAILY-LOSS:DAILY_LOSS_LIMIT_REACHED"],
+    "inputHash": "b91abe19dce2c0b5d7f10a3fcb07effdfe0dad7ccc61eac67c97afa57756507a",
+    "outputHash": "b543a1d728a438145f69d87fe2a8e5b867db9cdce97e1cb0f8deacd1b4ea8123"
   },
   {
     "name": "ledger-drift-beyond-tolerance",
@@ -40,12 +36,10 @@
     "primaryReasonCode": "PORTFOLIO_INCONSISTENT",
     "approvedQuantity": "0.000000000000",
     "riskAmount": "0.000000000000",
-    "netRewardRisk": "2.527458441600",
-    "failedRules": [
-      "R-003-PORTFOLIO-CONSISTENCY:PORTFOLIO_INCONSISTENT"
-    ],
-    "inputHash": "cbfc6de956560b4cf50d8317a90d1497a3cd925c4b4b98076d0692f70e13b24d",
-    "outputHash": "03a3c924b5642601d9259ce21ad98de24e00ceb49fea53d25f4710320fc10fd9"
+    "netRewardRisk": "2.385234000979",
+    "failedRules": ["R-003-PORTFOLIO-CONSISTENCY:PORTFOLIO_INCONSISTENT"],
+    "inputHash": "53f81a326ed4c88f42f1840afcdc1416b9803f64fe3a9b07e0dc60f6bd6b4e12",
+    "outputHash": "2020e140abbb0efabfe1d16e673ba85755f54ec1ae1441d8a8aa1c6c392b154f"
   },
   {
     "name": "correlated-exposure-capped-then-below-minimum-notional",
@@ -56,12 +50,10 @@
     "primaryReasonCode": "BELOW_INSTRUMENT_MINIMUM",
     "approvedQuantity": "0.000000000000",
     "riskAmount": "0.000000000000",
-    "netRewardRisk": "2.527458441600",
-    "failedRules": [
-      "R-025-INSTRUMENT-MINIMUMS:BELOW_INSTRUMENT_MINIMUM"
-    ],
-    "inputHash": "5306f8f7551027d1f663fe64eb29f2ebb1d3e933c9309c9c05c005f844fa7fdb",
-    "outputHash": "dd0262f082e5da15bef423d23525d3cb391663077f0c417f869063a7313ca375"
+    "netRewardRisk": "2.385234000979",
+    "failedRules": ["R-025-INSTRUMENT-MINIMUMS:BELOW_INSTRUMENT_MINIMUM"],
+    "inputHash": "c24a9a1ef8aa660583d1b70aef5fe6f034c780dedabcbc7986eaa4791ecb920c",
+    "outputHash": "e56e9d58f744ab704c5131f4483be9217c94fee8c8906c11f3ba334a6d36c55f"
   },
   {
     "name": "missing-execution-profile",
@@ -80,8 +72,8 @@
       "R-019-SLIPPAGE:EXECUTION_PROFILE_MISSING",
       "R-025-INSTRUMENT-MINIMUMS:BELOW_INSTRUMENT_MINIMUM"
     ],
-    "inputHash": "809265b433905cc1c89b180396de93e85eaa842370b8411dd9ee3018a252f546",
-    "outputHash": "906eda74d883eaa0d57de109fed92173ef506d963fd47fc152a6b1e33c30e9b5"
+    "inputHash": "3befb4cd02f8d57185b4f51b1f2f30039b3c731ef48909a14a85f93efcc1d909",
+    "outputHash": "262ef21ea2ab700dd6af220500077048c5c2cfd8689ffe7897eed353e1626c25"
   },
   {
     "name": "missing-regime-snapshot",
@@ -92,12 +84,10 @@
     "primaryReasonCode": "REGIME_MISSING",
     "approvedQuantity": "0.000000000000",
     "riskAmount": "0.000000000000",
-    "netRewardRisk": "2.527458441600",
-    "failedRules": [
-      "R-020-REGIME:REGIME_MISSING"
-    ],
-    "inputHash": "bf5b457341d3f199d0ccd68ca9d22334b2a169b855556ae580c4753b3819acf1",
-    "outputHash": "6de675177f5c051581502c42cfbbc9b96b2f97e84b02557ca9116f362d310320"
+    "netRewardRisk": "2.385234000979",
+    "failedRules": ["R-020-REGIME:REGIME_MISSING"],
+    "inputHash": "4415e6e6aa7cae68f9c6f446c285ef9cf919fe0e98a17d890f76f9901765d256",
+    "outputHash": "25fef1362d4734380d448544b4076d28ce23506cbe4ad7557edf5e7a3b9b3b50"
   },
   {
     "name": "post-loss-risk-multiplier",
@@ -108,12 +98,10 @@
     "primaryReasonCode": "NON_DETERMINISTIC_SIZE_OVERRIDE",
     "approvedQuantity": "0.000000000000",
     "riskAmount": "0.000000000000",
-    "netRewardRisk": "2.527458441600",
-    "failedRules": [
-      "R-023-NO-MARTINGALE:NON_DETERMINISTIC_SIZE_OVERRIDE"
-    ],
-    "inputHash": "674d50a914acda46dc7585c92400187c1087489c1730a36e70670edf950f77e0",
-    "outputHash": "1fa94c4f08a4a93a2dfdd38f85a6003a03bba24e8b9d403dcdaaa42ab536931e"
+    "netRewardRisk": "2.385234000979",
+    "failedRules": ["R-023-NO-MARTINGALE:NON_DETERMINISTIC_SIZE_OVERRIDE"],
+    "inputHash": "eb6626488df86beb27ba9c170bc50e77498c71b42aa55b136de42a2dbff3e8a8",
+    "outputHash": "be4fbb51a70c32dbfd35320e1c3eed6c6801ec60d17bb30be020abfb94696be0"
   },
   {
     "name": "kill-switch-engaged",
@@ -124,12 +112,10 @@
     "primaryReasonCode": "SESSION_KILL_SWITCH_ENGAGED",
     "approvedQuantity": "0.000000000000",
     "riskAmount": "0.000000000000",
-    "netRewardRisk": "2.527458441600",
-    "failedRules": [
-      "R-002-SESSION:SESSION_KILL_SWITCH_ENGAGED"
-    ],
-    "inputHash": "bf5f41ef83dbe55c1076e0897cd47113f9afbdb4a21be8ea53b6263e9287284f",
-    "outputHash": "cc43671842b7b05f158f17e77820ec2f4f0afafcb1a3ce9c2ff95c774ca93c78"
+    "netRewardRisk": "2.385234000979",
+    "failedRules": ["R-002-SESSION:SESSION_KILL_SWITCH_ENGAGED"],
+    "inputHash": "9c7de8cec182238a68a2a373d5ac48bd311bcecc4325806c0cc780db76a22695",
+    "outputHash": "f96cd252be3230667c6a7adfd8de96085ab6bdbdf594920f0f796691a1aa7155"
   },
   {
     "name": "three-consecutive-losses",
@@ -140,12 +126,10 @@
     "primaryReasonCode": "CONSECUTIVE_LOSS_LIMIT",
     "approvedQuantity": "0.000000000000",
     "riskAmount": "0.000000000000",
-    "netRewardRisk": "2.527458441600",
-    "failedRules": [
-      "R-021-LOSS-STREAK:CONSECUTIVE_LOSS_LIMIT"
-    ],
-    "inputHash": "1d25eb60427bc2b30c9e99cd30ea48f36f9ee1726103e9c9f0198a0875e497cf",
-    "outputHash": "fa558995e8529494d664dd3ff0d7d9ae5ec9768a0c369b9bb621f673255023d3"
+    "netRewardRisk": "2.385234000979",
+    "failedRules": ["R-021-LOSS-STREAK:CONSECUTIVE_LOSS_LIMIT"],
+    "inputHash": "02628ea05537f51d8cba46afe87b602178fc64fad60cf3deb3a942244e453701",
+    "outputHash": "ff5f6b934075341e8cae8e075c560a7c23ba12ad29ca0ce7a7ef832e26ccec4c"
   },
   {
     "name": "assessment-hash-conflict",
@@ -156,11 +140,11 @@
     "primaryReasonCode": "IDEMPOTENCY_OR_VERSION_CONFLICT",
     "approvedQuantity": "0.000000000000",
     "riskAmount": "0.000000000000",
-    "netRewardRisk": "2.527458441600",
+    "netRewardRisk": "2.385234000979",
     "failedRules": [
       "R-026-IDEMPOTENCY-VERSION:IDEMPOTENCY_OR_VERSION_CONFLICT"
     ],
-    "inputHash": "2f63290f227e06ba36948942b8d616824eefadea78c830c1a48e963f2daea0f2",
-    "outputHash": "ee644410dbbf7bd997e9e8c6eb2088929791e77645fb68929ba7faef2b68197d"
+    "inputHash": "2fc7d4df03ff3ead7229346d67b030b810ac07e1684ed6830d5533f803967326",
+    "outputHash": "a917e2ee88e7cb366da5dfdd1f93734b74580ef706628c627ea4f6c657d48cdf"
   }
 ]

@@ -29,7 +29,7 @@ export type IsoDateTimeString = string;
  * historischen Ergebnisse überschreiben, wenn sich Berechnungslogik oder
  * Version ändert").
  */
-export const SHADOW_PERFORMANCE_ENGINE_VERSION = "shadow-performance-v1";
+export const SHADOW_PERFORMANCE_ENGINE_VERSION = "shadow-performance-v2";
 
 /** Minimum daily return observations before Sharpe/Sortino are reported at all. */
 export const MIN_RETURN_OBSERVATIONS = 20;
@@ -73,15 +73,20 @@ export const MetricNullReason = {
   /** The reporting window has zero length, so exposure share is undefined. */
   EMPTY_WINDOW: "EMPTY_WINDOW"
 } as const;
-export type MetricNullReason = (typeof MetricNullReason)[keyof typeof MetricNullReason];
+export type MetricNullReason =
+  (typeof MetricNullReason)[keyof typeof MetricNullReason];
 
 /** A metric that may legitimately be unknown. `value === null` always carries a `reason`. */
 export type NullableMetric<T = DecimalString> =
   | { readonly value: T; readonly reason: null }
   | { readonly value: null; readonly reason: MetricNullReason };
 
-export const metricValue = <T = DecimalString>(value: T): NullableMetric<T> => ({ value, reason: null });
-export const metricUnavailable = <T = DecimalString>(reason: MetricNullReason): NullableMetric<T> => ({
+export const metricValue = <T = DecimalString>(
+  value: T
+): NullableMetric<T> => ({ value, reason: null });
+export const metricUnavailable = <T = DecimalString>(
+  reason: MetricNullReason
+): NullableMetric<T> => ({
   value: null,
   reason
 });
@@ -89,6 +94,7 @@ export const metricUnavailable = <T = DecimalString>(reason: MetricNullReason): 
 /** Segmentation axis of one computed result. */
 export const ShadowPerformanceSegment = {
   OVERALL: "OVERALL",
+  DIRECTION: "DIRECTION",
   STRATEGY_VERSION: "STRATEGY_VERSION",
   ASSET: "ASSET",
   MARKET_REGIME: "MARKET_REGIME",
@@ -120,6 +126,7 @@ export interface ClosedShadowTradeInput {
   readonly strategyVersionId: string;
   readonly assetId: string;
   readonly symbol: string | null;
+  readonly direction: "LONG" | "SHORT";
   /** `MarketRegimeSnapshot.overallRegime` captured in the candidate's input snapshot. */
   readonly marketRegime: string | null;
   /** `ShadowFill.triggerType` of the last exit fill (STOP, TAKE_PROFIT, ...). */

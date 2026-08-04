@@ -41,7 +41,10 @@ describe("sanitiseState", () => {
 
   it("marks a withheld field rather than silently dropping it", () => {
     const output = sanitiseState({ apiKey: "k" }) as Record<string, unknown>;
-    assert.ok("apiKey" in output, "a reviewer must see that something was withheld");
+    assert.ok(
+      "apiKey" in output,
+      "a reviewer must see that something was withheld"
+    );
     assert.equal(output.apiKey, "[redacted]");
   });
 
@@ -54,12 +57,18 @@ describe("sanitiseState", () => {
 
     assert.ok(String(output.long).length <= 2_001);
     assert.equal((output.many as unknown[]).length, 50);
-    const deep = output.deep as Record<string, Record<string, Record<string, Record<string, unknown>>>>;
+    const deep = output.deep as Record<
+      string,
+      Record<string, Record<string, Record<string, unknown>>>
+    >;
     assert.equal(deep.a.b.c.d.e, "[truncated]");
   });
 
   it("serialises dates and never returns a function", () => {
-    const output = sanitiseState({ at: OCCURRED_AT, fn: () => "x" }) as Record<string, unknown>;
+    const output = sanitiseState({ at: OCCURRED_AT, fn: () => "x" }) as Record<
+      string,
+      unknown
+    >;
     assert.equal(output.at, OCCURRED_AT.toISOString());
     assert.equal(output.fn, null);
   });
@@ -78,10 +87,20 @@ describe("isDrilldownAggregateType", () => {
 function seedChain() {
   const { database, tables } = createFakeTradingDatabase();
 
-  const asset = tables.get("asset")!.create({ data: { symbol: "BTCUSDT", assetType: "CRYPTO" } });
-  const portfolio = tables.get("portfolio")!.create({ data: { key: "pf", name: "pf", status: "ACTIVE" } });
+  const asset = tables
+    .get("asset")!
+    .create({ data: { symbol: "BTCUSDT", assetType: "CRYPTO" } });
+  const portfolio = tables
+    .get("portfolio")!
+    .create({ data: { key: "pf", name: "pf", status: "ACTIVE" } });
   const session = tables.get("tradingSession")!.create({
-    data: { sessionKey: "s1", portfolioId: portfolio.id, status: "SHADOW_ACTIVE", mode: "SHADOW", version: 1 }
+    data: {
+      sessionKey: "s1",
+      portfolioId: portfolio.id,
+      status: "SHADOW_ACTIVE",
+      mode: "SHADOW",
+      version: 1
+    }
   });
 
   const candidate = tables.get("tradeCandidate")!.create({
@@ -138,9 +157,70 @@ function seedChain() {
       portfolioId: portfolio.id,
       assetId: asset.id,
       entryOrderId: order.id,
+      strategyVersionId: "strategy-version-1",
+      direction: "LONG",
       status: "CLOSED",
       openedAt: OCCURRED_AT,
+      closedAt: new Date(OCCURRED_AT.getTime() + 60_000),
       version: 5
+    }
+  });
+  tables
+    .get("shadowOrder")!
+    .update({
+      where: { id: order.id },
+      data: { shadowPositionId: position.id }
+    });
+  tables.get("shadowFill")!.create({
+    data: {
+      fillKey: "fill-entry",
+      shadowOrderId: order.id,
+      shadowPositionId: position.id,
+      assetId: asset.id,
+      side: "BUY",
+      triggerType: "ENTRY",
+      occurredAt: OCCURRED_AT
+    }
+  });
+  tables.get("exitPlan")!.create({
+    data: {
+      planKey: "exit-plan-1",
+      shadowPositionId: position.id,
+      version: 1,
+      status: "COMPLETED",
+      createdAt: OCCURRED_AT
+    }
+  });
+  tables.get("shadowPositionEvent")!.create({
+    data: {
+      eventKey: "position-event-1",
+      shadowPositionId: position.id,
+      sequence: 1,
+      type: "CLOSED",
+      occurredAt: new Date(OCCURRED_AT.getTime() + 60_000)
+    }
+  });
+  tables.get("portfolioLedgerEntry")!.create({
+    data: {
+      entryKey: "ledger-1",
+      portfolioId: portfolio.id,
+      shadowPositionId: position.id,
+      sequence: 1,
+      type: "EXIT_FILL",
+      occurredAt: new Date(OCCURRED_AT.getTime() + 60_000)
+    }
+  });
+  tables.get("strategyPerformance")!.create({
+    data: {
+      portfolioId: portfolio.id,
+      strategyVersionId: "strategy-version-1",
+      segmentType: "DIRECTION",
+      segmentKey: "LONG",
+      segmentLabel: "LONG",
+      window: "ALL_TIME",
+      asOf: new Date(OCCURRED_AT.getTime() + 120_000),
+      dataThroughAt: new Date(OCCURRED_AT.getTime() + 60_000),
+      computedAt: new Date(OCCURRED_AT.getTime() + 120_000)
     }
   });
 
@@ -159,7 +239,11 @@ function seedChain() {
       engineVersion: "strategy-v1",
       codeVersion: "abc",
       beforeState: null,
-      afterState: { status: "CREATED", AUTH_SESSION_SECRET: "leak", nested: { apiKey: "leak" } },
+      afterState: {
+        status: "CREATED",
+        AUTH_SESSION_SECRET: "leak",
+        nested: { apiKey: "leak" }
+      },
       occurredAt: OCCURRED_AT
     }
   });
@@ -196,10 +280,22 @@ describe("getAuditDrilldown", () => {
 
     assert.equal(drilldown.found, true);
     const types = drilldown.chain.map((node) => node.aggregateType);
-    for (const expected of ["TradeCandidate", "RiskAssessment", "TradeDecision", "ShadowOrder", "ShadowPosition"]) {
+    for (const expected of [
+      "TradeCandidate",
+      "RiskAssessment",
+      "TradeDecision",
+      "ShadowOrder",
+      "ShadowFill",
+      "ShadowPosition",
+      "ExitPlan",
+      "PortfolioLedgerEntry",
+      "StrategyPerformance"
+    ]) {
       assert.ok(types.includes(expected), `chain must include ${expected}`);
     }
-    assert.ok(drilldown.chain.some((node) => node.aggregateId === candidate.id));
+    assert.ok(
+      drilldown.chain.some((node) => node.aggregateId === candidate.id)
+    );
     assert.ok(drilldown.chain.some((node) => node.aggregateId === order.id));
   });
 
@@ -213,7 +309,9 @@ describe("getAuditDrilldown", () => {
     });
 
     assert.ok(drilldown.chain.some((node) => node.aggregateId === position.id));
-    assert.ok(drilldown.chain.some((node) => node.aggregateType === "TradingSession"));
+    assert.ok(
+      drilldown.chain.some((node) => node.aggregateType === "TradingSession")
+    );
   });
 
   it("collects the audit events of every aggregate in the chain with versions and reason codes", async () => {
@@ -226,7 +324,10 @@ describe("getAuditDrilldown", () => {
     });
 
     const eventTypes = drilldown.events.map((event) => event.eventType);
-    assert.deepEqual(eventTypes, ["TRADE_CANDIDATE_CREATED", "SHADOW_POSITION_CLOSED"]);
+    assert.deepEqual(eventTypes, [
+      "TRADE_CANDIDATE_CREATED",
+      "SHADOW_POSITION_CLOSED"
+    ]);
     assert.deepEqual(drilldown.correlationIds.sort(), ["corr-1", "corr-2"]);
     assert.equal(drilldown.events[0].engineVersion, "strategy-v1");
     assert.equal(drilldown.events[0].codeVersion, "abc");
@@ -242,12 +343,17 @@ describe("getAuditDrilldown", () => {
       limit: 100
     });
 
-    const created = drilldown.events.find((event) => event.eventType === "TRADE_CANDIDATE_CREATED");
+    const created = drilldown.events.find(
+      (event) => event.eventType === "TRADE_CANDIDATE_CREATED"
+    );
     assert.ok(created);
     const after = created.afterState as Record<string, unknown>;
     assert.equal(after.status, "CREATED");
     assert.equal(after.AUTH_SESSION_SECRET, "[redacted]");
-    assert.equal((after.nested as Record<string, unknown>).apiKey, "[redacted]");
+    assert.equal(
+      (after.nested as Record<string, unknown>).apiKey,
+      "[redacted]"
+    );
 
     // And nothing in the serialised response carries the raw value.
     assert.ok(!JSON.stringify(drilldown).includes("leak"));
@@ -278,7 +384,9 @@ describe("getAuditDrilldown", () => {
   it("never writes — the drilldown is read-only", async () => {
     const { database, tables, position } = seedChain();
     const before = new Map(
-      [...tables.entries()].map(([name, table]) => [name, JSON.stringify(table.rows)] as const)
+      [...tables.entries()].map(
+        ([name, table]) => [name, JSON.stringify(table.rows)] as const
+      )
     );
 
     await getAuditDrilldown(database as never, {
@@ -288,7 +396,11 @@ describe("getAuditDrilldown", () => {
     });
 
     for (const [name, snapshot] of before) {
-      assert.equal(JSON.stringify(tables.get(name)!.rows), snapshot, `${name} was modified`);
+      assert.equal(
+        JSON.stringify(tables.get(name)!.rows),
+        snapshot,
+        `${name} was modified`
+      );
     }
   });
 });

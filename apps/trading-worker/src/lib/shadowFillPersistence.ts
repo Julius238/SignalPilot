@@ -28,6 +28,7 @@
  */
 
 import {
+  PortfolioStatus,
   Prisma,
   RiskEventType,
   RiskSeverity,
@@ -35,6 +36,7 @@ import {
   ShadowOrderStatus,
   ShadowPositionEventType,
   ShadowPositionStatus,
+  TradeDirection,
   TradingActorType,
   TradingSessionStatus,
   type PrismaClient
@@ -54,6 +56,7 @@ import {
 import { computePostFillNetRewardRisk } from "@signalpilot/risk-engine";
 import {
   DecimalValue,
+  ENTRY_SIDE,
   RoundingMode,
   buildActiveExitPlanScopeKey,
   buildAuditEventKey,
@@ -72,6 +75,7 @@ import {
   ledgerEntryCreateData,
   portfolioState as toPortfolioState
 } from "./shadowPortfolioIo.js";
+import { loadShadowPortfolioValuation } from "./shadowPortfolioValuation.js";
 
 export const SHADOW_FILL_JOB_KEY = "trading:shadow-process-fills";
 
@@ -84,7 +88,8 @@ export const SHADOW_FILL_JOB_KEY = "trading:shadow-process-fills";
 export const ShadowFillReasonCode = {
   POST_FILL_NET_CRV_BELOW_MINIMUM: "POST_FILL_NET_CRV_BELOW_MINIMUM"
 } as const;
-export type ShadowFillReasonCode = (typeof ShadowFillReasonCode)[keyof typeof ShadowFillReasonCode];
+export type ShadowFillReasonCode =
+  (typeof ShadowFillReasonCode)[keyof typeof ShadowFillReasonCode];
 
 export const ShadowFillOutcome = {
   FILLED: "FILLED",
@@ -98,7 +103,8 @@ export const ShadowFillOutcome = {
   ERROR_LOCKED: "ERROR_LOCKED",
   NOT_APPLICABLE: "NOT_APPLICABLE"
 } as const;
-export type ShadowFillOutcome = (typeof ShadowFillOutcome)[keyof typeof ShadowFillOutcome];
+export type ShadowFillOutcome =
+  (typeof ShadowFillOutcome)[keyof typeof ShadowFillOutcome];
 
 export interface ProcessEntryFillInput {
   readonly shadowOrderId: string;
@@ -142,7 +148,10 @@ function executionProfileSnapshotFromOrder(order: {
   readonly costModelSnapshotJson: Prisma.JsonValue;
   readonly executionProfileId: string;
 }): ExecutionProfileSnapshotV1 | null {
-  const precision = order.precisionSnapshotJson as Record<string, unknown> | null;
+  const precision = order.precisionSnapshotJson as Record<
+    string,
+    unknown
+  > | null;
   const cost = order.costModelSnapshotJson as Record<string, unknown> | null;
   if (precision === null || cost === null) return null;
   const tickSize = precision.tickSize;
@@ -218,7 +227,10 @@ async function engageErrorLock(
     });
     if (args.tradingSessionId !== null) {
       await tx.tradingSession.updateMany({
-        where: { id: args.tradingSessionId, status: { not: TradingSessionStatus.ERROR_LOCKED } },
+        where: {
+          id: args.tradingSessionId,
+          status: { not: TradingSessionStatus.ERROR_LOCKED }
+        },
         data: {
           status: TradingSessionStatus.ERROR_LOCKED,
           killSwitchEngaged: true,
@@ -227,6 +239,13 @@ async function engageErrorLock(
         }
       });
     }
+    await tx.portfolio.updateMany({
+      where: {
+        id: args.portfolioId,
+        status: { not: PortfolioStatus.ERROR_LOCKED }
+      },
+      data: { status: PortfolioStatus.ERROR_LOCKED, version: { increment: 1 } }
+    });
   });
 }
 
@@ -245,15 +264,33 @@ export async function processEntryOrderFillForCandle(
     include: { tradeCandidate: true, portfolio: true, tradingSession: true }
   });
   if (order === null || order.purpose !== "ENTRY") {
-    return { outcome: ShadowFillOutcome.NOT_APPLICABLE, shadowFillId: null, shadowPositionId: null };
+    return {
+      outcome: ShadowFillOutcome.NOT_APPLICABLE,
+      shadowFillId: null,
+      shadowPositionId: null
+    };
   }
-  if (order.status !== ShadowOrderStatus.WAITING_FOR_ENTRY && order.status !== ShadowOrderStatus.PARTIALLY_FILLED) {
-    return { outcome: ShadowFillOutcome.NOT_APPLICABLE, shadowFillId: null, shadowPositionId: null };
+  if (
+    order.status !== ShadowOrderStatus.WAITING_FOR_ENTRY &&
+    order.status !== ShadowOrderStatus.PARTIALLY_FILLED
+  ) {
+    return {
+      outcome: ShadowFillOutcome.NOT_APPLICABLE,
+      shadowFillId: null,
+      shadowPositionId: null
+    };
   }
 
-  const candle = await database.candle.findUnique({ where: { id: input.candleId } });
+  const candle = await database.candle.findUnique({
+    where: { id: input.candleId }
+  });
   if (candle === null || candle.closeTime.getTime() > input.asOf.getTime()) {
-    return { outcome: ShadowFillOutcome.WAITING, shadowFillId: null, shadowPositionId: null, message: "Candle not closed yet." };
+    return {
+      outcome: ShadowFillOutcome.WAITING,
+      shadowFillId: null,
+      shadowPositionId: null,
+      message: "Candle not closed yet."
+    };
   }
 
   const existingFillForCandle = await database.shadowFill.findFirst({
@@ -267,20 +304,68 @@ export async function processEntryOrderFillForCandle(
     };
   }
   if (order.lastProcessedCandleId === candle.id) {
-    return { outcome: ShadowFillOutcome.ALREADY_PROCESSED, shadowFillId: null, shadowPositionId: null };
+    return {
+      outcome: ShadowFillOutcome.ALREADY_PROCESSED,
+      shadowFillId: null,
+      shadowPositionId: null
+    };
   }
 
   const candidate = order.tradeCandidate;
+  if (
+    (order.direction !== TradeDirection.LONG &&
+      order.direction !== TradeDirection.SHORT) ||
+    candidate === null ||
+    candidate.direction !== order.direction ||
+    order.side !== ENTRY_SIDE[order.direction]
+  ) {
+    await engageErrorLock(database, {
+      tradingSessionId: order.tradingSessionId,
+      portfolioId: order.portfolioId,
+      reasonCode: "SIMULATION_DIRECTION_MISMATCH",
+      aggregateType: "ShadowOrder",
+      aggregateId: order.id,
+      inputHash: order.id,
+      jobKey: SHADOW_FILL_JOB_KEY
+    });
+    return {
+      outcome: ShadowFillOutcome.ERROR_LOCKED,
+      shadowFillId: null,
+      shadowPositionId: null
+    };
+  }
   const isFirstCandleForOrder = order.lastProcessedCandleId === null;
 
-  if (isFirstCandleForOrder && candidate !== null && candidate.plannedEntryMaximum !== null) {
+  if (
+    isFirstCandleForOrder &&
+    (candidate.plannedEntryMaximum !== null ||
+      candidate.plannedEntryMinimum !== null)
+  ) {
     const gap = checkEntryGap({
+      direction: order.direction,
       candleOpen: decimalString(candle.open),
-      plannedEntryMaximum: decimalString(candidate.plannedEntryMaximum)
+      ...(candidate.plannedEntryMaximum === null
+        ? {}
+        : {
+            plannedEntryMaximum: decimalString(candidate.plannedEntryMaximum)
+          }),
+      ...(candidate.plannedEntryMinimum === null
+        ? {}
+        : { plannedEntryMinimum: decimalString(candidate.plannedEntryMinimum) })
     });
     if (gap.gapTooLarge) {
-      await expireOrderAndReleaseReserve(database, order, candle.id, gap.reasonCode, input);
-      return { outcome: ShadowFillOutcome.ENTRY_GAP_EXPIRED, shadowFillId: null, shadowPositionId: null };
+      await expireOrderAndReleaseReserve(
+        database,
+        order,
+        candle.id,
+        gap.reasonCode,
+        input
+      );
+      return {
+        outcome: ShadowFillOutcome.ENTRY_GAP_EXPIRED,
+        shadowFillId: null,
+        shadowPositionId: null
+      };
     }
   }
 
@@ -295,11 +380,15 @@ export async function processEntryOrderFillForCandle(
       inputHash: order.id,
       jobKey: SHADOW_FILL_JOB_KEY
     });
-    return { outcome: ShadowFillOutcome.ERROR_LOCKED, shadowFillId: null, shadowPositionId: null };
+    return {
+      outcome: ShadowFillOutcome.ERROR_LOCKED,
+      shadowFillId: null,
+      shadowPositionId: null
+    };
   }
 
   const fill = computeMarketFill({
-    side: MarketSide.BUY,
+    side: ENTRY_SIDE[order.direction] as MarketSide,
     referencePrice: decimalString(candle.open),
     requestedQuantity: decimalString(order.remainingQuantity),
     candle: toCandleSnapshot(candle),
@@ -308,7 +397,10 @@ export async function processEntryOrderFillForCandle(
   });
 
   if (!fill.fillable) {
-    if (fill.reasonCode === "SIMULATION_RESERVE_EXCEEDED" || fill.reasonCode.startsWith("SIMULATION_INVALID")) {
+    if (
+      fill.reasonCode === "SIMULATION_RESERVE_EXCEEDED" ||
+      fill.reasonCode.startsWith("SIMULATION_INVALID")
+    ) {
       await engageErrorLock(database, {
         tradingSessionId: order.tradingSessionId,
         portfolioId: order.portfolioId,
@@ -318,40 +410,90 @@ export async function processEntryOrderFillForCandle(
         inputHash: order.id,
         jobKey: SHADOW_FILL_JOB_KEY
       });
-      return { outcome: ShadowFillOutcome.ERROR_LOCKED, shadowFillId: null, shadowPositionId: null };
+      return {
+        outcome: ShadowFillOutcome.ERROR_LOCKED,
+        shadowFillId: null,
+        shadowPositionId: null
+      };
     }
 
     // No fill this candle — mark the cursor and expire after the second
     // eligible candle if nothing has filled at all yet.
     const isSecondCandle = !isFirstCandleForOrder;
     if (isSecondCandle) {
-      await expireOrderAndReleaseReserve(database, order, candle.id, fill.reasonCode, input);
-      return { outcome: ShadowFillOutcome.EXPIRED, shadowFillId: null, shadowPositionId: null };
+      await expireOrderAndReleaseReserve(
+        database,
+        order,
+        candle.id,
+        fill.reasonCode,
+        input
+      );
+      return {
+        outcome: ShadowFillOutcome.EXPIRED,
+        shadowFillId: null,
+        shadowPositionId: null
+      };
     }
     await database.shadowOrder.update({
       where: { id: order.id },
       data: { lastProcessedCandleId: candle.id, version: { increment: 1 } }
     });
-    return { outcome: ShadowFillOutcome.WAITING, shadowFillId: null, shadowPositionId: null };
+    return {
+      outcome: ShadowFillOutcome.WAITING,
+      shadowFillId: null,
+      shadowPositionId: null
+    };
   }
 
   const portfolio = order.portfolio;
   if (portfolio === null) {
-    return { outcome: ShadowFillOutcome.NOT_APPLICABLE, shadowFillId: null, shadowPositionId: null };
+    return {
+      outcome: ShadowFillOutcome.NOT_APPLICABLE,
+      shadowFillId: null,
+      shadowPositionId: null
+    };
   }
 
-  const remainingBefore = DecimalValue.fromString(decimalString(order.remainingQuantity));
+  const remainingBefore = DecimalValue.fromString(
+    decimalString(order.remainingQuantity)
+  );
   const fillQuantity = DecimalValue.fromString(fill.fillQuantity);
   const isFinalFillForOrder = fillQuantity.gte(remainingBefore);
-  const reservedBefore = DecimalValue.fromString(decimalString(order.reservedQuoteAmount));
+  const reservedBefore = DecimalValue.fromString(
+    decimalString(order.reservedQuoteAmount)
+  );
   // Proportional share of the remaining reserve tied to this fill, rounded up
   // so the reserve released to the fill never under-covers its actual cost;
   // the final fill takes whatever remains instead of leaving a residue.
   const reservedForFill = isFinalFillForOrder
     ? reservedBefore
-    : reservedBefore.mul(fillQuantity, RoundingMode.CEIL).div(remainingBefore, RoundingMode.CEIL);
+    : reservedBefore
+        .mul(fillQuantity, RoundingMode.CEIL)
+        .div(remainingBefore, RoundingMode.CEIL);
+  const collateralForFill =
+    order.direction === TradeDirection.SHORT
+      ? reservedForFill.sub(DecimalValue.fromString(fill.feeAmount))
+      : DecimalValue.ZERO;
+  if (collateralForFill.isNegative()) {
+    await engageErrorLock(database, {
+      tradingSessionId: order.tradingSessionId,
+      portfolioId: order.portfolioId,
+      reasonCode: "SIMULATION_COLLATERAL_UNDERFUNDED",
+      aggregateType: "ShadowOrder",
+      aggregateId: order.id,
+      inputHash: order.id,
+      jobKey: SHADOW_FILL_JOB_KEY
+    });
+    return {
+      outcome: ShadowFillOutcome.ERROR_LOCKED,
+      shadowFillId: null,
+      shadowPositionId: null
+    };
+  }
 
-  const existingFillCount = await database.shadowFill.count({ where: { shadowOrderId: order.id } });
+  const existingFillCount = await database.shadowFill.count({
+    where: { shadowOrderId: order.id }
+  });
   const nextFillSequence = existingFillCount + 1;
 
   // Read fresh, not cached from anywhere earlier — the recheck below must
@@ -366,16 +508,27 @@ export async function processEntryOrderFillForCandle(
   let positionId: string | null = null;
 
   const result = await database.$transaction(async (tx) => {
-    let position = order.shadowPositionId === null
-      ? null
-      : await tx.shadowPosition.findUnique({ where: { id: order.shadowPositionId } });
+    let position =
+      order.shadowPositionId === null
+        ? null
+        : await tx.shadowPosition.findUnique({
+            where: { id: order.shadowPositionId }
+          });
 
     if (position === null) {
-      if (candidate === null || candidate.stopPrice === null || candidate.takeProfitPrice === null) {
-        throw new Error(`ShadowOrder ${order.id} has no candidate price plan to open a position from.`);
+      if (
+        candidate === null ||
+        candidate.stopPrice === null ||
+        candidate.takeProfitPrice === null
+      ) {
+        throw new Error(
+          `ShadowOrder ${order.id} has no candidate price plan to open a position from.`
+        );
       }
       const maxHoldHours = candidate.maxHoldHours ?? 72;
-      const maxHoldUntil = new Date(candle.closeTime.getTime() + maxHoldHours * 60 * 60 * 1000);
+      const maxHoldUntil = new Date(
+        candle.closeTime.getTime() + maxHoldHours * 60 * 60 * 1000
+      );
       const specification = {
         stopPrice: decimalString(candidate.stopPrice),
         takeProfitPrice: decimalString(candidate.takeProfitPrice),
@@ -395,11 +548,16 @@ export async function processEntryOrderFillForCandle(
           strategyVersionId: candidate.strategyVersionId,
           strategyAssignmentId: candidate.strategyAssignmentId,
           entryOrderId: order.id,
+          direction: order.direction,
           status: ShadowPositionStatus.OPENING,
-          openScopeKey: buildOpenPositionScopeKey({ portfolioId: order.portfolioId, assetId: order.assetId }),
+          openScopeKey: buildOpenPositionScopeKey({
+            portfolioId: order.portfolioId,
+            assetId: order.assetId
+          }),
           initialQuantity: "0",
           openQuantity: "0",
           averageEntryPrice: "0",
+          reservedCollateral: "0",
           stopPrice: candidate.stopPrice,
           takeProfitPrice: candidate.takeProfitPrice,
           maxHoldUntil,
@@ -418,15 +576,24 @@ export async function processEntryOrderFillForCandle(
           intrabarConflictPolicy: "STOP_FIRST",
           specificationJson: asJson(specification),
           specificationHash: buildSpecificationHash(specification),
-          activePositionKey: buildActiveExitPlanScopeKey({ shadowPositionId: created.id })
+          activePositionKey: buildActiveExitPlanScopeKey({
+            shadowPositionId: created.id
+          })
         }
       });
-      position = await tx.shadowPosition.findUnique({ where: { id: created.id } });
+      position = await tx.shadowPosition.findUnique({
+        where: { id: created.id }
+      });
     }
-    if (position === null) throw new Error("Position lookup failed immediately after creation.");
+    if (position === null)
+      throw new Error("Position lookup failed immediately after creation.");
     positionId = position.id;
 
-    const fillKey = buildFillKey({ shadowOrderId: order.id, sourceCandleId: candle.id, sequence: nextFillSequence });
+    const fillKey = buildFillKey({
+      shadowOrderId: order.id,
+      sourceCandleId: candle.id,
+      sequence: nextFillSequence
+    });
     const createdFill = await tx.shadowFill.create({
       data: {
         fillKey,
@@ -435,7 +602,7 @@ export async function processEntryOrderFillForCandle(
         assetId: order.assetId,
         sourceCandleId: candle.id,
         sequence: nextFillSequence,
-        side: "BUY",
+        side: ENTRY_SIDE[order.direction],
         quantity: fill.fillQuantity,
         referencePrice: fill.referencePrice,
         spreadAmount: fill.fullSpreadAmount,
@@ -457,21 +624,34 @@ export async function processEntryOrderFillForCandle(
 
     const positionUpdate = applyEntryFillToPosition(
       {
+        direction: order.direction,
         initialQuantity: decimalString(position.initialQuantity),
         openQuantity: decimalString(position.openQuantity),
         closedQuantity: decimalString(position.closedQuantity),
         averageEntryPrice: decimalString(position.averageEntryPrice),
-        averageExitPrice: position.averageExitPrice === null ? null : decimalString(position.averageExitPrice),
+        averageExitPrice:
+          position.averageExitPrice === null
+            ? null
+            : decimalString(position.averageExitPrice),
         grossEntryNotional: decimalString(position.grossEntryNotional),
         grossExitNotional: decimalString(position.grossExitNotional),
         realizedPnl: decimalString(position.realizedPnl),
         feesPaid: decimalString(position.feesPaid),
-        allocatedEntryFees: "0.000000000000"
+        allocatedEntryFees: "0.000000000000",
+        reservedCollateral: decimalString(position.reservedCollateral)
       },
-      { quantity: fill.fillQuantity, fillPrice: fill.fillPrice, notional: fill.notional, feeAmount: fill.feeAmount }
+      {
+        quantity: fill.fillQuantity,
+        fillPrice: fill.fillPrice,
+        notional: fill.notional,
+        feeAmount: fill.feeAmount,
+        collateralAmount: collateralForFill.toString()
+      }
     );
     if (!positionUpdate.ok || positionUpdate.position === null) {
-      throw new Error(`Entry fill could not be applied to position ${position.id}: ${positionUpdate.reasonCode}`);
+      throw new Error(
+        `Entry fill could not be applied to position ${position.id}: ${positionUpdate.reasonCode}`
+      );
     }
 
     // ── Post-fill net-CRV recheck (docs/trading/05; ADR 0009) ──────────────
@@ -479,19 +659,36 @@ export async function processEntryOrderFillForCandle(
     // never the pre-fill worst-case projection — against the same conservative
     // stop-exit cost model the pre-trade sizing used. Unreadable inputs or a
     // missing active limit set fail closed (never treated as a pass).
-    const openQuantityAfterFill = DecimalValue.fromString(positionUpdate.position.openQuantity);
+    const openQuantityAfterFill = DecimalValue.fromString(
+      positionUpdate.position.openQuantity
+    );
     const actualEntryFeePerUnit = openQuantityAfterFill.isPositive()
-      ? DecimalValue.fromString(positionUpdate.position.feesPaid).div(openQuantityAfterFill, RoundingMode.CEIL)
+      ? DecimalValue.fromString(positionUpdate.position.feesPaid).div(
+          openQuantityAfterFill,
+          RoundingMode.CEIL
+        )
       : DecimalValue.ZERO;
-    const minRewardRisk = activeRiskLimitSet === null ? null : decimalString(activeRiskLimitSet.minRewardRisk);
+    const minRewardRisk =
+      activeRiskLimitSet === null
+        ? null
+        : decimalString(activeRiskLimitSet.minRewardRisk);
     const recheck =
-      candidate === null || candidate.stopPrice === null || candidate.takeProfitPrice === null
+      candidate === null ||
+      candidate.stopPrice === null ||
+      candidate.takeProfitPrice === null
         ? null
         : computePostFillNetRewardRisk({
-            actualAverageEntryPrice: DecimalValue.fromString(positionUpdate.position.averageEntryPrice),
+            direction: order.direction,
+            actualAverageEntryPrice: DecimalValue.fromString(
+              positionUpdate.position.averageEntryPrice
+            ),
             actualEntryFeePerUnit,
-            stopPrice: DecimalValue.fromString(decimalString(candidate.stopPrice)),
-            takeProfitPrice: DecimalValue.fromString(decimalString(candidate.takeProfitPrice)),
+            stopPrice: DecimalValue.fromString(
+              decimalString(candidate.stopPrice)
+            ),
+            takeProfitPrice: DecimalValue.fromString(
+              decimalString(candidate.takeProfitPrice)
+            ),
             tickSize: DecimalValue.fromString(profileSnapshot.tickSize),
             feeBps: profileSnapshot.feeBps,
             fullSpreadBps: profileSnapshot.fullSpreadBps,
@@ -501,12 +698,13 @@ export async function processEntryOrderFillForCandle(
       recheck !== null &&
       recheck.computable &&
       minRewardRisk !== null &&
-      DecimalValue.fromString(recheck.netRewardRisk).gte(DecimalValue.fromString(minRewardRisk));
+      DecimalValue.fromString(recheck.netRewardRisk).gte(
+        DecimalValue.fromString(minRewardRisk)
+      );
 
     let newOrderStatus: ShadowOrderStatus = isFinalFillForOrder
       ? ShadowOrderStatus.FILLED
       : ShadowOrderStatus.PARTIALLY_FILLED;
-    const newPositionStatus = newOrderStatus === ShadowOrderStatus.FILLED ? ShadowPositionStatus.OPEN : ShadowPositionStatus.OPENING;
     const newRemaining = remainingBefore.sub(fillQuantity);
     let newReservedOnOrder = reservedBefore.sub(reservedForFill);
     let orderCancelReasonCode: string | null = null;
@@ -517,19 +715,34 @@ export async function processEntryOrderFillForCandle(
     // below for a forced, risk-reducing close instead of the ordinary exit.
     if (!netCrvOk && !isFinalFillForOrder) {
       newOrderStatus = ShadowOrderStatus.CANCELLED;
-      orderCancelReasonCode = ShadowFillReasonCode.POST_FILL_NET_CRV_BELOW_MINIMUM;
+      orderCancelReasonCode =
+        ShadowFillReasonCode.POST_FILL_NET_CRV_BELOW_MINIMUM;
     }
+    const newPositionStatus =
+      newOrderStatus === ShadowOrderStatus.FILLED ||
+      newOrderStatus === ShadowOrderStatus.CANCELLED
+        ? ShadowPositionStatus.OPEN
+        : ShadowPositionStatus.OPENING;
 
     await tx.shadowOrder.update({
       where: { id: order.id },
       data: {
         status: newOrderStatus,
-        filledQuantity: DecimalValue.fromString(decimalString(order.filledQuantity)).add(fillQuantity).toString(),
+        filledQuantity: DecimalValue.fromString(
+          decimalString(order.filledQuantity)
+        )
+          .add(fillQuantity)
+          .toString(),
         remainingQuantity: newRemaining.toString(),
         reservedQuoteAmount: newReservedOnOrder.toString(),
         shadowPositionId: position.id,
         lastProcessedCandleId: candle.id,
         cancelReasonCode: orderCancelReasonCode ?? undefined,
+        openEntryScopeKey:
+          newOrderStatus === ShadowOrderStatus.FILLED ||
+          newOrderStatus === ShadowOrderStatus.CANCELLED
+            ? null
+            : undefined,
         version: { increment: 1 }
       }
     });
@@ -541,27 +754,45 @@ export async function processEntryOrderFillForCandle(
         openQuantity: positionUpdate.position.openQuantity,
         averageEntryPrice: positionUpdate.position.averageEntryPrice,
         grossEntryNotional: positionUpdate.position.grossEntryNotional,
+        reservedCollateral: positionUpdate.position.reservedCollateral,
         feesPaid: positionUpdate.position.feesPaid,
         status: newPositionStatus,
-        openedAt: position.openedAt ?? (newPositionStatus === ShadowPositionStatus.OPEN ? candle.closeTime : null),
+        openedAt:
+          position.openedAt ??
+          (newPositionStatus === ShadowPositionStatus.OPEN
+            ? candle.closeTime
+            : null),
         lastProcessedCandleId: candle.id,
         version: { increment: 1 }
       }
     });
 
-    const eventSequence = (await tx.shadowPositionEvent.count({ where: { shadowPositionId: position.id } })) + 1;
+    const eventSequence =
+      (await tx.shadowPositionEvent.count({
+        where: { shadowPositionId: position.id }
+      })) + 1;
     await tx.shadowPositionEvent.create({
       data: {
-        eventKey: buildPositionEventKey({ shadowPositionId: position.id, sequence: eventSequence }),
+        eventKey: buildPositionEventKey({
+          shadowPositionId: position.id,
+          sequence: eventSequence
+        }),
         shadowPositionId: position.id,
         sequence: eventSequence,
-        type: newPositionStatus === ShadowPositionStatus.OPEN ? ShadowPositionEventType.OPENED : ShadowPositionEventType.OPENING,
+        type:
+          newPositionStatus === ShadowPositionStatus.OPEN
+            ? ShadowPositionEventType.OPENED
+            : ShadowPositionEventType.OPENING,
         sourceOrderId: order.id,
         sourceFillId: createdFill.id,
         sourceCandleId: candle.id,
         quantity: fill.fillQuantity,
         price: fill.fillPrice,
-        payloadJson: asJson({ jobKey: SHADOW_FILL_JOB_KEY }),
+        payloadJson: asJson({
+          jobKey: SHADOW_FILL_JOB_KEY,
+          direction: order.direction,
+          collateralAdded: collateralForFill.toString()
+        }),
         occurredAt: candle.closeTime
       }
     });
@@ -570,7 +801,10 @@ export async function processEntryOrderFillForCandle(
       const markSequence = eventSequence + 1;
       await tx.shadowPositionEvent.create({
         data: {
-          eventKey: buildPositionEventKey({ shadowPositionId: position.id, sequence: markSequence }),
+          eventKey: buildPositionEventKey({
+            shadowPositionId: position.id,
+            sequence: markSequence
+          }),
           shadowPositionId: position.id,
           sequence: markSequence,
           type: ShadowPositionEventType.MARKED,
@@ -605,32 +839,48 @@ export async function processEntryOrderFillForCandle(
           portfolioId: portfolio.id,
           shadowOrderId: order.id,
           shadowPositionId: position.id,
-          payloadJson: asJson({ jobKey: SHADOW_FILL_JOB_KEY, recheck, minRewardRisk }),
+          payloadJson: asJson({
+            jobKey: SHADOW_FILL_JOB_KEY,
+            recheck,
+            minRewardRisk
+          }),
           inputHash: fillKeyHash
         }
       });
     }
 
     const ledger = applyEntryFillLedger({
+      direction: order.direction,
       state: toPortfolioState(portfolio),
-      notionalEntryKey: `${fillKey}|BUY_NOTIONAL`,
+      notionalEntryKey: `${fillKey}|${order.direction === TradeDirection.LONG ? "BUY" : "SELL"}_NOTIONAL`,
       feeEntryKey: `${fillKey}|FEE`,
       reservedForFill: reservedForFill.toString(),
-      fill: { quantity: fill.fillQuantity, fillPrice: fill.fillPrice, notional: fill.notional, feeAmount: fill.feeAmount },
+      fill: {
+        quantity: fill.fillQuantity,
+        fillPrice: fill.fillPrice,
+        notional: fill.notional,
+        feeAmount: fill.feeAmount,
+        collateralAmount: collateralForFill.toString()
+      },
       shadowOrderId: order.id,
       shadowFillId: createdFill.id,
       shadowPositionId: position.id,
       occurredAt: candle.closeTime.toISOString()
     });
     if (!ledger.ok || ledger.nextState === null) {
-      throw new Error(`Entry fill ledger booking failed for order ${order.id}: ${ledger.reasonCode}`);
+      throw new Error(
+        `Entry fill ledger booking failed for order ${order.id}: ${ledger.reasonCode}`
+      );
     }
     const ledgerEntries = [...ledger.entries];
     let finalState = ledger.nextState;
 
     // Release whatever remained reserved for the now-cancelled remainder —
     // the reserve must never simply vanish from the books.
-    if (newOrderStatus === ShadowOrderStatus.CANCELLED && newReservedOnOrder.isPositive()) {
+    if (
+      newOrderStatus === ShadowOrderStatus.CANCELLED &&
+      newReservedOnOrder.isPositive()
+    ) {
       const release = computeReleaseReservation({
         state: finalState,
         entryKey: `${fillKey}-post-fill-crv-release`,
@@ -639,29 +889,49 @@ export async function processEntryOrderFillForCandle(
         occurredAt: candle.closeTime.toISOString()
       });
       if (!release.ok || release.nextState === null) {
-        throw new Error(`Post-fill CRV reserve release failed for order ${order.id}: ${release.reasonCode}`);
+        throw new Error(
+          `Post-fill CRV reserve release failed for order ${order.id}: ${release.reasonCode}`
+        );
       }
       ledgerEntries.push(...release.entries);
       finalState = release.nextState;
       newReservedOnOrder = DecimalValue.ZERO;
-      await tx.shadowOrder.update({ where: { id: order.id }, data: { reservedQuoteAmount: "0" } });
+      await tx.shadowOrder.update({
+        where: { id: order.id },
+        data: { reservedQuoteAmount: "0", openEntryScopeKey: null }
+      });
     }
 
     for (const entry of ledgerEntries) {
-      await tx.portfolioLedgerEntry.create({ data: ledgerEntryCreateData(entry, portfolio.id) });
+      await tx.portfolioLedgerEntry.create({
+        data: ledgerEntryCreateData(entry, portfolio.id)
+      });
     }
+    const markedPortfolio = await loadShadowPortfolioValuation(tx, {
+      portfolioId: portfolio.id,
+      asOf: input.asOf,
+      availableCash: finalState.availableCash,
+      reservedCash: finalState.reservedCash,
+      realizedPnl: finalState.realizedPnl,
+      feesPaid: finalState.feesPaid,
+      highWaterMark: decimalString(portfolio.highWaterMark),
+      startOfDayEquity: null
+    });
     const updated = await tx.portfolio.updateMany({
       where: { id: portfolio.id, version: portfolio.version },
       data: {
         availableCash: finalState.availableCash,
         reservedCash: finalState.reservedCash,
         feesPaid: finalState.feesPaid,
+        equity: markedPortfolio.valuation.equity,
         ledgerSequence: finalState.ledgerSequence,
         version: { increment: 1 }
       }
     });
     if (updated.count === 0) {
-      throw new Error(`Portfolio ${portfolio.id} version conflict while booking an entry fill.`);
+      throw new Error(
+        `Portfolio ${portfolio.id} version conflict while booking an entry fill.`
+      );
     }
 
     await tx.tradingAuditEvent.create({
@@ -680,10 +950,15 @@ export async function processEntryOrderFillForCandle(
         correlationId: input.correlationId,
         causationId: input.correlationId,
         idempotencyKey: buildPayloadHash(fillKey),
-        reasonCode: netCrvOk ? "SIMULATION_FILLED" : ShadowFillReasonCode.POST_FILL_NET_CRV_BELOW_MINIMUM,
+        reasonCode: netCrvOk
+          ? "SIMULATION_FILLED"
+          : ShadowFillReasonCode.POST_FILL_NET_CRV_BELOW_MINIMUM,
         tradingSessionId: order.tradingSessionId,
         afterState: asJson({
           fill,
+          direction: order.direction,
+          syntheticShadowShort: order.direction === TradeDirection.SHORT,
+          reservedCollateral: positionUpdate.position.reservedCollateral,
           orderStatus: newOrderStatus,
           positionStatus: newPositionStatus,
           postFillCrvRecheck: recheck,
@@ -731,14 +1006,25 @@ async function expireOrderAndReleaseReserve(
   if (DecimalValue.fromString(releaseAmount).isZero()) {
     await database.shadowOrder.update({
       where: { id: order.id },
-      data: { status: ShadowOrderStatus.EXPIRED, lastProcessedCandleId: candleId, cancelReasonCode: reasonCode, version: { increment: 1 } }
+      data: {
+        status: ShadowOrderStatus.EXPIRED,
+        openEntryScopeKey: null,
+        lastProcessedCandleId: candleId,
+        cancelReasonCode: reasonCode,
+        version: { increment: 1 }
+      }
     });
     return;
   }
 
   await database.$transaction(async (tx) => {
-    const portfolio = await tx.portfolio.findUnique({ where: { id: order.portfolioId } });
-    if (portfolio === null) throw new Error(`Portfolio ${order.portfolioId} not found while releasing a reserve.`);
+    const portfolio = await tx.portfolio.findUnique({
+      where: { id: order.portfolioId }
+    });
+    if (portfolio === null)
+      throw new Error(
+        `Portfolio ${order.portfolioId} not found while releasing a reserve.`
+      );
 
     const release = computeReleaseReservation({
       state: toPortfolioState(portfolio),
@@ -748,10 +1034,14 @@ async function expireOrderAndReleaseReserve(
       occurredAt: input.asOf.toISOString()
     });
     if (!release.ok || release.nextState === null) {
-      throw new Error(`Reserve release failed for order ${order.id}: ${release.reasonCode}`);
+      throw new Error(
+        `Reserve release failed for order ${order.id}: ${release.reasonCode}`
+      );
     }
 
-    await tx.portfolioLedgerEntry.create({ data: ledgerEntryCreateData(release.entries[0], portfolio.id) });
+    await tx.portfolioLedgerEntry.create({
+      data: ledgerEntryCreateData(release.entries[0], portfolio.id)
+    });
     const updated = await tx.portfolio.updateMany({
       where: { id: portfolio.id, version: portfolio.version },
       data: {
@@ -761,12 +1051,16 @@ async function expireOrderAndReleaseReserve(
         version: { increment: 1 }
       }
     });
-    if (updated.count === 0) throw new Error(`Portfolio ${portfolio.id} version conflict while releasing a reserve.`);
+    if (updated.count === 0)
+      throw new Error(
+        `Portfolio ${portfolio.id} version conflict while releasing a reserve.`
+      );
 
     await tx.shadowOrder.update({
       where: { id: order.id },
       data: {
         status: ShadowOrderStatus.EXPIRED,
+        openEntryScopeKey: null,
         reservedQuoteAmount: "0",
         lastProcessedCandleId: candleId,
         cancelReasonCode: reasonCode,

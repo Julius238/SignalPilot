@@ -28,7 +28,13 @@ const CAPABILITY = {
   tradingMode: "SHADOW",
   enableLiveTrading: false,
   shadowMasterFlagEnabled: true,
-  riskJobEnabled: true
+  riskJobEnabled: true,
+  strategyLongV1Enabled: true,
+  strategyShortV1Enabled: false,
+  shadowShortEnabled: false,
+  exchangeExecutionEnabled: false,
+  marginTradingEnabled: false,
+  futuresTradingEnabled: false
 };
 
 const setup = (options: RiskWorldOptions = {}) =>
@@ -70,7 +76,10 @@ describe("risk input assembler", () => {
     assert.equal(snapshot.tradingDateUtc, "2026-08-02");
     assert.equal(snapshot.candidate.symbol, "BTCUSDT");
     assert.equal(snapshot.candidate.strategyKey, "CRYPTO_MTF_BREAKOUT_V1");
-    assert.equal(snapshot.riskLimitSet!.specificationHash, RISK_LIMIT_SET_SPECIFICATION_HASH);
+    assert.equal(
+      snapshot.riskLimitSet!.specificationHash,
+      RISK_LIMIT_SET_SPECIFICATION_HASH
+    );
     assert.equal(snapshot.correlationGroup!.key, "CRYPTO_MAJOR");
     assert.deepEqual(snapshot.openPositions, []);
     assert.deepEqual(snapshot.sizeOverride, {
@@ -98,7 +107,10 @@ describe("risk input assembler", () => {
     assert.equal(candidate.validFrom, "2026-08-02T08:59:59.999Z");
     assert.equal(candidate.maxHoldHours, 72);
     assert.equal(candidate.stopDistance, "501.970000000000");
-    assert.equal(candidate.strategyEngineVersion, "crypto-mtf-breakout-v1/1.0.0");
+    assert.equal(
+      candidate.strategyEngineVersion,
+      "crypto-mtf-breakout-v1/1.0.0"
+    );
   });
 
   it("refuses to assemble for an unknown candidate", async () => {
@@ -157,7 +169,9 @@ describe("shadowAssessRisk job", () => {
   it("persists a passing result for every rule, not just the failures", async () => {
     const { writes, summary } = runJob();
     await summary;
-    const passing = writes.riskRuleResults.filter((rule) => rule.outcome === "PASS");
+    const passing = writes.riskRuleResults.filter(
+      (rule) => rule.outcome === "PASS"
+    );
     assert.equal(passing.length, RISK_RULE_COUNT);
     const codes = new Set(writes.riskRuleResults.map((rule) => rule.ruleCode));
     assert.equal(codes.size, RISK_RULE_COUNT);
@@ -187,7 +201,9 @@ describe("shadowAssessRisk job", () => {
   });
 
   it("rejects the strategy's own 2R plan because the costed reward/risk is below 2", async () => {
-    const { writes, summary } = runJob({ takeProfitPrice: STRATEGY_V1_TAKE_PROFIT });
+    const { writes, summary } = runJob({
+      takeProfitPrice: STRATEGY_V1_TAKE_PROFIT
+    });
     const finished = await summary;
 
     assert.equal(finished.approved, 0);
@@ -198,12 +214,18 @@ describe("shadowAssessRisk job", () => {
   });
 
   it("blocks on an inactive session and a raised kill switch", async () => {
-    for (const options of [{ sessionStatus: "PAUSED" }, { killSwitchEngaged: true }]) {
+    for (const options of [
+      { sessionStatus: "PAUSED" },
+      { killSwitchEngaged: true }
+    ]) {
       const { writes, summary } = runJob(options);
       const finished = await summary;
       assert.equal(finished.rejected, 1);
       assert.equal(writes.riskAssessments[0].status, "FAIL");
-      assert.equal(writes.riskAssessments[0].approvedQuantity, "0.000000000000");
+      assert.equal(
+        writes.riskAssessments[0].approvedQuantity,
+        "0.000000000000"
+      );
     }
   });
 
@@ -245,7 +267,11 @@ describe("shadowAssessRisk job", () => {
 
   it("is idempotent across repeated runs", async () => {
     const { database, writes } = setup();
-    const options = { asOf: AS_OF, env: RISK_ENABLED_ENV, correlationId: "c1" } as const;
+    const options = {
+      asOf: AS_OF,
+      env: RISK_ENABLED_ENV,
+      correlationId: "c1"
+    } as const;
 
     const first = await runShadowAssessRisk(database as never, options);
     const second = await runShadowAssessRisk(database as never, options);
@@ -257,6 +283,25 @@ describe("shadowAssessRisk job", () => {
     assert.equal(writes.riskAssessments.length, 1);
     assert.equal(writes.riskRuleResults.length, RISK_RULE_COUNT);
     assert.equal(writes.tradeDecisions.length, 1);
+  });
+
+  it("does not process an existing SHORT candidate while either Short flag is disabled", async () => {
+    const { database, writes, candidates } = setup();
+    candidates[0].direction = "SHORT";
+
+    const summary = await runShadowAssessRisk(database as never, {
+      asOf: AS_OF,
+      env: {
+        ...RISK_ENABLED_ENV,
+        TRADING_STRATEGY_SHORT_V1_ENABLED: "true",
+        TRADING_SHADOW_SHORT_ENABLED: "false"
+      },
+      correlationId: "short-disabled-risk"
+    });
+
+    assert.equal(summary.scanned, 0);
+    assert.equal(writes.riskAssessments.length, 0);
+    assert.equal(writes.tradeDecisions.length, 0);
   });
 
   it("reports a conflict when the same key carries a different hash", async () => {
@@ -272,20 +317,19 @@ describe("shadowAssessRisk job", () => {
     candidates[0].status = "CREATED";
     candidates[0].decision = null;
     const stored = writes.riskAssessments[0];
-    stored.assessmentKey = (
-      await (async () => {
-        const { assembleRiskInput: assemble } = await import("../src/lib/riskInputAssembler.js");
-        const assembled = await assemble(database as never, {
-          tradeCandidateId: "trade-candidate-1",
-          asOf: AS_OF,
-          codeVersion: "test-code-version",
-          capability: CAPABILITY
-        });
-        assert.equal(assembled.ok, true);
-        if (!assembled.ok) throw new Error("unreachable");
-        return evaluateRisk(assembled.snapshot).assessment.assessmentKey;
-      })()
-    ) as string;
+    stored.assessmentKey = (await (async () => {
+      const { assembleRiskInput: assemble } =
+        await import("../src/lib/riskInputAssembler.js");
+      const assembled = await assemble(database as never, {
+        tradeCandidateId: "trade-candidate-1",
+        asOf: AS_OF,
+        codeVersion: "test-code-version",
+        capability: CAPABILITY
+      });
+      assert.equal(assembled.ok, true);
+      if (!assembled.ok) throw new Error("unreachable");
+      return evaluateRisk(assembled.snapshot).assessment.assessmentKey;
+    })()) as string;
     stored.inputHash = "e".repeat(64);
 
     const second = await runShadowAssessRisk(database as never, {
@@ -296,9 +340,15 @@ describe("shadowAssessRisk job", () => {
 
     assert.equal(second.conflicts, 1);
     assert.equal(second.status, BotRunStatus.FAILED);
-    assert.equal(writes.riskAssessments.length, 1, "the stored assessment must not be overwritten");
+    assert.equal(
+      writes.riskAssessments.length,
+      1,
+      "the stored assessment must not be overwritten"
+    );
     assert.ok(
-      writes.riskEvents.some((event) => event.type === "IDEMPOTENCY_OR_VERSION_CONFLICT")
+      writes.riskEvents.some(
+        (event) => event.type === "IDEMPOTENCY_OR_VERSION_CONFLICT"
+      )
     );
   });
 
@@ -373,7 +423,10 @@ describe("shadowAssessRisk job", () => {
 
 describe("shadowBootstrap", () => {
   it("creates a disabled, fully specified shadow setup", async () => {
-    const { database, writes } = setup({ withRiskLimitSet: false, withExecutionProfile: false });
+    const { database, writes } = setup({
+      withRiskLimitSet: false,
+      withExecutionProfile: false
+    });
     const summary = await runShadowBootstrap(database as never, {
       asOf: AS_OF,
       env: BOOTSTRAP_ENABLED_ENV,
@@ -384,10 +437,16 @@ describe("shadowBootstrap", () => {
     assert.equal(summary.blocked, false);
     assert.equal(writes.riskLimitSets.length, 1);
     assert.equal(writes.riskLimitSets[0].status, "ACTIVE");
-    assert.equal(writes.riskLimitSets[0].specificationHash, RISK_LIMIT_SET_SPECIFICATION_HASH);
+    assert.equal(
+      writes.riskLimitSets[0].specificationHash,
+      RISK_LIMIT_SET_SPECIFICATION_HASH
+    );
     assert.equal(writes.ledgerEntries.length, 1);
     assert.equal(writes.ledgerEntries[0].type, "INITIAL_CASH");
-    assert.equal(writes.ledgerEntries[0].availableCashDelta, "10000.000000000000");
+    assert.equal(
+      writes.ledgerEntries[0].availableCashDelta,
+      "10000.000000000000"
+    );
     assert.equal(writes.auditEvents.length, 1);
     assert.equal(writes.auditEvents[0].eventType, "SHADOW_BOOTSTRAP_APPLIED");
   });
@@ -452,9 +511,16 @@ describe("shadowBootstrap", () => {
   });
 
   it("is idempotent", async () => {
-    const world = buildRiskWorld({ withRiskLimitSet: false, withExecutionProfile: false });
+    const world = buildRiskWorld({
+      withRiskLimitSet: false,
+      withExecutionProfile: false
+    });
     const { database, writes } = createFakeRiskDatabase(world);
-    const options = { asOf: AS_OF, env: BOOTSTRAP_ENABLED_ENV, correlationId: "b1" } as const;
+    const options = {
+      asOf: AS_OF,
+      env: BOOTSTRAP_ENABLED_ENV,
+      correlationId: "b1"
+    } as const;
 
     const first = await runShadowBootstrap(database as never, options);
     assert.ok(first.createdCount > 0);
@@ -463,8 +529,16 @@ describe("shadowBootstrap", () => {
 
     assert.equal(second.status, BotRunStatus.SUCCESS);
     assert.equal(writes.riskLimitSets.length, 1);
-    assert.equal(writes.ledgerEntries.length, 1, "the opening ledger entry must not double");
-    assert.equal(writes.auditEvents.length, 1, "the bootstrap audit must not double");
+    assert.equal(
+      writes.ledgerEntries.length,
+      1,
+      "the opening ledger entry must not double"
+    );
+    assert.equal(
+      writes.auditEvents.length,
+      1,
+      "the bootstrap audit must not double"
+    );
   });
 
   it("blocks by default", async () => {

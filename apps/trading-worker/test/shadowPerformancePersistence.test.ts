@@ -25,7 +25,12 @@ function seed() {
   const { database, tables } = createFakeExecutionDatabase();
 
   const portfolio = tables.get("portfolio")!.create({
-    data: { key: "pf", name: "pf", status: "ACTIVE", startingCash: decimal("10000") }
+    data: {
+      key: "pf",
+      name: "pf",
+      status: "ACTIVE",
+      startingCash: decimal("10000")
+    }
   });
 
   const candidate = tables.get("tradeCandidate")!.create({
@@ -50,10 +55,20 @@ function seed() {
   });
 
   const winnerOrder = tables.get("shadowOrder")!.create({
-    data: { orderKey: "o-win", tradeCandidateId: candidate.id, portfolioId: portfolio.id, assetId: "asset-btc" }
+    data: {
+      orderKey: "o-win",
+      tradeCandidateId: candidate.id,
+      portfolioId: portfolio.id,
+      assetId: "asset-btc"
+    }
   });
   const loserOrder = tables.get("shadowOrder")!.create({
-    data: { orderKey: "o-lose", tradeCandidateId: null, portfolioId: portfolio.id, assetId: "asset-eth" }
+    data: {
+      orderKey: "o-lose",
+      tradeCandidateId: null,
+      portfolioId: portfolio.id,
+      assetId: "asset-eth"
+    }
   });
 
   const winner = tables.get("shadowPosition")!.create({
@@ -62,6 +77,7 @@ function seed() {
       portfolioId: portfolio.id,
       assetId: "asset-btc",
       strategyVersionId: "sv-1",
+      direction: "LONG",
       entryOrderId: winnerOrder.id,
       status: "CLOSED",
       initialQuantity: decimal("1"),
@@ -78,6 +94,7 @@ function seed() {
       portfolioId: portfolio.id,
       assetId: "asset-eth",
       strategyVersionId: "sv-1",
+      direction: "SHORT",
       entryOrderId: loserOrder.id,
       status: "STOPPED_OUT",
       initialQuantity: decimal("2"),
@@ -166,6 +183,7 @@ describe("assembleShadowPerformanceInput", () => {
     const winner = input.trades.find((trade) => trade.assetId === "asset-btc");
     assert.ok(winner);
     assert.equal(winner.netPnl, "200");
+    assert.equal(winner.direction, "LONG");
     assert.equal(winner.fees, "4");
     assert.equal(winner.exitReason, "TAKE_PROFIT");
     assert.equal(winner.marketRegime, "RISK_ON");
@@ -176,7 +194,12 @@ describe("assembleShadowPerformanceInput", () => {
     const loser = input.trades.find((trade) => trade.assetId === "asset-eth");
     assert.ok(loser);
     assert.equal(loser.exitReason, "STOP");
-    assert.equal(loser.marketRegime, null, "no candidate snapshot means no invented regime");
+    assert.equal(loser.direction, "SHORT");
+    assert.equal(
+      loser.marketRegime,
+      null,
+      "no candidate snapshot means no invented regime"
+    );
     assert.equal(loser.plannedRiskAmount, null);
     assert.equal(loser.simulatedExecutionCost, "0.500000000000");
   });
@@ -235,7 +258,12 @@ describe("assembleShadowPerformanceInput", () => {
 describe("persistShadowPerformance", () => {
   it("writes one row per segment and is idempotent on the same data cut", async () => {
     const { database, tables, portfolio } = seed();
-    const options = { portfolioId: portfolio.id, window: "ALL_TIME" as never, asOf: ASOF, codeVersion: "test" };
+    const options = {
+      portfolioId: portfolio.id,
+      window: "ALL_TIME" as never,
+      asOf: ASOF,
+      codeVersion: "test"
+    };
 
     const first = await refreshShadowPerformance(database as never, options);
     assert.ok(first.written > 0);
@@ -266,17 +294,33 @@ describe("persistShadowPerformance", () => {
     });
     const afterFirst = tables.get("strategyPerformance")!.rows.length;
 
-    const nextVersion = { ...report, engineVersion: "shadow-performance-v2" };
-    const second = await persistShadowPerformance(database as never, nextVersion, {
-      window: "ALL_TIME" as never,
-      codeVersion: "test",
-      asOf: ASOF
-    });
+    const nextVersion = { ...report, engineVersion: "shadow-performance-v3" };
+    const second = await persistShadowPerformance(
+      database as never,
+      nextVersion,
+      {
+        window: "ALL_TIME" as never,
+        codeVersion: "test",
+        asOf: ASOF
+      }
+    );
 
-    assert.equal(second.written, report.segments.length, "a new engine version writes new rows");
-    assert.equal(tables.get("strategyPerformance")!.rows.length, afterFirst * 2);
-    const versions = new Set(tables.get("strategyPerformance")!.rows.map((row) => row.engineVersion));
-    assert.deepEqual([...versions].sort(), ["shadow-performance-v1", "shadow-performance-v2"]);
+    assert.equal(
+      second.written,
+      report.segments.length,
+      "a new engine version writes new rows"
+    );
+    assert.equal(
+      tables.get("strategyPerformance")!.rows.length,
+      afterFirst * 2
+    );
+    const versions = new Set(
+      tables.get("strategyPerformance")!.rows.map((row) => row.engineVersion)
+    );
+    assert.deepEqual([...versions].sort(), [
+      "shadow-performance-v2",
+      "shadow-performance-v3"
+    ]);
   });
 
   it("persists null metrics as null columns with the reason kept in metricsJson", async () => {
@@ -288,13 +332,21 @@ describe("persistShadowPerformance", () => {
       codeVersion: "test"
     });
 
-    const overall = tables.get("strategyPerformance")!.rows.find((row) => row.segmentType === "OVERALL");
+    const overall = tables
+      .get("strategyPerformance")!
+      .rows.find((row) => row.segmentType === "OVERALL");
     assert.ok(overall);
     // Fewer than 20 daily observations exist, so Sharpe is genuinely unknown.
     assert.equal(overall.sharpeRatio, null);
-    const metrics = overall.metricsJson as Record<string, { value: unknown; reason: string | null }>;
+    const metrics = overall.metricsJson as Record<
+      string,
+      { value: unknown; reason: string | null }
+    >;
     assert.equal(metrics.sharpeRatio.value, null);
-    assert.equal(metrics.sharpeRatio.reason, "INSUFFICIENT_RETURN_OBSERVATIONS");
+    assert.equal(
+      metrics.sharpeRatio.reason,
+      "INSUFFICIENT_RETURN_OBSERVATIONS"
+    );
     // MAE/MFE were not derivable either, and say so.
     assert.equal(overall.averageMaePct, null);
     assert.equal(metrics.averageMaePct.reason, "NO_PRICE_EXTREMES");
@@ -310,15 +362,21 @@ describe("persistShadowPerformance", () => {
     });
 
     for (const row of tables.get("strategyPerformance")!.rows) {
-      assert.equal(row.engineVersion, "shadow-performance-v1");
+      assert.equal(row.engineVersion, "shadow-performance-v2");
       assert.equal(row.codeVersion, "abc123");
-      assert.ok(typeof row.inputHash === "string" && (row.inputHash as string).length === 64);
-      assert.ok(typeof row.outputHash === "string" && (row.outputHash as string).length === 64);
+      assert.ok(
+        typeof row.inputHash === "string" &&
+          (row.inputHash as string).length === 64
+      );
+      assert.ok(
+        typeof row.outputHash === "string" &&
+          (row.outputHash as string).length === 64
+      );
       assert.ok(row.computedAt instanceof Date);
     }
   });
 
-  it("segments by asset, market regime, exit reason and strategy version", async () => {
+  it("segments by direction, asset, market regime, exit reason and strategy version", async () => {
     const { database, tables, portfolio } = seed();
     await refreshShadowPerformance(database as never, {
       portfolioId: portfolio.id,
@@ -328,9 +386,16 @@ describe("persistShadowPerformance", () => {
     });
 
     const rows = tables.get("strategyPerformance")!.rows;
-    const byType = (type: string) => rows.filter((row) => row.segmentType === type);
+    const byType = (type: string) =>
+      rows.filter((row) => row.segmentType === type);
 
     assert.equal(byType("OVERALL").length, 1);
+    assert.deepEqual(
+      byType("DIRECTION")
+        .map((row) => row.segmentKey)
+        .sort(),
+      ["LONG", "SHORT"]
+    );
     assert.equal(byType("ASSET").length, 2);
     assert.equal(byType("STRATEGY_VERSION").length, 1);
     assert.deepEqual(
@@ -348,15 +413,26 @@ describe("persistShadowPerformance", () => {
 
     // Only STRATEGY_VERSION rows point at a single version.
     for (const row of rows) {
-      if (row.segmentType === "STRATEGY_VERSION") assert.equal(row.strategyVersionId, "sv-1");
+      if (row.segmentType === "STRATEGY_VERSION")
+        assert.equal(row.strategyVersionId, "sv-1");
       else assert.equal(row.strategyVersionId, null);
     }
   });
 
   it("never touches an order, position, fill or risk decision", async () => {
     const { database, tables, portfolio } = seed();
-    const watched = ["shadowOrder", "shadowPosition", "shadowFill", "riskAssessment", "tradeCandidate"] as const;
-    const before = new Map(watched.map((name) => [name, JSON.stringify(tables.get(name)!.rows)] as const));
+    const watched = [
+      "shadowOrder",
+      "shadowPosition",
+      "shadowFill",
+      "riskAssessment",
+      "tradeCandidate"
+    ] as const;
+    const before = new Map(
+      watched.map(
+        (name) => [name, JSON.stringify(tables.get(name)!.rows)] as const
+      )
+    );
 
     await refreshShadowPerformance(database as never, {
       portfolioId: portfolio.id,
@@ -366,7 +442,11 @@ describe("persistShadowPerformance", () => {
     });
 
     for (const [name, snapshot] of before) {
-      assert.equal(JSON.stringify(tables.get(name)!.rows), snapshot, `${name} was modified`);
+      assert.equal(
+        JSON.stringify(tables.get(name)!.rows),
+        snapshot,
+        `${name} was modified`
+      );
     }
   });
 });

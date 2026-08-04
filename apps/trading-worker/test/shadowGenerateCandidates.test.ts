@@ -15,6 +15,7 @@ import {
 } from "../src/lib/shadowCandidatePersistence.js";
 import {
   REQUIRED_STRATEGY_VERSION,
+  REQUIRED_DIRECTIONAL_STRATEGY_VERSIONS,
   SHADOW_STRATEGY_SYMBOLS,
   runShadowGenerateCandidates
 } from "../src/jobs/shadowGenerateCandidates.js";
@@ -64,10 +65,19 @@ describe("strategy input assembler", () => {
     const snapshot = assembled.snapshot;
     assert.equal(snapshot.asOf, AS_OF.toISOString());
     assert.equal(snapshot.series["1h"].candles.length, 250);
-    assert.equal(snapshot.series["1h"].candles.at(-1)!.closeTime, "2026-08-02T08:59:59.999Z");
-    assert.equal(snapshot.strategy.specificationHash, CRYPTO_MTF_BREAKOUT_V1_SPECIFICATION_HASH);
+    assert.equal(
+      snapshot.series["1h"].candles.at(-1)!.closeTime,
+      "2026-08-02T08:59:59.999Z"
+    );
+    assert.equal(
+      snapshot.strategy.specificationHash,
+      CRYPTO_MTF_BREAKOUT_V1_SPECIFICATION_HASH
+    );
     assert.equal(snapshot.strategy.codeVersion, "test-code-version");
-    assert.equal(snapshot.signals["1h"]!.adjustedScoreSource, "RULE_APPLICATION");
+    assert.equal(
+      snapshot.signals["1h"]!.adjustedScoreSource,
+      "RULE_APPLICATION"
+    );
     assert.equal(snapshot.multiTimeframe!.alignment, "BULLISH_ALIGNED");
     assert.deepEqual(snapshot.contextEvents, []);
 
@@ -86,11 +96,16 @@ describe("strategy input assembler", () => {
 
     const raw = assembled.snapshot.multiTimeframe!.alignmentScoreRaw;
     assert.ok(raw > 1 && raw <= 100);
-    assert.equal(assembled.snapshot.multiTimeframe!.alignmentScore, (raw / 100).toFixed(12));
+    assert.equal(
+      assembled.snapshot.multiTimeframe!.alignmentScore,
+      (raw / 100).toFixed(12)
+    );
   });
 
   it("refuses to assemble without an enabled assignment", async () => {
-    const { database } = createFakeDatabase([buildFakeWorld({ assignmentEnabled: false })]);
+    const { database } = createFakeDatabase([
+      buildFakeWorld({ assignmentEnabled: false })
+    ]);
     const assembled = await assembleStrategyInput(database as never, {
       symbol: "BTCUSDT",
       asOf: AS_OF,
@@ -232,8 +247,15 @@ describe("shadow candidate persistence", () => {
     });
 
     assert.equal(conflict.outcome, PersistOutcome.CONFLICT);
-    assert.equal(conflict.reasonCode, StrategyReasonCode.CANDIDATE_INPUT_HASH_CONFLICT);
-    assert.equal(writes.tradeCandidates.length, 1, "the stored candidate must not be overwritten");
+    assert.equal(
+      conflict.reasonCode,
+      StrategyReasonCode.CANDIDATE_INPUT_HASH_CONFLICT
+    );
+    assert.equal(
+      writes.tradeCandidates.length,
+      1,
+      "the stored candidate must not be overwritten"
+    );
     assert.equal(writes.riskEvents.length, 1);
     assert.equal(writes.riskEvents[0].severity, "CRITICAL");
     assert.equal(writes.riskEvents[0].type, "IDEMPOTENCY_OR_VERSION_CONFLICT");
@@ -268,8 +290,15 @@ describe("shadow candidate persistence", () => {
     assert.equal(second.outcome, PersistOutcome.REJECTION_RECORDED);
     assert.equal(first.reasonCode, StrategyReasonCode.REGIME_NOT_RISK_ON);
     assert.equal(writes.tradeCandidates.length, 0);
-    assert.equal(writes.auditEvents.length, 1, "an identical refusal must not be written twice");
-    assert.equal(writes.auditEvents[0].eventType, "STRATEGY_EVALUATION_REJECTED");
+    assert.equal(
+      writes.auditEvents.length,
+      1,
+      "an identical refusal must not be written twice"
+    );
+    assert.equal(
+      writes.auditEvents[0].eventType,
+      "STRATEGY_EVALUATION_REJECTED"
+    );
   });
 });
 
@@ -299,10 +328,17 @@ describe("shadowGenerateCandidates job", () => {
 
   it("is idempotent across repeated runs", async () => {
     const { database, writes } = createFakeDatabase(btcAndEth());
-    const options = { asOf: AS_OF, env: ENABLED_ENV, correlationId: "correlation-1" } as const;
+    const options = {
+      asOf: AS_OF,
+      env: ENABLED_ENV,
+      correlationId: "correlation-1"
+    } as const;
 
     const first = await runShadowGenerateCandidates(database as never, options);
-    const second = await runShadowGenerateCandidates(database as never, options);
+    const second = await runShadowGenerateCandidates(
+      database as never,
+      options
+    );
 
     assert.equal(first.created, 2);
     assert.equal(second.created, 0);
@@ -353,8 +389,16 @@ describe("shadowGenerateCandidates job", () => {
 
   it("records a refusal instead of a candidate when the regime is not RISK_ON", async () => {
     const { writes, summary } = run([
-      buildFakeWorld({ symbol: "BTCUSDT", assetId: "asset-btc", cryptoRegime: "MIXED" }),
-      buildFakeWorld({ symbol: "ETHUSDT", assetId: "asset-eth", cryptoRegime: "MIXED" })
+      buildFakeWorld({
+        symbol: "BTCUSDT",
+        assetId: "asset-btc",
+        cryptoRegime: "MIXED"
+      }),
+      buildFakeWorld({
+        symbol: "ETHUSDT",
+        assetId: "asset-eth",
+        cryptoRegime: "MIXED"
+      })
     ]);
     const finished = await summary;
 
@@ -365,10 +409,72 @@ describe("shadowGenerateCandidates job", () => {
     assert.equal(writes.auditEvents.length, 2);
   });
 
+  it("does not even evaluate or persist SHORT while either Short flag is disabled", async () => {
+    const shortWorld = buildFakeWorld({
+      symbol: "BTCUSDT",
+      assetId: "asset-btc",
+      direction: "SHORT"
+    });
+    const { database, writes } = createFakeDatabase([shortWorld]);
+
+    const summary = await runShadowGenerateCandidates(database as never, {
+      asOf: AS_OF,
+      env: {
+        ...ENABLED_ENV,
+        TRADING_SHADOW_SHORT_ENABLED: "false",
+        TRADING_STRATEGY_SHORT_V1_ENABLED: "true"
+      },
+      correlationId: "short-disabled"
+    });
+
+    assert.equal(
+      summary.results.some((result) => result.strategyKey.includes("SHORT")),
+      false
+    );
+    assert.equal(writes.tradeCandidates.length, 0);
+    assert.equal(writes.auditEvents.length, 0);
+  });
+
+  it("creates a SHORT candidate only with both Short flags and an enabled Short assignment", async () => {
+    const shortWorld = buildFakeWorld({
+      symbol: "BTCUSDT",
+      assetId: "asset-btc",
+      direction: "SHORT"
+    });
+    const { database, writes } = createFakeDatabase([shortWorld]);
+
+    const summary = await runShadowGenerateCandidates(database as never, {
+      asOf: AS_OF,
+      env: {
+        ...ENABLED_ENV,
+        TRADING_SHADOW_SHORT_ENABLED: "true",
+        TRADING_STRATEGY_SHORT_V1_ENABLED: "true"
+      },
+      correlationId: "short-enabled"
+    });
+
+    assert.equal(summary.created, 1);
+    assert.equal(writes.tradeCandidates.length, 1);
+    assert.equal(writes.tradeCandidates[0].direction, "SHORT");
+    assert.equal(
+      summary.results.some(
+        (result) =>
+          result.strategyKey ===
+            REQUIRED_DIRECTIONAL_STRATEGY_VERSIONS.SHORT.strategyKey &&
+          result.outcome === PersistOutcome.CREATED
+      ),
+      true
+    );
+  });
+
   it("reports an assembler failure without aborting the other symbol", async () => {
     const { writes, summary } = run([
       buildFakeWorld({ symbol: "BTCUSDT", assetId: "asset-btc" }),
-      buildFakeWorld({ symbol: "ETHUSDT", assetId: "asset-eth", assignmentEnabled: false })
+      buildFakeWorld({
+        symbol: "ETHUSDT",
+        assetId: "asset-eth",
+        assignmentEnabled: false
+      })
     ]);
     const finished = await summary;
 
@@ -378,10 +484,21 @@ describe("shadowGenerateCandidates job", () => {
   });
 
   it("pins the strategy version values an operator must seed", () => {
-    assert.equal(REQUIRED_STRATEGY_VERSION.strategyKey, "CRYPTO_MTF_BREAKOUT_V1");
+    assert.equal(
+      REQUIRED_STRATEGY_VERSION.strategyKey,
+      "CRYPTO_MTF_BREAKOUT_V1"
+    );
     assert.equal(
       REQUIRED_STRATEGY_VERSION.specificationHash,
       CRYPTO_MTF_BREAKOUT_V1_SPECIFICATION_HASH
+    );
+    assert.match(
+      REQUIRED_DIRECTIONAL_STRATEGY_VERSIONS.LONG.strategyKey,
+      /LONG/
+    );
+    assert.match(
+      REQUIRED_DIRECTIONAL_STRATEGY_VERSIONS.SHORT.strategyKey,
+      /SHORT/
     );
   });
 });

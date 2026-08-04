@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-COMPOSE="docker compose -f docker-compose.prod.yml"
+# shellcheck source=./_common.sh
+source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
+require_production_env
 
 # If a service name is passed, tail that service; otherwise tail all
-$COMPOSE logs --follow --tail=100 "$@"
+"${COMPOSE[@]}" logs --follow --tail=100 "$@"

@@ -106,6 +106,10 @@ export const RiskReasonCode = {
   ASSIGNMENT_NOT_ACTIVE: "ASSIGNMENT_NOT_ACTIVE",
 
   LONG_ONLY_OK: "LONG_ONLY_OK",
+  DIRECTION_ALLOWED: "DIRECTION_ALLOWED",
+  SHORT_FLAGS_DISABLED: "SHORT_FLAGS_DISABLED",
+  STRATEGY_DIRECTION_MISMATCH: "STRATEGY_DIRECTION_MISMATCH",
+  EXCHANGE_SHORT_CAPABILITY_FORBIDDEN: "EXCHANGE_SHORT_CAPABILITY_FORBIDDEN",
   SIDE_NOT_ALLOWED: "SIDE_NOT_ALLOWED",
 
   NO_LEVERAGE_OK: "NO_LEVERAGE_OK",
@@ -212,7 +216,8 @@ export const RiskReasonCode = {
   RISK_SNAPSHOT_VERSION_UNSUPPORTED: "RISK_SNAPSHOT_VERSION_UNSUPPORTED",
   RISK_SNAPSHOT_MALFORMED: "RISK_SNAPSHOT_MALFORMED"
 } as const;
-export type RiskReasonCode = (typeof RiskReasonCode)[keyof typeof RiskReasonCode];
+export type RiskReasonCode =
+  (typeof RiskReasonCode)[keyof typeof RiskReasonCode];
 
 export const ALL_RISK_REASON_CODES: readonly RiskReasonCode[] = Object.freeze(
   Object.values(RiskReasonCode).sort()

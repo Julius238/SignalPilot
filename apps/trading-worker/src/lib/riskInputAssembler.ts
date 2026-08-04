@@ -25,18 +25,31 @@ import {
   type RiskInputSnapshotV1
 } from "@signalpilot/risk-engine";
 
+import { loadShadowPortfolioValuation } from "./shadowPortfolioValuation.js";
+
 export const RISK_INPUT_ASSEMBLER_VERSION = "risk-input-assembler-v1/1.0.0";
 
 /** Statuses that still tie up capital (docs/trading/06, `R-011`). */
-const EXPOSURE_POSITION_STATUSES = ["OPENING", "OPEN", "PARTIALLY_CLOSED", "ERROR"] as const;
+const EXPOSURE_POSITION_STATUSES = [
+  "OPENING",
+  "OPEN",
+  "PARTIALLY_CLOSED",
+  "ERROR"
+] as const;
 /** Order statuses that still hold a reservation. */
-const RESERVING_ORDER_STATUSES = ["ACCEPTED", "WAITING_FOR_ENTRY", "PARTIALLY_FILLED"] as const;
+const RESERVING_ORDER_STATUSES = [
+  "ACCEPTED",
+  "WAITING_FOR_ENTRY",
+  "PARTIALLY_FILLED"
+] as const;
 
 export const AssemblerReasonCode = {
   CANDIDATE_NOT_FOUND: "CANDIDATE_NOT_FOUND",
-  PORTFOLIO_NOT_FOUND: "PORTFOLIO_NOT_FOUND"
+  PORTFOLIO_NOT_FOUND: "PORTFOLIO_NOT_FOUND",
+  POSITION_MARK_UNAVAILABLE: "POSITION_MARK_UNAVAILABLE"
 } as const;
-export type AssemblerReasonCode = (typeof AssemblerReasonCode)[keyof typeof AssemblerReasonCode];
+export type AssemblerReasonCode =
+  (typeof AssemblerReasonCode)[keyof typeof AssemblerReasonCode];
 
 export interface AssembleRiskInputOptions {
   readonly tradeCandidateId: string;
@@ -48,12 +61,22 @@ export interface AssembleRiskInputOptions {
     readonly enableLiveTrading: boolean;
     readonly shadowMasterFlagEnabled: boolean;
     readonly riskJobEnabled: boolean;
+    readonly strategyLongV1Enabled: boolean;
+    readonly strategyShortV1Enabled: boolean;
+    readonly shadowShortEnabled: boolean;
+    readonly exchangeExecutionEnabled: boolean;
+    readonly marginTradingEnabled: boolean;
+    readonly futuresTradingEnabled: boolean;
   };
 }
 
 export type AssembleRiskInputResult =
   | { readonly ok: true; readonly snapshot: RiskInputSnapshotV1 }
-  | { readonly ok: false; readonly reasonCode: AssemblerReasonCode; readonly message: string };
+  | {
+      readonly ok: false;
+      readonly reasonCode: AssemblerReasonCode;
+      readonly message: string;
+    };
 
 // ───────────────────────────────────────────────────────────────────────────
 // Conversion helpers
@@ -85,7 +108,16 @@ const ageMs = (asOf: Date, at: Date | null | undefined): number | null =>
 const utcDate = (value: Date): string => value.toISOString().slice(0, 10);
 
 const startOfUtcDay = (value: Date): Date =>
-  new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()));
+  new Date(
+    Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate())
+  );
+
+function declaredDirection(value: Prisma.JsonValue): string {
+  if (typeof value !== "object" || value === null || Array.isArray(value))
+    return "UNKNOWN";
+  const direction = (value as Record<string, unknown>).direction;
+  return direction === "LONG" || direction === "SHORT" ? direction : "UNKNOWN";
+}
 
 // ───────────────────────────────────────────────────────────────────────────
 // Assembly
@@ -114,7 +146,9 @@ export async function assembleRiskInput(
     };
   }
 
-  const portfolio = await database.portfolio.findUnique({ where: { id: candidate.portfolioId } });
+  const portfolio = await database.portfolio.findUnique({
+    where: { id: candidate.portfolioId }
+  });
   if (portfolio === null) {
     return {
       ok: false,
@@ -152,7 +186,9 @@ export async function assembleRiskInput(
         feeDelta: true
       }
     }),
-    database.portfolioLedgerEntry.count({ where: { portfolioId: portfolio.id } }),
+    database.portfolioLedgerEntry.count({
+      where: { portfolioId: portfolio.id }
+    }),
     database.portfolioLedgerEntry.findFirst({
       where: { portfolioId: portfolio.id },
       orderBy: { sequence: "desc" },
@@ -163,11 +199,17 @@ export async function assembleRiskInput(
       orderBy: { asOf: "asc" }
     }),
     database.shadowPosition.findMany({
-      where: { portfolioId: portfolio.id, status: { in: [...EXPOSURE_POSITION_STATUSES] } },
+      where: {
+        portfolioId: portfolio.id,
+        status: { in: [...EXPOSURE_POSITION_STATUSES] }
+      },
       include: { asset: { select: { symbol: true } } }
     }),
     database.shadowOrder.findMany({
-      where: { portfolioId: portfolio.id, status: { in: [...RESERVING_ORDER_STATUSES] } },
+      where: {
+        portfolioId: portfolio.id,
+        status: { in: [...RESERVING_ORDER_STATUSES] }
+      },
       include: { asset: { select: { symbol: true } } }
     }),
     database.instrumentExecutionProfile.findFirst({
@@ -200,9 +242,37 @@ export async function assembleRiskInput(
     loadDailyCounters(database, portfolio.id, dayStart, asOf)
   ]);
 
+  let positionMarks: Awaited<ReturnType<typeof loadShadowPortfolioValuation>>;
+  try {
+    positionMarks = await loadShadowPortfolioValuation(database, {
+      portfolioId: portfolio.id,
+      asOf,
+      availableCash: decimalString(portfolio.availableCash),
+      reservedCash: decimalString(portfolio.reservedCash),
+      realizedPnl: decimalString(portfolio.realizedPnl),
+      feesPaid: decimalString(portfolio.feesPaid),
+      highWaterMark: decimalString(portfolio.highWaterMark),
+      startOfDayEquity: null
+    });
+  } catch (error) {
+    return {
+      ok: false,
+      reasonCode: AssemblerReasonCode.POSITION_MARK_UNAVAILABLE,
+      message:
+        error instanceof Error
+          ? error.message
+          : "Open-position valuation failed."
+    };
+  }
+  const markByPositionId = new Map(
+    positionMarks.marks.map((mark) => [mark.shadowPositionId, mark] as const)
+  );
+
   const equity = decimalString(portfolio.equity);
   const startOfDayEquity =
-    startOfDaySnapshot === null ? null : decimalString(startOfDaySnapshot.equity);
+    startOfDaySnapshot === null
+      ? null
+      : decimalString(startOfDaySnapshot.equity);
   const dailyPnl =
     startOfDayEquity === null
       ? "0.000000000000"
@@ -226,7 +296,13 @@ export async function assembleRiskInput(
       strategyVersionId: candidate.strategyVersionId,
       strategyVersionStatus: candidate.strategyVersion.status,
       strategyKey: candidate.strategyAssignment.strategy.key,
+      strategyDirection: declaredDirection(
+        candidate.strategyVersion.parametersJson
+      ),
       assignmentEnabled: candidate.strategyAssignment.enabled,
+      assignmentDirection: declaredDirection(
+        candidate.strategyAssignment.assignmentConfigJson
+      ),
       anchorCandleId: candidate.anchorCandleId,
       referenceEntryPrice: decimalString(candidate.referenceEntryPrice),
       stopPrice: decimalString(candidate.stopPrice),
@@ -237,7 +313,9 @@ export async function assembleRiskInput(
       plannedRewardRisk: nullableDecimal(candidate.plannedRewardRisk),
       plannedEntryMinimum: nullableDecimal(candidate.plannedEntryMinimum),
       plannedEntryMaximum: nullableDecimal(candidate.plannedEntryMaximum),
-      maximumEntryGapDistance: nullableDecimal(candidate.maximumEntryGapDistance),
+      maximumEntryGapDistance: nullableDecimal(
+        candidate.maximumEntryGapDistance
+      ),
       validFrom: nullableIso(candidate.validFrom),
       earliestFillAt: nullableIso(candidate.earliestFillAt),
       maxHoldHours: candidate.maxHoldHours,
@@ -295,7 +373,9 @@ export async function assembleRiskInput(
     ledgerReplay: {
       sequence: lastLedgerEntry?.sequence ?? 0,
       entryCount: ledgerCount,
-      availableCash: decimalString(ledgerAggregate._sum.availableCashDelta ?? 0),
+      availableCash: decimalString(
+        ledgerAggregate._sum.availableCashDelta ?? 0
+      ),
       reservedCash: decimalString(ledgerAggregate._sum.reservedCashDelta ?? 0),
       realizedPnl: decimalString(ledgerAggregate._sum.realizedPnlDelta ?? 0),
       feesPaid: decimalString(ledgerAggregate._sum.feeDelta ?? 0),
@@ -317,20 +397,21 @@ export async function assembleRiskInput(
       assetId: position.assetId,
       symbol: position.asset.symbol,
       status: position.status,
+      direction: position.direction,
       openQuantity: decimalString(position.openQuantity),
       averageEntryPrice: decimalString(position.averageEntryPrice),
-      // Conservative bid mark is a P4 projection; until then the entry notional
-      // is the honest upper bound of what the position ties up.
-      marketValue: multiplyDecimalStrings(
-        decimalString(position.openQuantity),
-        decimalString(position.averageEntryPrice)
-      )
+      marketValue: markByPositionId.get(position.id)?.marketValue ?? "INVALID",
+      equityContribution:
+        markByPositionId.get(position.id)?.equityContribution ?? "INVALID",
+      reservedCollateral: decimalString(position.reservedCollateral)
     })),
     reservations: reservingOrders.map((order) => ({
       shadowOrderId: order.id,
       assetId: order.assetId,
       symbol: order.asset.symbol,
       status: order.status,
+      direction: order.direction,
+      purpose: order.purpose,
       reservedQuoteAmount: decimalString(order.reservedQuoteAmount)
     })),
     dailyCounters: {
@@ -356,7 +437,9 @@ export async function assembleRiskInput(
             feeBps: executionProfile.feeBps,
             fullSpreadBps: executionProfile.fullSpreadBps,
             slippageBps: executionProfile.slippageBps,
-            maxParticipationRate: decimalString(executionProfile.maxParticipationRate),
+            maxParticipationRate: decimalString(
+              executionProfile.maxParticipationRate
+            ),
             sourceObservedAt: iso(executionProfile.sourceObservedAt),
             specificationHash: executionProfile.specificationHash
           },
@@ -375,9 +458,15 @@ export async function assembleRiskInput(
             maxOpenPositions: riskLimitSet.maxOpenPositions,
             maxNewTradesPerDay: riskLimitSet.maxNewTradesPerDay,
             maxConsecutiveLosses: riskLimitSet.maxConsecutiveLosses,
-            maxGrossExposurePct: decimalString(riskLimitSet.maxGrossExposurePct),
-            maxAssetExposurePct: decimalString(riskLimitSet.maxAssetExposurePct),
-            maxCorrelatedExposurePct: decimalString(riskLimitSet.maxCorrelatedExposurePct),
+            maxGrossExposurePct: decimalString(
+              riskLimitSet.maxGrossExposurePct
+            ),
+            maxAssetExposurePct: decimalString(
+              riskLimitSet.maxAssetExposurePct
+            ),
+            maxCorrelatedExposurePct: decimalString(
+              riskLimitSet.maxCorrelatedExposurePct
+            ),
             maxSpreadBps: riskLimitSet.maxSpreadBps,
             maxSlippageBps: riskLimitSet.maxSlippageBps,
             specificationHash: riskLimitSet.specificationHash
@@ -389,7 +478,8 @@ export async function assembleRiskInput(
       portfolioSnapshotAgeMs: ageMs(asOf, portfolio.lastReconciledAt),
       hasFutureTimestamp:
         candidate.dataAsOf.getTime() > asOf.getTime() ||
-        (marketRegime !== null && marketRegime.generatedAt.getTime() > asOf.getTime())
+        (marketRegime !== null &&
+          marketRegime.generatedAt.getTime() > asOf.getTime())
     },
     dataQuality: {
       minimumClosedCandles: dataQuality.candleCount,
@@ -413,7 +503,11 @@ export async function assembleRiskInput(
     },
     // v1 has no manual sizing path at all; the fields exist so `R-023` can
     // prove their absence rather than assume it.
-    sizeOverride: { manualQuantity: null, riskMultiplier: null, requestedBy: null },
+    sizeOverride: {
+      manualQuantity: null,
+      riskMultiplier: null,
+      requestedBy: null
+    },
     previousApproval:
       previousApproval === null
         ? null
@@ -477,10 +571,14 @@ async function loadDataQuality(
   readonly gapCount: TimeframeMap<number | null>;
   readonly providerErrorCount: TimeframeMap<number | null>;
 }> {
-  const rows = await database.candleDataQuality.findMany({ where: { assetId } });
+  const rows = await database.candleDataQuality.findMany({
+    where: { assetId }
+  });
   const byTimeframe = new Map(rows.map((row) => [row.timeframe, row]));
 
-  const pick = <T>(getter: (row: (typeof rows)[number]) => T): TimeframeMap<T | null> =>
+  const pick = <T>(
+    getter: (row: (typeof rows)[number]) => T
+  ): TimeframeMap<T | null> =>
     Object.fromEntries(
       (["1h", "4h", "1d"] as const).map((timeframe) => {
         const row = byTimeframe.get(timeframe);
@@ -491,12 +589,18 @@ async function loadDataQuality(
   // The oldest of the three observation times is the binding freshness.
   const observedAts = (["1h", "4h", "1d"] as const)
     .map((timeframe) => byTimeframe.get(timeframe))
-    .map((row) => (row === undefined ? null : (row.lastAuditAt ?? row.updatedAt)));
+    .map((row) =>
+      row === undefined ? null : (row.lastAuditAt ?? row.updatedAt)
+    );
   const oldest = observedAts.includes(null)
     ? null
     : observedAts.reduce<Date | null>(
         (worst, current) =>
-          current === null ? worst : worst === null || current < worst ? current : worst,
+          current === null
+            ? worst
+            : worst === null || current < worst
+              ? current
+              : worst,
         null
       );
 
@@ -561,8 +665,4 @@ async function loadDailyCounters(
 
 function subtractDecimalStrings(left: string, right: string): string {
   return new Prisma.Decimal(left).minus(new Prisma.Decimal(right)).toFixed(12);
-}
-
-function multiplyDecimalStrings(left: string, right: string): string {
-  return new Prisma.Decimal(left).mul(new Prisma.Decimal(right)).toDecimalPlaces(12).toFixed(12);
 }

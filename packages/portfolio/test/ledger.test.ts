@@ -18,7 +18,10 @@ const d = (value: string): DecimalValue => DecimalValue.fromString(value);
 
 describe("reserve -> partial release -> entry fill -> exit fill — one full round trip", () => {
   it("keeps availableCash + reservedCash + realizedPnl consistent at every step", () => {
-    const start = { ...EMPTY_PORTFOLIO_STATE, availableCash: "10000.000000000000" };
+    const start = {
+      ...EMPTY_PORTFOLIO_STATE,
+      availableCash: "10000.000000000000"
+    };
 
     // 1. Reserve worst-case cost for 0.1 units.
     const reserve = computeReserveEntry({
@@ -46,8 +49,14 @@ describe("reserve -> partial release -> entry fill -> exit fill — one full rou
     assert.equal(release.nextState?.reservedCash, "1449.000000000000");
 
     // 3. Entry fill for the 0.06 units actually filled.
-    const entryFill = { quantity: "0.06", fillPrice: "24102.41", notional: "1446.1446000000", feeAmount: "1.4461446" };
+    const entryFill = {
+      quantity: "0.06",
+      fillPrice: "24102.41",
+      notional: "1446.1446000000",
+      feeAmount: "1.4461446"
+    };
     const entryLedger = applyEntryFillLedger({
+      direction: "LONG",
       state: release.nextState!,
       notionalEntryKey: "entry-notional-1",
       feeEntryKey: "entry-fee-1",
@@ -64,17 +73,31 @@ describe("reserve -> partial release -> entry fill -> exit fill — one full rou
     const expectedAvailableAfterEntry = d("8551")
       .add(d("1449").sub(d(entryFill.notional)).sub(d(entryFill.feeAmount)))
       .toString();
-    assert.equal(entryLedger.nextState?.availableCash, expectedAvailableAfterEntry);
+    assert.equal(
+      entryLedger.nextState?.availableCash,
+      expectedAvailableAfterEntry
+    );
     assert.equal(entryLedger.nextState?.reservedCash, "0.000000000000");
-    assert.equal(entryLedger.nextState?.feesPaid, d(entryFill.feeAmount).toString());
+    assert.equal(
+      entryLedger.nextState?.feesPaid,
+      d(entryFill.feeAmount).toString()
+    );
 
-    const entryPosition = applyEntryFillToPosition(EMPTY_POSITION_STATE, entryFill);
+    const entryPosition = applyEntryFillToPosition(
+      EMPTY_POSITION_STATE,
+      entryFill
+    );
     assert.equal(entryPosition.ok, true);
     assert.equal(entryPosition.position?.openQuantity, "0.060000000000");
     assert.equal(entryPosition.position?.initialQuantity, "0.060000000000");
 
     // 4. Exit fill closes the entire position at a profit.
-    const exitFill = { quantity: "0.06", fillPrice: "24800.00", notional: "1488.0000000000", feeAmount: "1.488" };
+    const exitFill = {
+      quantity: "0.06",
+      fillPrice: "24800.00",
+      notional: "1488.0000000000",
+      feeAmount: "1.488"
+    };
     const exitPosition = applyExitFillToPosition(
       entryPosition.position!,
       exitFill,
@@ -84,15 +107,21 @@ describe("reserve -> partial release -> entry fill -> exit fill — one full rou
     assert.equal(exitPosition.position?.openQuantity, "0.000000000000");
     assert.equal(exitPosition.position?.closedQuantity, "0.060000000000");
     // Full close: all entry fees are attributed exactly once.
-    assert.equal(exitPosition.position?.allocatedEntryFees, entryPosition.position?.feesPaid);
+    assert.equal(
+      exitPosition.position?.allocatedEntryFees,
+      entryPosition.position?.feesPaid
+    );
 
     const exitLedger = applyExitFillLedger({
+      direction: "LONG",
       state: entryLedger.nextState!,
       proceedsEntryKey: "exit-notional-1",
       feeEntryKey: "exit-fee-1",
       pnlEntryKey: "exit-pnl-1",
       fill: exitFill,
       realizedPnlDelta: exitPosition.realizedPnlDelta!,
+      grossPnlDelta: exitPosition.grossPnlDelta!,
+      releasedCollateral: exitPosition.releasedCollateralDelta!,
       shadowOrderId: "order-exit-1",
       shadowFillId: "fill-exit-1",
       shadowPositionId: "position-1",
@@ -100,12 +129,20 @@ describe("reserve -> partial release -> entry fill -> exit fill — one full rou
     });
     assert.equal(exitLedger.ok, true);
     assert.equal(exitLedger.entries.length, 3);
-    assert.equal(exitLedger.nextState?.realizedPnl, exitPosition.realizedPnlDelta);
+    assert.equal(
+      exitLedger.nextState?.realizedPnl,
+      exitPosition.realizedPnlDelta
+    );
 
     // Net P&L equals the price move on the quantity, minus every fee paid.
-    const grossPnl = d(exitFill.fillPrice).sub(d(entryPosition.position!.averageEntryPrice)).mul(d("0.06"), "FLOOR");
+    const grossPnl = d(exitFill.fillPrice)
+      .sub(d(entryPosition.position!.averageEntryPrice))
+      .mul(d("0.06"), "FLOOR");
     const totalFees = d(entryFill.feeAmount).add(d(exitFill.feeAmount));
-    assert.equal(exitPosition.realizedPnlDelta, grossPnl.sub(totalFees).toString());
+    assert.equal(
+      exitPosition.realizedPnlDelta,
+      grossPnl.sub(totalFees).toString()
+    );
 
     // The final available cash reflects exactly: starting cash - entry cost - exit fee + exit proceeds.
     const expectedFinalAvailable = d("10000")
@@ -113,7 +150,10 @@ describe("reserve -> partial release -> entry fill -> exit fill — one full rou
       .sub(d(entryFill.feeAmount))
       .add(d(exitFill.notional))
       .sub(d(exitFill.feeAmount));
-    assert.equal(exitLedger.nextState?.availableCash, expectedFinalAvailable.toString());
+    assert.equal(
+      exitLedger.nextState?.availableCash,
+      expectedFinalAvailable.toString()
+    );
     assert.equal(exitLedger.nextState?.reservedCash, "0.000000000000");
   });
 });
@@ -143,6 +183,7 @@ describe("reservation and reserve-consuming guards", () => {
 
   it("refuses an entry fill whose actual cost would exceed its tied reserve", () => {
     const result = applyEntryFillLedger({
+      direction: "LONG",
       state: { ...EMPTY_PORTFOLIO_STATE, reservedCash: "100.000000000000" },
       notionalEntryKey: "n",
       feeEntryKey: "f",
@@ -158,11 +199,97 @@ describe("reservation and reserve-consuming guards", () => {
 
   it("refuses an exit fill quantity larger than the open position", () => {
     const result = applyExitFillToPosition(
-      { ...EMPTY_POSITION_STATE, initialQuantity: "1", openQuantity: "1", averageEntryPrice: "100" },
+      {
+        ...EMPTY_POSITION_STATE,
+        initialQuantity: "1",
+        openQuantity: "1",
+        averageEntryPrice: "100"
+      },
       { quantity: "2", fillPrice: "110", notional: "220", feeAmount: "0.2" },
       "0"
     );
     assert.equal(result.ok, false);
+  });
+});
+
+describe("synthetic SHORT collateral and ledger", () => {
+  it("never credits synthetic sell proceeds and releases collateral on buy-to-close", () => {
+    const start = {
+      ...EMPTY_PORTFOLIO_STATE,
+      availableCash: "10000.000000000000"
+    };
+    const reserve = computeReserveEntry({
+      state: start,
+      entryKey: "short-reserve",
+      reservedQuoteAmount: "2600",
+      shadowOrderId: "short-entry-order",
+      occurredAt: "2026-08-02T10:00:00.000Z"
+    });
+    assert.equal(reserve.ok, true);
+
+    const entryFill = {
+      quantity: "0.1",
+      fillPrice: "24000",
+      notional: "2400",
+      feeAmount: "2.4",
+      collateralAmount: "2597.6"
+    };
+    const entered = applyEntryFillToPosition(
+      { ...EMPTY_POSITION_STATE, direction: "SHORT" },
+      entryFill
+    );
+    assert.equal(entered.ok, true);
+    assert.equal(entered.position!.reservedCollateral, "2597.600000000000");
+
+    const entryLedger = applyEntryFillLedger({
+      direction: "SHORT",
+      state: reserve.nextState!,
+      notionalEntryKey: "short-entry-notional",
+      feeEntryKey: "short-entry-fee",
+      reservedForFill: "2600",
+      fill: entryFill,
+      shadowOrderId: "short-entry-order",
+      shadowFillId: "short-entry-fill",
+      shadowPositionId: "short-position",
+      occurredAt: "2026-08-02T11:00:00.000Z"
+    });
+    assert.equal(entryLedger.ok, true);
+    assert.equal(entryLedger.nextState!.availableCash, "7400.000000000000");
+    assert.equal(entryLedger.nextState!.reservedCash, "2597.600000000000");
+
+    const exitFill = {
+      quantity: "0.1",
+      fillPrice: "23000",
+      notional: "2300",
+      feeAmount: "2.3"
+    };
+    const exited = applyExitFillToPosition(
+      entered.position!,
+      exitFill,
+      entered.position!.feesPaid
+    );
+    assert.equal(exited.realizedPnlDelta, "95.300000000000");
+    assert.equal(exited.releasedCollateralDelta, "2597.600000000000");
+
+    const exitLedger = applyExitFillLedger({
+      direction: "SHORT",
+      state: entryLedger.nextState!,
+      proceedsEntryKey: "short-exit-notional",
+      feeEntryKey: "short-exit-fee",
+      pnlEntryKey: "short-exit-pnl",
+      fill: exitFill,
+      realizedPnlDelta: exited.realizedPnlDelta!,
+      grossPnlDelta: exited.grossPnlDelta!,
+      releasedCollateral: exited.releasedCollateralDelta!,
+      shadowOrderId: "short-exit-order",
+      shadowFillId: "short-exit-fill",
+      shadowPositionId: "short-position",
+      occurredAt: "2026-08-02T12:00:00.000Z"
+    });
+    assert.equal(exitLedger.ok, true);
+    assert.equal(exitLedger.nextState!.availableCash, "10095.300000000000");
+    assert.equal(exitLedger.nextState!.reservedCash, "0.000000000000");
+    assert.equal(exitLedger.nextState!.realizedPnl, "95.300000000000");
   });
 });
 
@@ -178,7 +305,12 @@ describe("partial exit fees are allocated proportionally, final close absorbs th
 
     const firstExit = applyExitFillToPosition(
       entered.position!,
-      { quantity: "0.03", fillPrice: "110", notional: "3.3", feeAmount: "0.01" },
+      {
+        quantity: "0.03",
+        fillPrice: "110",
+        notional: "3.3",
+        feeAmount: "0.01"
+      },
       entered.position!.feesPaid
     );
     assert.equal(firstExit.ok, true);
@@ -186,12 +318,20 @@ describe("partial exit fees are allocated proportionally, final close absorbs th
 
     const secondExit = applyExitFillToPosition(
       firstExit.position!,
-      { quantity: "0.06", fillPrice: "120", notional: "7.2", feeAmount: "0.02" },
+      {
+        quantity: "0.06",
+        fillPrice: "120",
+        notional: "7.2",
+        feeAmount: "0.02"
+      },
       entered.position!.feesPaid
     );
     assert.equal(secondExit.ok, true);
     assert.equal(secondExit.position?.openQuantity, "0.000000000000");
     // The two allocations together must equal the total entry fee exactly.
-    assert.equal(secondExit.position?.allocatedEntryFees, entered.position?.feesPaid);
+    assert.equal(
+      secondExit.position?.allocatedEntryFees,
+      entered.position?.feesPaid
+    );
   });
 });

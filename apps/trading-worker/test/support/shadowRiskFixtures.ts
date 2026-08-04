@@ -56,7 +56,8 @@ export function buildRiskWorld(options: RiskWorldOptions = {}) {
 
   const candidate = {
     id: "trade-candidate-1",
-    candidateKey: "candidate.v1|assignment-btcusdt|strategy-version-1|asset-btc|btcusdt-1h-249",
+    candidateKey:
+      "candidate.v1|assignment-btcusdt|strategy-version-1|asset-btc|btcusdt-1h-249",
     strategyAssignmentId: "assignment-btcusdt",
     strategyVersionId: "strategy-version-1",
     portfolioId: "portfolio-shadow-1",
@@ -88,10 +89,16 @@ export function buildRiskWorld(options: RiskWorldOptions = {}) {
     inputHash: "a".repeat(64),
     version: 0,
     asset,
-    strategyVersion: { id: "strategy-version-1", status: "ACTIVE", version: 1 },
+    strategyVersion: {
+      id: "strategy-version-1",
+      status: "ACTIVE",
+      version: 1,
+      parametersJson: { direction: "LONG" }
+    },
     strategyAssignment: {
       id: "assignment-btcusdt",
       enabled: true,
+      assignmentConfigJson: { direction: "LONG" },
       strategyId: "strategy-1",
       strategy: { key: "CRYPTO_MTF_BREAKOUT_V1" }
     },
@@ -192,9 +199,15 @@ export function buildRiskWorld(options: RiskWorldOptions = {}) {
               maxOpenPositions: RISK_LIMIT_SET_V1.maxOpenPositions,
               maxNewTradesPerDay: RISK_LIMIT_SET_V1.maxNewTradesPerDay,
               maxConsecutiveLosses: RISK_LIMIT_SET_V1.maxConsecutiveLosses,
-              maxGrossExposurePct: decimal(RISK_LIMIT_SET_V1.maxGrossExposurePct),
-              maxAssetExposurePct: decimal(RISK_LIMIT_SET_V1.maxAssetExposurePct),
-              maxCorrelatedExposurePct: decimal(RISK_LIMIT_SET_V1.maxCorrelatedExposurePct),
+              maxGrossExposurePct: decimal(
+                RISK_LIMIT_SET_V1.maxGrossExposurePct
+              ),
+              maxAssetExposurePct: decimal(
+                RISK_LIMIT_SET_V1.maxAssetExposurePct
+              ),
+              maxCorrelatedExposurePct: decimal(
+                RISK_LIMIT_SET_V1.maxCorrelatedExposurePct
+              ),
               maxSpreadBps: RISK_LIMIT_SET_V1.maxSpreadBps,
               maxSlippageBps: RISK_LIMIT_SET_V1.maxSlippageBps,
               specificationHash: RISK_LIMIT_SET_SPECIFICATION_HASH
@@ -220,9 +233,24 @@ export function buildRiskWorld(options: RiskWorldOptions = {}) {
       providerErrorCount: 0
     })),
     candles: [
-      { assetId: asset.id, timeframe: "1h", openTime: new Date("2026-08-02T08:00:00.000Z"), closeTime: new Date("2026-08-02T08:59:59.999Z") },
-      { assetId: asset.id, timeframe: "4h", openTime: new Date("2026-08-02T04:00:00.000Z"), closeTime: new Date("2026-08-02T07:59:59.999Z") },
-      { assetId: asset.id, timeframe: "1d", openTime: new Date("2026-08-01T00:00:00.000Z"), closeTime: new Date("2026-08-01T23:59:59.999Z") }
+      {
+        assetId: asset.id,
+        timeframe: "1h",
+        openTime: new Date("2026-08-02T08:00:00.000Z"),
+        closeTime: new Date("2026-08-02T08:59:59.999Z")
+      },
+      {
+        assetId: asset.id,
+        timeframe: "4h",
+        openTime: new Date("2026-08-02T04:00:00.000Z"),
+        closeTime: new Date("2026-08-02T07:59:59.999Z")
+      },
+      {
+        assetId: asset.id,
+        timeframe: "1d",
+        openTime: new Date("2026-08-01T00:00:00.000Z"),
+        closeTime: new Date("2026-08-01T23:59:59.999Z")
+      }
     ]
   };
 }
@@ -285,11 +313,22 @@ export function createFakeRiskDatabase(world: RiskWorld) {
     tradeCandidate: {
       findUnique: async ({ where }: { where: { id: string } }) =>
         candidates.find((candidate) => candidate.id === where.id) ?? null,
-      findMany: async ({ where }: { where?: { id?: string; status?: { in: string[] } } } = {}) =>
+      findMany: async ({
+        where
+      }: {
+        where?: {
+          id?: string;
+          status?: { in: string[] };
+          direction?: { in: string[] };
+        };
+      } = {}) =>
         candidates.filter(
           (candidate) =>
             (where?.id === undefined || candidate.id === where.id) &&
-            (where?.status === undefined || where.status.in.includes(candidate.status)) &&
+            (where?.status === undefined ||
+              where.status.in.includes(candidate.status)) &&
+            (where?.direction === undefined ||
+              where.direction.in.includes(candidate.direction)) &&
             candidate.decision === null
         ),
       updateMany: async ({
@@ -300,7 +339,9 @@ export function createFakeRiskDatabase(world: RiskWorld) {
         data: Record<string, unknown>;
       }) => {
         const target = candidates.find(
-          (candidate) => candidate.id === where.id && where.status.in.includes(candidate.status)
+          (candidate) =>
+            candidate.id === where.id &&
+            where.status.in.includes(candidate.status)
         );
         if (target === undefined) return { count: 0 };
         target.status = data.status as string;
@@ -311,10 +352,14 @@ export function createFakeRiskDatabase(world: RiskWorld) {
     portfolio: {
       findUnique: async ({ where }: { where: { id?: string; key?: string } }) =>
         world.portfolios.find(
-          (portfolio) => portfolio.id === where.id || portfolio.key === where.key
+          (portfolio) =>
+            portfolio.id === where.id || portfolio.key === where.key
         ) ?? null,
       create: async ({ data }: { data: Record<string, unknown> }) => {
-        const row = { id: `portfolio-${writes.portfolios.length + 1}`, ...data };
+        const row = {
+          id: `portfolio-${writes.portfolios.length + 1}`,
+          ...data
+        };
         writes.portfolios.push(row);
         return row;
       }
@@ -322,7 +367,9 @@ export function createFakeRiskDatabase(world: RiskWorld) {
     tradingSession: {
       findFirst: async () => world.sessions[0] ?? null,
       findUnique: async ({ where }: { where: { sessionKey: string } }) =>
-        world.sessions.find((session) => session.sessionKey === where.sessionKey) ?? null,
+        world.sessions.find(
+          (session) => session.sessionKey === where.sessionKey
+        ) ?? null,
       create: async ({ data }: { data: Record<string, unknown> }) => {
         const row = { id: `session-${writes.sessions.length + 1}`, ...data };
         writes.sessions.push(row);
@@ -332,7 +379,8 @@ export function createFakeRiskDatabase(world: RiskWorld) {
     portfolioLedgerEntry: {
       aggregate: async () => ({
         _sum: {
-          availableCashDelta: world.ledgerEntries[0]?.availableCashDelta ?? decimal("0"),
+          availableCashDelta:
+            world.ledgerEntries[0]?.availableCashDelta ?? decimal("0"),
           reservedCashDelta: decimal("0"),
           realizedPnlDelta: decimal("0"),
           feeDelta: decimal("0")
@@ -347,14 +395,17 @@ export function createFakeRiskDatabase(world: RiskWorld) {
         where: { entryKey: string };
         create: Record<string, unknown>;
       }) => {
-        const existing = writes.ledgerEntries.find((row) => row.entryKey === where.entryKey);
+        const existing = writes.ledgerEntries.find(
+          (row) => row.entryKey === where.entryKey
+        );
         if (existing !== undefined) return existing;
         writes.ledgerEntries.push(create);
         return create;
       }
     },
     portfolioSnapshot: {
-      findFirst: async () => world.snapshots[0] ?? writes.portfolioSnapshots[0] ?? null,
+      findFirst: async () =>
+        world.snapshots[0] ?? writes.portfolioSnapshots[0] ?? null,
       create: async ({ data }: { data: Record<string, unknown> }) => {
         writes.portfolioSnapshots.push(data);
         return data;
@@ -363,17 +414,25 @@ export function createFakeRiskDatabase(world: RiskWorld) {
     shadowPosition: { findMany: async () => [] },
     shadowOrder: { findMany: async () => [] },
     instrumentExecutionProfile: {
-      findFirst: async () => world.executionProfiles[0] ?? writes.executionProfiles[0] ?? null,
+      findFirst: async () =>
+        world.executionProfiles[0] ?? writes.executionProfiles[0] ?? null,
       create: async ({ data }: { data: Record<string, unknown> }) => {
-        const row = { id: `execution-profile-${writes.executionProfiles.length + 1}`, ...data };
+        const row = {
+          id: `execution-profile-${writes.executionProfiles.length + 1}`,
+          ...data
+        };
         writes.executionProfiles.push(row);
         return row;
       }
     },
     riskLimitSet: {
-      findFirst: async () => world.riskLimitSets[0] ?? writes.riskLimitSets[0] ?? null,
+      findFirst: async () =>
+        world.riskLimitSets[0] ?? writes.riskLimitSets[0] ?? null,
       create: async ({ data }: { data: Record<string, unknown> }) => {
-        const row = { id: `risk-limit-set-${writes.riskLimitSets.length + 1}`, ...data };
+        const row = {
+          id: `risk-limit-set-${writes.riskLimitSets.length + 1}`,
+          ...data
+        };
         writes.riskLimitSets.push(row);
         return row;
       }
@@ -382,7 +441,8 @@ export function createFakeRiskDatabase(world: RiskWorld) {
     candleDataQuality: { findMany: async () => world.dataQuality },
     candle: {
       findFirst: async ({ where }: { where: { timeframe: string } }) =>
-        world.candles.find((candle) => candle.timeframe === where.timeframe) ?? null
+        world.candles.find((candle) => candle.timeframe === where.timeframe) ??
+        null
     },
     asset: {
       findFirst: async ({ where }: { where: { symbol: string } }) =>
@@ -391,13 +451,18 @@ export function createFakeRiskDatabase(world: RiskWorld) {
 
     riskAssessment: {
       findUnique: async ({ where }: { where: { assessmentKey: string } }) =>
-        writes.riskAssessments.find((row) => row.assessmentKey === where.assessmentKey) ?? null,
+        writes.riskAssessments.find(
+          (row) => row.assessmentKey === where.assessmentKey
+        ) ?? null,
       findFirst: async ({ where }: { where: { status?: string } }) =>
         writes.riskAssessments.find(
           (row) => where.status === undefined || row.status === where.status
         ) ?? null,
       create: async ({ data }: { data: Record<string, unknown> }) => {
-        const row = { id: `risk-assessment-${writes.riskAssessments.length + 1}`, ...data };
+        const row = {
+          id: `risk-assessment-${writes.riskAssessments.length + 1}`,
+          ...data
+        };
         writes.riskAssessments.push(row);
         return row;
       }
@@ -410,9 +475,14 @@ export function createFakeRiskDatabase(world: RiskWorld) {
     },
     tradeDecision: {
       create: async ({ data }: { data: Record<string, unknown> }) => {
-        const row = { id: `trade-decision-${writes.tradeDecisions.length + 1}`, ...data };
+        const row = {
+          id: `trade-decision-${writes.tradeDecisions.length + 1}`,
+          ...data
+        };
         writes.tradeDecisions.push(row);
-        const candidate = candidates.find((entry) => entry.id === data.tradeCandidateId);
+        const candidate = candidates.find(
+          (entry) => entry.id === data.tradeCandidateId
+        );
         if (candidate !== undefined) candidate.decision = { id: row.id };
         return row;
       }
@@ -422,16 +492,32 @@ export function createFakeRiskDatabase(world: RiskWorld) {
         writes.auditEvents.push(data);
         return data;
       },
-      upsert: async ({ where, create }: { where: { eventKey: string }; create: Record<string, unknown> }) => {
-        const existing = writes.auditEvents.find((row) => row.eventKey === where.eventKey);
+      upsert: async ({
+        where,
+        create
+      }: {
+        where: { eventKey: string };
+        create: Record<string, unknown>;
+      }) => {
+        const existing = writes.auditEvents.find(
+          (row) => row.eventKey === where.eventKey
+        );
         if (existing !== undefined) return existing;
         writes.auditEvents.push(create);
         return create;
       }
     },
     riskEvent: {
-      upsert: async ({ where, create }: { where: { eventKey: string }; create: Record<string, unknown> }) => {
-        const existing = writes.riskEvents.find((row) => row.eventKey === where.eventKey);
+      upsert: async ({
+        where,
+        create
+      }: {
+        where: { eventKey: string };
+        create: Record<string, unknown>;
+      }) => {
+        const existing = writes.riskEvents.find(
+          (row) => row.eventKey === where.eventKey
+        );
         if (existing !== undefined) return existing;
         writes.riskEvents.push(create);
         return create;
@@ -444,7 +530,13 @@ export function createFakeRiskDatabase(world: RiskWorld) {
         writes.botRuns.push(row);
         return row;
       },
-      update: async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
+      update: async ({
+        where,
+        data
+      }: {
+        where: { id: string };
+        data: Record<string, unknown>;
+      }) => {
         writes.botRunUpdates.push({ id: where.id, ...data });
         return { id: where.id, ...data };
       }
@@ -460,23 +552,28 @@ export function createFakeRiskDatabase(world: RiskWorld) {
     shadowPositionEvent: forbidden("shadowPositionEvent"),
     exitPlan: forbidden("exitPlan"),
 
-    $transaction: async <T>(handler: (tx: unknown) => Promise<T>): Promise<T> => handler(database)
+    $transaction: async <T>(handler: (tx: unknown) => Promise<T>): Promise<T> =>
+      handler(database)
   };
 
   return { database, writes, candidates };
 }
 
 /** Environment that satisfies every flag the risk job needs. */
-export const RISK_ENABLED_ENV: Readonly<Record<string, string | undefined>> = Object.freeze({
-  ENABLE_LIVE_TRADING: "false",
-  TRADING_MODE: "SHADOW",
-  TRADING_SHADOW_ENABLED: "true",
-  TRADING_RISK_V1_ENABLED: "true",
-  TRADING_CODE_VERSION: "test-code-version"
-});
+export const RISK_ENABLED_ENV: Readonly<Record<string, string | undefined>> =
+  Object.freeze({
+    ENABLE_LIVE_TRADING: "false",
+    TRADING_MODE: "SHADOW",
+    TRADING_SHADOW_ENABLED: "true",
+    TRADING_RISK_V1_ENABLED: "true",
+    TRADING_STRATEGY_LONG_V1_ENABLED: "true",
+    TRADING_CODE_VERSION: "test-code-version"
+  });
 
 /** Environment that additionally allows the operations bootstrap. */
-export const BOOTSTRAP_ENABLED_ENV: Readonly<Record<string, string | undefined>> = Object.freeze({
+export const BOOTSTRAP_ENABLED_ENV: Readonly<
+  Record<string, string | undefined>
+> = Object.freeze({
   ...RISK_ENABLED_ENV,
   TRADING_BOOTSTRAP_ENABLED: "true"
 });

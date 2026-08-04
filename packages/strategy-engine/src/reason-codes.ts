@@ -101,6 +101,12 @@ export const StrategyReasonCode = {
   BREAKOUT_NOT_CONFIRMED: "BREAKOUT_NOT_CONFIRMED",
   BREAKOUT_CONFIRMED: "BREAKOUT_CONFIRMED",
   BREAKOUT_REFERENCE_UNAVAILABLE: "BREAKOUT_REFERENCE_UNAVAILABLE",
+  // Short breakdown counterparts. Distinct codes rather than reusing the
+  // breakout ones, so an operator reading a reason code always knows which
+  // direction produced it (ADR 0011).
+  BREAKDOWN_NOT_CONFIRMED: "BREAKDOWN_NOT_CONFIRMED",
+  BREAKDOWN_CONFIRMED: "BREAKDOWN_CONFIRMED",
+  BREAKDOWN_REFERENCE_UNAVAILABLE: "BREAKDOWN_REFERENCE_UNAVAILABLE",
 
   RSI_OUT_OF_RANGE: "RSI_OUT_OF_RANGE",
   RSI_IN_RANGE: "RSI_IN_RANGE",
@@ -134,9 +140,11 @@ export const StrategyReasonCode = {
 
   REGIME_MISSING: "REGIME_MISSING",
   REGIME_NOT_RISK_ON: "REGIME_NOT_RISK_ON",
+  REGIME_NOT_RISK_OFF: "REGIME_NOT_RISK_OFF",
   REGIME_RISK_MODE_BLOCKED: "REGIME_RISK_MODE_BLOCKED",
   REGIME_CONFIDENCE_BELOW_MINIMUM: "REGIME_CONFIDENCE_BELOW_MINIMUM",
   REGIME_RISK_ON: "REGIME_RISK_ON",
+  REGIME_RISK_OFF: "REGIME_RISK_OFF",
 
   CONTEXT_CRITICAL_BEARISH_EVENT: "CONTEXT_CRITICAL_BEARISH_EVENT",
   CONTEXT_NO_BLOCKING_EVENT: "CONTEXT_NO_BLOCKING_EVENT",
@@ -149,6 +157,8 @@ export const StrategyReasonCode = {
   REWARD_RISK_BELOW_MINIMUM: "REWARD_RISK_BELOW_MINIMUM",
   REWARD_RISK_CONFIRMED: "REWARD_RISK_CONFIRMED",
   PRICE_PLAN_VALID: "PRICE_PLAN_VALID",
+  /** Direction-aware ordering guard refused the plan (trading-domain). */
+  PRICE_PLAN_ORDER_INVALID: "PRICE_PLAN_ORDER_INVALID",
 
   // ── Candidate lifetime ──────────────────────────────────────────────────
   CANDIDATE_ALREADY_EXPIRED: "CANDIDATE_ALREADY_EXPIRED",
@@ -159,12 +169,12 @@ export const StrategyReasonCode = {
   CANDIDATE_IDEMPOTENT_REPLAY: "CANDIDATE_IDEMPOTENT_REPLAY",
   CANDIDATE_INPUT_HASH_CONFLICT: "CANDIDATE_INPUT_HASH_CONFLICT"
 } as const;
-export type StrategyReasonCode = (typeof StrategyReasonCode)[keyof typeof StrategyReasonCode];
+export type StrategyReasonCode =
+  (typeof StrategyReasonCode)[keyof typeof StrategyReasonCode];
 
 /** Every reason code, sorted — used by exhaustiveness and stability tests. */
-export const ALL_STRATEGY_REASON_CODES: readonly StrategyReasonCode[] = Object.freeze(
-  Object.values(StrategyReasonCode).sort()
-);
+export const ALL_STRATEGY_REASON_CODES: readonly StrategyReasonCode[] =
+  Object.freeze(Object.values(StrategyReasonCode).sort());
 
 /**
  * `INVALID_INPUT` covers formal and technical violations (docs/trading/05,
@@ -186,4 +196,5 @@ export const StrategyCheckStage = {
   ENTRY: "ENTRY",
   PRICE_PLAN: "PRICE_PLAN"
 } as const;
-export type StrategyCheckStage = (typeof StrategyCheckStage)[keyof typeof StrategyCheckStage];
+export type StrategyCheckStage =
+  (typeof StrategyCheckStage)[keyof typeof StrategyCheckStage];

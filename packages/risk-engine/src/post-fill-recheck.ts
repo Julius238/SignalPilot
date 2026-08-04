@@ -25,11 +25,21 @@
  * Pure function: no DB, clock, network or `process.env`.
  */
 
-import { DecimalValue, RoundingMode } from "@signalpilot/trading-domain";
+import {
+  DecimalValue,
+  RoundingMode,
+  TradeDirection,
+  type TradeDirection as TradeDirectionValue
+} from "@signalpilot/trading-domain";
 
-import { computeWorstSellFill, rateFromBps } from "./position-sizing.js";
+import {
+  computeWorstBuyFill,
+  computeWorstSellFill,
+  rateFromBps
+} from "./position-sizing.js";
 
 export interface PostFillRewardRiskInput {
+  readonly direction: TradeDirectionValue;
   /** The position's actual weighted-average entry price after the fill. */
   readonly actualAverageEntryPrice: DecimalValue;
   /** Actual entry fee already paid, per unit (`feesPaid / openQuantity`). */
@@ -45,6 +55,7 @@ export interface PostFillRewardRiskInput {
 export interface PostFillRewardRiskResult {
   readonly computable: boolean;
   readonly worstStopFillPrice: string;
+  readonly worstTakeProfitFillPrice: string;
   readonly stopExitFeePerUnit: string;
   readonly roundTripFeesPerUnit: string;
   readonly perUnitRisk: string;
@@ -57,6 +68,7 @@ function zero(): PostFillRewardRiskResult {
   return {
     computable: false,
     worstStopFillPrice: z,
+    worstTakeProfitFillPrice: z,
     stopExitFeePerUnit: z,
     roundTripFeesPerUnit: z,
     perUnitRisk: z,
@@ -64,7 +76,9 @@ function zero(): PostFillRewardRiskResult {
   };
 }
 
-export function computePostFillNetRewardRisk(input: PostFillRewardRiskInput): PostFillRewardRiskResult {
+export function computePostFillNetRewardRisk(
+  input: PostFillRewardRiskInput
+): PostFillRewardRiskResult {
   const fullSpreadRate = rateFromBps(input.fullSpreadBps);
   const slippageRate = rateFromBps(input.slippageBps);
   const feeRate = rateFromBps(input.feeBps);
@@ -78,31 +92,87 @@ export function computePostFillNetRewardRisk(input: PostFillRewardRiskInput): Po
     !input.stopPrice.isPositive() ||
     !input.takeProfitPrice.isPositive() ||
     !input.tickSize.isPositive() ||
-    input.stopPrice.gte(input.actualAverageEntryPrice) ||
-    input.takeProfitPrice.lte(input.actualAverageEntryPrice)
+    (input.direction !== TradeDirection.LONG &&
+      input.direction !== TradeDirection.SHORT) ||
+    (input.direction === TradeDirection.LONG &&
+      (input.stopPrice.gte(input.actualAverageEntryPrice) ||
+        input.takeProfitPrice.lte(input.actualAverageEntryPrice))) ||
+    (input.direction === TradeDirection.SHORT &&
+      (input.stopPrice.lte(input.actualAverageEntryPrice) ||
+        input.takeProfitPrice.gte(input.actualAverageEntryPrice)))
   ) {
     return zero();
   }
 
-  const worstStopFillPrice = computeWorstSellFill(input.stopPrice, fullSpreadRate, slippageRate, input.tickSize);
-  if (!worstStopFillPrice.isPositive() || worstStopFillPrice.gte(input.actualAverageEntryPrice)) {
+  const worstStopFillPrice =
+    input.direction === TradeDirection.LONG
+      ? computeWorstSellFill(
+          input.stopPrice,
+          fullSpreadRate,
+          slippageRate,
+          input.tickSize
+        )
+      : computeWorstBuyFill(
+          input.stopPrice,
+          fullSpreadRate,
+          slippageRate,
+          input.tickSize
+        );
+  const worstTakeProfitFillPrice =
+    input.direction === TradeDirection.LONG
+      ? computeWorstSellFill(
+          input.takeProfitPrice,
+          fullSpreadRate,
+          slippageRate,
+          input.tickSize
+        )
+      : computeWorstBuyFill(
+          input.takeProfitPrice,
+          fullSpreadRate,
+          slippageRate,
+          input.tickSize
+        );
+  const invalidStop =
+    input.direction === TradeDirection.LONG
+      ? worstStopFillPrice.gte(input.actualAverageEntryPrice)
+      : worstStopFillPrice.lte(input.actualAverageEntryPrice);
+  if (
+    !worstStopFillPrice.isPositive() ||
+    !worstTakeProfitFillPrice.isPositive() ||
+    invalidStop
+  ) {
     return zero();
   }
 
   const stopExitFeePerUnit = worstStopFillPrice.mul(feeRate, RoundingMode.CEIL);
-  const roundTripFeesPerUnit = input.actualEntryFeePerUnit.add(stopExitFeePerUnit);
-  const perUnitRisk = input.actualAverageEntryPrice.sub(worstStopFillPrice).add(roundTripFeesPerUnit);
+  const roundTripFeesPerUnit =
+    input.actualEntryFeePerUnit.add(stopExitFeePerUnit);
+  const grossRisk =
+    input.direction === TradeDirection.LONG
+      ? input.actualAverageEntryPrice.sub(worstStopFillPrice)
+      : worstStopFillPrice.sub(input.actualAverageEntryPrice);
+  const perUnitRisk = grossRisk.add(roundTripFeesPerUnit);
   if (!perUnitRisk.isPositive()) {
     return zero();
   }
 
-  const netRewardRisk = input.takeProfitPrice
-    .sub(input.actualAverageEntryPrice)
-    .div(perUnitRisk, RoundingMode.FLOOR);
+  const takeProfitExitFeePerUnit = worstTakeProfitFillPrice.mul(
+    feeRate,
+    RoundingMode.CEIL
+  );
+  const grossReward =
+    input.direction === TradeDirection.LONG
+      ? worstTakeProfitFillPrice.sub(input.actualAverageEntryPrice)
+      : input.actualAverageEntryPrice.sub(worstTakeProfitFillPrice);
+  const netReward = grossReward
+    .sub(input.actualEntryFeePerUnit)
+    .sub(takeProfitExitFeePerUnit);
+  const netRewardRisk = netReward.div(perUnitRisk, RoundingMode.FLOOR);
 
   return {
     computable: true,
     worstStopFillPrice: worstStopFillPrice.toString(),
+    worstTakeProfitFillPrice: worstTakeProfitFillPrice.toString(),
     stopExitFeePerUnit: stopExitFeePerUnit.toString(),
     roundTripFeesPerUnit: roundTripFeesPerUnit.toString(),
     perUnitRisk: perUnitRisk.toString(),

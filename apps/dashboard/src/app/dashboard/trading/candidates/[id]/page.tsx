@@ -1,13 +1,21 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { DirectionBadge } from "../../../../../components/badges";
 import { DebugJsonBlock } from "../../../../../components/debug-json-block";
 import { ErrorState } from "../../../../../components/empty-state";
-import { MetricCard, PageHeader, SectionCard } from "../../../../../components/ui";
+import {
+  MetricCard,
+  PageHeader,
+  SectionCard
+} from "../../../../../components/ui";
 import { CandidateStatusBadge } from "../../../../../components/trading/trading-status";
 import { TradingDisabled } from "../../../../../components/trading/trading-disabled";
 import { fetchTradeCandidateDetail } from "../../../../../lib/trading-api";
-import { formatDecimalAmount, formatUtcDateTime } from "../../../../../lib/trading-format";
+import {
+  formatDecimalAmount,
+  formatUtcDateTime
+} from "../../../../../lib/trading-format";
 import { TRADING_DASHBOARD_ENABLED } from "../../../../../lib/trading-flag";
 
 type PageProps = { params: Promise<{ id: string }> };
@@ -20,7 +28,10 @@ export default async function TradeCandidateDetailPage({ params }: PageProps) {
   const { id } = await params;
   const result = await fetchTradeCandidateDetail(id);
 
-  if (result.error === "Not Found" || (result.error && result.error.toLowerCase().includes("not found"))) {
+  if (
+    result.error === "Not Found" ||
+    (result.error && result.error.toLowerCase().includes("not found"))
+  ) {
     notFound();
   }
 
@@ -33,14 +44,20 @@ export default async function TradeCandidateDetailPage({ params }: PageProps) {
         title={candidate?.symbol ?? candidate?.assetId ?? id}
         subtitle={candidate ? candidate.candidateKey : undefined}
         actions={
-          <Link className="primary-link secondary-link" href="/dashboard/trading/candidates">
+          <Link
+            className="primary-link secondary-link"
+            href="/dashboard/trading/candidates"
+          >
             ← Alle Kandidaten
           </Link>
         }
       />
 
       {result.error ? (
-        <ErrorState title="Kandidat konnte nicht geladen werden" message={result.error} />
+        <ErrorState
+          title="Kandidat konnte nicht geladen werden"
+          message={result.error}
+        />
       ) : null}
 
       {candidate ? (
@@ -50,15 +67,43 @@ export default async function TradeCandidateDetailPage({ params }: PageProps) {
               label="Status"
               value={<CandidateStatusBadge value={candidate.status} />}
             />
-            <MetricCard label="Richtung" value={candidate.direction} />
+            <MetricCard
+              label="Richtung"
+              value={<DirectionBadge value={candidate.direction} />}
+            />
+            <MetricCard
+              label="Strategie"
+              value={`${candidate.strategyKey ?? "—"}${candidate.strategyVersion === null ? "" : ` v${candidate.strategyVersion}`}`}
+            />
             <MetricCard label="Entry-Typ" value={candidate.entryType} />
-            <MetricCard label="Referenz-Entry" value={formatDecimalAmount(candidate.referenceEntryPrice)} />
-            <MetricCard label="Stop" value={formatDecimalAmount(candidate.stopPrice)} />
-            <MetricCard label="Take Profit" value={formatDecimalAmount(candidate.takeProfitPrice)} />
-            <MetricCard label="Min. CRV" value={formatDecimalAmount(candidate.minimumRewardRisk)} />
-            <MetricCard label="Geplantes CRV" value={formatDecimalAmount(candidate.plannedRewardRisk)} />
-            <MetricCard label="Stop-Distanz" value={formatDecimalAmount(candidate.stopDistance)} />
-            <MetricCard label="Stop-Distanz %" value={`${formatDecimalAmount(candidate.stopDistancePct)}%`} />
+            <MetricCard
+              label="Referenz-Entry"
+              value={formatDecimalAmount(candidate.referenceEntryPrice)}
+            />
+            <MetricCard
+              label="Stop"
+              value={formatDecimalAmount(candidate.stopPrice)}
+            />
+            <MetricCard
+              label="Take Profit"
+              value={formatDecimalAmount(candidate.takeProfitPrice)}
+            />
+            <MetricCard
+              label="Min. CRV"
+              value={formatDecimalAmount(candidate.minimumRewardRisk)}
+            />
+            <MetricCard
+              label="Geplantes CRV"
+              value={formatDecimalAmount(candidate.plannedRewardRisk)}
+            />
+            <MetricCard
+              label="Stop-Distanz"
+              value={formatDecimalAmount(candidate.stopDistance)}
+            />
+            <MetricCard
+              label="Stop-Distanz %"
+              value={`${formatDecimalAmount(candidate.stopDistancePct)}%`}
+            />
           </div>
 
           <div className="grid two" style={{ marginTop: 16 }}>
@@ -66,15 +111,21 @@ export default async function TradeCandidateDetailPage({ params }: PageProps) {
               <div className="stack-list compact">
                 <div className="list-row">
                   <span>Geplantes Entry-Minimum</span>
-                  <strong>{formatDecimalAmount(candidate.plannedEntryMinimum)}</strong>
+                  <strong>
+                    {formatDecimalAmount(candidate.plannedEntryMinimum)}
+                  </strong>
                 </div>
                 <div className="list-row">
                   <span>Geplantes Entry-Maximum</span>
-                  <strong>{formatDecimalAmount(candidate.plannedEntryMaximum)}</strong>
+                  <strong>
+                    {formatDecimalAmount(candidate.plannedEntryMaximum)}
+                  </strong>
                 </div>
                 <div className="list-row">
                   <span>Max. Entry-Gap-Distanz</span>
-                  <strong>{formatDecimalAmount(candidate.maximumEntryGapDistance)}</strong>
+                  <strong>
+                    {formatDecimalAmount(candidate.maximumEntryGapDistance)}
+                  </strong>
                 </div>
                 <div className="list-row">
                   <span>Gültig ab</span>
@@ -118,8 +169,62 @@ export default async function TradeCandidateDetailPage({ params }: PageProps) {
           </div>
 
           <div style={{ marginTop: 16 }}>
-            <SectionCard title="Strategie-Evidenz" subtitle="Rohcodes der Strategie-Engine, unverändert">
-              <DebugJsonBlock label="strategyReasonCodes" data={candidate.strategyReasonCodes} />
+            <SectionCard
+              title="Strategie-Evidenz"
+              subtitle="Rohcodes der Strategie-Engine, unverändert"
+            >
+              <DebugJsonBlock
+                label="strategyReasonCodes"
+                data={candidate.strategyReasonCodes}
+              />
+            </SectionCard>
+          </div>
+
+          <div style={{ marginTop: 16 }}>
+            <SectionCard
+              title="Letzte Risikoprüfung"
+              subtitle="Regelergebnisse und finale Entscheidung"
+            >
+              {candidate.latestRiskAssessment ? (
+                <div className="stack-list compact">
+                  <div className="list-row">
+                    <span>Status / Entscheidung</span>
+                    <strong>
+                      {candidate.latestRiskAssessment.status} ·{" "}
+                      {candidate.latestRiskAssessment.decision?.reasonCode ??
+                        "—"}
+                    </strong>
+                  </div>
+                  <div className="list-row">
+                    <span>Freigegebene Menge / Risiko</span>
+                    <strong>
+                      {formatDecimalAmount(
+                        candidate.latestRiskAssessment.approvedQuantity
+                      )}{" "}
+                      /{" "}
+                      {formatDecimalAmount(
+                        candidate.latestRiskAssessment.riskAmount
+                      )}
+                    </strong>
+                  </div>
+                  <div className="list-row">
+                    <span>Blockierende Regeln</span>
+                    <strong>
+                      {candidate.latestRiskAssessment.ruleResults
+                        .filter(
+                          (rule) =>
+                            rule.outcome === "FAIL" || rule.outcome === "ERROR"
+                        )
+                        .map((rule) => `${rule.ruleCode}:${rule.reasonCode}`)
+                        .join(", ") || "—"}
+                    </strong>
+                  </div>
+                </div>
+              ) : (
+                <p className="muted small">
+                  Noch keine Risikoprüfung vorhanden.
+                </p>
+              )}
             </SectionCard>
           </div>
         </>

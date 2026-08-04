@@ -3,11 +3,17 @@ import { describe, it } from "node:test";
 
 import { DecimalValue } from "@signalpilot/trading-domain";
 
-import { computePositionSizing, type PositionSizingInput } from "../src/position-sizing.js";
+import {
+  computePositionSizing,
+  type PositionSizingInput
+} from "../src/position-sizing.js";
 
 const d = (value: string): DecimalValue => DecimalValue.fromString(value);
 
-const baseInput = (overrides: Partial<PositionSizingInput> = {}): PositionSizingInput => ({
+const baseInput = (
+  overrides: Partial<PositionSizingInput> = {}
+): PositionSizingInput => ({
+  direction: "LONG",
   referenceEntryPrice: d("24100"),
   stopPrice: d("23598.03"),
   takeProfitPrice: d("25706.30"),
@@ -49,7 +55,10 @@ describe("computePositionSizing — cost bridge", () => {
   it("charges both entry and exit fees in the per-unit risk", () => {
     const perUnitRisk = d(result.perUnitRisk);
     const spread = d(result.worstEntryPrice).sub(d(result.worstStopFillPrice));
-    assert.equal(perUnitRisk.toString(), spread.add(d(result.roundTripFeesPerUnit)).toString());
+    assert.equal(
+      perUnitRisk.toString(),
+      spread.add(d(result.roundTripFeesPerUnit)).toString()
+    );
     assert.ok(d(result.roundTripFeesPerUnit).isPositive());
   });
 
@@ -59,6 +68,34 @@ describe("computePositionSizing — cost bridge", () => {
 
   it("never lets the worst-case loss exceed the budget", () => {
     assert.ok(d(result.riskAmount).lte(d(result.riskBudget)));
+  });
+});
+
+describe("computePositionSizing — synthetic SHORT", () => {
+  const short = () =>
+    computePositionSizing(
+      baseInput({
+        direction: "SHORT",
+        referenceEntryPrice: d("24100"),
+        stopPrice: d("24602"),
+        takeProfitPrice: d("22400")
+      })
+    );
+
+  it("uses adverse sell entry and buy-to-close fills", () => {
+    const result = short();
+    assert.equal(result.computable, true);
+    assert.ok(d(result.worstEntryPrice).lt(d("24100")));
+    assert.ok(d(result.worstStopFillPrice).gt(d("24602")));
+    assert.ok(d(result.worstTakeProfitFillPrice).gt(d("22400")));
+  });
+
+  it("keeps risk under 0.25% and reserves unleveraged stop collateral", () => {
+    const result = short();
+    assert.ok(d(result.riskAmount).lte(d("25")));
+    assert.ok(d(result.reservedQuoteAmount).lte(d("10000")));
+    assert.ok(d(result.collateralPerUnit).gt(d(result.worstStopFillPrice)));
+    assert.ok(d(result.netRewardRisk).gte(d("2")));
   });
 });
 
@@ -72,37 +109,49 @@ describe("computePositionSizing — rounding and caps", () => {
 
   it("shrinks the quantity when equity falls", () => {
     const larger = computePositionSizing(baseInput({ equity: d("10000") }));
-    const smaller = computePositionSizing(baseInput({ equity: d("5000"), availableCash: d("5000") }));
+    const smaller = computePositionSizing(
+      baseInput({ equity: d("5000"), availableCash: d("5000") })
+    );
     assert.ok(d(smaller.approvedQuantity).lt(d(larger.approvedQuantity)));
     assert.ok(d(smaller.riskAmount).lt(d(larger.riskAmount)));
   });
 
   it("caps on available cash when the wallet is thin", () => {
-    const result = computePositionSizing(baseInput({ availableCash: d("100") }));
+    const result = computePositionSizing(
+      baseInput({ availableCash: d("100") })
+    );
     assert.equal(result.cappedBy, "AVAILABLE_CASH");
     assert.ok(d(result.reservedQuoteAmount).lte(d("100")));
   });
 
   it("caps on the asset exposure limit", () => {
-    const result = computePositionSizing(baseInput({ currentAssetExposure: d("1990") }));
+    const result = computePositionSizing(
+      baseInput({ currentAssetExposure: d("1990") })
+    );
     assert.equal(result.cappedBy, "ASSET_EXPOSURE");
     assert.ok(d(result.postTradeAssetExposure).lte(d("2000")));
   });
 
   it("caps on the correlated exposure limit", () => {
-    const result = computePositionSizing(baseInput({ currentCorrelatedExposure: d("2995") }));
+    const result = computePositionSizing(
+      baseInput({ currentCorrelatedExposure: d("2995") })
+    );
     assert.equal(result.cappedBy, "CORRELATED_EXPOSURE");
     assert.ok(d(result.postTradeCorrelatedExposure).lte(d("3000")));
   });
 
   it("respects an instrument maximum quantity", () => {
-    const result = computePositionSizing(baseInput({ maxQuantity: d("0.001") }));
+    const result = computePositionSizing(
+      baseInput({ maxQuantity: d("0.001") })
+    );
     assert.equal(result.cappedBy, "INSTRUMENT_MAXIMUM");
     assert.equal(result.approvedQuantity, d("0.001").toString());
   });
 
   it("returns zero rather than rounding up below one step", () => {
-    const result = computePositionSizing(baseInput({ stepSize: d("1"), minQuantity: d("1") }));
+    const result = computePositionSizing(
+      baseInput({ stepSize: d("1"), minQuantity: d("1") })
+    );
     assert.equal(d(result.approvedQuantity).isZero(), true);
     assert.equal(d(result.notional).isZero(), true);
   });
@@ -110,15 +159,19 @@ describe("computePositionSizing — rounding and caps", () => {
 
 describe("computePositionSizing — costs reduce reward/risk", () => {
   it("lowers the net reward/risk as spread, slippage and fees grow", () => {
-    const cheap = computePositionSizing(baseInput({ feeBps: 0, fullSpreadBps: 0, slippageBps: 0 }));
-    const expensive = computePositionSizing(baseInput({ feeBps: 10, fullSpreadBps: 20, slippageBps: 15 }));
+    const cheap = computePositionSizing(
+      baseInput({ feeBps: 0, fullSpreadBps: 0, slippageBps: 0 })
+    );
+    const expensive = computePositionSizing(
+      baseInput({ feeBps: 10, fullSpreadBps: 20, slippageBps: 15 })
+    );
     assert.ok(d(expensive.netRewardRisk).lt(d(cheap.netRewardRisk)));
     assert.ok(d(expensive.approvedQuantity).lt(d(cheap.approvedQuantity)));
   });
 
-  it("reports a stricter conservative reward/risk than the R-008 measure", () => {
+  it("uses the adverse TP fill and fees as the binding R-008 measure", () => {
     const result = computePositionSizing(baseInput());
-    assert.ok(d(result.conservativeRewardRisk).lt(d(result.netRewardRisk)));
+    assert.equal(result.conservativeRewardRisk, result.netRewardRisk);
   });
 
   it("reaches exactly 2.0 without any cost", () => {
@@ -170,6 +223,9 @@ describe("computePositionSizing — refuses impossible inputs", () => {
   });
 
   it("is deterministic", () => {
-    assert.deepEqual(computePositionSizing(baseInput()), computePositionSizing(baseInput()));
+    assert.deepEqual(
+      computePositionSizing(baseInput()),
+      computePositionSizing(baseInput())
+    );
   });
 });

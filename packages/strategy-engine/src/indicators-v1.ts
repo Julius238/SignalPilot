@@ -49,7 +49,10 @@ function isUsablePeriod(period: number): boolean {
 export function mean(values: readonly DecimalValue[]): DecimalValue | null {
   if (values.length === 0) return null;
   const total = DecimalValue.sum(values);
-  return total.div(DecimalValue.fromSafeInteger(values.length), INDICATOR_ROUNDING);
+  return total.div(
+    DecimalValue.fromSafeInteger(values.length),
+    INDICATOR_ROUNDING
+  );
 }
 
 /** Simple moving average over the last `period` values. */
@@ -94,15 +97,23 @@ export function relativeStrengthIndex(
   }
 
   const relativeStrength = averageGain.div(averageLoss, INDICATOR_ROUNDING);
-  return HUNDRED.sub(HUNDRED.div(DecimalValue.ONE.add(relativeStrength), INDICATOR_ROUNDING));
+  return HUNDRED.sub(
+    HUNDRED.div(DecimalValue.ONE.add(relativeStrength), INDICATOR_ROUNDING)
+  );
 }
 
 /** True range of `current` against the previous close. */
-export function trueRange(current: PinnedCandle, previous: PinnedCandle): DecimalValue {
+export function trueRange(
+  current: PinnedCandle,
+  previous: PinnedCandle
+): DecimalValue {
   const highLow = current.high.sub(current.low);
   const highPreviousClose = current.high.sub(previous.close).abs();
   const lowPreviousClose = current.low.sub(previous.close).abs();
-  return DecimalValue.max(highLow, DecimalValue.max(highPreviousClose, lowPreviousClose));
+  return DecimalValue.max(
+    highLow,
+    DecimalValue.max(highPreviousClose, lowPreviousClose)
+  );
 }
 
 /** ATR as the mean of the last `period` true ranges. */
@@ -130,8 +141,39 @@ export function priorPeriodHigh(
   period = 20
 ): DecimalValue | null {
   if (!isUsablePeriod(period) || candles.length < period + 1) return null;
-  const window = candles.slice(candles.length - (period + 1), candles.length - 1);
-  return window.reduce<DecimalValue>((highest, candle) => DecimalValue.max(highest, candle.high), window[0].high);
+  const window = candles.slice(
+    candles.length - (period + 1),
+    candles.length - 1
+  );
+  return window.reduce<DecimalValue>(
+    (highest, candle) => DecimalValue.max(highest, candle.high),
+    window[0].high
+  );
+}
+
+/**
+ * Lowest low of the `period` candles immediately before the last entry — the
+ * mirror of `priorPeriodHigh` and the reference level a breakdown must close
+ * below.
+ *
+ * The anchor candle is excluded from the window for the same reason as in
+ * `priorPeriodHigh`: a signal candle that is part of its own reference window
+ * would be compared against itself, which makes the breakdown trivially true
+ * whenever the candle prints the window low.
+ */
+export function priorPeriodLow(
+  candles: readonly PinnedCandle[],
+  period = 20
+): DecimalValue | null {
+  if (!isUsablePeriod(period) || candles.length < period + 1) return null;
+  const window = candles.slice(
+    candles.length - (period + 1),
+    candles.length - 1
+  );
+  return window.reduce<DecimalValue>(
+    (lowest, candle) => DecimalValue.min(lowest, candle.low),
+    window[0].low
+  );
 }
 
 /**
@@ -144,7 +186,10 @@ export function priorAverageVolume(
   period = 20
 ): DecimalValue | null {
   if (!isUsablePeriod(period) || candles.length < period + 1) return null;
-  const window = candles.slice(candles.length - (period + 1), candles.length - 1);
+  const window = candles.slice(
+    candles.length - (period + 1),
+    candles.length - 1
+  );
   return mean(window.map((candle) => candle.volume));
 }
 
@@ -153,7 +198,12 @@ export function relativeVolume(
   volume: DecimalValue,
   averageVolume: DecimalValue | null
 ): DecimalValue | null {
-  if (averageVolume === null || averageVolume.isZero() || averageVolume.isNegative()) return null;
+  if (
+    averageVolume === null ||
+    averageVolume.isZero() ||
+    averageVolume.isNegative()
+  )
+    return null;
   return volume.div(averageVolume, INDICATOR_ROUNDING);
 }
 

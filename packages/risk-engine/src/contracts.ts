@@ -17,7 +17,11 @@
 
 import type { DecimalString } from "@signalpilot/trading-domain";
 
-import type { RiskEvaluationOutcome, RiskReasonCode, RiskRuleCode } from "./reason-codes.js";
+import type {
+  RiskEvaluationOutcome,
+  RiskReasonCode,
+  RiskRuleCode
+} from "./reason-codes.js";
 
 export type IsoDateTimeString = string;
 /** Calendar day in UTC, `YYYY-MM-DD` — the business date for daily limits. */
@@ -36,6 +40,13 @@ export interface RiskCapabilityInputV1 {
   readonly enableLiveTrading: boolean;
   readonly shadowMasterFlagEnabled: boolean;
   readonly riskJobEnabled: boolean;
+  readonly strategyLongV1Enabled: boolean;
+  readonly strategyShortV1Enabled: boolean;
+  readonly shadowShortEnabled: boolean;
+  /** These capabilities do not exist in the shadow build and must stay false. */
+  readonly exchangeExecutionEnabled: boolean;
+  readonly marginTradingEnabled: boolean;
+  readonly futuresTradingEnabled: boolean;
 }
 
 /**
@@ -59,7 +70,11 @@ export interface RiskCandidateInputV1 {
   readonly strategyVersionId: string;
   readonly strategyVersionStatus: string;
   readonly strategyKey: string;
+  /** Direction declared by immutable StrategyVersion.parametersJson. */
+  readonly strategyDirection: string;
   readonly assignmentEnabled: boolean;
+  /** Direction declared by StrategyAssignment.assignmentConfigJson. */
+  readonly assignmentDirection: string;
   readonly anchorCandleId: string;
 
   readonly referenceEntryPrice: DecimalString;
@@ -157,10 +172,15 @@ export interface RiskOpenPositionInputV1 {
   readonly assetId: string;
   readonly symbol: string;
   readonly status: string;
+  readonly direction: string;
   readonly openQuantity: DecimalString;
   readonly averageEntryPrice: DecimalString;
-  /** Conservative bid mark × open quantity (docs/trading/07). */
+  /** Absolute notional used for gross/asset/correlated exposure; never netted. */
   readonly marketValue: DecimalString;
+  /** Cash/equity contribution: long market value, short unrealized PnL. */
+  readonly equityContribution: DecimalString;
+  /** Unleveraged collateral retained for an open synthetic short. */
+  readonly reservedCollateral: DecimalString;
 }
 
 /** Cash reserved by a non-terminal order. Counts towards exposure. */
@@ -169,6 +189,8 @@ export interface RiskReservationInputV1 {
   readonly assetId: string;
   readonly symbol: string;
   readonly status: string;
+  readonly direction: string;
+  readonly purpose: string;
   readonly reservedQuoteAmount: DecimalString;
 }
 
@@ -240,9 +262,13 @@ export interface RiskDataFreshnessInputV1 {
 }
 
 export interface RiskDataQualityInputV1 {
-  readonly minimumClosedCandles: Readonly<Record<"1h" | "4h" | "1d", number | null>>;
+  readonly minimumClosedCandles: Readonly<
+    Record<"1h" | "4h" | "1d", number | null>
+  >;
   readonly gapCount: Readonly<Record<"1h" | "4h" | "1d", number | null>>;
-  readonly providerErrorCount: Readonly<Record<"1h" | "4h" | "1d", number | null>>;
+  readonly providerErrorCount: Readonly<
+    Record<"1h" | "4h" | "1d", number | null>
+  >;
   readonly ohlcContradiction: boolean;
 }
 
@@ -381,9 +407,11 @@ export interface RiskSizingResultV1 {
   readonly approvedQuantity: DecimalString;
   readonly notional: DecimalString;
   readonly entryFeeTotal: DecimalString;
+  /** Per-unit cash backing. For SHORT this covers stop buy-to-close plus fees. */
+  readonly collateralPerUnit: DecimalString;
   readonly reservedQuoteAmount: DecimalString;
   readonly riskAmount: DecimalString;
-  /** `(TP - worstEntry) / perUnitRisk` — the `R-008` measure. */
+  /** Directional net reward after adverse TP fill and round-trip TP fees. */
   readonly netRewardRisk: DecimalString;
   /**
    * Stricter variant that also charges the adverse take-profit fill and its
@@ -439,7 +467,11 @@ export interface TradeDecisionDraftV1 {
 export interface RiskEvaluationResultV1 {
   readonly outcome: RiskEvaluationOutcome;
   /** Session-level directive; orchestration applies it, the engine never does. */
-  readonly directive: "NONE" | "BLOCK_NEW" | "ENGAGE_KILL_SWITCH" | "ERROR_LOCK";
+  readonly directive:
+    | "NONE"
+    | "BLOCK_NEW"
+    | "ENGAGE_KILL_SWITCH"
+    | "ERROR_LOCK";
   readonly primaryReasonCode: RiskReasonCode;
   /** All 26 results in `RISK_RULE_ORDER`, PASS results included. */
   readonly ruleResults: readonly RiskRuleResultDraftV1[];

@@ -17,6 +17,7 @@ import {
   APPROVABLE_TAKE_PROFIT,
   STRATEGY_V1_TAKE_PROFIT,
   buildApprovableSnapshot,
+  buildApprovableShortSnapshot,
   clone,
   openPosition,
   type DeepMutable
@@ -26,14 +27,18 @@ const d = (value: string): DecimalValue => DecimalValue.fromString(value);
 
 type MutableSnapshot = DeepMutable<RiskInputSnapshotV1>;
 
-const mutate = (change: (snapshot: MutableSnapshot) => void): RiskInputSnapshotV1 => {
+const mutate = (
+  change: (snapshot: MutableSnapshot) => void
+): RiskInputSnapshotV1 => {
   const snapshot = clone(buildApprovableSnapshot());
   change(snapshot);
   return snapshot as RiskInputSnapshotV1;
 };
 
 const ruleOf = (snapshot: RiskInputSnapshotV1, ruleCode: string) => {
-  const result = evaluateRisk(snapshot).ruleResults.find((rule) => rule.ruleCode === ruleCode);
+  const result = evaluateRisk(snapshot).ruleResults.find(
+    (rule) => rule.ruleCode === ruleCode
+  );
   assert.ok(result, `missing rule result for ${ruleCode}`);
   return result;
 };
@@ -80,15 +85,30 @@ describe("approval path", () => {
   it("persists the full cost bridge with the assessment", () => {
     const sizing = result.assessment.sizing;
     assert.equal(sizing.computable, true);
-    assert.ok(d(sizing.worstEntryPrice).gt(d(result.assessment.sizing.worstStopFillPrice)));
+    assert.ok(
+      d(sizing.worstEntryPrice).gt(
+        d(result.assessment.sizing.worstStopFillPrice)
+      )
+    );
     assert.ok(d(sizing.netRewardRisk).gte(d("2")));
-    assert.ok(d(sizing.reservedQuoteAmount).lte(d(result.assessment.availableCash)));
+    assert.ok(
+      d(sizing.reservedQuoteAmount).lte(d(result.assessment.availableCash))
+    );
   });
 
   it("creates no order, fill, position or ledger artefact", () => {
     const serialised = JSON.stringify(result);
-    for (const forbidden of ["shadowOrder", "shadowFill", "shadowPosition", "ledgerEntry", "exitPlan"]) {
-      assert.ok(!serialised.includes(forbidden), `output must not contain ${forbidden}`);
+    for (const forbidden of [
+      "shadowOrder",
+      "shadowFill",
+      "shadowPosition",
+      "ledgerEntry",
+      "exitPlan"
+    ]) {
+      assert.ok(
+        !serialised.includes(forbidden),
+        `output must not contain ${forbidden}`
+      );
     }
   });
 });
@@ -103,7 +123,10 @@ describe("R-008 and the strategy v1 take profit", () => {
     });
     const result = evaluateRisk(snapshot);
     assert.equal(result.outcome, "REJECTED");
-    assert.equal(result.primaryReasonCode, RiskReasonCode.REWARD_RISK_BELOW_MINIMUM);
+    assert.equal(
+      result.primaryReasonCode,
+      RiskReasonCode.REWARD_RISK_BELOW_MINIMUM
+    );
     assert.ok(d(result.assessment.sizing.netRewardRisk).lt(d("2")));
     assert.equal(d(result.assessment.approvedQuantity).isZero(), true);
   });
@@ -140,14 +163,20 @@ describe("mode, session and portfolio rules", () => {
       next.capability.riskJobEnabled = false;
     });
     assert.equal(evaluateRisk(snapshot).outcome, "REJECTED");
-    assert.equal(ruleOf(snapshot, RiskRuleCode.SHADOW_MODE).reasonCode, RiskReasonCode.RISK_JOB_DISABLED);
+    assert.equal(
+      ruleOf(snapshot, RiskRuleCode.SHADOW_MODE).reasonCode,
+      RiskReasonCode.RISK_JOB_DISABLED
+    );
   });
 
   it("R-002 blocks a paused session and an engaged kill switch", () => {
     const paused = mutate((next) => {
       next.session!.status = "PAUSED";
     });
-    assert.equal(ruleOf(paused, RiskRuleCode.SESSION).reasonCode, RiskReasonCode.SESSION_BLOCKS_ENTRY);
+    assert.equal(
+      ruleOf(paused, RiskRuleCode.SESSION).reasonCode,
+      RiskReasonCode.SESSION_BLOCKS_ENTRY
+    );
     assert.equal(evaluateRisk(paused).directive, "BLOCK_NEW");
 
     const killed = mutate((next) => {
@@ -176,7 +205,10 @@ describe("mode, session and portfolio rules", () => {
     const snapshot = mutate((next) => {
       next.ledgerReplay.availableCash = "10000.000000010000";
     });
-    assert.equal(ruleOf(snapshot, RiskRuleCode.PORTFOLIO_CONSISTENCY).outcome, "PASS");
+    assert.equal(
+      ruleOf(snapshot, RiskRuleCode.PORTFOLIO_CONSISTENCY).outcome,
+      "PASS"
+    );
   });
 
   it("R-003 fails on negative cash, an orphan ledger row and a duplicate scope", () => {
@@ -247,7 +279,10 @@ describe("instrument, direction and leverage rules", () => {
       next.asset.symbol = "SOLUSDT";
       next.candidate.symbol = "SOLUSDT";
     });
-    assert.equal(ruleOf(snapshot, RiskRuleCode.ASSET_SCOPE).reasonCode, RiskReasonCode.ASSET_NOT_ALLOWED);
+    assert.equal(
+      ruleOf(snapshot, RiskRuleCode.ASSET_SCOPE).reasonCode,
+      RiskReasonCode.ASSET_NOT_ALLOWED
+    );
   });
 
   it("R-004 blocks a non-USDT quote and a leveraged token", () => {
@@ -283,16 +318,38 @@ describe("instrument, direction and leverage rules", () => {
     );
   });
 
-  it("R-005 blocks a short and fails critically on an unknown direction", () => {
-    assert.equal(
-      ruleOf(
-        mutate((next) => {
-          next.candidate.direction = "SHORT";
-        }),
-        RiskRuleCode.LONG_ONLY
-      ).severity,
-      "BLOCKER"
+  it("R-005 permits only a fully declared and fully gated synthetic short", () => {
+    const allowed = ruleOf(
+      buildApprovableShortSnapshot(),
+      RiskRuleCode.LONG_ONLY
     );
+    assert.equal(allowed.outcome, "PASS");
+    assert.equal(allowed.reasonCode, RiskReasonCode.DIRECTION_ALLOWED);
+
+    const flagsOff = clone(buildApprovableShortSnapshot());
+    flagsOff.capability.shadowShortEnabled = false;
+    assert.equal(
+      ruleOf(flagsOff as RiskInputSnapshotV1, RiskRuleCode.LONG_ONLY)
+        .reasonCode,
+      RiskReasonCode.SHORT_FLAGS_DISABLED
+    );
+
+    const mismatch = clone(buildApprovableShortSnapshot());
+    mismatch.candidate.assignmentDirection = "LONG";
+    assert.equal(
+      ruleOf(mismatch as RiskInputSnapshotV1, RiskRuleCode.LONG_ONLY).severity,
+      "CRITICAL"
+    );
+
+    const exchange = clone(buildApprovableShortSnapshot());
+    exchange.capability.exchangeExecutionEnabled = true;
+    assert.equal(
+      ruleOf(exchange as RiskInputSnapshotV1, RiskRuleCode.LONG_ONLY).severity,
+      "CRITICAL"
+    );
+  });
+
+  it("R-005 fails critically on an unknown direction", () => {
     assert.equal(
       ruleOf(
         mutate((next) => {
@@ -401,7 +458,11 @@ describe("portfolio limit rules", () => {
   it("R-011 blocks a third open position and counts ERROR positions", () => {
     const snapshot = mutate((next) => {
       next.openPositions = [
-        openPosition({ assetId: "asset-eth", symbol: "ETHUSDT", marketValue: "10.000000000000" }),
+        openPosition({
+          assetId: "asset-eth",
+          symbol: "ETHUSDT",
+          marketValue: "10.000000000000"
+        }),
         openPosition({
           assetId: "asset-sol",
           symbol: "SOLUSDT",
@@ -440,7 +501,11 @@ describe("portfolio limit rules", () => {
   it("R-014 blocks a second position in the same asset", () => {
     const snapshot = mutate((next) => {
       next.openPositions = [
-        openPosition({ assetId: "asset-btc", symbol: "BTCUSDT", marketValue: "100.000000000000" })
+        openPosition({
+          assetId: "asset-btc",
+          symbol: "BTCUSDT",
+          marketValue: "100.000000000000"
+        })
       ];
       next.portfolio.equity = "10100.000000000000";
     });
@@ -464,7 +529,11 @@ describe("portfolio limit rules", () => {
   it("R-013 and R-015 cap the size instead of approving beyond the limit", () => {
     const snapshot = mutate((next) => {
       next.openPositions = [
-        openPosition({ assetId: "asset-eth", symbol: "ETHUSDT", marketValue: "2990.000000000000" })
+        openPosition({
+          assetId: "asset-eth",
+          symbol: "ETHUSDT",
+          marketValue: "2990.000000000000"
+        })
       ];
       next.portfolio.equity = "12990.000000000000";
       next.portfolio.availableCash = "10000.000000000000";
@@ -482,16 +551,34 @@ describe("portfolio limit rules", () => {
 describe("data, execution profile and regime rules", () => {
   it("R-016 blocks each stale source and a future timestamp", () => {
     for (const [change, reasonCode] of [
-      [(next: MutableSnapshot) => (next.freshness.candleAgeMs["1h"] = 8_100_001), RiskReasonCode.DATA_STALE_CANDLES_1H],
-      [(next: MutableSnapshot) => (next.freshness.dataQualityAgeMs = 7_200_001), RiskReasonCode.DATA_STALE_DATA_QUALITY],
-      [(next: MutableSnapshot) => (next.freshness.regimeAgeMs = 93_600_001), RiskReasonCode.DATA_STALE_REGIME],
       [
-        (next: MutableSnapshot) => (next.freshness.portfolioSnapshotAgeMs = 300_001),
+        (next: MutableSnapshot) =>
+          (next.freshness.candleAgeMs["1h"] = 8_100_001),
+        RiskReasonCode.DATA_STALE_CANDLES_1H
+      ],
+      [
+        (next: MutableSnapshot) =>
+          (next.freshness.dataQualityAgeMs = 7_200_001),
+        RiskReasonCode.DATA_STALE_DATA_QUALITY
+      ],
+      [
+        (next: MutableSnapshot) => (next.freshness.regimeAgeMs = 93_600_001),
+        RiskReasonCode.DATA_STALE_REGIME
+      ],
+      [
+        (next: MutableSnapshot) =>
+          (next.freshness.portfolioSnapshotAgeMs = 300_001),
         RiskReasonCode.DATA_STALE_PORTFOLIO_SNAPSHOT
       ],
-      [(next: MutableSnapshot) => (next.freshness.hasFutureTimestamp = true), RiskReasonCode.DATA_TIMESTAMP_IN_FUTURE]
+      [
+        (next: MutableSnapshot) => (next.freshness.hasFutureTimestamp = true),
+        RiskReasonCode.DATA_TIMESTAMP_IN_FUTURE
+      ]
     ] as const) {
-      assert.equal(ruleOf(mutate(change), RiskRuleCode.DATA_FRESHNESS).reasonCode, reasonCode);
+      assert.equal(
+        ruleOf(mutate(change), RiskRuleCode.DATA_FRESHNESS).reasonCode,
+        reasonCode
+      );
     }
   });
 
@@ -519,7 +606,8 @@ describe("data, execution profile and regime rules", () => {
 
   it("R-017 blocks thin history, gaps and provider errors", () => {
     for (const change of [
-      (next: MutableSnapshot) => (next.dataQuality.minimumClosedCandles["4h"] = 199),
+      (next: MutableSnapshot) =>
+        (next.dataQuality.minimumClosedCandles["4h"] = 199),
       (next: MutableSnapshot) => (next.dataQuality.gapCount["1d"] = 1),
       (next: MutableSnapshot) => (next.dataQuality.providerErrorCount["1h"] = 1)
     ]) {
@@ -538,7 +626,12 @@ describe("data, execution profile and regime rules", () => {
       RiskRuleCode.DATA_QUALITY
     );
     assert.equal(rule.severity, "CRITICAL");
-    assert.equal(evaluateRisk(mutate((next) => (next.dataQuality.ohlcContradiction = true))).outcome, "ERROR");
+    assert.equal(
+      evaluateRisk(
+        mutate((next) => (next.dataQuality.ohlcContradiction = true))
+      ).outcome,
+      "ERROR"
+    );
   });
 
   it("R-018 and R-019 hold the documented basis point caps", () => {
@@ -626,30 +719,45 @@ describe("structural prohibition rules", () => {
     const snapshot = mutate((next) => {
       next.dailyCounters.consecutiveLosses = 3;
     });
-    assert.equal(ruleOf(snapshot, RiskRuleCode.LOSS_STREAK).severity, "CRITICAL");
+    assert.equal(
+      ruleOf(snapshot, RiskRuleCode.LOSS_STREAK).severity,
+      "CRITICAL"
+    );
     assert.equal(evaluateRisk(snapshot).directive, "ENGAGE_KILL_SWITCH");
   });
 
   it("R-022 fails critically when exposure for the asset already exists", () => {
     const snapshot = mutate((next) => {
       next.openPositions = [
-        openPosition({ assetId: "asset-btc", symbol: "BTCUSDT", marketValue: "100.000000000000" })
+        openPosition({
+          assetId: "asset-btc",
+          symbol: "BTCUSDT",
+          marketValue: "100.000000000000"
+        })
       ];
       next.portfolio.equity = "10100.000000000000";
     });
     const rule = ruleOf(snapshot, RiskRuleCode.NO_SCALE_IN);
-    assert.equal(rule.reasonCode, RiskReasonCode.AVERAGING_OR_SCALE_IN_FORBIDDEN);
+    assert.equal(
+      rule.reasonCode,
+      RiskReasonCode.AVERAGING_OR_SCALE_IN_FORBIDDEN
+    );
     assert.equal(rule.severity, "CRITICAL");
   });
 
   it("R-023 fails critically on a manual size or a risk multiplier", () => {
     for (const change of [
-      (next: MutableSnapshot) => (next.sizeOverride.manualQuantity = "1.000000000000"),
-      (next: MutableSnapshot) => (next.sizeOverride.riskMultiplier = "2.000000000000"),
+      (next: MutableSnapshot) =>
+        (next.sizeOverride.manualQuantity = "1.000000000000"),
+      (next: MutableSnapshot) =>
+        (next.sizeOverride.riskMultiplier = "2.000000000000"),
       (next: MutableSnapshot) => (next.sizeOverride.requestedBy = "admin")
     ]) {
       const rule = ruleOf(mutate(change), RiskRuleCode.NO_MARTINGALE);
-      assert.equal(rule.reasonCode, RiskReasonCode.NON_DETERMINISTIC_SIZE_OVERRIDE);
+      assert.equal(
+        rule.reasonCode,
+        RiskReasonCode.NON_DETERMINISTIC_SIZE_OVERRIDE
+      );
       assert.equal(rule.severity, "CRITICAL");
     }
   });
@@ -721,13 +829,17 @@ describe("R-026 idempotency and versions", () => {
   it("fails critically on a stored assessment with a different hash", () => {
     const snapshot = mutate((next) => {
       next.existingAssessment = {
-        assessmentKey: "risk-assessment.v1|trade-candidate-1|risk-limit-set-1|deadbeef",
+        assessmentKey:
+          "risk-assessment.v1|trade-candidate-1|risk-limit-set-1|deadbeef",
         inputHash: "f".repeat(64),
         status: "PASS"
       };
     });
     const rule = ruleOf(snapshot, RiskRuleCode.IDEMPOTENCY_VERSION);
-    assert.equal(rule.reasonCode, RiskReasonCode.IDEMPOTENCY_OR_VERSION_CONFLICT);
+    assert.equal(
+      rule.reasonCode,
+      RiskReasonCode.IDEMPOTENCY_OR_VERSION_CONFLICT
+    );
     assert.equal(rule.severity, "CRITICAL");
     const result = evaluateRisk(snapshot);
     assert.equal(result.outcome, "ERROR");
@@ -739,12 +851,16 @@ describe("R-026 idempotency and versions", () => {
     const inputHash = evaluateRisk(base).inputHash;
     const replay = mutate((next) => {
       next.existingAssessment = {
-        assessmentKey: "risk-assessment.v1|trade-candidate-1|risk-limit-set-1|x",
+        assessmentKey:
+          "risk-assessment.v1|trade-candidate-1|risk-limit-set-1|x",
         inputHash,
         status: "PASS"
       };
     });
-    assert.equal(ruleOf(replay, RiskRuleCode.IDEMPOTENCY_VERSION).outcome, "PASS");
+    assert.equal(
+      ruleOf(replay, RiskRuleCode.IDEMPOTENCY_VERSION).outcome,
+      "PASS"
+    );
   });
 
   it("fails critically on an incomplete candidate plan", () => {
@@ -848,11 +964,17 @@ describe("determinism and snapshot handling", () => {
   });
 
   it("errors with all 26 results on an unsupported snapshot version", () => {
-    const snapshot = { ...buildApprovableSnapshot(), snapshotVersion: "RISK_INPUT_SNAPSHOT_V2" };
+    const snapshot = {
+      ...buildApprovableSnapshot(),
+      snapshotVersion: "RISK_INPUT_SNAPSHOT_V2"
+    };
     const result = evaluateRisk(snapshot as unknown as RiskInputSnapshotV1);
     assert.equal(result.outcome, "ERROR");
     assert.equal(result.ruleResults.length, 26);
-    assert.equal(result.primaryReasonCode, RiskReasonCode.RISK_SNAPSHOT_VERSION_UNSUPPORTED);
+    assert.equal(
+      result.primaryReasonCode,
+      RiskReasonCode.RISK_SNAPSHOT_VERSION_UNSUPPORTED
+    );
     assert.equal(result.directive, "ERROR_LOCK");
   });
 });

@@ -61,7 +61,8 @@ export const PersistOutcome = {
   CONFLICT: "CONFLICT",
   REJECTION_RECORDED: "REJECTION_RECORDED"
 } as const;
-export type PersistOutcome = (typeof PersistOutcome)[keyof typeof PersistOutcome];
+export type PersistOutcome =
+  (typeof PersistOutcome)[keyof typeof PersistOutcome];
 
 export interface PersistStrategyEvaluationInput {
   readonly evaluation: StrategyEvaluationResultV1;
@@ -107,7 +108,10 @@ async function persistCandidate(
     select: { id: true, inputHash: true }
   });
 
-  const verdict = classifyReplay(existing?.inputHash ?? null, candidate.inputHash);
+  const verdict = classifyReplay(
+    existing?.inputHash ?? null,
+    candidate.inputHash
+  );
 
   if (verdict === ReplayVerdict.IDEMPOTENT_REPLAY) {
     return {
@@ -121,7 +125,13 @@ async function persistCandidate(
   }
 
   if (verdict === ReplayVerdict.CONFLICT) {
-    await recordHashConflict(database, input, candidate, existing?.id ?? null, existing?.inputHash ?? null);
+    await recordHashConflict(
+      database,
+      input,
+      candidate,
+      existing?.id ?? null,
+      existing?.inputHash ?? null
+    );
     return {
       outcome: PersistOutcome.CONFLICT,
       candidateKey: candidate.candidateKey,
@@ -143,7 +153,10 @@ async function persistCandidate(
         assetId: candidate.assetId,
         anchorCandleId: candidate.anchorCandleId,
         anchorSignalId: candidate.anchorSignalId,
-        direction: TradeDirection.LONG,
+        direction:
+          candidate.direction === TradeDirection.LONG
+            ? TradeDirection.LONG
+            : TradeDirection.SHORT,
         entryType: TradeEntryType.MARKET,
         status: TradeCandidateStatus.CREATED,
         referenceEntryPrice: candidate.referenceEntryPrice,

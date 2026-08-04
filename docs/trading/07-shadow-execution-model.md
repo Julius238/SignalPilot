@@ -4,7 +4,7 @@
 
 Die Simulation soll reproduzierbar und im Zweifel schlechter, nicht besser, als die aus OHLCV belegbare Ausführung sein. Sie behauptet keine Tick-Reihenfolge, die in 1h-Candles nicht vorhanden ist. Jeder Algorithmus und jedes Kosten-/Instrumentprofil ist versioniert.
 
-V1 unterstützt Market Orders. Limit Orders sind ein späterer Zusatz und dürfen erst nach separater Spezifikation aktiviert werden.
+V1 unterstützt interne Market Orders für Long sowie synthetische, ungehebelte Shadow-Shorts. Es gibt keine Exchange-Position, kein Borrowing, Funding, Margin, Futures, Leverage oder Liquidationsmodell. Limit Orders und jeder echte Short sind spätere, separat zu spezifizierende Systeme; Spot-Adapter dürfen Short nie akzeptieren.
 
 ## Eingaben je Simulationsschritt
 
@@ -88,12 +88,12 @@ Eine spätere realistischere Volumen-/Orderbuchkalibrierung erhält eine neue Si
 2. Keine Ausführung in `C0`.
 3. Erste zulässige Candle `C1`: Referenz `open(C1)`.
 4. `open(C1) > referenceEntry + 0.5 × ATR`: kompletter ungefüllter Entry läuft als `ENTRY_GAP_TOO_LARGE` aus; kein FOMO-Fill.
-5. Ansonsten Market-Buy-Formel und Liquiditätscap.
+5. Ansonsten Long mit Market-BUY, Short mit Market-SELL und demselben Liquiditätscap. Ein adverse Gap ist Long ein zu hoher, Short ein zu niedriger Open.
 6. Nach einem Entry-Fill werden Stop/TP mit tatsächlichem Average Entry und gespeichertem ExitPlan geprüft. Ein Fill darf niemals ohne ExitPlan/Position/Ledger committen.
 
 ## Stop, Take Profit und Intrakerzenkonflikte
 
-Für jede Position und neue geschlossene Candle in folgender Reihenfolge:
+Für jede Long-Position und neue geschlossene Candle in folgender Reihenfolge:
 
 1. **Gap durch Stop:** `open <= stop`. Trigger Stop, Referenz `open` (schlechter als Stop möglich), Sell-Spread/Slippage.
 2. **Gap über Take Profit:** `open >= takeProfit`. Trigger TP, Referenz höchstens `takeProfit`; günstigerer Open wird nicht gutgeschrieben.
@@ -104,6 +104,16 @@ Für jede Position und neue geschlossene Candle in folgender Reihenfolge:
 7. **Regime-/manueller Exit:** wenn vor Candleverarbeitung angefordert und kein härterer Stop, Referenz `open` der nächsten Candle; kommt die Anforderung erst nach Open, `close` der nächsten vollständig beobachtbaren Candle.
 
 Für eine in `C1` am Open eröffnete Position wird der gesamte OHLC-Range von `C1` danach als potenzieller Exitpfad behandelt. Treffen Stop und TP, gilt ebenfalls Stop zuerst. Das ist konservativ, aber deterministisch.
+
+Für Short werden die Schwellen und Exit-Sides explizit gerichtet ausgewertet:
+
+1. Stop-Gap `open >= stop`: BUY-to-close am adversen Open.
+2. TP-Gap `open <= takeProfit`: BUY-to-close höchstens mit dem TP-Vorteil; kein positiver Gap-Bonus.
+3. Beide im Range (`high >= stop` und `low <= takeProfit`): immer Stop zuerst.
+4. Nur Stop: `high >= stop`; nur TP: `low <= takeProfit`.
+5. Time-, Invalidierungs- und Manual-Risk-Close verwenden einen adversen BUY-Fill.
+
+Teil-Exits, Fillkosten, Tick-/Mengenregeln und Stop-first sind für beide Richtungen identisch. Nach jedem Entry-Teilfill erfolgt ein richtungsabhängiger Netto-CRV-Recheck; ein Shortfall beendet den Rest und erzwingt einen risikoreduzierenden Close der bereits gefüllten Menge.
 
 ## Gap-Risiken
 
@@ -120,10 +130,11 @@ Eine spätere Version muss mindestens Queue-/Touch-Modell, Maker/Taker, Partial 
 
 ### Entry-Akzeptanz
 
-Worst-Case-Reserve:
+Worst-Case-Reserve beziehungsweise Collateral:
 
 ```text
-worstEntryPrice = BUY(referencePrice, maxSpread, maxSlippage), advers gerundet
+LONG  worstEntryPrice = adverse BUY(referencePrice)
+SHORT worstEntryPrice = adverse SELL(referencePrice)
 reservedQuote = quantity * worstEntryPrice + adverseEntryFee
 ```
 
@@ -131,16 +142,25 @@ Ledger: `availableCash -= reservedQuote`, `reservedCash += reservedQuote`. Eine 
 
 ### Entry-Fill
 
-Für tatsächliche Kosten `fillNotional + fee`:
+Long-Fill:
 
 - `reservedCash -=` der dem Fill zugeordneten Reserve;
 - nicht benötigter reservierter Teil dieses Fills zurück zu `availableCash`;
 - tatsächliche Buy-Kosten werden aus dem Portfoliovermögen gegen den Basisasset-Marktwert transformiert; Ledger hält Quote-Cash- und Fee-Wirkung;
 - Restreserve bleibt an die Restmenge gebunden.
 
+Short-Fill:
+
+- Entry ist `SELL`, erzeugt aber absichtlich keinen verfügbaren Verkaufserlös;
+- der volle ungehebelte Fill-Notional bleibt als `ShadowPosition.reservedCollateral` in `reservedCash`, die Entry-Gebühr wird daraus belastet;
+- die Restreserve bleibt an die ungefüllte Menge gebunden;
+- die Ledger-Typen belegen SELL-Entry, Fee und die Collateralbindung, ohne eine Exchange- oder Schuldposition zu erfinden.
+
 Cancel/Expiry gibt nur den ungefüllten Rest frei. Kein Pfad darf `availableCash` negativ machen.
 
 ### Exit-Fill
+
+Long:
 
 ```text
 netProceeds = fillNotional - exitFee
@@ -149,14 +169,23 @@ realizedPnlDelta = quantity * (fillPrice - allocatedAverageEntryPrice)
                    - allocatedEntryFees - exitFee
 ```
 
+Short:
+
+```text
+grossPnlDelta = quantity * (allocatedAverageEntryPrice - fillPrice)
+realizedPnlDelta = grossPnlDelta - allocatedEntryFees - exitFee
+availableCash += releasedCollateral + grossPnlDelta - exitFee
+reservedCash -= releasedCollateral
+```
+
 Entry Fees werden proportional zur geschlossenen Menge zugeordnet. Rundungsreste werden erst beim finalen Close deterministisch dem letzten Fill zugeschlagen.
 
 ## Realisiert, unrealisiert und Equity
 
-- Realisiert: ausschließlich aus abgeschlossenen Sell-Fills abzüglich zugeordneter Entry-/Exitgebühren.
-- Unrealisiert: offene Menge × (`conservativeBidMark - averageEntryPrice`) minus geschätzte Exitfee. Mark ist Candle-Close mit halbem Sell-Spread, ohne zusätzliche Slippage; Risk-Worst-Case kann separat Slippage abziehen.
-- Marktwert: offene Menge × conservativeBidMark.
-- Equity: `availableCash + reservedCash + marketValue`. Reserviertes Cash bleibt Eigentum des Portfolios und darf nicht doppelt als Marktwert gezählt werden.
+- Long realisiert: `quantity × (sellFill - entry) - zugeordnete Entry-/Exitgebühren`; Short realisiert: `quantity × (entry - buyFill) - Gebühren`.
+- Long unrealisiert: offene Menge × (`conservativeBidMark - averageEntryPrice`) minus geschätzte Exitfee. Short unrealisiert: offene Menge × (`averageEntryPrice - conservativeAskMark`) minus geschätzte Exitfee.
+- Der Long-Equitybeitrag ist der konservative Marktwert. Beim Short ist der Notional bereits vollständig im reservierten Collateral enthalten; deshalb ist sein zusätzlicher Equitybeitrag ausschließlich das richtungsabhängige unrealized P&L.
+- Equity: `availableCash + reservedCash + sum(directionale Equitybeiträge)`. Collateral darf nie zugleich als Short-Marktwert gezählt werden.
 - High Water Mark steigt nur mit einem reconciled Snapshot; Drawdown wird davon abgeleitet.
 
 ## Historisch zu speichernde Filldaten
@@ -186,3 +215,5 @@ Damit ist ein Fill ohne Zugriff auf später veränderte Candles/Profile reproduz
 - Prozessabbruch zwischen Berechnung und Commit: kein Fill vorhanden; gleiche Inputs erzeugen nach Claim-Ablauf denselben Fill.
 - Projektion fehlerhaft, Ledger korrekt: Projektion neu aufbauen und auditieren.
 - Ledger unklar: niemals aus Projektion überschreiben; manuelle Auflösung.
+
+Reconciliation prüft zusätzlich Direction/Side, P&L-Vorzeichen, Short-Collateral, richtungsfreie aktive Scopes, doppelte Entry-Orders/Positionen und Ledger-/Cache-Abweichungen. Kritische Abweichungen setzen Portfolio und Session auf `ERROR_LOCKED`, engagieren den Kill Switch und blockieren neue Exposure; risikoreduzierende Exits bleiben möglich.

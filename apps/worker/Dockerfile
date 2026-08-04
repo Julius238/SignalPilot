@@ -10,10 +10,12 @@ COPY . .
 
 RUN pnpm install --frozen-lockfile
 
-# Build packages first (ensures Prisma client is generated for linux),
-# then the worker
-RUN pnpm -r --filter "./packages/**" build
-RUN pnpm --filter @signalpilot/worker build
+# Build the worker together with its complete workspace dependency closure, in
+# pnpm's topological order. Same `<pkg>...` filter as apps/api/Dockerfile — see
+# the long note there. Prisma generate runs as part of
+# `@signalpilot/database`'s own build, so the linux engine binary is still
+# produced here.
+RUN pnpm --filter "@signalpilot/worker..." build
 
 # Create a minimal standalone deployment with only production dependencies.
 # @prisma/client and prisma are direct deps so pnpm deploy includes them with

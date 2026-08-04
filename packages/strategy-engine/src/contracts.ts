@@ -30,7 +30,9 @@ export const STRATEGY_TIMEFRAMES = ["1h", "4h", "1d"] as const;
 export type StrategyTimeframe = (typeof STRATEGY_TIMEFRAMES)[number];
 
 /** Interval length of each supported timeframe in milliseconds. */
-export const TIMEFRAME_INTERVAL_MS: Readonly<Record<StrategyTimeframe, number>> = Object.freeze({
+export const TIMEFRAME_INTERVAL_MS: Readonly<
+  Record<StrategyTimeframe, number>
+> = Object.freeze({
   "1h": 60 * 60 * 1000,
   "4h": 4 * 60 * 60 * 1000,
   "1d": 24 * 60 * 60 * 1000
@@ -219,7 +221,9 @@ export interface StrategyInputSnapshotV1 {
   readonly strategy: SnapshotStrategyVersionV1;
   readonly assignment: SnapshotAssignmentV1;
   readonly series: Readonly<Record<StrategyTimeframe, SnapshotSeriesV1>>;
-  readonly signals: Readonly<Record<StrategyTimeframe, SnapshotSignalV1 | null>>;
+  readonly signals: Readonly<
+    Record<StrategyTimeframe, SnapshotSignalV1 | null>
+  >;
   readonly multiTimeframe: SnapshotMultiTimeframeV1 | null;
   readonly marketRegime: SnapshotMarketRegimeV1 | null;
   readonly executionProfile: SnapshotExecutionProfileV1 | null;
@@ -280,7 +284,15 @@ export interface StrategyIndicatorSnapshotV1 {
   readonly rsi14_1h: DecimalString;
   readonly atr14_1h: DecimalString;
   readonly atrToClose1h: DecimalString;
-  readonly priorHigh20_1h: DecimalString;
+  /** Long breakout reference. Absent on a short candidate. */
+  readonly priorHigh20_1h?: DecimalString;
+  /** Short breakdown reference. Absent on a long candidate. */
+  readonly priorLow20_1h?: DecimalString;
+  /**
+   * Signed distance of the anchor close beyond its reference level, always
+   * expressed as a positive magnitude of the move that confirmed the setup:
+   * `close − priorHigh` for a breakout, `priorLow − close` for a breakdown.
+   */
   readonly breakoutDistance: DecimalString;
   readonly breakoutDistancePct: DecimalString;
   readonly averageVolume20_1h: DecimalString;
@@ -308,7 +320,12 @@ export interface TradeCandidateDraftV1 {
   readonly symbol: string;
   readonly anchorCandleId: string;
   readonly anchorSignalId: string | null;
-  readonly direction: "LONG";
+  /**
+   * `LONG` for `CRYPTO_MTF_BREAKOUT_LONG_V1`, `SHORT` for
+   * `CRYPTO_MTF_BREAKDOWN_SHORT_V1`. A short is a synthetic, unleveraged
+   * shadow simulation only (ADR 0012).
+   */
+  readonly direction: "LONG" | "SHORT";
   readonly entryType: "MARKET";
   /** Draft status; the worker persists the candidate in exactly this state. */
   readonly status: "CREATED";
@@ -382,5 +399,7 @@ export interface StrategyDefinitionV1 {
   readonly engineVersion: string;
   readonly specificationHash: string;
   readonly parameters: Readonly<Record<string, unknown>>;
-  readonly evaluate: (snapshot: StrategyInputSnapshotV1) => StrategyEvaluationResultV1;
+  readonly evaluate: (
+    snapshot: StrategyInputSnapshotV1
+  ) => StrategyEvaluationResultV1;
 }

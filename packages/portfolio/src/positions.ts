@@ -15,7 +15,12 @@
  * deterministisch dem letzten Fill zugeschlagen").
  */
 
-import { DecimalValue, RoundingMode } from "@signalpilot/trading-domain";
+import {
+  DecimalValue,
+  RoundingMode,
+  TradeDirection,
+  grossPnl
+} from "@signalpilot/trading-domain";
 
 import {
   EMPTY_POSITION_STATE,
@@ -41,11 +46,23 @@ function decimalOrNull(value: string): DecimalValue | null {
 
 const ZERO_STR = "0.000000000000";
 
-function failedPosition(reasonCode: PortfolioReasonCode): PositionUpdateResultV1 {
-  return { ok: false, reasonCode, position: null, realizedPnlDelta: null, allocatedEntryFeesDelta: null };
+function failedPosition(
+  reasonCode: PortfolioReasonCode
+): PositionUpdateResultV1 {
+  return {
+    ok: false,
+    reasonCode,
+    position: null,
+    realizedPnlDelta: null,
+    allocatedEntryFeesDelta: null,
+    releasedCollateralDelta: null,
+    grossPnlDelta: null
+  };
 }
 
-function failedLedger(reasonCode: PortfolioReasonCode): LedgerOperationResultV1 {
+function failedLedger(
+  reasonCode: PortfolioReasonCode
+): LedgerOperationResultV1 {
   return { ok: false, reasonCode, entries: [], nextState: null };
 }
 
@@ -62,6 +79,7 @@ export function applyEntryFillToPosition(
   const fillPrice = decimalOrNull(fill.fillPrice);
   const notional = decimalOrNull(fill.notional);
   const fee = decimalOrNull(fill.feeAmount);
+  const collateral = decimalOrNull(fill.collateralAmount ?? ZERO_STR);
   if (
     quantity === null ||
     !quantity.isPositive() ||
@@ -69,15 +87,24 @@ export function applyEntryFillToPosition(
     !fillPrice.isPositive() ||
     notional === null ||
     fee === null ||
-    fee.isNegative()
+    fee.isNegative() ||
+    collateral === null ||
+    collateral.isNegative() ||
+    (position.direction === TradeDirection.LONG && !collateral.isZero()) ||
+    (position.direction === TradeDirection.SHORT && !collateral.isPositive())
   ) {
     return failedPosition(PortfolioReasonCode.INVALID_AMOUNT);
   }
 
-  const priorQuantity = decimalOrNull(position.openQuantity) ?? DecimalValue.ZERO;
-  const priorNotional = decimalOrNull(position.grossEntryNotional) ?? DecimalValue.ZERO;
+  const priorQuantity =
+    decimalOrNull(position.openQuantity) ?? DecimalValue.ZERO;
+  const priorNotional =
+    decimalOrNull(position.grossEntryNotional) ?? DecimalValue.ZERO;
   const priorFees = decimalOrNull(position.feesPaid) ?? DecimalValue.ZERO;
-  const priorInitial = decimalOrNull(position.initialQuantity) ?? DecimalValue.ZERO;
+  const priorInitial =
+    decimalOrNull(position.initialQuantity) ?? DecimalValue.ZERO;
+  const priorCollateral =
+    decimalOrNull(position.reservedCollateral) ?? DecimalValue.ZERO;
 
   const newQuantity = priorQuantity.add(quantity);
   const newNotional = priorNotional.add(notional);
@@ -91,10 +118,19 @@ export function applyEntryFillToPosition(
     openQuantity: newQuantity.toString(),
     grossEntryNotional: newNotional.toString(),
     averageEntryPrice: averageEntryPrice.toString(),
-    feesPaid: priorFees.add(fee).toString()
+    feesPaid: priorFees.add(fee).toString(),
+    reservedCollateral: priorCollateral.add(collateral).toString()
   };
 
-  return { ok: true, reasonCode: PortfolioReasonCode.OK, position: next, realizedPnlDelta: null, allocatedEntryFeesDelta: null };
+  return {
+    ok: true,
+    reasonCode: PortfolioReasonCode.OK,
+    position: next,
+    realizedPnlDelta: null,
+    allocatedEntryFeesDelta: null,
+    releasedCollateralDelta: null,
+    grossPnlDelta: null
+  };
 }
 
 /**
@@ -117,6 +153,7 @@ export function applyExitFillToPosition(
   const initialQuantity = decimalOrNull(position.initialQuantity);
   const averageEntryPrice = decimalOrNull(position.averageEntryPrice);
   const entryFeesTotal = decimalOrNull(entryFeesPaidTotal);
+  const reservedCollateral = decimalOrNull(position.reservedCollateral);
 
   if (
     quantity === null ||
@@ -130,7 +167,9 @@ export function applyExitFillToPosition(
     initialQuantity === null ||
     !initialQuantity.isPositive() ||
     averageEntryPrice === null ||
-    entryFeesTotal === null
+    entryFeesTotal === null ||
+    reservedCollateral === null ||
+    reservedCollateral.isNegative()
   ) {
     return failedPosition(PortfolioReasonCode.INVALID_AMOUNT);
   }
@@ -138,10 +177,14 @@ export function applyExitFillToPosition(
     return failedPosition(PortfolioReasonCode.QUANTITY_EXCEEDS_OPEN);
   }
 
-  const priorClosed = decimalOrNull(position.closedQuantity) ?? DecimalValue.ZERO;
-  const priorExitNotional = decimalOrNull(position.grossExitNotional) ?? DecimalValue.ZERO;
-  const priorRealized = decimalOrNull(position.realizedPnl) ?? DecimalValue.ZERO;
-  const priorAllocated = decimalOrNull(position.allocatedEntryFees) ?? DecimalValue.ZERO;
+  const priorClosed =
+    decimalOrNull(position.closedQuantity) ?? DecimalValue.ZERO;
+  const priorExitNotional =
+    decimalOrNull(position.grossExitNotional) ?? DecimalValue.ZERO;
+  const priorRealized =
+    decimalOrNull(position.realizedPnl) ?? DecimalValue.ZERO;
+  const priorAllocated =
+    decimalOrNull(position.allocatedEntryFees) ?? DecimalValue.ZERO;
   const priorExitFees = decimalOrNull(position.feesPaid) ?? DecimalValue.ZERO;
 
   const newClosed = priorClosed.add(quantity);
@@ -153,10 +196,28 @@ export function applyExitFillToPosition(
   // left instead of leaving fees permanently unattributed.
   const allocatedEntryFeesDelta = isFinalClose
     ? entryFeesTotal.sub(priorAllocated)
-    : entryFeesTotal.mul(quantity, RoundingMode.CEIL).div(initialQuantity, RoundingMode.CEIL);
+    : entryFeesTotal
+        .mul(quantity, RoundingMode.CEIL)
+        .div(initialQuantity, RoundingMode.CEIL);
 
-  const grossPnl = fillPrice.sub(averageEntryPrice).mul(quantity, RoundingMode.FLOOR);
-  const realizedPnlDelta = grossPnl.sub(allocatedEntryFeesDelta).sub(exitFee);
+  const grossPnlDelta = grossPnl(
+    position.direction,
+    averageEntryPrice,
+    fillPrice,
+    quantity,
+    RoundingMode.FLOOR
+  );
+  const realizedPnlDelta = grossPnlDelta
+    .sub(allocatedEntryFeesDelta)
+    .sub(exitFee);
+  const releasedCollateralDelta =
+    position.direction === TradeDirection.SHORT
+      ? isFinalClose
+        ? reservedCollateral
+        : reservedCollateral
+            .mul(quantity, RoundingMode.FLOOR)
+            .div(openQuantity, RoundingMode.FLOOR)
+      : DecimalValue.ZERO;
 
   const priorExitNotionalSum = priorExitNotional.add(notional);
   const averageExitPrice = newClosed.isPositive()
@@ -171,7 +232,10 @@ export function applyExitFillToPosition(
     averageExitPrice: averageExitPrice.toString(),
     realizedPnl: priorRealized.add(realizedPnlDelta).toString(),
     allocatedEntryFees: priorAllocated.add(allocatedEntryFeesDelta).toString(),
-    feesPaid: priorExitFees.add(exitFee).toString()
+    feesPaid: priorExitFees.add(exitFee).toString(),
+    reservedCollateral: reservedCollateral
+      .sub(releasedCollateralDelta)
+      .toString()
   };
 
   return {
@@ -179,11 +243,14 @@ export function applyExitFillToPosition(
     reasonCode: PortfolioReasonCode.OK,
     position: next,
     realizedPnlDelta: realizedPnlDelta.toString(),
-    allocatedEntryFeesDelta: allocatedEntryFeesDelta.toString()
+    allocatedEntryFeesDelta: allocatedEntryFeesDelta.toString(),
+    releasedCollateralDelta: releasedCollateralDelta.toString(),
+    grossPnlDelta: grossPnlDelta.toString()
   };
 }
 
 export interface ApplyEntryFillLedgerInputV1 {
+  readonly direction: "LONG" | "SHORT";
   readonly state: PortfolioStateV1;
   readonly notionalEntryKey: string;
   readonly feeEntryKey: string;
@@ -202,7 +269,9 @@ export interface ApplyEntryFillLedgerInputV1 {
  * rather than silently absorbed (docs/trading/07, "Kein Pfad darf
  * `availableCash` negativ machen").
  */
-export function applyEntryFillLedger(input: ApplyEntryFillLedgerInputV1): LedgerOperationResultV1 {
+export function applyEntryFillLedger(
+  input: ApplyEntryFillLedgerInputV1
+): LedgerOperationResultV1 {
   const reservedForFill = decimalOrNull(input.reservedForFill);
   const notional = decimalOrNull(input.fill.notional);
   const fee = decimalOrNull(input.fill.feeAmount);
@@ -219,7 +288,9 @@ export function applyEntryFillLedger(input: ApplyEntryFillLedgerInputV1): Ledger
   if (reservedForFill.gt(reservedCash)) {
     return failedLedger(PortfolioReasonCode.RESERVATION_MISMATCH);
   }
-  if (notional.add(fee).gt(reservedForFill)) {
+  const requiredReserve =
+    input.direction === TradeDirection.LONG ? notional.add(fee) : fee;
+  if (requiredReserve.gt(reservedForFill)) {
     return failedLedger(PortfolioReasonCode.INSUFFICIENT_RESERVE);
   }
 
@@ -232,9 +303,18 @@ export function applyEntryFillLedger(input: ApplyEntryFillLedgerInputV1): Ledger
   const notionalEntry: LedgerEntryDraftV1 = {
     entryKey: input.notionalEntryKey,
     sequence: input.state.ledgerSequence + 1,
-    type: "BUY_NOTIONAL",
-    availableCashDelta: releasedExcess.toString(),
-    reservedCashDelta: reservedForFill.negate().toString(),
+    type:
+      input.direction === TradeDirection.LONG
+        ? "BUY_NOTIONAL"
+        : "SELL_NOTIONAL",
+    availableCashDelta:
+      input.direction === TradeDirection.LONG
+        ? releasedExcess.toString()
+        : ZERO_STR,
+    reservedCashDelta:
+      input.direction === TradeDirection.LONG
+        ? reservedForFill.negate().toString()
+        : ZERO_STR,
     realizedPnlDelta: ZERO_STR,
     feeDelta: ZERO_STR,
     shadowOrderId: input.shadowOrderId,
@@ -245,14 +325,23 @@ export function applyEntryFillLedger(input: ApplyEntryFillLedgerInputV1): Ledger
     occurredAt: input.occurredAt
   };
   let state = applyLedgerEntry(input.state, notionalEntry);
-  const notionalWithBalance = { ...notionalEntry, balanceAfterJson: { ...state } };
+  const notionalWithBalance = {
+    ...notionalEntry,
+    balanceAfterJson: { ...state }
+  };
 
   const feeEntry: LedgerEntryDraftV1 = {
     entryKey: input.feeEntryKey,
     sequence: state.ledgerSequence + 1,
     type: "FEE",
-    availableCashDelta: fee.negate().toString(),
-    reservedCashDelta: ZERO_STR,
+    availableCashDelta:
+      input.direction === TradeDirection.LONG
+        ? fee.negate().toString()
+        : ZERO_STR,
+    reservedCashDelta:
+      input.direction === TradeDirection.SHORT
+        ? fee.negate().toString()
+        : ZERO_STR,
     realizedPnlDelta: ZERO_STR,
     feeDelta: fee.toString(),
     shadowOrderId: input.shadowOrderId,
@@ -274,12 +363,15 @@ export function applyEntryFillLedger(input: ApplyEntryFillLedgerInputV1): Ledger
 }
 
 export interface ApplyExitFillLedgerInputV1 {
+  readonly direction: "LONG" | "SHORT";
   readonly state: PortfolioStateV1;
   readonly proceedsEntryKey: string;
   readonly feeEntryKey: string;
   readonly pnlEntryKey: string;
   readonly fill: FillAppliedV1;
   readonly realizedPnlDelta: string;
+  readonly grossPnlDelta: string;
+  readonly releasedCollateral: string;
   readonly shadowOrderId: string;
   readonly shadowFillId: string;
   readonly shadowPositionId: string;
@@ -293,19 +385,36 @@ export interface ApplyExitFillLedgerInputV1 {
  * the allocated entry fee and this exit's own fee, so the P&L row moves no
  * cash of its own.
  */
-export function applyExitFillLedger(input: ApplyExitFillLedgerInputV1): LedgerOperationResultV1 {
+export function applyExitFillLedger(
+  input: ApplyExitFillLedgerInputV1
+): LedgerOperationResultV1 {
   const notional = decimalOrNull(input.fill.notional);
   const fee = decimalOrNull(input.fill.feeAmount);
   const realizedPnlDelta = decimalOrNull(input.realizedPnlDelta);
-  if (notional === null || fee === null || fee.isNegative() || realizedPnlDelta === null) {
+  const grossPnlDelta = decimalOrNull(input.grossPnlDelta);
+  const releasedCollateral = decimalOrNull(input.releasedCollateral);
+  if (
+    notional === null ||
+    fee === null ||
+    fee.isNegative() ||
+    realizedPnlDelta === null ||
+    grossPnlDelta === null ||
+    releasedCollateral === null ||
+    releasedCollateral.isNegative() ||
+    (input.direction === TradeDirection.LONG && !releasedCollateral.isZero())
+  ) {
     return failedLedger(PortfolioReasonCode.INVALID_AMOUNT);
   }
 
   const proceedsEntry: LedgerEntryDraftV1 = {
     entryKey: input.proceedsEntryKey,
     sequence: input.state.ledgerSequence + 1,
-    type: "SELL_NOTIONAL",
-    availableCashDelta: notional.toString(),
+    type:
+      input.direction === TradeDirection.LONG
+        ? "SELL_NOTIONAL"
+        : "BUY_NOTIONAL",
+    availableCashDelta:
+      input.direction === TradeDirection.LONG ? notional.toString() : ZERO_STR,
     reservedCashDelta: ZERO_STR,
     realizedPnlDelta: ZERO_STR,
     feeDelta: ZERO_STR,
@@ -317,7 +426,31 @@ export function applyExitFillLedger(input: ApplyExitFillLedgerInputV1): LedgerOp
     occurredAt: input.occurredAt
   };
   let state = applyLedgerEntry(input.state, proceedsEntry);
-  const proceedsWithBalance = { ...proceedsEntry, balanceAfterJson: { ...state } };
+  const proceedsWithBalance = {
+    ...proceedsEntry,
+    balanceAfterJson: { ...state }
+  };
+
+  const entries: LedgerEntryDraftV1[] = [proceedsWithBalance];
+  if (input.direction === TradeDirection.SHORT) {
+    const releaseEntry: LedgerEntryDraftV1 = {
+      entryKey: `${input.proceedsEntryKey}|COLLATERAL_RELEASE`,
+      sequence: state.ledgerSequence + 1,
+      type: "RELEASE",
+      availableCashDelta: releasedCollateral.toString(),
+      reservedCashDelta: releasedCollateral.negate().toString(),
+      realizedPnlDelta: ZERO_STR,
+      feeDelta: ZERO_STR,
+      shadowOrderId: input.shadowOrderId,
+      shadowFillId: input.shadowFillId,
+      shadowPositionId: input.shadowPositionId,
+      correctionOfId: null,
+      balanceAfterJson: {},
+      occurredAt: input.occurredAt
+    };
+    state = applyLedgerEntry(state, releaseEntry);
+    entries.push({ ...releaseEntry, balanceAfterJson: { ...state } });
+  }
 
   const feeEntry: LedgerEntryDraftV1 = {
     entryKey: input.feeEntryKey,
@@ -336,12 +469,16 @@ export function applyExitFillLedger(input: ApplyExitFillLedgerInputV1): LedgerOp
   };
   state = applyLedgerEntry(state, feeEntry);
   const feeWithBalance = { ...feeEntry, balanceAfterJson: { ...state } };
+  entries.push(feeWithBalance);
 
   const pnlEntry: LedgerEntryDraftV1 = {
     entryKey: input.pnlEntryKey,
     sequence: state.ledgerSequence + 1,
     type: "PNL_ADJUSTMENT",
-    availableCashDelta: ZERO_STR,
+    availableCashDelta:
+      input.direction === TradeDirection.SHORT
+        ? grossPnlDelta.toString()
+        : ZERO_STR,
     reservedCashDelta: ZERO_STR,
     realizedPnlDelta: realizedPnlDelta.toString(),
     feeDelta: ZERO_STR,
@@ -354,11 +491,12 @@ export function applyExitFillLedger(input: ApplyExitFillLedgerInputV1): LedgerOp
   };
   state = applyLedgerEntry(state, pnlEntry);
   const pnlWithBalance = { ...pnlEntry, balanceAfterJson: { ...state } };
+  entries.push(pnlWithBalance);
 
   return {
     ok: true,
     reasonCode: PortfolioReasonCode.OK,
-    entries: [proceedsWithBalance, feeWithBalance, pnlWithBalance],
+    entries,
     nextState: state
   };
 }

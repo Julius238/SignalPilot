@@ -18,6 +18,80 @@ type ExtraField = {
 
 type Status = "idle" | "submitting" | "success" | "error";
 
+export type OperationBodyValue = string | number | boolean | null | undefined;
+
+/**
+ * Declarative, fully serialisable description of the request body.
+ *
+ * This used to be a `buildBody` callback. A function cannot cross the React
+ * Server/Client boundary: the operations page is a Server Component, so
+ * passing one made `next build` fail while prerendering
+ * /dashboard/trading/operations ("Functions cannot be passed directly to
+ * Client Components"). That error only surfaced once the trading dashboard was
+ * actually enabled at build time — with the flag off the page short-circuits
+ * to <TradingDisabled/> and never renders these props.
+ *
+ * Everything the callbacks used to do is expressible as data, so the body is
+ * now assembled here on the client from plain values.
+ */
+export type OperationBodySpec = {
+  /** Constants resolved on the server (ids, expected entity versions). */
+  base?: Record<string, OperationBodyValue>;
+  /**
+   * Extra form fields copied into the body under the same key. A field
+   * declared as a checkbox is coerced to a strict boolean.
+   */
+  passthrough?: readonly string[];
+  /** One "<id><separator><version>" select value split into two body keys. */
+  split?: {
+    from: string;
+    separator: string;
+    idKey: string;
+    versionKey: string;
+  };
+  /**
+   * One extra field that must match a fixed allowlist before it enters the
+   * body. A non-matching value becomes `undefined`, exactly as the previous
+   * callback did — and the API re-validates it server-side regardless.
+   */
+  allowlisted?: { from: string; to: string; allowed: readonly string[] };
+};
+
+/**
+ * Assemble the operation body from the spec and the current form state. Pure
+ * and exported so it can be unit-tested without rendering.
+ */
+export function buildOperationBody(
+  spec: OperationBodySpec,
+  extra: Record<string, string | boolean>,
+  extraFields: readonly ExtraField[] = []
+): Record<string, unknown> {
+  const body: Record<string, unknown> = { ...(spec.base ?? {}) };
+
+  for (const key of spec.passthrough ?? []) {
+    const declared = extraFields.find((field) => field.name === key);
+    body[key] =
+      declared?.type === "checkbox" ? extra[key] === true : extra[key];
+  }
+
+  if (spec.split) {
+    const [id, version] = String(extra[spec.split.from] ?? "").split(
+      spec.split.separator
+    );
+    body[spec.split.idKey] = id;
+    body[spec.split.versionKey] = Number(version);
+  }
+
+  if (spec.allowlisted) {
+    const value = String(extra[spec.allowlisted.from] ?? "");
+    body[spec.allowlisted.to] = spec.allowlisted.allowed.includes(value)
+      ? value
+      : undefined;
+  }
+
+  return body;
+}
+
 export type OperationConfirmProps = {
   title: string;
   impact: string;
@@ -26,10 +100,7 @@ export type OperationConfirmProps = {
   endpoint: string;
   reasonFieldName: "reasonCode" | "reasonNote" | "reason";
   reasonLabel?: string;
-  buildBody: (fields: { reason: string; extra: Record<string, string | boolean> }) => Record<
-    string,
-    unknown
-  >;
+  body: OperationBodySpec;
   extraFields?: ExtraField[];
   triggerLabel?: string;
   disabledReason?: string | null;
@@ -52,7 +123,7 @@ export function OperationConfirm({
   endpoint,
   reasonFieldName,
   reasonLabel = "Grund",
-  buildBody,
+  body: bodySpec,
   extraFields = [],
   triggerLabel = "Aktion vorbereiten",
   disabledReason = null
@@ -84,10 +155,14 @@ export function OperationConfirm({
   }
 
   const requiredExtraMissing = extraFields.some(
-    (field) => field.required && field.type !== "checkbox" && !String(extra[field.name] ?? "").trim()
+    (field) =>
+      field.required &&
+      field.type !== "checkbox" &&
+      !String(extra[field.name] ?? "").trim()
   );
   const requiredCheckboxMissing = extraFields.some(
-    (field) => field.required && field.type === "checkbox" && extra[field.name] !== true
+    (field) =>
+      field.required && field.type === "checkbox" && extra[field.name] !== true
   );
   const canSubmit =
     reason.trim().length > 0 &&
@@ -108,7 +183,7 @@ export function OperationConfirm({
     idempotencyKeyRef.current = idempotencyKey;
 
     const body = {
-      ...buildBody({ reason, extra }),
+      ...buildOperationBody(bodySpec, extra, extraFields),
       [reasonFieldName]: reason,
       confirm: confirmPhrase,
       idempotencyKey
@@ -147,7 +222,11 @@ export function OperationConfirm({
         <h3>{title}</h3>
         <p className="operation-impact">{impact}</p>
         <div className="operation-actions">
-          <button type="button" className="operation-toggle" onClick={openPanel}>
+          <button
+            type="button"
+            className="operation-toggle"
+            onClick={openPanel}
+          >
             {triggerLabel}
           </button>
         </div>
@@ -171,12 +250,18 @@ export function OperationConfirm({
 
       {extraFields.map((field) =>
         field.type === "checkbox" ? (
-          <label key={field.name} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <label
+            key={field.name}
+            style={{ display: "flex", alignItems: "center", gap: 8 }}
+          >
             <input
               type="checkbox"
               checked={extra[field.name] === true}
               onChange={(event) =>
-                setExtra((current) => ({ ...current, [field.name]: event.target.checked }))
+                setExtra((current) => ({
+                  ...current,
+                  [field.name]: event.target.checked
+                }))
               }
               disabled={status === "submitting"}
             />
@@ -190,7 +275,10 @@ export function OperationConfirm({
                 id={`${endpoint}-${field.name}`}
                 value={String(extra[field.name] ?? "")}
                 onChange={(event) =>
-                  setExtra((current) => ({ ...current, [field.name]: event.target.value }))
+                  setExtra((current) => ({
+                    ...current,
+                    [field.name]: event.target.value
+                  }))
                 }
                 disabled={status === "submitting"}
               />
@@ -199,7 +287,10 @@ export function OperationConfirm({
                 id={`${endpoint}-${field.name}`}
                 value={String(extra[field.name] ?? "")}
                 onChange={(event) =>
-                  setExtra((current) => ({ ...current, [field.name]: event.target.value }))
+                  setExtra((current) => ({
+                    ...current,
+                    [field.name]: event.target.value
+                  }))
                 }
                 disabled={status === "submitting"}
               >
@@ -218,12 +309,17 @@ export function OperationConfirm({
                 type="text"
                 value={String(extra[field.name] ?? "")}
                 onChange={(event) =>
-                  setExtra((current) => ({ ...current, [field.name]: event.target.value }))
+                  setExtra((current) => ({
+                    ...current,
+                    [field.name]: event.target.value
+                  }))
                 }
                 disabled={status === "submitting"}
               />
             )}
-            {field.helpText ? <p className="operation-meta">{field.helpText}</p> : null}
+            {field.helpText ? (
+              <p className="operation-meta">{field.helpText}</p>
+            ) : null}
           </div>
         )
       )}
@@ -241,15 +337,19 @@ export function OperationConfirm({
       />
 
       <p className="operation-meta">
-        Diese Aktion verwendet einen frisch ausgestellten CSRF-Token und einen pro Versuch stabilen
-        Idempotency-Key — ein erneuter Klick nach einem Fehler führt die Aktion nicht doppelt aus.
+        Diese Aktion verwendet einen frisch ausgestellten CSRF-Token und einen
+        pro Versuch stabilen Idempotency-Key — ein erneuter Klick nach einem
+        Fehler führt die Aktion nicht doppelt aus.
       </p>
 
       {message ? (
         <p
           className="operation-meta"
           role={status === "error" ? "alert" : "status"}
-          style={{ color: status === "error" ? "var(--bad)" : "var(--good)", fontWeight: 600 }}
+          style={{
+            color: status === "error" ? "var(--bad)" : "var(--good)",
+            fontWeight: 600
+          }}
         >
           {message}
         </p>
@@ -259,7 +359,12 @@ export function OperationConfirm({
         <button type="submit" onClick={submit} disabled={!canSubmit}>
           {status === "submitting" ? "Wird ausgeführt…" : "Jetzt ausführen"}
         </button>
-        <button type="button" className="operation-toggle" onClick={closePanel} disabled={status === "submitting"}>
+        <button
+          type="button"
+          className="operation-toggle"
+          onClick={closePanel}
+          disabled={status === "submitting"}
+        >
           Abbrechen
         </button>
       </div>

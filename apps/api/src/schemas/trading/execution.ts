@@ -9,6 +9,7 @@ export interface ShadowOrderRow {
   readonly tradeCandidateId: string | null;
   readonly shadowPositionId: string | null;
   readonly purpose: string;
+  readonly direction: string;
   readonly side: string;
   readonly orderType: string;
   readonly timeInForce: string;
@@ -24,9 +25,31 @@ export interface ShadowOrderRow {
   readonly expiresAt: Date | null;
   readonly createdAt: Date;
   readonly updatedAt: Date;
+  readonly tradeCandidate?: ExecutionStrategySource | null;
+  readonly exitForPosition?: ExecutionStrategySource | null;
+}
+
+interface ExecutionStrategySource {
+  readonly strategyVersionId: string;
+  readonly strategyVersion?: {
+    readonly version: number;
+    readonly strategy?: { readonly key: string; readonly name: string } | null;
+  } | null;
+}
+
+function executionStrategy(source: ExecutionStrategySource | null | undefined) {
+  return {
+    strategyVersionId: source?.strategyVersionId ?? null,
+    strategyVersion: source?.strategyVersion?.version ?? null,
+    strategyKey: source?.strategyVersion?.strategy?.key ?? null,
+    strategyName: source?.strategyVersion?.strategy?.name ?? null
+  };
 }
 
 export function toOrder(order: ShadowOrderRow) {
+  const strategy = executionStrategy(
+    order.tradeCandidate ?? order.exitForPosition
+  );
   return {
     id: order.id,
     orderKey: order.orderKey,
@@ -36,7 +59,11 @@ export function toOrder(order: ShadowOrderRow) {
     tradeCandidateId: order.tradeCandidateId,
     shadowPositionId: order.shadowPositionId,
     purpose: order.purpose,
+    direction: order.direction,
     side: order.side,
+    ...strategy,
+    syntheticShadowShort: order.direction === "SHORT",
+    exchangePosition: false,
     orderType: order.orderType,
     timeInForce: order.timeInForce,
     status: order.status,
@@ -72,9 +99,14 @@ export interface ShadowFillRow {
   readonly feeAsset: string;
   readonly triggerType: string;
   readonly occurredAt: Date;
+  readonly shadowOrder?: ShadowOrderRow | null;
 }
 
 export function toFill(fill: ShadowFillRow) {
+  const order = fill.shadowOrder;
+  const strategy = executionStrategy(
+    order?.tradeCandidate ?? order?.exitForPosition
+  );
   return {
     id: fill.id,
     fillKey: fill.fillKey,
@@ -83,6 +115,10 @@ export function toFill(fill: ShadowFillRow) {
     assetId: fill.assetId,
     symbol: fill.asset?.symbol ?? null,
     side: fill.side,
+    direction: order?.direction ?? null,
+    ...strategy,
+    syntheticShadowShort: order?.direction === "SHORT",
+    exchangePosition: false,
     quantity: decimalToString(fill.quantity),
     referencePrice: decimalToString(fill.referencePrice),
     spreadAmount: decimalToString(fill.spreadAmount),
@@ -113,6 +149,13 @@ export interface ShadowPositionRow {
   readonly assetId: string;
   readonly asset?: { readonly symbol: string } | null;
   readonly status: string;
+  readonly direction: string;
+  readonly strategyAssignmentId: string;
+  readonly strategyVersionId: string;
+  readonly strategyVersion?: {
+    readonly version: number;
+    readonly strategy?: { readonly key: string; readonly name: string } | null;
+  } | null;
   readonly initialQuantity: unknown;
   readonly openQuantity: unknown;
   readonly closedQuantity: unknown;
@@ -122,6 +165,7 @@ export interface ShadowPositionRow {
   readonly grossExitNotional: unknown;
   readonly realizedPnl: unknown;
   readonly feesPaid: unknown;
+  readonly reservedCollateral: unknown;
   readonly stopPrice: unknown;
   readonly takeProfitPrice: unknown;
   readonly maxHoldUntil: Date;
@@ -130,6 +174,30 @@ export interface ShadowPositionRow {
   readonly lastValuationAt: Date | null;
   readonly version: number;
   readonly events?: readonly ShadowPositionEventRow[];
+  readonly exitPlans?: readonly {
+    readonly id: string;
+    readonly version: number;
+    readonly status: string;
+    readonly triggeredBy: string | null;
+    readonly triggeredAt: Date | null;
+  }[];
+  readonly exitOrders?: readonly {
+    readonly fills?: readonly {
+      readonly triggerType: string;
+      readonly occurredAt: Date;
+    }[];
+  }[];
+}
+
+function positionExitReason(position: ShadowPositionRow): string | null {
+  for (const order of position.exitOrders ?? []) {
+    const trigger = order.fills?.[0]?.triggerType;
+    if (trigger !== undefined) return trigger;
+  }
+  return (
+    position.exitPlans?.find((plan) => plan.triggeredBy !== null)
+      ?.triggeredBy ?? null
+  );
 }
 
 export function toPositionListItem(position: ShadowPositionRow) {
@@ -139,6 +207,14 @@ export function toPositionListItem(position: ShadowPositionRow) {
     portfolioId: position.portfolioId,
     assetId: position.assetId,
     symbol: position.asset?.symbol ?? null,
+    direction: position.direction,
+    strategyAssignmentId: position.strategyAssignmentId,
+    strategyVersionId: position.strategyVersionId,
+    strategyVersion: position.strategyVersion?.version ?? null,
+    strategyKey: position.strategyVersion?.strategy?.key ?? null,
+    strategyName: position.strategyVersion?.strategy?.name ?? null,
+    syntheticShadowShort: position.direction === "SHORT",
+    exchangePosition: false,
     status: position.status,
     initialQuantity: decimalToString(position.initialQuantity),
     openQuantity: decimalToString(position.openQuantity),
@@ -147,6 +223,8 @@ export function toPositionListItem(position: ShadowPositionRow) {
     averageExitPrice: decimalToString(position.averageExitPrice),
     realizedPnl: decimalToString(position.realizedPnl),
     feesPaid: decimalToString(position.feesPaid),
+    reservedCollateral: decimalToString(position.reservedCollateral),
+    exitReason: positionExitReason(position),
     stopPrice: decimalToString(position.stopPrice),
     takeProfitPrice: decimalToString(position.takeProfitPrice),
     maxHoldUntil: toIso(position.maxHoldUntil),
@@ -162,6 +240,13 @@ export function toPositionDetail(position: ShadowPositionRow) {
     grossEntryNotional: decimalToString(position.grossEntryNotional),
     grossExitNotional: decimalToString(position.grossExitNotional),
     lastValuationAt: toIsoOrNull(position.lastValuationAt),
+    exitPlans: (position.exitPlans ?? []).map((plan) => ({
+      id: plan.id,
+      version: plan.version,
+      status: plan.status,
+      triggeredBy: plan.triggeredBy,
+      triggeredAt: toIsoOrNull(plan.triggeredAt)
+    })),
     events: (position.events ?? []).map((event) => ({
       id: event.id,
       sequence: event.sequence,

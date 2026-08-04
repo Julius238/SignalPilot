@@ -8,14 +8,31 @@ import { randomUUID } from "node:crypto";
 
 type Row = Record<string, unknown>;
 
-const FILTER_OPERATOR_KEYS = new Set(["in", "notIn", "not", "lte", "gte", "lt", "gt", "is"]);
+const FILTER_OPERATOR_KEYS = new Set([
+  "in",
+  "notIn",
+  "not",
+  "lte",
+  "gte",
+  "lt",
+  "gt",
+  "is"
+]);
 
-function flattenCompoundUniqueWhere(where: Record<string, unknown>): Record<string, unknown> {
+function flattenCompoundUniqueWhere(
+  where: Record<string, unknown>
+): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(where)) {
-    if (value !== null && typeof value === "object" && !(value instanceof Date)) {
+    if (
+      value !== null &&
+      typeof value === "object" &&
+      !(value instanceof Date)
+    ) {
       const innerKeys = Object.keys(value as Record<string, unknown>);
-      const looksLikeOperator = innerKeys.some((innerKey) => FILTER_OPERATOR_KEYS.has(innerKey));
+      const looksLikeOperator = innerKeys.some((innerKey) =>
+        FILTER_OPERATOR_KEYS.has(innerKey)
+      );
       if (!looksLikeOperator) {
         Object.assign(result, value);
         continue;
@@ -26,20 +43,85 @@ function flattenCompoundUniqueWhere(where: Record<string, unknown>): Record<stri
   return result;
 }
 
-function matchesWhere(row: Row, where: Record<string, unknown> | undefined): boolean {
+const RELATION_FILTERS: Record<
+  string,
+  { readonly table: string; readonly foreignKey: string }
+> = {
+  "shadowFill.shadowOrder": {
+    table: "shadowOrder",
+    foreignKey: "shadowOrderId"
+  },
+  "shadowOrder.tradeCandidate": {
+    table: "tradeCandidate",
+    foreignKey: "tradeCandidateId"
+  },
+  "shadowOrder.exitForPosition": {
+    table: "shadowPosition",
+    foreignKey: "shadowPositionId"
+  }
+};
+
+let relationFilterTables: (() => Map<string, Table>) | null = null;
+
+function matchesWhere(
+  row: Row,
+  where: Record<string, unknown> | undefined,
+  tableName?: string
+): boolean {
   if (where === undefined) return true;
   for (const [key, condition] of Object.entries(where)) {
     if (condition === undefined) continue;
     if (key === "OR" && Array.isArray(condition)) {
       const branches = condition as Record<string, unknown>[];
-      if (!branches.some((branch) => matchesWhere(row, branch))) return false;
+      if (!branches.some((branch) => matchesWhere(row, branch, tableName)))
+        return false;
+      continue;
+    }
+    const relation =
+      tableName === undefined
+        ? undefined
+        : RELATION_FILTERS[`${tableName}.${key}`];
+    if (relation !== undefined && relationFilterTables !== null) {
+      const target = relationFilterTables().get(relation.table);
+      const parent = target?.rows.find(
+        (candidate) => candidate.id === row[relation.foreignKey]
+      );
+      if (parent === undefined) return false;
+      const relationRecord = condition as Record<string, unknown>;
+      const nested =
+        relationRecord.is !== null && typeof relationRecord.is === "object"
+          ? (relationRecord.is as Record<string, unknown>)
+          : relationRecord;
+      if (!matchesWhere(parent, nested, relation.table)) return false;
       continue;
     }
     const value = row[key];
-    if (condition !== null && typeof condition === "object" && !(condition instanceof Date)) {
+    if (
+      condition !== null &&
+      typeof condition === "object" &&
+      !(condition instanceof Date)
+    ) {
       const cond = condition as Record<string, unknown>;
+      if (Array.isArray(cond.path) && "equals" in cond) {
+        let selected: unknown = value;
+        for (const segment of cond.path) {
+          if (
+            typeof segment !== "string" ||
+            selected === null ||
+            typeof selected !== "object" ||
+            Array.isArray(selected)
+          ) {
+            selected = undefined;
+            break;
+          }
+          selected = (selected as Record<string, unknown>)[segment];
+        }
+        if (selected !== cond.equals) return false;
+        continue;
+      }
       if ("in" in cond && !(cond.in as unknown[]).includes(value)) return false;
-      if ("notIn" in cond && (cond.notIn as unknown[]).includes(value)) return false;
+      if ("notIn" in cond && (cond.notIn as unknown[]).includes(value))
+        return false;
       if ("not" in cond) {
         const notVal = cond.not;
         if (notVal === null ? value === null : value === notVal) return false;
@@ -75,24 +157,115 @@ function compare(a: unknown, b: unknown): number {
  */
 const RELATIONS: Record<
   string,
-  { readonly table: string; readonly foreignKey: string; readonly localKey?: string; readonly many?: boolean }
+  {
+    readonly table: string;
+    readonly foreignKey: string;
+    readonly localKey?: string;
+    readonly many?: boolean;
+  }
 > = {
   "tradeCandidate.asset": { table: "asset", foreignKey: "id" },
+  "tradeCandidate.strategyAssignment": {
+    table: "strategyAssignment",
+    foreignKey: "id"
+  },
+  "tradeCandidate.strategyVersion": {
+    table: "strategyVersion",
+    foreignKey: "id"
+  },
+  "strategyVersion.strategy": { table: "strategy", foreignKey: "id" },
+  "strategyAssignment.asset": { table: "asset", foreignKey: "id" },
+  "strategyAssignment.strategy": { table: "strategy", foreignKey: "id" },
+  "strategyAssignment.strategyVersion": {
+    table: "strategyVersion",
+    foreignKey: "id"
+  },
   "shadowOrder.asset": { table: "asset", foreignKey: "id" },
+  "shadowOrder.tradeCandidate": { table: "tradeCandidate", foreignKey: "id" },
+  "shadowOrder.exitForPosition": {
+    table: "shadowPosition",
+    foreignKey: "id",
+    localKey: "shadowPositionId"
+  },
+  "shadowOrder.fills": {
+    table: "shadowFill",
+    foreignKey: "shadowOrderId",
+    many: true
+  },
   "shadowFill.asset": { table: "asset", foreignKey: "id" },
   "shadowPosition.asset": { table: "asset", foreignKey: "id" },
-  "riskAssessment.ruleResults": { table: "riskRuleResult", foreignKey: "riskAssessmentId", many: true },
-  "riskAssessment.decision": { table: "tradeDecision", foreignKey: "riskAssessmentId" },
-  "shadowPosition.events": { table: "shadowPositionEvent", foreignKey: "shadowPositionId", many: true },
+  "riskAssessment.ruleResults": {
+    table: "riskRuleResult",
+    foreignKey: "riskAssessmentId",
+    many: true
+  },
+  "riskAssessment.decision": {
+    table: "tradeDecision",
+    foreignKey: "riskAssessmentId"
+  },
+  "shadowPosition.events": {
+    table: "shadowPositionEvent",
+    foreignKey: "shadowPositionId",
+    many: true
+  },
   // P8 audit drilldown
-  "tradeCandidate.decision": { table: "tradeDecision", foreignKey: "tradeCandidateId" },
-  "tradeCandidate.riskAssessments": { table: "riskAssessment", foreignKey: "tradeCandidateId", many: true },
-  "tradeCandidate.shadowOrders": { table: "shadowOrder", foreignKey: "tradeCandidateId", many: true },
-  "shadowPosition.fills": { table: "shadowFill", foreignKey: "shadowPositionId", many: true },
-  "shadowPosition.exitPlans": { table: "exitPlan", foreignKey: "shadowPositionId", many: true },
-  "shadowPosition.entryOrder": { table: "shadowOrder", foreignKey: "id", localKey: "entryOrderId" },
-  "shadowFill.shadowOrder": { table: "shadowOrder", foreignKey: "id", localKey: "shadowOrderId" },
-  "tradingAlertOutbox.attempts": { table: "tradingAlertOutboxAttempt", foreignKey: "outboxId", many: true }
+  "tradeCandidate.decision": {
+    table: "tradeDecision",
+    foreignKey: "tradeCandidateId"
+  },
+  "tradeCandidate.riskAssessments": {
+    table: "riskAssessment",
+    foreignKey: "tradeCandidateId",
+    many: true
+  },
+  "tradeCandidate.shadowOrders": {
+    table: "shadowOrder",
+    foreignKey: "tradeCandidateId",
+    many: true
+  },
+  "shadowPosition.fills": {
+    table: "shadowFill",
+    foreignKey: "shadowPositionId",
+    many: true
+  },
+  "shadowPosition.exitPlans": {
+    table: "exitPlan",
+    foreignKey: "shadowPositionId",
+    many: true
+  },
+  "shadowPosition.exitOrders": {
+    table: "shadowOrder",
+    foreignKey: "shadowPositionId",
+    many: true
+  },
+  "shadowPosition.ledgerEntries": {
+    table: "portfolioLedgerEntry",
+    foreignKey: "shadowPositionId",
+    many: true
+  },
+  "shadowPosition.entryOrder": {
+    table: "shadowOrder",
+    foreignKey: "id",
+    localKey: "entryOrderId"
+  },
+  "shadowPosition.strategyAssignment": {
+    table: "strategyAssignment",
+    foreignKey: "id"
+  },
+  "shadowPosition.strategyVersion": {
+    table: "strategyVersion",
+    foreignKey: "id"
+  },
+  "shadowFill.shadowOrder": {
+    table: "shadowOrder",
+    foreignKey: "id",
+    localKey: "shadowOrderId"
+  },
+  "tradingAlertOutbox.attempts": {
+    table: "tradingAlertOutboxAttempt",
+    foreignKey: "outboxId",
+    many: true
+  }
 };
 
 /** A nested `include`/`select` spec inside a relation entry, if there is one. */
@@ -100,7 +273,9 @@ function nestedSpec(value: unknown): Record<string, unknown> | undefined {
   if (value === null || typeof value !== "object") return undefined;
   const record = value as Record<string, unknown>;
   const nested = record.include ?? record.select;
-  return nested !== null && typeof nested === "object" ? (nested as Record<string, unknown>) : undefined;
+  return nested !== null && typeof nested === "object"
+    ? (nested as Record<string, unknown>)
+    : undefined;
 }
 
 /** Treat a `select` map as a relation spec; a non-object select is ignored. */
@@ -112,14 +287,20 @@ function asSpec(select: unknown): Record<string, unknown> | undefined {
 
 class Table {
   readonly rows: Row[] = [];
-  constructor(readonly name: string, readonly allTables: () => Map<string, Table>) {}
+  constructor(
+    readonly name: string,
+    readonly allTables: () => Map<string, Table>
+  ) {}
 
   /**
    * Prisma resolves relations named in `select` exactly like ones named in
    * `include`, so both are funnelled through here. Scalar keys in a `select`
    * are ignored: the fake always returns the whole row, which is a superset.
    */
-  private applyIncludes(row: Row | null, include: Record<string, unknown> | undefined): Row | null {
+  private applyIncludes(
+    row: Row | null,
+    include: Record<string, unknown> | undefined
+  ): Row | null {
     if (row === null || include === undefined) return row;
     const result = { ...row };
     for (const [key, spec] of Object.entries(include)) {
@@ -131,19 +312,24 @@ class Table {
         continue;
       }
       const sub = nestedSpec(spec);
-      const orderBy = (spec as { orderBy?: Record<string, "asc" | "desc"> })?.orderBy;
+      const orderBy = (spec as { orderBy?: Record<string, "asc" | "desc"> })
+        ?.orderBy;
       const take = (spec as { take?: number })?.take;
 
       if (relation.foreignKey === "id") {
         const fkFieldOnRow = relation.localKey ?? `${relation.table}Id`;
         const fkValue = row[fkFieldOnRow];
         const found =
-          fkValue === undefined || fkValue === null ? null : target.rows.find((r) => r.id === fkValue) ?? null;
+          fkValue === undefined || fkValue === null
+            ? null
+            : (target.rows.find((r) => r.id === fkValue) ?? null);
         result[key] = target.applyIncludes(found, sub);
         continue;
       }
 
-      const matches = target.rows.filter((r) => r[relation.foreignKey] === row.id);
+      const matches = target.rows.filter(
+        (r) => r[relation.foreignKey] === row.id
+      );
       if (relation.many === true) {
         const sorted = sortRows(matches, orderBy);
         const limited = take === undefined ? sorted : sorted.slice(0, take);
@@ -161,57 +347,94 @@ class Table {
     select?: unknown;
   }): Row | null {
     const where = flattenCompoundUniqueWhere(args.where);
-    const row = this.rows.find((candidate) => matchesWhere(candidate, where)) ?? null;
+    const row =
+      this.rows.find((candidate) =>
+        matchesWhere(candidate, where, this.name)
+      ) ?? null;
     return this.applyIncludes(row, args.include ?? asSpec(args.select));
   }
 
   findFirst(args: {
     where?: Record<string, unknown>;
-    orderBy?: Record<string, "asc" | "desc"> | readonly Record<string, "asc" | "desc">[];
+    orderBy?:
+      | Record<string, "asc" | "desc">
+      | readonly Record<string, "asc" | "desc">[];
     include?: Record<string, unknown>;
     select?: unknown;
   }): Row | null {
-    const matches = this.rows.filter((row) => matchesWhere(row, args.where));
+    const matches = this.rows.filter((row) =>
+      matchesWhere(row, args.where, this.name)
+    );
     const sorted = sortRows(matches, args.orderBy);
-    return this.applyIncludes(sorted[0] ?? null, args.include ?? asSpec(args.select));
+    return this.applyIncludes(
+      sorted[0] ?? null,
+      args.include ?? asSpec(args.select)
+    );
   }
 
   findMany(
     args: {
       where?: Record<string, unknown>;
-      orderBy?: Record<string, "asc" | "desc"> | readonly Record<string, "asc" | "desc">[];
+      orderBy?:
+        | Record<string, "asc" | "desc">
+        | readonly Record<string, "asc" | "desc">[];
       take?: number;
       skip?: number;
       include?: Record<string, unknown>;
       select?: unknown;
     } = {}
   ): Row[] {
-    const matches = this.rows.filter((row) => matchesWhere(row, args.where));
+    const matches = this.rows.filter((row) =>
+      matchesWhere(row, args.where, this.name)
+    );
     const sorted = sortRows(matches, args.orderBy);
     const skipped = args.skip === undefined ? sorted : sorted.slice(args.skip);
-    const limited = args.take === undefined ? skipped : skipped.slice(0, args.take);
-    return limited.map((row) => this.applyIncludes(row, args.include ?? asSpec(args.select))!);
+    const limited =
+      args.take === undefined ? skipped : skipped.slice(0, args.take);
+    return limited.map(
+      (row) => this.applyIncludes(row, args.include ?? asSpec(args.select))!
+    );
   }
 
   count(args: { where?: Record<string, unknown> } = {}): number {
-    return this.rows.filter((row) => matchesWhere(row, args.where)).length;
+    return this.rows.filter((row) => matchesWhere(row, args.where, this.name))
+      .length;
   }
 
   create(args: { data: Row }): Row {
-    const row: Row = { id: randomUUID(), createdAt: new Date(), updatedAt: new Date(), version: 0, ...args.data };
+    const row: Row = {
+      id: randomUUID(),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      version: 0,
+      ...args.data
+    };
     this.rows.push(row);
     return row;
   }
 
-  update(args: { where: Record<string, unknown>; data: Record<string, unknown> }): Row {
-    const row = this.rows.find((candidate) => matchesWhere(candidate, args.where));
-    if (row === undefined) throw new Error(`${this.name}.update: no row matches ${JSON.stringify(args.where)}`);
+  update(args: {
+    where: Record<string, unknown>;
+    data: Record<string, unknown>;
+  }): Row {
+    const row = this.rows.find((candidate) =>
+      matchesWhere(candidate, args.where, this.name)
+    );
+    if (row === undefined)
+      throw new Error(
+        `${this.name}.update: no row matches ${JSON.stringify(args.where)}`
+      );
     applyData(row, args.data);
     return row;
   }
 
-  updateMany(args: { where: Record<string, unknown>; data: Record<string, unknown> }): { count: number } {
-    const matches = this.rows.filter((row) => matchesWhere(row, args.where));
+  updateMany(args: {
+    where: Record<string, unknown>;
+    data: Record<string, unknown>;
+  }): { count: number } {
+    const matches = this.rows.filter((row) =>
+      matchesWhere(row, args.where, this.name)
+    );
     for (const row of matches) applyData(row, args.data);
     return { count: matches.length };
   }
@@ -219,8 +442,14 @@ class Table {
 
 function applyData(row: Row, data: Record<string, unknown>): void {
   for (const [key, value] of Object.entries(data)) {
-    if (value !== null && typeof value === "object" && "increment" in (value as Record<string, unknown>)) {
-      row[key] = Number(row[key] ?? 0) + Number((value as { increment: number }).increment);
+    if (
+      value !== null &&
+      typeof value === "object" &&
+      "increment" in (value as Record<string, unknown>)
+    ) {
+      row[key] =
+        Number(row[key] ?? 0) +
+        Number((value as { increment: number }).increment);
     } else {
       row[key] = value;
     }
@@ -230,7 +459,10 @@ function applyData(row: Row, data: Record<string, unknown>): void {
 
 function sortRows(
   rows: Row[],
-  orderBy: Record<string, "asc" | "desc"> | readonly Record<string, "asc" | "desc">[] | undefined
+  orderBy:
+    | Record<string, "asc" | "desc">
+    | readonly Record<string, "asc" | "desc">[]
+    | undefined
 ): Row[] {
   if (orderBy === undefined) return rows;
   // Prisma accepts an array of single-key order clauses; the fake only honours
@@ -269,13 +501,17 @@ const MODEL_NAMES = [
   "tradingJobCursor",
   // Work package 8
   "strategyVersion",
+  "strategy",
+  "strategyAssignment",
   "tradingAlertOutbox",
   "tradingAlertOutboxAttempt"
 ] as const;
 
 export function createFakeTradingDatabase() {
   const tables = new Map<string, Table>();
-  for (const name of MODEL_NAMES) tables.set(name, new Table(name, () => tables));
+  for (const name of MODEL_NAMES)
+    tables.set(name, new Table(name, () => tables));
+  relationFilterTables = () => tables;
 
   const db: Record<string, unknown> = {};
   for (const name of MODEL_NAMES) {

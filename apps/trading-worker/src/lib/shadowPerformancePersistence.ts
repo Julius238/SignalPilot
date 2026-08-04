@@ -35,7 +35,11 @@ import {
   type PortfolioEquityPointInput,
   type ShadowPerformanceReport
 } from "@signalpilot/performance-intelligence/shadow";
-import { DecimalValue, RoundingMode, buildStrategyPerformanceSnapshotKey } from "@signalpilot/trading-domain";
+import {
+  DecimalValue,
+  RoundingMode,
+  buildStrategyPerformanceSnapshotKey
+} from "@signalpilot/trading-domain";
 
 export const SHADOW_PERFORMANCE_JOB_KEY = "trading:performance-refresh";
 
@@ -50,19 +54,28 @@ const CLOSED_POSITION_STATUSES = [
 const MAX_TRADES_PER_WINDOW = 5_000;
 const MAX_EQUITY_POINTS = 1_000;
 
-const decimalString = (value: unknown): string => (value === null || value === undefined ? "0" : String(value));
+const decimalString = (value: unknown): string =>
+  value === null || value === undefined ? "0" : String(value);
 
 function startOfUtcDay(value: Date): Date {
-  return new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()));
+  return new Date(
+    Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate())
+  );
 }
 
 /** UTC bounds of one reporting window, relative to `asOf`. */
-export function resolveWindowBounds(window: StrategyPerformanceWindow, asOf: Date): { from: Date; to: Date } {
+export function resolveWindowBounds(
+  window: StrategyPerformanceWindow,
+  asOf: Date
+): { from: Date; to: Date } {
   switch (window) {
     case StrategyPerformanceWindow.DAILY:
       return { from: startOfUtcDay(asOf), to: asOf };
     case StrategyPerformanceWindow.ROLLING_30D:
-      return { from: new Date(asOf.getTime() - 30 * 24 * 60 * 60_000), to: asOf };
+      return {
+        from: new Date(asOf.getTime() - 30 * 24 * 60 * 60_000),
+        to: asOf
+      };
     case StrategyPerformanceWindow.ALL_TIME:
     default:
       return { from: new Date(0), to: asOf };
@@ -75,10 +88,18 @@ export function resolveWindowBounds(window: StrategyPerformanceWindow, asOf: Dat
  * regime table on purpose: performance must be attributed to the regime that
  * was true when the trade was decided, not to today's.
  */
-function extractMarketRegime(inputSnapshot: Prisma.JsonValue | null | undefined): string | null {
-  if (inputSnapshot === null || typeof inputSnapshot !== "object" || Array.isArray(inputSnapshot)) return null;
+function extractMarketRegime(
+  inputSnapshot: Prisma.JsonValue | null | undefined
+): string | null {
+  if (
+    inputSnapshot === null ||
+    typeof inputSnapshot !== "object" ||
+    Array.isArray(inputSnapshot)
+  )
+    return null;
   const regime = (inputSnapshot as Record<string, unknown>).marketRegime;
-  if (regime === null || typeof regime !== "object" || Array.isArray(regime)) return null;
+  if (regime === null || typeof regime !== "object" || Array.isArray(regime))
+    return null;
   const overall = (regime as Record<string, unknown>).overallRegime;
   return typeof overall === "string" && overall.length > 0 ? overall : null;
 }
@@ -125,7 +146,12 @@ export async function assembleShadowPerformanceInput(
       },
       fills: {
         orderBy: { occurredAt: "asc" },
-        select: { quantity: true, slippageAmount: true, triggerType: true, occurredAt: true }
+        select: {
+          quantity: true,
+          slippageAmount: true,
+          triggerType: true,
+          occurredAt: true
+        }
       }
     }
   });
@@ -134,19 +160,27 @@ export async function assembleShadowPerformanceInput(
   // of one query per trade.
   const candidateIds = positions
     .map((position) => position.entryOrder?.tradeCandidateId)
-    .filter((value): value is string => typeof value === "string" && value.length > 0);
+    .filter(
+      (value): value is string => typeof value === "string" && value.length > 0
+    );
   const assessments =
     candidateIds.length === 0
       ? []
       : await database.riskAssessment.findMany({
-          where: { tradeCandidateId: { in: candidateIds }, status: RiskAssessmentStatus.PASS },
+          where: {
+            tradeCandidateId: { in: candidateIds },
+            status: RiskAssessmentStatus.PASS
+          },
           orderBy: { assessedAt: "desc" },
           select: { tradeCandidateId: true, riskAmount: true }
         });
   const riskAmountByCandidate = new Map<string, string>();
   for (const assessment of assessments) {
     if (!riskAmountByCandidate.has(assessment.tradeCandidateId)) {
-      riskAmountByCandidate.set(assessment.tradeCandidateId, decimalString(assessment.riskAmount));
+      riskAmountByCandidate.set(
+        assessment.tradeCandidateId,
+        decimalString(assessment.riskAmount)
+      );
     }
   }
 
@@ -167,13 +201,23 @@ export async function assembleShadowPerformanceInput(
       }
     }, DecimalValue.ZERO);
 
-    const exitFills = position.fills.filter((fill) => fill.triggerType !== "ENTRY");
-    const exitReason = exitFills.length === 0 ? null : exitFills[exitFills.length - 1].triggerType;
+    const exitFills = position.fills.filter(
+      (fill) => fill.triggerType !== "ENTRY"
+    );
+    const exitReason =
+      exitFills.length === 0
+        ? null
+        : exitFills[exitFills.length - 1].triggerType;
 
     const candidateId = position.entryOrder?.tradeCandidateId ?? null;
     const extremes =
       options.derivePriceExtremes === true
-        ? await derivePriceExtremes(database, position.assetId, position.openedAt, position.closedAt)
+        ? await derivePriceExtremes(
+            database,
+            position.assetId,
+            position.openedAt,
+            position.closedAt
+          )
         : { maxAdversePrice: null, maxFavorablePrice: null };
 
     trades.push({
@@ -182,7 +226,10 @@ export async function assembleShadowPerformanceInput(
       strategyVersionId: position.strategyVersionId,
       assetId: position.assetId,
       symbol: position.asset?.symbol ?? null,
-      marketRegime: extractMarketRegime(position.entryOrder?.tradeCandidate?.inputSnapshotJson),
+      direction: position.direction,
+      marketRegime: extractMarketRegime(
+        position.entryOrder?.tradeCandidate?.inputSnapshotJson
+      ),
       exitReason,
       openedAt: position.openedAt?.toISOString() ?? null,
       closedAt: position.closedAt?.toISOString() ?? null,
@@ -191,7 +238,10 @@ export async function assembleShadowPerformanceInput(
       netPnl: decimalString(position.realizedPnl),
       fees: decimalString(position.feesPaid),
       simulatedExecutionCost: executionCost.toString(),
-      plannedRiskAmount: candidateId === null ? null : (riskAmountByCandidate.get(candidateId) ?? null),
+      plannedRiskAmount:
+        candidateId === null
+          ? null
+          : (riskAmountByCandidate.get(candidateId) ?? null),
       maxAdversePrice: extremes.maxAdversePrice,
       maxFavorablePrice: extremes.maxFavorablePrice
     });
@@ -219,9 +269,17 @@ export async function assembleShadowPerformanceInput(
     left.tradingDateUtc.localeCompare(right.tradingDateUtc)
   );
 
-  const [assessedCandidates, riskRejectedCandidates, invalidCandidates, expiredCandidates] = await Promise.all([
+  const [
+    assessedCandidates,
+    riskRejectedCandidates,
+    invalidCandidates,
+    expiredCandidates
+  ] = await Promise.all([
     database.riskAssessment.count({
-      where: { portfolioId: options.portfolioId, assessedAt: { gte: from, lte: to } }
+      where: {
+        portfolioId: options.portfolioId,
+        assessedAt: { gte: from, lte: to }
+      }
     }),
     database.riskAssessment.count({
       where: {
@@ -252,18 +310,30 @@ export async function assembleShadowPerformanceInput(
     trades.length === 0
       ? null
       : await database.shadowPositionEvent.findFirst({
-          where: { shadowPositionId: { in: trades.map((entry) => entry.positionId) } },
+          where: {
+            shadowPositionId: { in: trades.map((entry) => entry.positionId) }
+          },
           orderBy: [{ occurredAt: "desc" }, { sequence: "desc" }],
           select: { id: true, occurredAt: true }
         });
 
   return {
     portfolioId: options.portfolioId,
-    window: { from: from.toISOString(), to: to.toISOString(), asOf: options.asOf.toISOString() },
-    equityBase: portfolio === null ? null : decimalString(portfolio.startingCash),
+    window: {
+      from: from.toISOString(),
+      to: to.toISOString(),
+      asOf: options.asOf.toISOString()
+    },
+    equityBase:
+      portfolio === null ? null : decimalString(portfolio.startingCash),
     trades,
     equityCurve,
-    riskFunnel: { assessedCandidates, riskRejectedCandidates, invalidCandidates, expiredCandidates },
+    riskFunnel: {
+      assessedCandidates,
+      riskRejectedCandidates,
+      invalidCandidates,
+      expiredCandidates
+    },
     sourceThroughPositionEventId: lastEvent?.id ?? null,
     dataThroughAt: lastEvent?.occurredAt.toISOString() ?? null
   };
@@ -279,21 +349,33 @@ async function derivePriceExtremes(
   assetId: string,
   openedAt: Date | null,
   closedAt: Date | null
-): Promise<{ maxAdversePrice: string | null; maxFavorablePrice: string | null }> {
+): Promise<{
+  maxAdversePrice: string | null;
+  maxFavorablePrice: string | null;
+}> {
   if (openedAt === null || closedAt === null || closedAt < openedAt) {
     return { maxAdversePrice: null, maxFavorablePrice: null };
   }
   const aggregate = await database.candle.aggregate({
-    where: { assetId, timeframe: "1h", closeTime: { gte: openedAt, lte: closedAt } },
+    where: {
+      assetId,
+      timeframe: "1h",
+      closeTime: { gte: openedAt, lte: closedAt }
+    },
     _min: { low: true },
     _max: { high: true }
   });
   const low = aggregate._min.low;
   const high = aggregate._max.high;
-  if (low === null || high === null) return { maxAdversePrice: null, maxFavorablePrice: null };
+  if (low === null || high === null)
+    return { maxAdversePrice: null, maxFavorablePrice: null };
   return {
-    maxAdversePrice: DecimalValue.fromString(Number(low).toFixed(12)).toString(),
-    maxFavorablePrice: DecimalValue.fromString(Number(high).toFixed(12)).toString()
+    maxAdversePrice: DecimalValue.fromString(
+      Number(low).toFixed(12)
+    ).toString(),
+    maxFavorablePrice: DecimalValue.fromString(
+      Number(high).toFixed(12)
+    ).toString()
   };
 }
 
@@ -307,7 +389,9 @@ const metricColumn = (metric: NullableMetric): Prisma.Decimal | null =>
 
 /** Same, but for a column that is NOT NULL and legitimately zero when unknown. */
 const metricColumnOrZero = (metric: NullableMetric): Prisma.Decimal =>
-  metric.value === null ? new Prisma.Decimal(0) : new Prisma.Decimal(metric.value);
+  metric.value === null
+    ? new Prisma.Decimal(0)
+    : new Prisma.Decimal(metric.value);
 
 export interface PersistShadowPerformanceOptions {
   readonly window: StrategyPerformanceWindow;
@@ -348,7 +432,9 @@ export async function persistShadowPerformance(
       inputHash: report.inputHash
     });
 
-    const existing = await database.strategyPerformance.findUnique({ where: { snapshotKey } });
+    const existing = await database.strategyPerformance.findUnique({
+      where: { snapshotKey }
+    });
     if (existing !== null) {
       unchanged += 1;
       continue;
@@ -360,7 +446,9 @@ export async function persistShadowPerformance(
         data: {
           snapshotKey,
           strategyVersionId:
-            segment.segmentType === ShadowPerformanceSegment.STRATEGY_VERSION ? segment.strategyVersionId : null,
+            segment.segmentType === ShadowPerformanceSegment.STRATEGY_VERSION
+              ? segment.strategyVersionId
+              : null,
           portfolioId: report.portfolioId,
           window: options.window,
           segmentType: segment.segmentType,
@@ -384,7 +472,9 @@ export async function persistShadowPerformance(
           winRatePct: metricColumn(metrics.winRatePct),
           grossProfit: new Prisma.Decimal(metrics.grossProfit),
           grossLoss: new Prisma.Decimal(metrics.grossLoss),
-          simulatedExecutionCost: new Prisma.Decimal(metrics.simulatedExecutionCost),
+          simulatedExecutionCost: new Prisma.Decimal(
+            metrics.simulatedExecutionCost
+          ),
           averageWin: metricColumn(metrics.averageWin),
           averageLoss: metricColumn(metrics.averageLoss),
           cumulativeR: metricColumn(metrics.cumulativeR),
@@ -410,7 +500,10 @@ export async function persistShadowPerformance(
           metricsJson: metrics as unknown as Prisma.InputJsonObject,
           engineVersion: report.engineVersion,
           codeVersion: options.codeVersion,
-          dataThroughAt: report.dataThroughAt === null ? null : new Date(report.dataThroughAt),
+          dataThroughAt:
+            report.dataThroughAt === null
+              ? null
+              : new Date(report.dataThroughAt),
           computedAt: options.asOf,
           sourceThroughPositionEventId: report.sourceThroughPositionEventId,
           inputHash: report.inputHash,
@@ -420,7 +513,10 @@ export async function persistShadowPerformance(
       written += 1;
     } catch (error) {
       // A concurrent refresh already wrote this exact snapshot.
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === "P2002"
+      ) {
         unchanged += 1;
         continue;
       }

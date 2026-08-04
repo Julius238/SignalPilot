@@ -73,11 +73,18 @@ export function buildApprovableSnapshot(
       tradingMode: "SHADOW",
       enableLiveTrading: false,
       shadowMasterFlagEnabled: true,
-      riskJobEnabled: true
+      riskJobEnabled: true,
+      strategyLongV1Enabled: true,
+      strategyShortV1Enabled: false,
+      shadowShortEnabled: false,
+      exchangeExecutionEnabled: false,
+      marginTradingEnabled: false,
+      futuresTradingEnabled: false
     },
     candidate: {
       id: "trade-candidate-1",
-      candidateKey: "candidate.v1|assignment-btcusdt|strategy-version-1|asset-btc|btcusdt-1h-249",
+      candidateKey:
+        "candidate.v1|assignment-btcusdt|strategy-version-1|asset-btc|btcusdt-1h-249",
       status: "CREATED",
       direction: "LONG",
       entryType: "MARKET",
@@ -88,7 +95,9 @@ export function buildApprovableSnapshot(
       strategyVersionId: "strategy-version-1",
       strategyVersionStatus: "ACTIVE",
       strategyKey: "CRYPTO_MTF_BREAKOUT_V1",
+      strategyDirection: "LONG",
       assignmentEnabled: true,
+      assignmentDirection: "LONG",
       anchorCandleId: "btcusdt-1h-249",
       referenceEntryPrice: REFERENCE_ENTRY,
       stopPrice: STOP_PRICE,
@@ -235,7 +244,11 @@ export function buildApprovableSnapshot(
       key: CRYPTO_MAJOR_GROUP_KEY,
       memberSymbols: [...CRYPTO_MAJOR_MEMBERS]
     },
-    sizeOverride: { manualQuantity: null, riskMultiplier: null, requestedBy: null },
+    sizeOverride: {
+      manualQuantity: null,
+      riskMultiplier: null,
+      requestedBy: null
+    },
     previousApproval: null,
     existingAssessment: null,
     policyVersions: {
@@ -246,6 +259,44 @@ export function buildApprovableSnapshot(
       inputAssemblerVersion: "risk-input-assembler-v1/1.0.0",
       codeVersion: "test-code-version"
     }
+  };
+}
+
+/** Mirror-image, fully gated synthetic SHORT snapshot for RISK_OFF. */
+export function buildApprovableShortSnapshot(): RiskInputSnapshotV1 {
+  const snapshot = clone(buildApprovableSnapshot()) as RiskInputSnapshotV1;
+  return {
+    ...snapshot,
+    capability: {
+      ...snapshot.capability,
+      strategyLongV1Enabled: false,
+      strategyShortV1Enabled: true,
+      shadowShortEnabled: true
+    },
+    candidate: {
+      ...snapshot.candidate,
+      candidateKey:
+        "candidate.v1|assignment-btcusdt-short|strategy-version-short-1|asset-btc|btcusdt-1h-249",
+      direction: "SHORT",
+      strategyAssignmentId: "assignment-btcusdt-short",
+      strategyVersionId: "strategy-version-short-1",
+      strategyKey: "CRYPTO_MTF_BREAKDOWN_SHORT_V1",
+      strategyDirection: "SHORT",
+      assignmentDirection: "SHORT",
+      referenceEntryPrice: "24100.000000000000",
+      stopPrice: "24602.000000000000",
+      takeProfitPrice: "22400.000000000000",
+      plannedEntryMinimum: "23932.680000000000",
+      plannedEntryMaximum: "24602.000000000000",
+      strategyEngineVersion: "crypto-mtf-breakdown-short-v1/1.0.0"
+    },
+    marketRegime:
+      snapshot.marketRegime === null
+        ? null
+        : {
+            ...snapshot.marketRegime,
+            cryptoRegime: "RISK_OFF"
+          }
   };
 }
 
@@ -262,8 +313,11 @@ export function openPosition(overrides: {
     assetId: overrides.assetId ?? "asset-eth",
     symbol: overrides.symbol ?? "ETHUSDT",
     status: overrides.status ?? "OPEN",
+    direction: "LONG",
     openQuantity: "1.000000000000",
     averageEntryPrice: overrides.marketValue,
-    marketValue: overrides.marketValue
+    marketValue: overrides.marketValue,
+    equityContribution: overrides.marketValue,
+    reservedCollateral: "0.000000000000"
   };
 }

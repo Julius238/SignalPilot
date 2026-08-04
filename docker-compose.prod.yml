@@ -74,9 +74,15 @@ services:
       context: .
       dockerfile: apps/dashboard/Dockerfile
       target: runtime
+      # Build args, not runtime env: Next.js inlines NEXT_PUBLIC_* into the
+      # client bundle when the image is built. Each one is forwarded
+      # explicitly with a safe default, so an unset variable produces the
+      # conservative build rather than an empty string. Only browser-safe
+      # values belong here — never a secret (docs/DEPLOYMENT.md).
       args:
         NEXT_PUBLIC_SIGNALPILOT_API_URL: ${NEXT_PUBLIC_SIGNALPILOT_API_URL:-/api}
         SIGNALPILOT_API_INTERNAL_URL: ${SIGNALPILOT_API_INTERNAL_URL:-http://api:3100}
+        NEXT_PUBLIC_TRADING_DASHBOARD_ENABLED: ${NEXT_PUBLIC_TRADING_DASHBOARD_ENABLED:-false}
     restart: unless-stopped
     env_file:
       - path: .env.production
@@ -138,7 +144,11 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "find /tmp/trading-worker-heartbeat -mmin -2 2>/dev/null | grep -q ."]
+      test:
+        [
+          "CMD-SHELL",
+          "find /tmp/trading-worker-heartbeat -mmin -2 2>/dev/null | grep -q ."
+        ]
       interval: 30s
       timeout: 5s
       retries: 5

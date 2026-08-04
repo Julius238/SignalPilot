@@ -98,6 +98,7 @@
     "shadow:generate-candidates": "tsx src/jobs/shadowGenerateCandidates.ts",
     "shadow:assess-risk": "tsx src/jobs/shadowAssessRisk.ts",
     "shadow:bootstrap": "tsx src/jobs/shadowBootstrap.ts",
+    "shadow:strategy-setup": "tsx src/jobs/shadowStrategySetup.ts",
     "shadow:create-orders": "tsx src/jobs/shadowCreateOrders.ts",
     "shadow:process-fills": "tsx src/jobs/shadowProcessFills.ts",
     "shadow:monitor-positions": "tsx src/jobs/shadowMonitorPositions.ts",

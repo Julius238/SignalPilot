@@ -1,12 +1,19 @@
 import Link from "next/link";
 
+import { DirectionBadge } from "../../../../components/badges";
 import { EmptyState, ErrorState } from "../../../../components/empty-state";
 import { PageHeader, SectionCard } from "../../../../components/ui";
 import { CandidateStatusBadge } from "../../../../components/trading/trading-status";
 import { TradingDisabled } from "../../../../components/trading/trading-disabled";
 import { TradingPagination } from "../../../../components/trading/trading-pagination";
-import { fetchTradeCandidates, type TradeCandidateStatus } from "../../../../lib/trading-api";
-import { formatDecimalAmount, formatUtcDateTime } from "../../../../lib/trading-format";
+import {
+  fetchTradeCandidates,
+  type TradeCandidateStatus
+} from "../../../../lib/trading-api";
+import {
+  formatDecimalAmount,
+  formatUtcDateTime
+} from "../../../../lib/trading-format";
 import { TRADING_DASHBOARD_ENABLED } from "../../../../lib/trading-flag";
 
 const LIMIT = 50;
@@ -24,7 +31,13 @@ const STATUS_OPTIONS: Array<{ value: string; label: string }> = [
 ];
 
 type PageProps = {
-  searchParams: Promise<{ status?: string; assetId?: string; offset?: string }>;
+  searchParams: Promise<{
+    status?: string;
+    assetId?: string;
+    direction?: string;
+    strategyVersionId?: string;
+    offset?: string;
+  }>;
 };
 
 export default async function TradeCandidatesPage({ searchParams }: PageProps) {
@@ -37,12 +50,19 @@ export default async function TradeCandidatesPage({ searchParams }: PageProps) {
   const result = await fetchTradeCandidates({
     status: params.status || undefined,
     assetId: params.assetId || undefined,
+    direction: params.direction || undefined,
+    strategyVersionId: params.strategyVersionId || undefined,
     limit: LIMIT,
     offset
   });
 
   const candidates = result.data ?? [];
-  const hasFilter = Boolean(params.status || params.assetId);
+  const hasFilter = Boolean(
+    params.status ||
+    params.assetId ||
+    params.direction ||
+    params.strategyVersionId
+  );
 
   return (
     <>
@@ -53,7 +73,10 @@ export default async function TradeCandidatesPage({ searchParams }: PageProps) {
       />
 
       {result.error ? (
-        <ErrorState title="Kandidaten konnten nicht geladen werden" message={result.error} />
+        <ErrorState
+          title="Kandidaten konnten nicht geladen werden"
+          message={result.error}
+        />
       ) : null}
 
       <form className="filter-bar" method="GET">
@@ -64,16 +87,37 @@ export default async function TradeCandidatesPage({ searchParams }: PageProps) {
             </option>
           ))}
         </select>
-        <input name="assetId" placeholder="Asset-ID" defaultValue={params.assetId ?? ""} />
+        <input
+          name="assetId"
+          placeholder="Asset-ID"
+          defaultValue={params.assetId ?? ""}
+        />
+        <select name="direction" defaultValue={params.direction ?? ""}>
+          <option value="">Long &amp; Short</option>
+          <option value="LONG">Nur Long</option>
+          <option value="SHORT">Nur Short</option>
+        </select>
+        <input
+          name="strategyVersionId"
+          placeholder="StrategyVersion-ID"
+          defaultValue={params.strategyVersionId ?? ""}
+        />
         <button type="submit">Filtern</button>
         {hasFilter ? (
-          <a href="/dashboard/trading/candidates" className="section-link" style={{ alignSelf: "center" }}>
+          <a
+            href="/dashboard/trading/candidates"
+            className="section-link"
+            style={{ alignSelf: "center" }}
+          >
             Zurücksetzen
           </a>
         ) : null}
       </form>
 
-      <SectionCard title="Kandidaten" subtitle={`${candidates.length} Einträge auf dieser Seite`}>
+      <SectionCard
+        title="Kandidaten"
+        subtitle={`${candidates.length} Einträge auf dieser Seite`}
+      >
         {candidates.length > 0 ? (
           <>
             <div className="table-wrap">
@@ -81,6 +125,8 @@ export default async function TradeCandidatesPage({ searchParams }: PageProps) {
                 <thead>
                   <tr>
                     <th>Symbol</th>
+                    <th>Richtung</th>
+                    <th>Strategie</th>
                     <th>Status</th>
                     <th>Entry (Referenz)</th>
                     <th>Stop</th>
@@ -94,19 +140,42 @@ export default async function TradeCandidatesPage({ searchParams }: PageProps) {
                   {candidates.map((candidate) => (
                     <tr key={candidate.id}>
                       <td data-label="Symbol">
-                        <Link href={`/dashboard/trading/candidates/${candidate.id}`}>
+                        <Link
+                          href={`/dashboard/trading/candidates/${candidate.id}`}
+                        >
                           {candidate.symbol ?? candidate.assetId}
                         </Link>
                       </td>
-                      <td data-label="Status">
-                        <CandidateStatusBadge value={candidate.status as TradeCandidateStatus} />
+                      <td data-label="Richtung">
+                        <DirectionBadge value={candidate.direction} />
                       </td>
-                      <td data-label="Entry">{formatDecimalAmount(candidate.referenceEntryPrice)}</td>
-                      <td data-label="Stop">{formatDecimalAmount(candidate.stopPrice)}</td>
-                      <td data-label="Take Profit">{formatDecimalAmount(candidate.takeProfitPrice)}</td>
-                      <td data-label="CRV">{formatDecimalAmount(candidate.plannedRewardRisk)}</td>
+                      <td data-label="Strategie" className="muted small">
+                        {candidate.strategyKey ?? "—"}
+                        {candidate.strategyVersion === null
+                          ? ""
+                          : ` v${candidate.strategyVersion}`}
+                      </td>
+                      <td data-label="Status">
+                        <CandidateStatusBadge
+                          value={candidate.status as TradeCandidateStatus}
+                        />
+                      </td>
+                      <td data-label="Entry">
+                        {formatDecimalAmount(candidate.referenceEntryPrice)}
+                      </td>
+                      <td data-label="Stop">
+                        {formatDecimalAmount(candidate.stopPrice)}
+                      </td>
+                      <td data-label="Take Profit">
+                        {formatDecimalAmount(candidate.takeProfitPrice)}
+                      </td>
+                      <td data-label="CRV">
+                        {formatDecimalAmount(candidate.plannedRewardRisk)}
+                      </td>
                       <td data-label="Ablehnungsgrund" className="muted small">
-                        {candidate.invalidReasonCode ?? candidate.cancelReasonCode ?? "—"}
+                        {candidate.invalidReasonCode ??
+                          candidate.cancelReasonCode ??
+                          "—"}
                       </td>
                       <td data-label="Datenstand" className="nowrap">
                         {formatUtcDateTime(candidate.dataAsOf)}

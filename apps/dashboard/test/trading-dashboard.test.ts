@@ -42,23 +42,35 @@ describe("trading dashboard feature flag", () => {
     const productionExample = await readSrc("../../.env.production.example");
 
     assert.match(example, /NEXT_PUBLIC_TRADING_DASHBOARD_ENABLED=false/);
-    assert.match(productionExample, /NEXT_PUBLIC_TRADING_DASHBOARD_ENABLED=false/);
+    assert.match(
+      productionExample,
+      /NEXT_PUBLIC_TRADING_DASHBOARD_ENABLED=false/
+    );
   });
 
   it("only treats the literal string 'true' as enabled", async () => {
     const source = await readSrc("src/lib/trading-flag.ts");
-    assert.match(source, /process\.env\.NEXT_PUBLIC_TRADING_DASHBOARD_ENABLED === "true"/);
+    assert.match(
+      source,
+      /process\.env\.NEXT_PUBLIC_TRADING_DASHBOARD_ENABLED === "true"/
+    );
   });
 
   it("gates the navigation group behind the flag", async () => {
     const source = await readSrc("src/components/nav-bar.tsx");
-    assert.match(source, /import \{ TRADING_DASHBOARD_ENABLED \} from "\.\.\/lib\/trading-flag"/);
+    assert.match(
+      source,
+      /import \{ TRADING_DASHBOARD_ENABLED \} from "\.\.\/lib\/trading-flag"/
+    );
     assert.match(source, /\.\.\.\(TRADING_DASHBOARD_ENABLED/);
     assert.match(source, /label: "Shadow Trading"/);
   });
 
   it("gates every trading page and layout against unconditional fetching", async () => {
-    for (const page of [...TRADING_PAGES, "src/app/dashboard/trading/layout.tsx"]) {
+    for (const page of [
+      ...TRADING_PAGES,
+      "src/app/dashboard/trading/layout.tsx"
+    ]) {
       const source = await readSrc(page);
       assert.match(
         source,
@@ -82,7 +94,10 @@ describe("trading dashboard feature flag", () => {
       );
       assert.ok(guardIndex >= 0, `${page} is missing the flag guard`);
       if (fetchIndex >= 0) {
-        assert.ok(guardIndex < fetchIndex, `${page} calls a trading fetch before the flag guard`);
+        assert.ok(
+          guardIndex < fetchIndex,
+          `${page} calls a trading fetch before the flag guard`
+        );
       }
     }
   });
@@ -172,34 +187,48 @@ describe("operations require reason, confirmation, version, CSRF and idempotency
   });
 
   it("requires a non-empty reason and an exact confirmation phrase before enabling submit", async () => {
-    const source = await readSrc("src/components/trading/operation-confirm.tsx");
+    const source = await readSrc(
+      "src/components/trading/operation-confirm.tsx"
+    );
     assert.match(source, /reason\.trim\(\)\.length > 0/);
     assert.match(source, /confirmInput === confirmPhrase/);
     assert.match(source, /idempotencyKeyRef/);
   });
 
   it("regenerates the idempotency key only for a fresh attempt, not on retry", async () => {
-    const source = await readSrc("src/components/trading/operation-confirm.tsx");
+    const source = await readSrc(
+      "src/components/trading/operation-confirm.tsx"
+    );
     assert.match(source, /function openPanel/);
     assert.match(source, /idempotencyKeyRef\.current = newIdempotencyKey\(\)/);
-    assert.match(source, /const idempotencyKey = idempotencyKeyRef\.current \?\? newIdempotencyKey\(\)/);
+    assert.match(
+      source,
+      /const idempotencyKey = idempotencyKeyRef\.current \?\? newIdempotencyKey\(\)/
+    );
   });
 
   it("round-trips the current entity version for every versioned operation", async () => {
-    const source = await readSrc("src/app/dashboard/trading/operations/page.tsx");
+    const source = await readSrc(
+      "src/app/dashboard/trading/operations/page.tsx"
+    );
     assert.match(source, /expectedVersion: portfolio\?\.version/);
     assert.match(source, /expectedVersion: session\.version/);
-    assert.match(source, /expectedVersion: Number\(versionStr\)/);
+    // The position operation carries its version through the serialisable
+    // split spec rather than an inline callback.
+    assert.match(source, /versionKey: "expectedVersion"/);
   });
 
   it("does not send expectedVersion for the non-versioned run-job operation", async () => {
-    const source = await readSrc("src/app/dashboard/trading/operations/page.tsx");
+    const source = await readSrc(
+      "src/app/dashboard/trading/operations/page.tsx"
+    );
     const start = source.indexOf('endpoint="/trading/operations/run-job"');
-    const buildBodyStart = source.indexOf("buildBody={", start);
-    const buildBodyEnd = source.indexOf("/>", buildBodyStart);
-    const buildBodySnippet = source.slice(buildBodyStart, buildBodyEnd);
     assert.ok(start > 0, "run-job operation panel not found");
-    assert.doesNotMatch(buildBodySnippet, /expectedVersion/);
+    const bodyStart = source.indexOf("body={{", start);
+    assert.ok(bodyStart > start, "run-job body spec not found");
+    const bodyEnd = source.indexOf("/>", bodyStart);
+    const bodySnippet = source.slice(bodyStart, bodyEnd);
+    assert.doesNotMatch(bodySnippet, /expectedVersion/);
   });
 
   it("marks the confirm-phrase constants exactly as the API expects", () => {
@@ -209,26 +238,41 @@ describe("operations require reason, confirmation, version, CSRF and idempotency
   });
 
   it("visually marks dangerous operations", async () => {
-    const source = await readSrc("src/app/dashboard/trading/operations/page.tsx");
-    assert.match(source, /title="Kill-Switch aktivieren"[\s\S]{0,400}dangerous/);
-    assert.match(source, /title="Position risikoreduzierend schließen"[\s\S]{0,400}dangerous/);
+    const source = await readSrc(
+      "src/app/dashboard/trading/operations/page.tsx"
+    );
+    assert.match(
+      source,
+      /title="Kill-Switch aktivieren"[\s\S]{0,400}dangerous/
+    );
+    assert.match(
+      source,
+      /title="Position risikoreduzierend schließen"[\s\S]{0,400}dangerous/
+    );
   });
 });
 
 describe("version conflicts and API errors", () => {
   it("extracts the current version from the 409 conflict message", () => {
     assert.equal(
-      parseVersionFromConflictMessage("Current version is 5. Reload and retry with the current version."),
+      parseVersionFromConflictMessage(
+        "Current version is 5. Reload and retry with the current version."
+      ),
       5
     );
     assert.equal(parseVersionFromConflictMessage("Forbidden"), null);
   });
 
   it("shows the raw API error message and marks status as error, without optimistic success", async () => {
-    const source = await readSrc("src/components/trading/operation-confirm.tsx");
+    const source = await readSrc(
+      "src/components/trading/operation-confirm.tsx"
+    );
     assert.match(source, /setStatus\("error"\)/);
     assert.match(source, /setMessage\(result\.error/);
-    assert.doesNotMatch(source, /setStatus\("success"\)[\s\S]{0,40}result\.error/);
+    assert.doesNotMatch(
+      source,
+      /setStatus\("success"\)[\s\S]{0,40}result\.error/
+    );
   });
 
   it("treats a disabled operations API (404) as unavailable, not a hard crash", async () => {
@@ -239,15 +283,78 @@ describe("version conflicts and API errors", () => {
 
 describe("manual risk close only offers currently open positions", () => {
   it("fetches positions with open=true for the manual risk close selector", async () => {
-    const source = await readSrc("src/app/dashboard/trading/operations/page.tsx");
-    assert.match(source, /fetchShadowPositions\(\{ open: "true", limit: 100 \}\)/);
+    const source = await readSrc(
+      "src/app/dashboard/trading/operations/page.tsx"
+    );
+    assert.match(
+      source,
+      /fetchShadowPositions\(\{ open: "true", limit: 100 \}\)/
+    );
     assert.doesNotMatch(source, /fetchShadowPositions\(\{ open: "false"/);
   });
 
   it("encodes the selected position's own version instead of a shared/static one", async () => {
-    const source = await readSrc("src/app/dashboard/trading/operations/page.tsx");
-    assert.match(source, /value: `\$\{position\.id\}::\$\{position\.version\}`/);
-    assert.match(source, /const \[shadowPositionId, versionStr\] = String\(extra\.positionId \?\? ""\)\.split\("::"\)/);
+    const source = await readSrc(
+      "src/app/dashboard/trading/operations/page.tsx"
+    );
+    assert.match(
+      source,
+      /value: `\$\{position\.id\}::\$\{position\.version\}`/
+    );
+    // Decoded by the client component from a declarative spec — the id and the
+    // version must still come from the SAME selected option, never from a
+    // separate field that could drift apart.
+    assert.match(source, /from: "positionId"/);
+    assert.match(source, /separator: "::"/);
+    assert.match(source, /idKey: "shadowPositionId"/);
+    assert.match(source, /versionKey: "expectedVersion"/);
+  });
+});
+
+describe("server/client component boundary stays serialisable", () => {
+  // Regression guard for the build failure that only appeared once
+  // NEXT_PUBLIC_TRADING_DASHBOARD_ENABLED=true made Next.js actually prerender
+  // /dashboard/trading/operations: the page is a Server Component, and React
+  // cannot serialise a function prop across the boundary
+  // ("Functions cannot be passed directly to Client Components").
+  it("passes no function prop from the operations page into OperationConfirm", async () => {
+    const source = await readSrc(
+      "src/app/dashboard/trading/operations/page.tsx"
+    );
+    assert.doesNotMatch(
+      source,
+      /buildBody=/,
+      "buildBody was a function prop and must not come back"
+    );
+    assert.doesNotMatch(
+      source,
+      /\b(body|extraFields|options)=\{\s*\([^)]*\)\s*=>/,
+      "no arrow function may be handed to the client component as a prop"
+    );
+  });
+
+  it("declares the request body as data, not as a callback", async () => {
+    const component = await readSrc(
+      "src/components/trading/operation-confirm.tsx"
+    );
+    assert.match(component, /export type OperationBodySpec/);
+    assert.match(component, /export function buildOperationBody/);
+    assert.doesNotMatch(
+      component,
+      /buildBody:/,
+      "the callback prop must be gone"
+    );
+  });
+
+  it("keeps the trading pages server components so no data fetch moves into the browser", async () => {
+    for (const page of TRADING_PAGES) {
+      const source = await readSrc(page);
+      assert.doesNotMatch(
+        source,
+        /^"use client"/m,
+        `${page} must stay a server component`
+      );
+    }
   });
 });
 
@@ -277,14 +384,18 @@ describe("manual job trigger only allows the fixed allowlist", () => {
   });
 
   it("renders the job picker as a fixed select, never a free-text input", async () => {
-    const source = await readSrc("src/app/dashboard/trading/operations/page.tsx");
+    const source = await readSrc(
+      "src/app/dashboard/trading/operations/page.tsx"
+    );
     assert.match(source, /name: "jobName"[\s\S]{0,120}type: "select"/);
     assert.match(source, /options: RUN_JOB_ALLOWLIST\.map/);
     assert.doesNotMatch(source, /<input[^>]*jobName/);
   });
 
   it("only lets the OperationConfirm select render options from the fixed list, never free text", async () => {
-    const source = await readSrc("src/components/trading/operation-confirm.tsx");
+    const source = await readSrc(
+      "src/components/trading/operation-confirm.tsx"
+    );
     const selectBranchStart = source.indexOf('field.type === "select"');
     const selectBranchEnd = source.indexOf(") : (", selectBranchStart);
     const branch = source.slice(selectBranchStart, selectBranchEnd);
@@ -339,10 +450,17 @@ describe("no secrets or unfiltered audit payloads in the DOM", () => {
   it("only reads the trading dashboard flag from process.env, nowhere else in trading pages", async () => {
     for (const page of TRADING_PAGES) {
       const source = await readSrc(page);
-      assert.doesNotMatch(source, /process\.env/, `${page} should not read process.env directly`);
+      assert.doesNotMatch(
+        source,
+        /process\.env/,
+        `${page} should not read process.env directly`
+      );
     }
     const flagSource = await readSrc("src/lib/trading-flag.ts");
-    assert.match(flagSource, /process\.env\.NEXT_PUBLIC_TRADING_DASHBOARD_ENABLED/);
+    assert.match(
+      flagSource,
+      /process\.env\.NEXT_PUBLIC_TRADING_DASHBOARD_ENABLED/
+    );
   });
 });
 
@@ -350,16 +468,25 @@ describe("server-side filters and pagination", () => {
   it("bounds every list fetch to a fixed, small limit", async () => {
     for (const page of TRADING_PAGES) {
       const source = await readSrc(page);
-      const limitMatches = [...source.matchAll(/limit:\s*(\d+)/g)].map((match) => Number(match[1]));
-      const constLimitMatches = [...source.matchAll(/const LIMIT = (\d+);/g)].map((match) => Number(match[1]));
+      const limitMatches = [...source.matchAll(/limit:\s*(\d+)/g)].map(
+        (match) => Number(match[1])
+      );
+      const constLimitMatches = [
+        ...source.matchAll(/const LIMIT = (\d+);/g)
+      ].map((match) => Number(match[1]));
       for (const value of [...limitMatches, ...constLimitMatches]) {
-        assert.ok(value > 0 && value <= 200, `${page} uses an out-of-range limit: ${value}`);
+        assert.ok(
+          value > 0 && value <= 200,
+          `${page} uses an out-of-range limit: ${value}`
+        );
       }
     }
   });
 
   it("derives has-more-pages from result count instead of a nonexistent total field", async () => {
-    const source = await readSrc("src/components/trading/trading-pagination.tsx");
+    const source = await readSrc(
+      "src/components/trading/trading-pagination.tsx"
+    );
     assert.match(source, /count === limit/);
   });
 
@@ -371,7 +498,10 @@ describe("server-side filters and pagination", () => {
       "src/app/dashboard/trading/audit/page.tsx"
     ]) {
       const source = await readSrc(page);
-      assert.match(source, /Math\.max\(0, Number\(params\.\w+Offset\) \|\| 0\)|Math\.max\(0, Number\(params\.offset\) \|\| 0\)/);
+      assert.match(
+        source,
+        /Math\.max\(0, Number\(params\.\w+Offset\) \|\| 0\)|Math\.max\(0, Number\(params\.offset\) \|\| 0\)/
+      );
     }
   });
 });
@@ -403,8 +533,12 @@ describe("responsive tables", () => {
   });
 
   it("applies the responsive table class to the densest mobile-facing lists", async () => {
-    const candidates = await readSrc("src/app/dashboard/trading/candidates/page.tsx");
-    const positions = await readSrc("src/app/dashboard/trading/positions/page.tsx");
+    const candidates = await readSrc(
+      "src/app/dashboard/trading/candidates/page.tsx"
+    );
+    const positions = await readSrc(
+      "src/app/dashboard/trading/positions/page.tsx"
+    );
     assert.match(candidates, /className="responsive-table"/);
     assert.match(positions, /className="responsive-table"/);
   });
@@ -419,7 +553,11 @@ describe("loading, empty and error states", () => {
   it("every trading page renders explicit empty and error states", async () => {
     for (const page of TRADING_PAGES) {
       const source = await readSrc(page);
-      assert.match(source, /EmptyState|ErrorState/, `${page} must render an empty or error state`);
+      assert.match(
+        source,
+        /EmptyState|ErrorState/,
+        `${page} must render an empty or error state`
+      );
     }
   });
 });

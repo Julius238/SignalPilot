@@ -17,7 +17,10 @@
  * commits the drafts atomically.
  */
 
-import type { DecimalString } from "@signalpilot/trading-domain";
+import type {
+  DecimalString,
+  TradeDirection
+} from "@signalpilot/trading-domain";
 
 export type IsoDateTimeString = string;
 
@@ -32,7 +35,8 @@ export const LedgerEntryType = {
   PNL_ADJUSTMENT: "PNL_ADJUSTMENT",
   CORRECTION: "CORRECTION"
 } as const;
-export type LedgerEntryType = (typeof LedgerEntryType)[keyof typeof LedgerEntryType];
+export type LedgerEntryType =
+  (typeof LedgerEntryType)[keyof typeof LedgerEntryType];
 
 /** The cached, replayable projection of `Portfolio`'s money columns. */
 export interface PortfolioStateV1 {
@@ -73,9 +77,15 @@ export const PortfolioReasonCode = {
   EQUITY_MISMATCH: "PORTFOLIO_EQUITY_MISMATCH",
   CACHE_MISMATCH_LEDGER_REPLAY: "PORTFOLIO_CACHE_MISMATCH_LEDGER_REPLAY",
   DUPLICATE_ASSET_POSITION_SCOPE: "PORTFOLIO_DUPLICATE_ASSET_POSITION_SCOPE",
-  QUANTITY_EXCEEDS_OPEN: "PORTFOLIO_QUANTITY_EXCEEDS_OPEN"
+  QUANTITY_EXCEEDS_OPEN: "PORTFOLIO_QUANTITY_EXCEEDS_OPEN",
+  DIRECTION_MISMATCH: "PORTFOLIO_DIRECTION_MISMATCH",
+  COLLATERAL_MISMATCH: "PORTFOLIO_COLLATERAL_MISMATCH",
+  PNL_SIGN_MISMATCH: "PORTFOLIO_PNL_SIGN_MISMATCH",
+  DUPLICATE_ENTRY_ORDER_SCOPE: "PORTFOLIO_DUPLICATE_ENTRY_ORDER_SCOPE",
+  OPPOSING_ACTIVE_SCOPE: "PORTFOLIO_OPPOSING_ACTIVE_SCOPE"
 } as const;
-export type PortfolioReasonCode = (typeof PortfolioReasonCode)[keyof typeof PortfolioReasonCode];
+export type PortfolioReasonCode =
+  (typeof PortfolioReasonCode)[keyof typeof PortfolioReasonCode];
 
 /** Result of one ledger-producing operation: at most one entry, never a partial one. */
 export interface LedgerOperationResultV1 {
@@ -91,6 +101,7 @@ export interface LedgerOperationResultV1 {
 
 /** The subset of `ShadowPosition` this package computes and mutates. */
 export interface PositionStateV1 {
+  readonly direction: TradeDirection;
   readonly initialQuantity: DecimalString;
   readonly openQuantity: DecimalString;
   readonly closedQuantity: DecimalString;
@@ -100,11 +111,13 @@ export interface PositionStateV1 {
   readonly grossExitNotional: DecimalString;
   readonly realizedPnl: DecimalString;
   readonly feesPaid: DecimalString;
+  readonly reservedCollateral: DecimalString;
   /** Entry fees already attributed to a closed quantity — for proportional allocation. */
   readonly allocatedEntryFees: DecimalString;
 }
 
 export const EMPTY_POSITION_STATE: PositionStateV1 = Object.freeze({
+  direction: "LONG",
   initialQuantity: "0.000000000000",
   openQuantity: "0.000000000000",
   closedQuantity: "0.000000000000",
@@ -114,6 +127,7 @@ export const EMPTY_POSITION_STATE: PositionStateV1 = Object.freeze({
   grossExitNotional: "0.000000000000",
   realizedPnl: "0.000000000000",
   feesPaid: "0.000000000000",
+  reservedCollateral: "0.000000000000",
   allocatedEntryFees: "0.000000000000"
 });
 
@@ -122,6 +136,8 @@ export interface FillAppliedV1 {
   readonly fillPrice: DecimalString;
   readonly notional: DecimalString;
   readonly feeAmount: DecimalString;
+  /** Collateral allocated/released with this fill; zero for LONG. */
+  readonly collateralAmount?: DecimalString;
 }
 
 export interface PositionUpdateResultV1 {
@@ -131,6 +147,8 @@ export interface PositionUpdateResultV1 {
   /** `realizedPnlDelta` this exit fill contributed — `null` for an entry fill. */
   readonly realizedPnlDelta: DecimalString | null;
   readonly allocatedEntryFeesDelta: DecimalString | null;
+  readonly releasedCollateralDelta: DecimalString | null;
+  readonly grossPnlDelta: DecimalString | null;
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -138,6 +156,7 @@ export interface PositionUpdateResultV1 {
 // ───────────────────────────────────────────────────────────────────────────
 
 export interface PositionMarkInputV1 {
+  readonly direction: TradeDirection;
   readonly openQuantity: DecimalString;
   readonly averageEntryPrice: DecimalString;
   readonly conservativeBidMark: DecimalString;
@@ -145,8 +164,11 @@ export interface PositionMarkInputV1 {
 }
 
 export interface PositionMarkResultV1 {
+  /** Absolute mark notional, used for non-netted exposure. */
   readonly marketValue: DecimalString;
   readonly unrealizedPnl: DecimalString;
+  /** LONG market value; SHORT unrealized PnL (collateral is already cash). */
+  readonly equityContribution: DecimalString;
 }
 
 export interface PortfolioValuationInputV1 {

@@ -17,7 +17,11 @@ import {
   buildAuditEventKey,
   type TradingCapabilityContext
 } from "@signalpilot/trading-domain";
-import { TradingActorType, prisma, type PrismaClient } from "@signalpilot/database";
+import {
+  TradingActorType,
+  prisma,
+  type PrismaClient
+} from "@signalpilot/database";
 import {
   activatePortfolio,
   activateSession,
@@ -26,6 +30,7 @@ import {
   releaseKillSwitch,
   unlockSessionToStopped
 } from "@signalpilot/trading-worker/lib/shadowSessionOps";
+import { setStrategyAssignmentEnabled } from "@signalpilot/trading-worker/lib/shadowSessionOps";
 import { requestManualRiskClose } from "@signalpilot/trading-worker/lib/manualRiskClose";
 import { checkShadowBaseAllowed } from "@signalpilot/trading-worker/lib/tradingSafety";
 import { runShadowAssessRisk } from "@signalpilot/trading-worker/jobs/shadowAssessRisk";
@@ -51,14 +56,19 @@ export type OperationOutcome<T> =
       readonly expectedVersion: number;
       readonly entityId: string;
     }
-  | { readonly kind: "guard_failed"; readonly reasonCode: string; readonly message: string };
+  | {
+      readonly kind: "guard_failed";
+      readonly reasonCode: string;
+      readonly message: string;
+    };
 
 function capabilityFromEnv(): TradingCapabilityContext | null {
   const base = checkShadowBaseAllowed(process.env);
   if (!base.allowed) return null;
   return {
     buildCapability: TradingBuildCapability.SHADOW_ONLY,
-    tradingMode: base.flags.tradingMode as (typeof TradingMode)[keyof typeof TradingMode],
+    tradingMode: base.flags
+      .tradingMode as (typeof TradingMode)[keyof typeof TradingMode],
     enableLiveTrading: base.flags.enableLiveTrading,
     shadowMasterFlagEnabled: base.flags.shadowEnabled
   };
@@ -72,15 +82,80 @@ export interface ActivatePortfolioOperationInput {
   readonly asOf: Date;
 }
 
+export interface SetAssignmentOperationInput {
+  readonly assignmentId: string;
+  readonly actorId: string;
+  readonly enabled: boolean;
+  readonly confirmation: string;
+  readonly idempotencyKey: string;
+  readonly expectedVersion: number;
+  readonly asOf: Date;
+}
+
+export async function setAssignmentOperation(
+  database: PrismaClient,
+  input: SetAssignmentOperationInput
+): Promise<OperationOutcome<unknown>> {
+  const replay = await findIdempotentReplay(
+    database,
+    "StrategyAssignment",
+    input.idempotencyKey,
+    input.assignmentId
+  );
+  if (replay !== null) return { kind: "replayed", result: replay.afterState };
+
+  const assignment = await database.strategyAssignment.findUnique({
+    where: { id: input.assignmentId }
+  });
+  if (assignment === null)
+    return {
+      kind: "not_found",
+      message: `No StrategyAssignment ${input.assignmentId}.`
+    };
+  if (assignment.version !== input.expectedVersion) {
+    return {
+      kind: "version_conflict",
+      currentVersion: assignment.version,
+      expectedVersion: input.expectedVersion,
+      entityId: input.assignmentId
+    };
+  }
+
+  const result = await setStrategyAssignmentEnabled(database, {
+    assignmentId: input.assignmentId,
+    actorId: input.actorId,
+    enabled: input.enabled,
+    confirmation: input.confirmation,
+    idempotencyKey: input.idempotencyKey,
+    expectedVersion: input.expectedVersion,
+    asOf: input.asOf
+  });
+  if (!result.ok)
+    return {
+      kind: "guard_failed",
+      reasonCode: result.reasonCode,
+      message: result.message
+    };
+  return { kind: "executed", result: result.result };
+}
+
 export async function activatePortfolioOperation(
   database: PrismaClient,
   input: ActivatePortfolioOperationInput
 ): Promise<OperationOutcome<unknown>> {
-  const replay = await findIdempotentReplay(database, "Portfolio", input.idempotencyKey, input.portfolioId);
+  const replay = await findIdempotentReplay(
+    database,
+    "Portfolio",
+    input.idempotencyKey,
+    input.portfolioId
+  );
   if (replay !== null) return { kind: "replayed", result: replay.afterState };
 
-  const portfolio = await database.portfolio.findUnique({ where: { id: input.portfolioId } });
-  if (portfolio === null) return { kind: "not_found", message: `No Portfolio ${input.portfolioId}.` };
+  const portfolio = await database.portfolio.findUnique({
+    where: { id: input.portfolioId }
+  });
+  if (portfolio === null)
+    return { kind: "not_found", message: `No Portfolio ${input.portfolioId}.` };
   if (portfolio.version !== input.expectedVersion) {
     return {
       kind: "version_conflict",
@@ -96,7 +171,12 @@ export async function activatePortfolioOperation(
     asOf: input.asOf,
     idempotencyKey: input.idempotencyKey
   });
-  if (!result.ok) return { kind: "guard_failed", reasonCode: result.reasonCode, message: result.message };
+  if (!result.ok)
+    return {
+      kind: "guard_failed",
+      reasonCode: result.reasonCode,
+      message: result.message
+    };
   return { kind: "executed", result: result.result };
 }
 
@@ -112,11 +192,22 @@ export async function releaseKillSwitchOperation(
   database: PrismaClient,
   input: SessionOperationInput
 ): Promise<OperationOutcome<unknown>> {
-  const replay = await findIdempotentReplay(database, "TradingSession", input.idempotencyKey, input.sessionId);
+  const replay = await findIdempotentReplay(
+    database,
+    "TradingSession",
+    input.idempotencyKey,
+    input.sessionId
+  );
   if (replay !== null) return { kind: "replayed", result: replay.afterState };
 
-  const session = await database.tradingSession.findUnique({ where: { id: input.sessionId } });
-  if (session === null) return { kind: "not_found", message: `No TradingSession ${input.sessionId}.` };
+  const session = await database.tradingSession.findUnique({
+    where: { id: input.sessionId }
+  });
+  if (session === null)
+    return {
+      kind: "not_found",
+      message: `No TradingSession ${input.sessionId}.`
+    };
   if (session.version !== input.expectedVersion) {
     return {
       kind: "version_conflict",
@@ -132,7 +223,12 @@ export async function releaseKillSwitchOperation(
     asOf: input.asOf,
     idempotencyKey: input.idempotencyKey
   });
-  if (!result.ok) return { kind: "guard_failed", reasonCode: result.reasonCode, message: result.message };
+  if (!result.ok)
+    return {
+      kind: "guard_failed",
+      reasonCode: result.reasonCode,
+      message: result.message
+    };
   return { kind: "executed", result: result.result };
 }
 
@@ -140,11 +236,22 @@ export async function activateSessionOperation(
   database: PrismaClient,
   input: SessionOperationInput
 ): Promise<OperationOutcome<unknown>> {
-  const replay = await findIdempotentReplay(database, "TradingSession", input.idempotencyKey, input.sessionId);
+  const replay = await findIdempotentReplay(
+    database,
+    "TradingSession",
+    input.idempotencyKey,
+    input.sessionId
+  );
   if (replay !== null) return { kind: "replayed", result: replay.afterState };
 
-  const session = await database.tradingSession.findUnique({ where: { id: input.sessionId } });
-  if (session === null) return { kind: "not_found", message: `No TradingSession ${input.sessionId}.` };
+  const session = await database.tradingSession.findUnique({
+    where: { id: input.sessionId }
+  });
+  if (session === null)
+    return {
+      kind: "not_found",
+      message: `No TradingSession ${input.sessionId}.`
+    };
   if (session.version !== input.expectedVersion) {
     return {
       kind: "version_conflict",
@@ -156,7 +263,11 @@ export async function activateSessionOperation(
 
   const capability = capabilityFromEnv();
   if (capability === null) {
-    return { kind: "guard_failed", reasonCode: "CONFIG_INVALID", message: "Shadow-only base configuration is not satisfied." };
+    return {
+      kind: "guard_failed",
+      reasonCode: "CONFIG_INVALID",
+      message: "Shadow-only base configuration is not satisfied."
+    };
   }
 
   const result = await activateSession(database, {
@@ -166,7 +277,12 @@ export async function activateSessionOperation(
     capability,
     asOf: input.asOf
   });
-  if (!result.ok) return { kind: "guard_failed", reasonCode: result.reasonCode, message: result.message };
+  if (!result.ok)
+    return {
+      kind: "guard_failed",
+      reasonCode: result.reasonCode,
+      message: result.message
+    };
   return { kind: "executed", result: result.result };
 }
 
@@ -174,11 +290,22 @@ export async function pauseSessionOperation(
   database: PrismaClient,
   input: SessionOperationInput
 ): Promise<OperationOutcome<unknown>> {
-  const replay = await findIdempotentReplay(database, "TradingSession", input.idempotencyKey, input.sessionId);
+  const replay = await findIdempotentReplay(
+    database,
+    "TradingSession",
+    input.idempotencyKey,
+    input.sessionId
+  );
   if (replay !== null) return { kind: "replayed", result: replay.afterState };
 
-  const session = await database.tradingSession.findUnique({ where: { id: input.sessionId } });
-  if (session === null) return { kind: "not_found", message: `No TradingSession ${input.sessionId}.` };
+  const session = await database.tradingSession.findUnique({
+    where: { id: input.sessionId }
+  });
+  if (session === null)
+    return {
+      kind: "not_found",
+      message: `No TradingSession ${input.sessionId}.`
+    };
   if (session.version !== input.expectedVersion) {
     return {
       kind: "version_conflict",
@@ -194,7 +321,12 @@ export async function pauseSessionOperation(
     asOf: input.asOf,
     idempotencyKey: input.idempotencyKey
   });
-  if (!result.ok) return { kind: "guard_failed", reasonCode: result.reasonCode, message: result.message };
+  if (!result.ok)
+    return {
+      kind: "guard_failed",
+      reasonCode: result.reasonCode,
+      message: result.message
+    };
   return { kind: "executed", result: result.result };
 }
 
@@ -206,11 +338,22 @@ export async function engageKillSwitchOperation(
   database: PrismaClient,
   input: EngageKillSwitchOperationInput
 ): Promise<OperationOutcome<unknown>> {
-  const replay = await findIdempotentReplay(database, "TradingSession", input.idempotencyKey, input.sessionId);
+  const replay = await findIdempotentReplay(
+    database,
+    "TradingSession",
+    input.idempotencyKey,
+    input.sessionId
+  );
   if (replay !== null) return { kind: "replayed", result: replay.afterState };
 
-  const session = await database.tradingSession.findUnique({ where: { id: input.sessionId } });
-  if (session === null) return { kind: "not_found", message: `No TradingSession ${input.sessionId}.` };
+  const session = await database.tradingSession.findUnique({
+    where: { id: input.sessionId }
+  });
+  if (session === null)
+    return {
+      kind: "not_found",
+      message: `No TradingSession ${input.sessionId}.`
+    };
   if (session.version !== input.expectedVersion) {
     return {
       kind: "version_conflict",
@@ -227,7 +370,12 @@ export async function engageKillSwitchOperation(
     asOf: input.asOf,
     idempotencyKey: input.idempotencyKey
   });
-  if (!result.ok) return { kind: "guard_failed", reasonCode: result.reasonCode, message: result.message };
+  if (!result.ok)
+    return {
+      kind: "guard_failed",
+      reasonCode: result.reasonCode,
+      message: result.message
+    };
   return { kind: "executed", result: result.result };
 }
 
@@ -239,11 +387,22 @@ export async function unlockSessionOperation(
   database: PrismaClient,
   input: UnlockSessionOperationInput
 ): Promise<OperationOutcome<unknown>> {
-  const replay = await findIdempotentReplay(database, "TradingSession", input.idempotencyKey, input.sessionId);
+  const replay = await findIdempotentReplay(
+    database,
+    "TradingSession",
+    input.idempotencyKey,
+    input.sessionId
+  );
   if (replay !== null) return { kind: "replayed", result: replay.afterState };
 
-  const session = await database.tradingSession.findUnique({ where: { id: input.sessionId } });
-  if (session === null) return { kind: "not_found", message: `No TradingSession ${input.sessionId}.` };
+  const session = await database.tradingSession.findUnique({
+    where: { id: input.sessionId }
+  });
+  if (session === null)
+    return {
+      kind: "not_found",
+      message: `No TradingSession ${input.sessionId}.`
+    };
   if (session.version !== input.expectedVersion) {
     return {
       kind: "version_conflict",
@@ -260,7 +419,12 @@ export async function unlockSessionOperation(
     confirmCauseResolved: input.confirmCauseResolved,
     asOf: input.asOf
   });
-  if (!result.ok) return { kind: "guard_failed", reasonCode: result.reasonCode, message: result.message };
+  if (!result.ok)
+    return {
+      kind: "guard_failed",
+      reasonCode: result.reasonCode,
+      message: result.message
+    };
   return { kind: "executed", result: result.result };
 }
 
@@ -277,11 +441,22 @@ export async function manualRiskCloseOperation(
   database: PrismaClient,
   input: ManualRiskCloseOperationInput
 ): Promise<OperationOutcome<unknown>> {
-  const replay = await findIdempotentReplay(database, "ShadowPosition", input.idempotencyKey, input.shadowPositionId);
+  const replay = await findIdempotentReplay(
+    database,
+    "ShadowPosition",
+    input.idempotencyKey,
+    input.shadowPositionId
+  );
   if (replay !== null) return { kind: "replayed", result: replay.afterState };
 
-  const position = await database.shadowPosition.findUnique({ where: { id: input.shadowPositionId } });
-  if (position === null) return { kind: "not_found", message: `No ShadowPosition ${input.shadowPositionId}.` };
+  const position = await database.shadowPosition.findUnique({
+    where: { id: input.shadowPositionId }
+  });
+  if (position === null)
+    return {
+      kind: "not_found",
+      message: `No ShadowPosition ${input.shadowPositionId}.`
+    };
   if (position.version !== input.expectedVersion) {
     return {
       kind: "version_conflict",
@@ -298,7 +473,12 @@ export async function manualRiskCloseOperation(
     idempotencyKey: input.idempotencyKey,
     asOf: input.asOf
   });
-  if (!result.ok) return { kind: "guard_failed", reasonCode: result.reasonCode, message: result.message };
+  if (!result.ok)
+    return {
+      kind: "guard_failed",
+      reasonCode: result.reasonCode,
+      message: result.message
+    };
   return { kind: "executed", result };
 }
 
@@ -322,21 +502,28 @@ export const RUN_JOB_ALLOWLIST = [
 ] as const;
 export type AllowlistedJobName = (typeof RUN_JOB_ALLOWLIST)[number];
 
-const JOB_RUNNERS: Readonly<Record<AllowlistedJobName, (database: PrismaClient, options: { asOf: Date }) => Promise<unknown>>> =
-  {
-    "shadow-start-trading-day": runShadowStartTradingDay,
-    "shadow-generate-candidates": runShadowGenerateCandidates,
-    "shadow-assess-risk": runShadowAssessRisk,
-    "shadow-create-orders": runShadowCreateOrders,
-    "shadow-process-fills": runShadowProcessFills,
-    "shadow-monitor-positions": runShadowMonitorPositions,
-    "shadow-reconcile-portfolio": runShadowReconcilePortfolio,
-    "shadow-performance-refresh": runShadowPerformanceRefresh,
-    "shadow-alert-outbox": runShadowAlertOutbox,
-    "shadow-retention": (database, options) => runShadowRetention(database, { ...options, apply: false })
-  };
+const JOB_RUNNERS: Readonly<
+  Record<
+    AllowlistedJobName,
+    (database: PrismaClient, options: { asOf: Date }) => Promise<unknown>
+  >
+> = {
+  "shadow-start-trading-day": runShadowStartTradingDay,
+  "shadow-generate-candidates": runShadowGenerateCandidates,
+  "shadow-assess-risk": runShadowAssessRisk,
+  "shadow-create-orders": runShadowCreateOrders,
+  "shadow-process-fills": runShadowProcessFills,
+  "shadow-monitor-positions": runShadowMonitorPositions,
+  "shadow-reconcile-portfolio": runShadowReconcilePortfolio,
+  "shadow-performance-refresh": runShadowPerformanceRefresh,
+  "shadow-alert-outbox": runShadowAlertOutbox,
+  "shadow-retention": (database, options) =>
+    runShadowRetention(database, { ...options, apply: false })
+};
 
-export function isAllowlistedJobName(value: string): value is AllowlistedJobName {
+export function isAllowlistedJobName(
+  value: string
+): value is AllowlistedJobName {
   return (RUN_JOB_ALLOWLIST as readonly string[]).includes(value);
 }
 
@@ -366,7 +553,12 @@ export async function runJobOperation(
     };
   }
 
-  const replay = await findIdempotentReplay(database, "ManualJobRun", input.idempotencyKey, input.jobName);
+  const replay = await findIdempotentReplay(
+    database,
+    "ManualJobRun",
+    input.idempotencyKey,
+    input.jobName
+  );
   if (replay !== null) return { kind: "replayed", result: replay.afterState };
 
   const runner = JOB_RUNNERS[input.jobName];

@@ -16,14 +16,28 @@ import {
   type StrategyInputSnapshotV1
 } from "../src/index.js";
 
-import { BTC_1H_SHAPE, buildCandles, buildPassingSnapshot, clone } from "./support/build-snapshot.js";
-import { ETH_BASE_SNAPSHOT, REJECTION_CASES } from "./support/rejection-cases.js";
+import {
+  BTC_1H_SHAPE,
+  buildCandles,
+  buildPassingSnapshot,
+  clone
+} from "./support/build-snapshot.js";
+import {
+  ETH_BASE_SNAPSHOT,
+  REJECTION_CASES
+} from "./support/rejection-cases.js";
 
 const PARAMS = CRYPTO_MTF_BREAKOUT_V1_PARAMETERS;
 
-function candidateOf(snapshot: StrategyInputSnapshotV1): StrategyCandidateResultV1 {
+function candidateOf(
+  snapshot: StrategyInputSnapshotV1
+): StrategyCandidateResultV1 {
   const result = evaluateCryptoMtfBreakoutV1(snapshot);
-  assert.equal(result.outcome, "CANDIDATE", `expected a candidate, got ${result.reasonCodes.join(",")}`);
+  assert.equal(
+    result.outcome,
+    "CANDIDATE",
+    `expected a candidate, got ${result.reasonCodes.join(",")}`
+  );
   return result as StrategyCandidateResultV1;
 }
 
@@ -34,7 +48,11 @@ function withOneHourShape(
   const next = clone(snapshot);
   next.series["1h"] = {
     ...next.series["1h"],
-    candles: buildCandles("1h", { ...BTC_1H_SHAPE, ...shape }, { idPrefix: "btcusdt" })
+    candles: buildCandles(
+      "1h",
+      { ...BTC_1H_SHAPE, ...shape },
+      { idPrefix: "btcusdt" }
+    )
   };
   return next;
 }
@@ -49,7 +67,10 @@ describe("CRYPTO_MTF_BREAKOUT_V1 — happy path", () => {
     assert.equal(candidate.status, "CREATED");
     assert.equal(candidate.symbol, "BTCUSDT");
     assert.equal(candidate.strategyKey, CRYPTO_MTF_BREAKOUT_V1_KEY);
-    assert.equal(candidate.specificationHash, CRYPTO_MTF_BREAKOUT_V1_SPECIFICATION_HASH);
+    assert.equal(
+      candidate.specificationHash,
+      CRYPTO_MTF_BREAKOUT_V1_SPECIFICATION_HASH
+    );
   });
 
   it("anchors on the newest closed 1h candle and its signal", () => {
@@ -75,7 +96,8 @@ describe("CRYPTO_MTF_BREAKOUT_V1 — happy path", () => {
   });
 
   it("uses close(C0) as reference entry", () => {
-    const anchorClose = buildPassingSnapshot().series["1h"].candles.at(-1)!.close;
+    const anchorClose =
+      buildPassingSnapshot().series["1h"].candles.at(-1)!.close;
     assert.equal(
       DecimalValue.fromString(candidate.referenceEntryPrice).toString(),
       DecimalValue.fromString(anchorClose).toString()
@@ -87,13 +109,23 @@ describe("CRYPTO_MTF_BREAKOUT_V1 — happy path", () => {
     const atr = DecimalValue.fromString(candidate.indicators.atr14_1h);
     const stopDistance = DecimalValue.fromString(candidate.stopDistance);
 
-    assert.ok(stopDistance.gte(DecimalValue.fromString("1.5").mul(atr, "FLOOR")));
-    assert.ok(stopDistance.gte(DecimalValue.fromString("0.0075").mul(reference, "FLOOR")));
+    assert.ok(
+      stopDistance.gte(DecimalValue.fromString("1.5").mul(atr, "FLOOR"))
+    );
+    assert.ok(
+      stopDistance.gte(
+        DecimalValue.fromString("0.0075").mul(reference, "FLOOR")
+      )
+    );
     assert.equal(reference.sub(stopDistance).toString(), candidate.stopPrice);
   });
 
   it("caps the stop distance at 3 %", () => {
-    assert.ok(DecimalValue.fromString(candidate.stopDistancePct).lte(DecimalValue.fromString("0.03")));
+    assert.ok(
+      DecimalValue.fromString(candidate.stopDistancePct).lte(
+        DecimalValue.fromString("0.03")
+      )
+    );
   });
 
   it("raises the stop to the greater of the ATR term and the 0.75 % floor", () => {
@@ -109,8 +141,14 @@ describe("CRYPTO_MTF_BREAKOUT_V1 — happy path", () => {
     const expected = DecimalValue.max(atrTerm, floorTerm);
 
     assert.equal(candidate.stopDistance, expected.toString());
-    assert.ok(DecimalValue.fromString(candidate.indicators.atrToClose1h).gte(DecimalValue.fromString("0.005")));
-    assert.ok(result.reasonCodes.includes(StrategyReasonCode.STOP_DISTANCE_ATR_APPLIED));
+    assert.ok(
+      DecimalValue.fromString(candidate.indicators.atrToClose1h).gte(
+        DecimalValue.fromString("0.005")
+      )
+    );
+    assert.ok(
+      result.reasonCodes.includes(StrategyReasonCode.STOP_DISTANCE_ATR_APPLIED)
+    );
   });
 
   it("places the take profit at exactly 2.5R gross", () => {
@@ -131,10 +169,15 @@ describe("CRYPTO_MTF_BREAKOUT_V1 — happy path", () => {
   it("limits the planned entry range by 0.5 ATR above the reference", () => {
     const reference = DecimalValue.fromString(candidate.referenceEntryPrice);
     const atr = DecimalValue.fromString(candidate.indicators.atr14_1h);
-    assert.equal(candidate.maximumEntryGapDistance, DecimalValue.fromString("0.5").mul(atr, "FLOOR").toString());
+    assert.equal(
+      candidate.maximumEntryGapDistance,
+      DecimalValue.fromString("0.5").mul(atr, "FLOOR").toString()
+    );
     assert.equal(
       candidate.plannedEntryMaximum,
-      reference.add(DecimalValue.fromString(candidate.maximumEntryGapDistance)).toString()
+      reference
+        .add(DecimalValue.fromString(candidate.maximumEntryGapDistance))
+        .toString()
     );
     assert.equal(candidate.plannedEntryMinimum, candidate.stopPrice);
   });
@@ -154,7 +197,10 @@ describe("CRYPTO_MTF_BREAKOUT_V1 — happy path", () => {
       "leverage",
       "margin"
     ]) {
-      assert.ok(!serialised.includes(forbidden), `candidate must not carry ${forbidden}`);
+      assert.ok(
+        !serialised.includes(forbidden),
+        `candidate must not carry ${forbidden}`
+      );
     }
   });
 
@@ -172,14 +218,22 @@ describe("CRYPTO_MTF_BREAKOUT_V1 — happy path", () => {
     assert.equal(byType.get("REGIME"), 1);
     assert.equal(byType.get("EXECUTION_PROFILE"), 1);
 
-    const keys = candidate.evidence.map((item) => `${item.type}|${item.sourceType}|${item.sourceKey}`);
-    assert.equal(new Set(keys).size, keys.length, "evidence keys must be unique");
+    const keys = candidate.evidence.map(
+      (item) => `${item.type}|${item.sourceType}|${item.sourceKey}`
+    );
+    assert.equal(
+      new Set(keys).size,
+      keys.length,
+      "evidence keys must be unique"
+    );
   });
 
   it("reports sorted, de-duplicated pass reason codes", () => {
     assert.deepEqual([...result.reasonCodes], [...result.reasonCodes].sort());
     assert.equal(new Set(result.reasonCodes).size, result.reasonCodes.length);
-    assert.ok(result.reasonCodes.includes(StrategyReasonCode.BREAKOUT_CONFIRMED));
+    assert.ok(
+      result.reasonCodes.includes(StrategyReasonCode.BREAKOUT_CONFIRMED)
+    );
     assert.ok(result.reasonCodes.includes(StrategyReasonCode.REGIME_RISK_ON));
   });
 });
@@ -204,7 +258,9 @@ describe("CRYPTO_MTF_BREAKOUT_V1 — breakout window", () => {
     const previous = candles[candles.length - 2];
     candles[candles.length - 2] = {
       ...previous,
-      high: DecimalValue.fromString(previous.high).add(DecimalValue.fromSafeInteger(50)).toString()
+      high: DecimalValue.fromString(previous.high)
+        .add(DecimalValue.fromSafeInteger(50))
+        .toString()
     };
     raised.series["1h"] = { ...raised.series["1h"], candles };
     assert.notEqual(
@@ -216,36 +272,57 @@ describe("CRYPTO_MTF_BREAKOUT_V1 — breakout window", () => {
   it("refuses when the close only equals the prior high", () => {
     const snapshot = clone(buildPassingSnapshot());
     const candles = [...snapshot.series["1h"].candles];
-    const priorHigh = candidateOf(buildPassingSnapshot()).candidate.indicators.priorHigh20_1h;
+    const priorHigh = candidateOf(buildPassingSnapshot()).candidate.indicators
+      .priorHigh20_1h;
     const anchor = candles[candles.length - 1];
     candles[candles.length - 1] = {
       ...anchor,
       close: DecimalValue.fromString(priorHigh).toString(),
-      high: DecimalValue.fromString(priorHigh).add(DecimalValue.fromSafeInteger(1)).toString()
+      high: DecimalValue.fromString(priorHigh)
+        .add(DecimalValue.fromSafeInteger(1))
+        .toString()
     };
     snapshot.series["1h"] = { ...snapshot.series["1h"], candles };
 
     const result = evaluateCryptoMtfBreakoutV1(snapshot);
     assert.equal(result.outcome, "NO_CANDIDATE");
-    assert.ok(result.reasonCodes.includes(StrategyReasonCode.BREAKOUT_NOT_CONFIRMED));
+    assert.ok(
+      result.reasonCodes.includes(StrategyReasonCode.BREAKOUT_NOT_CONFIRMED)
+    );
   });
 });
 
 describe("CRYPTO_MTF_BREAKOUT_V1 — boundaries", () => {
   it("accepts relative volume of exactly 1.50 and refuses 1.49", () => {
-    const onBoundary = withOneHourShape(buildPassingSnapshot(), { volume: 100, anchorVolume: 150 });
+    const onBoundary = withOneHourShape(buildPassingSnapshot(), {
+      volume: 100,
+      anchorVolume: 150
+    });
     const boundaryCandidate = candidateOf(onBoundary).candidate;
-    assert.equal(boundaryCandidate.indicators.relativeVolume1h, "1.500000000000");
+    assert.equal(
+      boundaryCandidate.indicators.relativeVolume1h,
+      "1.500000000000"
+    );
 
-    const below = withOneHourShape(buildPassingSnapshot(), { volume: 100, anchorVolume: 149 });
+    const below = withOneHourShape(buildPassingSnapshot(), {
+      volume: 100,
+      anchorVolume: 149
+    });
     const result = evaluateCryptoMtfBreakoutV1(below);
     assert.equal(result.outcome, "NO_CANDIDATE");
-    assert.ok(result.reasonCodes.includes(StrategyReasonCode.RELATIVE_VOLUME_BELOW_MINIMUM));
+    assert.ok(
+      result.reasonCodes.includes(
+        StrategyReasonCode.RELATIVE_VOLUME_BELOW_MINIMUM
+      )
+    );
   });
 
   it("accepts an adjusted score of exactly 70 and refuses 69", () => {
     const onBoundary = clone(buildPassingSnapshot());
-    onBoundary.signals["1h"] = { ...onBoundary.signals["1h"]!, adjustedScore: 70 };
+    onBoundary.signals["1h"] = {
+      ...onBoundary.signals["1h"]!,
+      adjustedScore: 70
+    };
     assert.equal(candidateOf(onBoundary).outcome, "CANDIDATE");
 
     const below = clone(buildPassingSnapshot());
@@ -259,11 +336,17 @@ describe("CRYPTO_MTF_BREAKOUT_V1 — boundaries", () => {
 
   it("accepts an alignment score of exactly 0.65 and refuses one tick below", () => {
     const onBoundary = clone(buildPassingSnapshot());
-    onBoundary.multiTimeframe = { ...onBoundary.multiTimeframe!, alignmentScore: "0.650000000000" };
+    onBoundary.multiTimeframe = {
+      ...onBoundary.multiTimeframe!,
+      alignmentScore: "0.650000000000"
+    };
     assert.equal(candidateOf(onBoundary).outcome, "CANDIDATE");
 
     const below = clone(buildPassingSnapshot());
-    below.multiTimeframe = { ...below.multiTimeframe!, alignmentScore: "0.649999999999" };
+    below.multiTimeframe = {
+      ...below.multiTimeframe!,
+      alignmentScore: "0.649999999999"
+    };
     assert.ok(
       evaluateCryptoMtfBreakoutV1(below).reasonCodes.includes(
         StrategyReasonCode.MTF_ALIGNMENT_SCORE_BELOW_MINIMUM
@@ -315,7 +398,11 @@ describe("CRYPTO_MTF_BREAKOUT_V1 — boundaries", () => {
 
     const bearish = clone(neutral);
     bearish.contextEvents = [
-      { ...neutral.contextEvents[0], severity: "CRITICAL", directionalBias: "BEARISH" }
+      {
+        ...neutral.contextEvents[0],
+        severity: "CRITICAL",
+        directionalBias: "BEARISH"
+      }
     ];
     assert.ok(
       evaluateCryptoMtfBreakoutV1(bearish).reasonCodes.includes(
@@ -338,7 +425,10 @@ describe("CRYPTO_MTF_BREAKOUT_V1 — determinism and purity", () => {
     const base = evaluateCryptoMtfBreakoutV1(buildPassingSnapshot());
     const changed = clone(buildPassingSnapshot());
     changed.marketRegime = { ...changed.marketRegime!, confidence: 71 };
-    assert.notEqual(evaluateCryptoMtfBreakoutV1(changed).inputHash, base.inputHash);
+    assert.notEqual(
+      evaluateCryptoMtfBreakoutV1(changed).inputHash,
+      base.inputHash
+    );
   });
 
   it("is independent of object key order", () => {
@@ -362,7 +452,10 @@ describe("CRYPTO_MTF_BREAKOUT_V1 — determinism and purity", () => {
 
   it("derives evaluatedAt from asOf, never from the system clock", () => {
     const snapshot = buildPassingSnapshot();
-    assert.equal(evaluateCryptoMtfBreakoutV1(snapshot).evaluatedAt, snapshot.asOf);
+    assert.equal(
+      evaluateCryptoMtfBreakoutV1(snapshot).evaluatedAt,
+      snapshot.asOf
+    );
   });
 });
 
@@ -387,34 +480,86 @@ describe("CRYPTO_MTF_BREAKOUT_V1 — rejections", () => {
 });
 
 describe("strategy registry", () => {
-  it("exposes exactly one strategy in v1", () => {
-    assert.deepEqual([...REGISTERED_STRATEGY_KEYS], [CRYPTO_MTF_BREAKOUT_V1_KEY]);
+  it("exposes the long identity, its legacy alias and the short strategy", () => {
+    assert.deepEqual(
+      [...REGISTERED_STRATEGY_KEYS],
+      [
+        "CRYPTO_MTF_BREAKDOWN_SHORT_V1",
+        "CRYPTO_MTF_BREAKOUT_LONG_V1",
+        "CRYPTO_MTF_BREAKOUT_V1"
+      ]
+    );
+    // The legacy key still resolves so historical candidates stay evaluable
+    // against the exact hash they were decided with (ADR 0011).
     assert.notEqual(getStrategy(CRYPTO_MTF_BREAKOUT_V1_KEY), null);
     assert.equal(getStrategy("SOME_OTHER_STRATEGY"), null);
   });
 
+  it("keeps the legacy long identity byte-identical while renaming the current one", () => {
+    const legacy = getStrategy("CRYPTO_MTF_BREAKOUT_V1");
+    const current = getStrategy("CRYPTO_MTF_BREAKOUT_LONG_V1");
+    assert.ok(legacy && current);
+    // Renaming changes the identity, so the hash MUST differ — otherwise the
+    // rename would have silently rewritten history.
+    assert.notEqual(legacy.specificationHash, current.specificationHash);
+    // ...but every actual rule is unchanged: same evaluator, and the parameter
+    // sets differ in `key` only.
+    assert.equal(legacy.evaluate, current.evaluate);
+    const { key: legacyKey, ...legacyRest } = legacy.parameters as Record<
+      string,
+      unknown
+    >;
+    const { key: currentKey, ...currentRest } = current.parameters as Record<
+      string,
+      unknown
+    >;
+    assert.equal(legacyKey, "CRYPTO_MTF_BREAKOUT_V1");
+    assert.equal(currentKey, "CRYPTO_MTF_BREAKOUT_LONG_V1");
+    assert.deepEqual(legacyRest, currentRest);
+  });
+
   it("refuses an unregistered strategy key", () => {
     const snapshot = clone(buildPassingSnapshot());
-    snapshot.strategy = { ...snapshot.strategy, strategyKey: "CRYPTO_MTF_BREAKOUT_V2" };
+    snapshot.strategy = {
+      ...snapshot.strategy,
+      strategyKey: "CRYPTO_MTF_BREAKOUT_V2"
+    };
     const result = evaluateStrategy(snapshot);
     assert.equal(result.outcome, "INVALID_INPUT");
-    assert.deepEqual([...result.reasonCodes], [StrategyReasonCode.STRATEGY_KEY_UNKNOWN]);
+    assert.deepEqual(
+      [...result.reasonCodes],
+      [StrategyReasonCode.STRATEGY_KEY_UNKNOWN]
+    );
   });
 
   it("refuses a strategy version whose engine version drifted", () => {
     const snapshot = clone(buildPassingSnapshot());
-    snapshot.strategy = { ...snapshot.strategy, engineVersion: "crypto-mtf-breakout-v1/1.1.0" };
+    snapshot.strategy = {
+      ...snapshot.strategy,
+      engineVersion: "crypto-mtf-breakout-v1/1.1.0"
+    };
     const result = evaluateStrategy(snapshot);
     assert.equal(result.outcome, "INVALID_INPUT");
-    assert.ok(result.reasonCodes.includes(StrategyReasonCode.STRATEGY_ENGINE_VERSION_MISMATCH));
+    assert.ok(
+      result.reasonCodes.includes(
+        StrategyReasonCode.STRATEGY_ENGINE_VERSION_MISMATCH
+      )
+    );
   });
 
   it("refuses a strategy version whose specification hash drifted", () => {
     const snapshot = clone(buildPassingSnapshot());
-    snapshot.strategy = { ...snapshot.strategy, specificationHash: "f".repeat(64) };
+    snapshot.strategy = {
+      ...snapshot.strategy,
+      specificationHash: "f".repeat(64)
+    };
     const result = evaluateStrategy(snapshot);
     assert.equal(result.outcome, "INVALID_INPUT");
-    assert.ok(result.reasonCodes.includes(StrategyReasonCode.STRATEGY_SPECIFICATION_HASH_MISMATCH));
+    assert.ok(
+      result.reasonCodes.includes(
+        StrategyReasonCode.STRATEGY_SPECIFICATION_HASH_MISMATCH
+      )
+    );
   });
 
   it("refuses a strategy version without a code version", () => {
@@ -422,7 +567,11 @@ describe("strategy registry", () => {
     snapshot.strategy = { ...snapshot.strategy, codeVersion: "  " };
     const result = evaluateStrategy(snapshot);
     assert.equal(result.outcome, "INVALID_INPUT");
-    assert.ok(result.reasonCodes.includes(StrategyReasonCode.STRATEGY_CODE_VERSION_MISSING));
+    assert.ok(
+      result.reasonCodes.includes(
+        StrategyReasonCode.STRATEGY_CODE_VERSION_MISSING
+      )
+    );
   });
 
   it("pins the specification hash", () => {

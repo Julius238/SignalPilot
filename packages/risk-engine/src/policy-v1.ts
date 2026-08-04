@@ -14,10 +14,10 @@
 
 import { buildSpecificationHash } from "@signalpilot/trading-domain";
 
-export const RISK_ENGINE_VERSION = "risk-engine-v1/1.0.0";
-export const RISK_RULE_SET_VERSION = "risk-rules-v1/1.0.0";
-export const RISK_SIZING_POLICY_VERSION = "risk-sizing-v1/1.0.0";
-export const RISK_COST_POLICY_VERSION = "risk-cost-v1/1.0.0";
+export const RISK_ENGINE_VERSION = "risk-engine-v1/1.1.0";
+export const RISK_RULE_SET_VERSION = "risk-rules-v1/1.1.0";
+export const RISK_SIZING_POLICY_VERSION = "risk-sizing-v1/1.1.0";
+export const RISK_COST_POLICY_VERSION = "risk-cost-v1/1.1.0";
 
 export const RISK_LIMIT_SET_KEY = "SHADOW_V1";
 export const RISK_LIMIT_SET_VERSION = 1;
@@ -36,7 +36,10 @@ export const PORTFOLIO_TOLERANCE = "0.00000001";
 
 /** Fixed correlation group for v1 (docs/trading/06, "Correlation v1"). */
 export const CRYPTO_MAJOR_GROUP_KEY = "CRYPTO_MAJOR";
-export const CRYPTO_MAJOR_MEMBERS: readonly string[] = Object.freeze(["BTCUSDT", "ETHUSDT"]);
+export const CRYPTO_MAJOR_MEMBERS: readonly string[] = Object.freeze([
+  "BTCUSDT",
+  "ETHUSDT"
+]);
 
 /**
  * Freshness ceilings for `R-016-DATA-FRESHNESS`. The candle and data-quality
@@ -57,8 +60,15 @@ export const RISK_MINIMUM_CANDLES = 200;
 
 /** Regime conditions for `R-020-REGIME`. */
 export const RISK_REGIME_POLICY = Object.freeze({
-  requiredCryptoRegime: "RISK_ON",
-  forbiddenRiskModes: Object.freeze(["DEFENSIVE", "HIGH_RISK", "UNKNOWN"] as const),
+  requiredCryptoRegimeByDirection: Object.freeze({
+    LONG: "RISK_ON",
+    SHORT: "RISK_OFF"
+  }),
+  forbiddenRiskModes: Object.freeze([
+    "DEFENSIVE",
+    "HIGH_RISK",
+    "UNKNOWN"
+  ] as const),
   minimumConfidence: 60
 });
 
@@ -98,9 +108,22 @@ export const RISK_POLICY_V1 = Object.freeze({
   minimumCandles: RISK_MINIMUM_CANDLES,
   regime: RISK_REGIME_POLICY,
   assetScope: RISK_ASSET_SCOPE,
-  correlationGroup: Object.freeze({ key: CRYPTO_MAJOR_GROUP_KEY, members: CRYPTO_MAJOR_MEMBERS }),
+  correlationGroup: Object.freeze({
+    key: CRYPTO_MAJOR_GROUP_KEY,
+    members: CRYPTO_MAJOR_MEMBERS
+  }),
   portfolioTolerance: PORTFOLIO_TOLERANCE,
-  direction: "LONG",
+  directions: Object.freeze(["LONG", "SHORT"]),
+  shortCapability: Object.freeze({
+    shadowOnly: true,
+    leveraged: false,
+    exchangeExecution: false,
+    margin: false,
+    futures: false,
+    borrowing: false,
+    funding: false,
+    liquidation: false
+  }),
   entryType: "MARKET",
   leverageAllowed: false,
   marginAllowed: false,
@@ -111,4 +134,5 @@ export const RISK_POLICY_V1 = Object.freeze({
 export const RISK_POLICY_HASH = buildSpecificationHash(RISK_POLICY_V1);
 
 /** Specification hash a stored `RiskLimitSet` row must carry to be accepted. */
-export const RISK_LIMIT_SET_SPECIFICATION_HASH = buildSpecificationHash(RISK_LIMIT_SET_V1);
+export const RISK_LIMIT_SET_SPECIFICATION_HASH =
+  buildSpecificationHash(RISK_LIMIT_SET_V1);

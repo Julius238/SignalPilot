@@ -118,7 +118,10 @@ describe("database package ESM exports", () => {
 
   it("exports the shadow trading enums at runtime", () => {
     assert.equal(TradeCandidateStatus.READY_FOR_RISK, "READY_FOR_RISK");
-    assert.equal(TradeCandidateStatus.APPROVED_FOR_SHADOW, "APPROVED_FOR_SHADOW");
+    assert.equal(
+      TradeCandidateStatus.APPROVED_FOR_SHADOW,
+      "APPROVED_FOR_SHADOW"
+    );
     assert.equal(ShadowOrderStatus.WAITING_FOR_ENTRY, "WAITING_FOR_ENTRY");
     assert.equal(ShadowPositionStatus.STOPPED_OUT, "STOPPED_OUT");
     assert.equal(TradingSessionStatus.SHADOW_ACTIVE, "SHADOW_ACTIVE");
@@ -130,8 +133,15 @@ describe("database package ESM exports", () => {
   it("exposes no live trading and no limit order enum member", () => {
     assert.deepEqual(Object.values(TradingSessionMode), ["SHADOW"]);
     assert.deepEqual(Object.values(ShadowOrderType), ["MARKET"]);
-    assert.deepEqual(Object.values(TradeDirection), ["LONG"]);
     assert.deepEqual(Object.values(TradeEntryType), ["MARKET"]);
+  });
+
+  it("allows exactly LONG and SHORT, and SHORT is synthetic only", () => {
+    // SHORT is a synthetic, unleveraged shadow direction (ADR 0012). It is not
+    // a live-trading capability: TradingSessionMode still has no LIVE member,
+    // ShadowOrderType still has no LIMIT member, and no exchange adapter
+    // exists. Adding a third direction would need its own decision record.
+    assert.deepEqual(Object.values(TradeDirection), ["LONG", "SHORT"]);
   });
 
   it("exports the remaining shadow trading enum constants without throwing", () => {
@@ -157,7 +167,9 @@ describe("database package ESM exports", () => {
       TradeEvidenceType,
       TradingActorType
     ]) {
-      assert.ok(typeof enumObject === "object" && Object.keys(enumObject).length > 0);
+      assert.ok(
+        typeof enumObject === "object" && Object.keys(enumObject).length > 0
+      );
     }
   });
 

@@ -12,7 +12,13 @@
  * closing the position.
  */
 
-import { DecimalValue, RoundingMode, type DecimalString } from "@signalpilot/trading-domain";
+import {
+  DecimalValue,
+  RoundingMode,
+  TradeDirection,
+  type DecimalString,
+  type TradeDirection as TradeDirectionValue
+} from "@signalpilot/trading-domain";
 import { rateFromBps } from "@signalpilot/trading-simulation";
 
 import type {
@@ -54,8 +60,32 @@ export function computeConservativeBidMark(
   return mark.quantizeToStep(tick, RoundingMode.FLOOR).toString();
 }
 
+/** Directional conservative close mark: bid for LONG, ask for SHORT. */
+export function computeConservativeMark(
+  direction: TradeDirectionValue,
+  closePrice: string,
+  fullSpreadBps: number,
+  tickSize: string | null
+): DecimalString | null {
+  if (direction === TradeDirection.LONG) {
+    return computeConservativeBidMark(closePrice, fullSpreadBps, tickSize);
+  }
+  if (direction !== TradeDirection.SHORT) return null;
+  const close = decimalOrNull(closePrice);
+  const rate = rateFromBps(fullSpreadBps);
+  if (close === null || !close.isPositive() || rate === null) return null;
+  const halfSpread = rate.div(TWO, RoundingMode.CEIL);
+  const mark = close.mul(DecimalValue.ONE.add(halfSpread), RoundingMode.CEIL);
+  if (tickSize === null) return mark.toString();
+  const tick = decimalOrNull(tickSize);
+  if (tick === null || !tick.isPositive()) return mark.toString();
+  return mark.quantizeToStep(tick, RoundingMode.CEIL).toString();
+}
+
 /** Open quantity × (mark - average entry), minus an estimated exit fee. */
-export function computePositionMark(input: PositionMarkInputV1): PositionMarkResultV1 | null {
+export function computePositionMark(
+  input: PositionMarkInputV1
+): PositionMarkResultV1 | null {
   const quantity = decimalOrNull(input.openQuantity);
   const averageEntry = decimalOrNull(input.averageEntryPrice);
   const mark = decimalOrNull(input.conservativeBidMark);
@@ -75,9 +105,22 @@ export function computePositionMark(input: PositionMarkInputV1): PositionMarkRes
 
   const marketValue = quantity.mul(mark, RoundingMode.FLOOR);
   const estimatedExitFee = marketValue.mul(feeRate, RoundingMode.CEIL);
-  const unrealizedPnl = mark.sub(averageEntry).mul(quantity, RoundingMode.FLOOR).sub(estimatedExitFee);
+  const grossUnrealized =
+    input.direction === TradeDirection.LONG
+      ? mark.sub(averageEntry).mul(quantity, RoundingMode.FLOOR)
+      : input.direction === TradeDirection.SHORT
+        ? averageEntry.sub(mark).mul(quantity, RoundingMode.FLOOR)
+        : null;
+  if (grossUnrealized === null) return null;
+  const unrealizedPnl = grossUnrealized.sub(estimatedExitFee);
+  const equityContribution =
+    input.direction === TradeDirection.LONG ? marketValue : unrealizedPnl;
 
-  return { marketValue: marketValue.toString(), unrealizedPnl: unrealizedPnl.toString() };
+  return {
+    marketValue: marketValue.toString(),
+    unrealizedPnl: unrealizedPnl.toString(),
+    equityContribution: equityContribution.toString()
+  };
 }
 
 /**
@@ -93,19 +136,32 @@ export function computePortfolioValuation(
   const availableCash = decimalOrNull(input.availableCash);
   const reservedCash = decimalOrNull(input.reservedCash);
   const priorHighWaterMark = decimalOrNull(input.highWaterMark);
-  if (availableCash === null || reservedCash === null || priorHighWaterMark === null) return null;
+  if (
+    availableCash === null ||
+    reservedCash === null ||
+    priorHighWaterMark === null
+  )
+    return null;
 
   let marketValue = DecimalValue.ZERO;
   let unrealizedPnl = DecimalValue.ZERO;
+  let equityContribution = DecimalValue.ZERO;
   for (const mark of input.openPositionMarks) {
     const marketValueEntry = decimalOrNull(mark.marketValue);
     const unrealizedEntry = decimalOrNull(mark.unrealizedPnl);
-    if (marketValueEntry === null || unrealizedEntry === null) return null;
+    const equityEntry = decimalOrNull(mark.equityContribution);
+    if (
+      marketValueEntry === null ||
+      unrealizedEntry === null ||
+      equityEntry === null
+    )
+      return null;
     marketValue = marketValue.add(marketValueEntry);
     unrealizedPnl = unrealizedPnl.add(unrealizedEntry);
+    equityContribution = equityContribution.add(equityEntry);
   }
 
-  const equity = availableCash.add(reservedCash).add(marketValue);
+  const equity = availableCash.add(reservedCash).add(equityContribution);
   const highWaterMark = DecimalValue.max(priorHighWaterMark, equity);
   const drawdownAmount = highWaterMark.sub(equity);
   const drawdownPct = highWaterMark.isPositive()

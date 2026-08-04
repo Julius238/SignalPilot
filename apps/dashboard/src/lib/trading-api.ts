@@ -6,7 +6,12 @@
 //
 // Alle Decimal-Felder sind Strings, alle Zeitfelder ISO-UTC-Strings.
 
-import { buildQuery, fetchApi, mutateApi, type ApiResult } from "./signalpilot-api";
+import {
+  buildQuery,
+  fetchApi,
+  mutateApi,
+  type ApiResult
+} from "./signalpilot-api";
 
 export type TradeCandidateStatus =
   | "CREATED"
@@ -17,11 +22,17 @@ export type TradeCandidateStatus =
   | "RISK_REJECTED"
   | "EXPIRED"
   | "CANCELLED";
+export type TradeDirection = "LONG" | "SHORT";
 
 export type RiskAssessmentStatus = "PASS" | "FAIL" | "ERROR";
 export type RiskRuleOutcome = "PASS" | "FAIL" | "WARN" | "ERROR";
 export type RiskSeverity = "INFO" | "WARNING" | "BLOCKER" | "CRITICAL";
-export type TradeDecisionOutcome = "APPROVE_SHADOW" | "REJECT" | "EXPIRE" | "CANCEL" | "ERROR";
+export type TradeDecisionOutcome =
+  | "APPROVE_SHADOW"
+  | "REJECT"
+  | "EXPIRE"
+  | "CANCEL"
+  | "ERROR";
 
 export type ShadowOrderStatus =
   | "PROPOSED"
@@ -114,7 +125,12 @@ export type TradingOverview = {
   drawdownAmount: string;
   drawdownPct: string;
   latestActivity: {
-    candidate: { id: string; symbol: string | null; status: string; dataAsOf: string } | null;
+    candidate: {
+      id: string;
+      symbol: string | null;
+      status: string;
+      dataAsOf: string;
+    } | null;
     riskAssessment: { id: string; status: string; assessedAt: string } | null;
     order: { id: string; status: string; createdAt: string } | null;
   };
@@ -163,13 +179,45 @@ export type PortfolioSnapshot = {
   openPositionCount: number;
 };
 
+export type StrategyAssignment = {
+  id: string;
+  portfolioId: string;
+  assetId: string;
+  symbol: string;
+  timeframe: string;
+  enabled: boolean;
+  direction: TradeDirection | null;
+  directionConsistent: boolean;
+  strategyId: string;
+  strategyKey: string;
+  strategyName: string;
+  strategyStatus: string;
+  strategyVersionId: string;
+  strategyVersion: number;
+  strategyVersionStatus: string;
+  strategyEngineVersion: string;
+  strategySpecificationHash: string;
+  syntheticShadowOnly: boolean;
+  version: number;
+  validFrom: string | null;
+  validTo: string | null;
+};
+
 export type TradeCandidateListItem = {
   id: string;
   candidateKey: string;
   portfolioId: string;
   assetId: string;
   symbol: string | null;
-  direction: string;
+  direction: TradeDirection;
+  strategyAssignmentId: string;
+  strategyVersionId: string;
+  strategyKey: string | null;
+  strategyName: string | null;
+  strategyVersion: number | null;
+  strategyEngineVersion: string | null;
+  strategyCodeVersion: string | null;
+  strategySpecificationHash: string | null;
   entryType: string;
   status: TradeCandidateStatus;
   referenceEntryPrice: string;
@@ -194,6 +242,7 @@ export type TradeCandidateDetail = TradeCandidateListItem & {
   earliestFillAt: string | null;
   maxHoldHours: number | null;
   strategyReasonCodes: unknown;
+  latestRiskAssessment: RiskAssessment | null;
 };
 
 export type RiskRuleResult = {
@@ -243,7 +292,14 @@ export type ShadowOrder = {
   tradeCandidateId: string | null;
   shadowPositionId: string | null;
   purpose: ShadowOrderPurpose;
+  direction: TradeDirection;
   side: ShadowOrderSide;
+  strategyVersionId: string | null;
+  strategyVersion: number | null;
+  strategyKey: string | null;
+  strategyName: string | null;
+  syntheticShadowShort: boolean;
+  exchangePosition: false;
   orderType: string;
   timeInForce: string;
   status: ShadowOrderStatus;
@@ -268,6 +324,13 @@ export type ShadowFill = {
   assetId: string;
   symbol: string | null;
   side: ShadowOrderSide;
+  direction: TradeDirection | null;
+  strategyVersionId: string | null;
+  strategyVersion: number | null;
+  strategyKey: string | null;
+  strategyName: string | null;
+  syntheticShadowShort: boolean;
+  exchangePosition: false;
   quantity: string;
   referencePrice: string;
   spreadAmount: string;
@@ -286,6 +349,14 @@ export type ShadowPositionListItem = {
   portfolioId: string;
   assetId: string;
   symbol: string | null;
+  direction: TradeDirection;
+  strategyAssignmentId: string;
+  strategyVersionId: string;
+  strategyVersion: number | null;
+  strategyKey: string | null;
+  strategyName: string | null;
+  syntheticShadowShort: boolean;
+  exchangePosition: false;
   status: ShadowPositionStatus;
   initialQuantity: string;
   openQuantity: string;
@@ -294,6 +365,8 @@ export type ShadowPositionListItem = {
   averageExitPrice: string;
   realizedPnl: string;
   feesPaid: string;
+  reservedCollateral: string;
+  exitReason: ShadowFillTriggerType | string | null;
   stopPrice: string;
   takeProfitPrice: string;
   maxHoldUntil: string;
@@ -316,6 +389,13 @@ export type ShadowPositionDetail = ShadowPositionListItem & {
   grossEntryNotional: string;
   grossExitNotional: string;
   lastValuationAt: string | null;
+  exitPlans: Array<{
+    id: string;
+    version: number;
+    status: string;
+    triggeredBy: string | null;
+    triggeredAt: string | null;
+  }>;
   events: ShadowPositionEvent[];
 };
 
@@ -440,7 +520,9 @@ export type PaginationParams = {
   to?: string;
 };
 
-export function buildTradingQuery(params: Record<string, string | number | undefined>): string {
+export function buildTradingQuery(
+  params: Record<string, string | number | undefined>
+): string {
   return buildQuery(params);
 }
 
@@ -456,55 +538,117 @@ export function fetchTradingPortfolio() {
   return fetchApi<PortfolioSummary>("/trading/portfolio");
 }
 
-export function fetchTradingPortfolioSnapshots(params: PaginationParams & { portfolioId?: string }) {
-  return fetchApi<PortfolioSnapshot[]>(`/trading/portfolio/snapshots${buildQuery(params)}`);
+export function fetchTradingPortfolioSnapshots(
+  params: PaginationParams & { portfolioId?: string }
+) {
+  return fetchApi<PortfolioSnapshot[]>(
+    `/trading/portfolio/snapshots${buildQuery(params)}`
+  );
+}
+
+export function fetchStrategyAssignments(
+  params: PaginationParams & {
+    assetId?: string;
+    direction?: string;
+    enabled?: "true" | "false";
+  }
+) {
+  return fetchApi<StrategyAssignment[]>(
+    `/trading/assignments${buildQuery(params)}`
+  );
 }
 
 export function fetchTradeCandidates(
-  params: PaginationParams & { status?: string; assetId?: string }
+  params: PaginationParams & {
+    status?: string;
+    assetId?: string;
+    direction?: string;
+    strategyVersionId?: string;
+  }
 ) {
-  return fetchApi<TradeCandidateListItem[]>(`/trading/candidates${buildQuery(params)}`);
+  return fetchApi<TradeCandidateListItem[]>(
+    `/trading/candidates${buildQuery(params)}`
+  );
 }
 
 export function fetchTradeCandidateDetail(id: string) {
-  return fetchApi<TradeCandidateDetail>(`/trading/candidates/${encodeURIComponent(id)}`);
+  return fetchApi<TradeCandidateDetail>(
+    `/trading/candidates/${encodeURIComponent(id)}`
+  );
 }
 
 export function fetchRiskAssessments(
-  params: PaginationParams & { status?: string; tradeCandidateId?: string; portfolioId?: string }
+  params: PaginationParams & {
+    status?: string;
+    tradeCandidateId?: string;
+    portfolioId?: string;
+  }
 ) {
-  return fetchApi<RiskAssessment[]>(`/trading/risk-assessments${buildQuery(params)}`);
+  return fetchApi<RiskAssessment[]>(
+    `/trading/risk-assessments${buildQuery(params)}`
+  );
 }
 
 export function fetchShadowOrders(
-  params: PaginationParams & { status?: string; purpose?: string; assetId?: string; portfolioId?: string }
+  params: PaginationParams & {
+    status?: string;
+    purpose?: string;
+    assetId?: string;
+    portfolioId?: string;
+    direction?: string;
+    strategyVersionId?: string;
+  }
 ) {
   return fetchApi<ShadowOrder[]>(`/trading/orders${buildQuery(params)}`);
 }
 
 export function fetchShadowFills(
-  params: PaginationParams & { assetId?: string; orderId?: string; positionId?: string }
+  params: PaginationParams & {
+    assetId?: string;
+    orderId?: string;
+    positionId?: string;
+    direction?: string;
+    strategyVersionId?: string;
+  }
 ) {
   return fetchApi<ShadowFill[]>(`/trading/fills${buildQuery(params)}`);
 }
 
 export function fetchShadowPositions(
-  params: PaginationParams & { assetId?: string; portfolioId?: string; open?: "true" | "false" }
+  params: PaginationParams & {
+    assetId?: string;
+    portfolioId?: string;
+    open?: "true" | "false";
+    direction?: string;
+    strategyVersionId?: string;
+  }
 ) {
-  return fetchApi<ShadowPositionListItem[]>(`/trading/positions${buildQuery(params)}`);
+  return fetchApi<ShadowPositionListItem[]>(
+    `/trading/positions${buildQuery(params)}`
+  );
 }
 
 export function fetchShadowPositionDetail(id: string) {
-  return fetchApi<ShadowPositionDetail>(`/trading/positions/${encodeURIComponent(id)}`);
+  return fetchApi<ShadowPositionDetail>(
+    `/trading/positions/${encodeURIComponent(id)}`
+  );
 }
 
 export function fetchStrategyPerformance(
-  params: PaginationParams & { window?: string; portfolioId?: string; strategyVersionId?: string }
+  params: PaginationParams & {
+    window?: string;
+    portfolioId?: string;
+    strategyVersionId?: string;
+  }
 ) {
-  return fetchApi<StrategyPerformance[]>(`/trading/performance${buildQuery(params)}`);
+  return fetchApi<StrategyPerformance[]>(
+    `/trading/performance${buildQuery(params)}`
+  );
 }
 
-export function fetchTradingSessions(params: PaginationParams & { portfolioId?: string }) {
+export function fetchTradingSessions(
+  params: PaginationParams & { portfolioId?: string }
+) {
   return fetchApi<TradingSession[]>(`/trading/sessions${buildQuery(params)}`);
 }
 
@@ -540,7 +684,9 @@ export function fetchWorkerStatus() {
 // technischer Fehler — die UI muss das als deaktiviert behandeln, nicht als
 // harten Fehler.
 
-export async function fetchTradingCsrfToken(): Promise<ApiResult<{ csrfToken: string }>> {
+export async function fetchTradingCsrfToken(): Promise<
+  ApiResult<{ csrfToken: string }>
+> {
   return fetchApi<{ csrfToken: string }>("/trading/csrf-token");
 }
 
@@ -616,7 +762,9 @@ export const CONFIRM_PHRASES = {
 // (plus `expectedVersion`, `entityType`, `entityId`). Diese Funktion bleibt als
 // Fallback für Antworten bestehen, die nur den Satz "Current version is <N>."
 // enthalten — sie ist nicht mehr der primäre Weg.
-export function parseVersionFromConflictMessage(message: string): number | null {
+export function parseVersionFromConflictMessage(
+  message: string
+): number | null {
   const match = message.match(/version is (\d+)/i);
   return match ? Number(match[1]) : null;
 }
@@ -631,15 +779,23 @@ export type TradingVersionConflict = {
 };
 
 /** Bevorzugter Weg: die strukturierten Felder aus dem 409-Body lesen. */
-export function readVersionConflict(body: unknown): TradingVersionConflict | null {
+export function readVersionConflict(
+  body: unknown
+): TradingVersionConflict | null {
   if (body === null || typeof body !== "object") return null;
   const record = body as Record<string, unknown>;
-  if (record.reasonCode !== "VERSION_CONFLICT" || typeof record.currentVersion !== "number") return null;
+  if (
+    record.reasonCode !== "VERSION_CONFLICT" ||
+    typeof record.currentVersion !== "number"
+  )
+    return null;
   return {
     reasonCode: "VERSION_CONFLICT",
     currentVersion: record.currentVersion,
-    expectedVersion: typeof record.expectedVersion === "number" ? record.expectedVersion : -1,
-    entityType: typeof record.entityType === "string" ? record.entityType : "unknown",
+    expectedVersion:
+      typeof record.expectedVersion === "number" ? record.expectedVersion : -1,
+    entityType:
+      typeof record.entityType === "string" ? record.entityType : "unknown",
     entityId: typeof record.entityId === "string" ? record.entityId : null,
     message: typeof record.message === "string" ? record.message : ""
   };
@@ -652,6 +808,7 @@ export function readVersionConflict(body: unknown): TradingVersionConflict | nul
 
 export type StrategyPerformanceSegmentType =
   | "OVERALL"
+  | "DIRECTION"
   | "STRATEGY_VERSION"
   | "ASSET"
   | "MARKET_REGIME"
@@ -746,10 +903,19 @@ export type PerformanceLatestRun = {
     computedAt: string | null;
   } | null;
   segments: PerformanceSegment[];
-  engineVersions: Array<{ engineVersion: string; snapshots: number; latestAsOf: string | null }>;
+  engineVersions: Array<{
+    engineVersion: string;
+    snapshots: number;
+    latestAsOf: string | null;
+  }>;
 };
 
-export type TradingAlertOutboxStatus = "PENDING" | "PROCESSING" | "SENT" | "FAILED" | "DEAD";
+export type TradingAlertOutboxStatus =
+  | "PENDING"
+  | "PROCESSING"
+  | "SENT"
+  | "FAILED"
+  | "DEAD";
 
 export type TradingAlertEventType =
   | "SESSION_ERROR_LOCKED"
@@ -891,11 +1057,18 @@ export function fetchPerformanceSegments(
     engineVersion?: string;
   }
 ) {
-  return fetchApi<PerformanceSegment[]>(`/trading/performance/segments${buildQuery(params)}`);
+  return fetchApi<PerformanceSegment[]>(
+    `/trading/performance/segments${buildQuery(params)}`
+  );
 }
 
-export function fetchLatestPerformanceRun(params: { window?: string; portfolioId?: string }) {
-  return fetchApi<PerformanceLatestRun>(`/trading/performance/latest${buildQuery(params)}`);
+export function fetchLatestPerformanceRun(params: {
+  window?: string;
+  portfolioId?: string;
+}) {
+  return fetchApi<PerformanceLatestRun>(
+    `/trading/performance/latest${buildQuery(params)}`
+  );
 }
 
 export function fetchAlertOutbox(
@@ -906,7 +1079,9 @@ export function fetchAlertOutbox(
     portfolioId?: string;
   }
 ) {
-  return fetchApi<AlertOutboxEntry[]>(`/trading/alerts/outbox${buildQuery(params)}`);
+  return fetchApi<AlertOutboxEntry[]>(
+    `/trading/alerts/outbox${buildQuery(params)}`
+  );
 }
 
 export function fetchAlertOutboxSummary() {
@@ -918,7 +1093,9 @@ export function fetchAuditDrilldown(params: {
   aggregateId: string;
   limit?: number;
 }) {
-  return fetchApi<AuditDrilldown>(`/trading/audit/drilldown${buildQuery(params)}`);
+  return fetchApi<AuditDrilldown>(
+    `/trading/audit/drilldown${buildQuery(params)}`
+  );
 }
 
 export function fetchEligibilityReport() {

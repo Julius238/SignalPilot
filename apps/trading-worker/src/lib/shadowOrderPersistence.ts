@@ -29,22 +29,30 @@ import {
   ShadowOrderType,
   ShadowPositionStatus,
   TradeCandidateStatus,
+  TradeDirection,
   TradingActorType,
   type PrismaClient
 } from "@signalpilot/database";
 import { computeReserveEntry } from "@signalpilot/portfolio";
 import {
   DecimalValue,
+  ENTRY_SIDE,
   TradingReasonCode,
   buildAuditEventKey,
   buildClientOrderId,
   buildEntryOrderKey,
   buildLedgerEntryKey,
+  buildOpenEntryOrderScopeKey,
   buildPayloadHash,
   buildRiskEventKey
 } from "@signalpilot/trading-domain";
 
-import { asJson, decimalString, ledgerEntryCreateData, portfolioState } from "./shadowPortfolioIo.js";
+import {
+  asJson,
+  decimalString,
+  ledgerEntryCreateData,
+  portfolioState
+} from "./shadowPortfolioIo.js";
 
 export const SHADOW_ORDER_JOB_KEY = "trading:shadow-create-orders";
 
@@ -70,6 +78,8 @@ export const ShadowOrderReasonCode = {
   DECISION_MISSING: "SHADOW_ORDER_DECISION_MISSING",
   RISK_ASSESSMENT_MISSING: "SHADOW_ORDER_RISK_ASSESSMENT_MISSING",
   SIZING_UNREADABLE: "SHADOW_ORDER_SIZING_UNREADABLE",
+  DIRECTION_DISABLED: "SHADOW_ORDER_DIRECTION_DISABLED",
+  DIRECTION_CONFLICT: "SHADOW_ORDER_DIRECTION_CONFLICT",
   PORTFOLIO_NOT_ACTIVE: TradingReasonCode.PORTFOLIO_NOT_ACTIVE,
   SESSION_BLOCKS_ENTRY: TradingReasonCode.SESSION_BLOCKS_ENTRY,
   EXECUTION_PROFILE_MISSING: "SHADOW_ORDER_EXECUTION_PROFILE_MISSING",
@@ -87,13 +97,25 @@ export const ShadowOrderOutcome = {
   IDEMPOTENT_REPLAY: "IDEMPOTENT_REPLAY",
   BLOCKED: "BLOCKED"
 } as const;
-export type ShadowOrderOutcome = (typeof ShadowOrderOutcome)[keyof typeof ShadowOrderOutcome];
+export type ShadowOrderOutcome =
+  (typeof ShadowOrderOutcome)[keyof typeof ShadowOrderOutcome];
 
 export interface CreateShadowOrderInput {
   readonly tradeCandidateId: string;
   readonly asOf: Date;
   readonly codeVersion: string;
   readonly correlationId: string;
+  readonly capability: {
+    readonly strategyV1Enabled: boolean;
+    readonly strategyLongV1Enabled: boolean;
+    readonly strategyShortV1Enabled: boolean;
+    readonly shadowShortEnabled: boolean;
+    readonly shadowOnlyBuild: boolean;
+    readonly enableLiveTrading: boolean;
+    readonly exchangeExecutionEnabled: boolean;
+    readonly marginTradingEnabled: boolean;
+    readonly futuresTradingEnabled: boolean;
+  };
 }
 
 export interface CreateShadowOrderResult {
@@ -111,7 +133,12 @@ type Sizing = {
 
 /** Extract only the fields this module needs from `RiskAssessment.inputsJson`. */
 function extractSizing(inputsJson: Prisma.JsonValue): Sizing | null {
-  if (typeof inputsJson !== "object" || inputsJson === null || Array.isArray(inputsJson)) return null;
+  if (
+    typeof inputsJson !== "object" ||
+    inputsJson === null ||
+    Array.isArray(inputsJson)
+  )
+    return null;
   const sizing = (inputsJson as Record<string, unknown>).sizing;
   if (typeof sizing !== "object" || sizing === null) return null;
   const record = sizing as Record<string, unknown>;
@@ -134,13 +161,22 @@ function extractSizing(inputsJson: Prisma.JsonValue): Sizing | null {
 function extractExecutionProfileRef(
   inputsJson: Prisma.JsonValue
 ): { readonly id: string; readonly specificationHash: string } | null {
-  if (typeof inputsJson !== "object" || inputsJson === null || Array.isArray(inputsJson)) return null;
+  if (
+    typeof inputsJson !== "object" ||
+    inputsJson === null ||
+    Array.isArray(inputsJson)
+  )
+    return null;
   const snapshot = (inputsJson as Record<string, unknown>).snapshot;
   if (typeof snapshot !== "object" || snapshot === null) return null;
   const profile = (snapshot as Record<string, unknown>).executionProfile;
   if (typeof profile !== "object" || profile === null) return null;
   const record = profile as Record<string, unknown>;
-  if (typeof record.id !== "string" || typeof record.specificationHash !== "string") return null;
+  if (
+    typeof record.id !== "string" ||
+    typeof record.specificationHash !== "string"
+  )
+    return null;
   return { id: record.id, specificationHash: record.specificationHash };
 }
 
@@ -148,7 +184,12 @@ function blocked(
   reasonCode: ShadowOrderReasonCode,
   message: string
 ): CreateShadowOrderResult {
-  return { outcome: ShadowOrderOutcome.BLOCKED, reasonCode, shadowOrderId: null, message };
+  return {
+    outcome: ShadowOrderOutcome.BLOCKED,
+    reasonCode,
+    shadowOrderId: null,
+    message
+  };
 }
 
 /**
@@ -163,10 +204,68 @@ export async function createShadowOrderForCandidate(
 ): Promise<CreateShadowOrderResult> {
   const candidate = await database.tradeCandidate.findUnique({
     where: { id: input.tradeCandidateId },
-    include: { decision: true }
+    include: {
+      decision: true,
+      strategyVersion: { include: { strategy: true } },
+      strategyAssignment: true
+    }
   });
   if (candidate === null) {
-    return blocked(ShadowOrderReasonCode.CANDIDATE_NOT_FOUND, `No TradeCandidate ${input.tradeCandidateId}.`);
+    return blocked(
+      ShadowOrderReasonCode.CANDIDATE_NOT_FOUND,
+      `No TradeCandidate ${input.tradeCandidateId}.`
+    );
+  }
+
+  const assignmentConfig = candidate.strategyAssignment.assignmentConfigJson;
+  const assignmentDirection =
+    typeof assignmentConfig === "object" &&
+    assignmentConfig !== null &&
+    !Array.isArray(assignmentConfig)
+      ? (assignmentConfig as Record<string, unknown>).direction
+      : null;
+  const strategyParameters = candidate.strategyVersion.parametersJson;
+  const strategyDirection =
+    typeof strategyParameters === "object" &&
+    strategyParameters !== null &&
+    !Array.isArray(strategyParameters)
+      ? (strategyParameters as Record<string, unknown>).direction
+      : null;
+  if (
+    strategyDirection !== candidate.direction ||
+    assignmentDirection !== candidate.direction
+  ) {
+    return blocked(
+      ShadowOrderReasonCode.DIRECTION_CONFLICT,
+      "Candidate, StrategyVersion and StrategyAssignment do not declare the same direction."
+    );
+  }
+  const capability = input.capability;
+  const capabilitySafe =
+    capability.strategyV1Enabled === true &&
+    capability.shadowOnlyBuild === true &&
+    capability.enableLiveTrading === false &&
+    capability.exchangeExecutionEnabled === false &&
+    capability.marginTradingEnabled === false &&
+    capability.futuresTradingEnabled === false;
+  const directionEnabled =
+    candidate.direction === TradeDirection.LONG
+      ? capabilitySafe &&
+        (candidate.strategyVersion.strategy.key === "CRYPTO_MTF_BREAKOUT_V1" ||
+          (candidate.strategyVersion.strategy.key ===
+            "CRYPTO_MTF_BREAKOUT_LONG_V1" &&
+            capability.strategyLongV1Enabled === true))
+      : candidate.direction === TradeDirection.SHORT &&
+        capabilitySafe &&
+        candidate.strategyVersion.strategy.key ===
+          "CRYPTO_MTF_BREAKDOWN_SHORT_V1" &&
+        capability.strategyShortV1Enabled === true &&
+        capability.shadowShortEnabled === true;
+  if (!directionEnabled) {
+    return blocked(
+      ShadowOrderReasonCode.DIRECTION_DISABLED,
+      `Entry capability is disabled or contradictory for ${candidate.direction}.`
+    );
   }
 
   const existingOrder = await database.shadowOrder.findUnique({
@@ -187,13 +286,22 @@ export async function createShadowOrderForCandidate(
       `Candidate is ${candidate.status}, not APPROVED_FOR_SHADOW.`
     );
   }
-  if (candidate.decision === null || candidate.decision.outcome !== "APPROVE_SHADOW") {
-    return blocked(ShadowOrderReasonCode.DECISION_MISSING, "No APPROVE_SHADOW decision on the candidate.");
+  if (
+    candidate.decision === null ||
+    candidate.decision.outcome !== "APPROVE_SHADOW"
+  ) {
+    return blocked(
+      ShadowOrderReasonCode.DECISION_MISSING,
+      "No APPROVE_SHADOW decision on the candidate."
+    );
   }
 
-  const riskAssessment = candidate.decision.riskAssessmentId === null
-    ? null
-    : await database.riskAssessment.findUnique({ where: { id: candidate.decision.riskAssessmentId } });
+  const riskAssessment =
+    candidate.decision.riskAssessmentId === null
+      ? null
+      : await database.riskAssessment.findUnique({
+          where: { id: candidate.decision.riskAssessmentId }
+        });
   if (riskAssessment === null || riskAssessment.status !== "PASS") {
     return blocked(
       ShadowOrderReasonCode.RISK_ASSESSMENT_MISSING,
@@ -204,10 +312,15 @@ export async function createShadowOrderForCandidate(
   const sizing = extractSizing(riskAssessment.inputsJson);
   const profileRef = extractExecutionProfileRef(riskAssessment.inputsJson);
   if (sizing === null || profileRef === null) {
-    return blocked(ShadowOrderReasonCode.SIZING_UNREADABLE, "Risk assessment sizing is unreadable.");
+    return blocked(
+      ShadowOrderReasonCode.SIZING_UNREADABLE,
+      "Risk assessment sizing is unreadable."
+    );
   }
 
-  const portfolio = await database.portfolio.findUnique({ where: { id: candidate.portfolioId } });
+  const portfolio = await database.portfolio.findUnique({
+    where: { id: candidate.portfolioId }
+  });
   if (portfolio === null || portfolio.status !== "ACTIVE") {
     return blocked(
       ShadowOrderReasonCode.PORTFOLIO_NOT_ACTIVE,
@@ -219,7 +332,11 @@ export async function createShadowOrderForCandidate(
     where: { portfolioId: portfolio.id, status: { not: "CLOSED" } },
     orderBy: { createdAt: "desc" }
   });
-  if (session === null || session.status !== "SHADOW_ACTIVE" || session.killSwitchEngaged) {
+  if (
+    session === null ||
+    session.status !== "SHADOW_ACTIVE" ||
+    session.killSwitchEngaged
+  ) {
     return blocked(
       ShadowOrderReasonCode.SESSION_BLOCKS_ENTRY,
       `Session is ${session?.status ?? "MISSING"} (kill switch ${session?.killSwitchEngaged ?? "unknown"}).`
@@ -231,10 +348,21 @@ export async function createShadowOrderForCandidate(
     orderBy: { version: "desc" }
   });
   if (executionProfile === null) {
-    return blocked(ShadowOrderReasonCode.EXECUTION_PROFILE_MISSING, "No active execution profile.");
+    return blocked(
+      ShadowOrderReasonCode.EXECUTION_PROFILE_MISSING,
+      "No active execution profile."
+    );
   }
-  if (executionProfile.id !== profileRef.id || executionProfile.specificationHash !== profileRef.specificationHash) {
-    await recordExecutionProfileChange(database, candidate.id, portfolio.id, executionProfile.id);
+  if (
+    executionProfile.id !== profileRef.id ||
+    executionProfile.specificationHash !== profileRef.specificationHash
+  ) {
+    await recordExecutionProfileChange(
+      database,
+      candidate.id,
+      portfolio.id,
+      executionProfile.id
+    );
     return blocked(
       ShadowOrderReasonCode.EXECUTION_PROFILE_CHANGED,
       "The active execution profile changed after risk approval; the order is refused, not silently re-priced."
@@ -289,13 +417,20 @@ export async function createShadowOrderForCandidate(
     );
   }
 
-  const orderKey = buildEntryOrderKey({ tradeDecisionId: candidate.decision.id });
+  const orderKey = buildEntryOrderKey({
+    tradeDecisionId: candidate.decision.id
+  });
   const clientOrderId = buildClientOrderId(orderKey);
   const earliestFillAt = candidate.earliestFillAt ?? candidate.validFrom;
   if (earliestFillAt === null) {
-    return blocked(ShadowOrderReasonCode.SIZING_UNREADABLE, "Candidate has no earliestFillAt/validFrom.");
+    return blocked(
+      ShadowOrderReasonCode.SIZING_UNREADABLE,
+      "Candidate has no earliestFillAt/validFrom."
+    );
   }
-  const orderExpiresAt = new Date(earliestFillAt.getTime() + ORDER_FILL_WINDOW_MS);
+  const orderExpiresAt = new Date(
+    earliestFillAt.getTime() + ORDER_FILL_WINDOW_MS
+  );
 
   const createdOrderId = await database.$transaction(async (tx) => {
     const created = await tx.shadowOrder.create({
@@ -309,8 +444,14 @@ export async function createShadowOrderForCandidate(
         tradingSessionId: session.id,
         executionProfileId: executionProfile.id,
         entryCandidateKey: candidate.candidateKey,
+        openEntryScopeKey: buildOpenEntryOrderScopeKey({
+          portfolioId: portfolio.id,
+          assetId: candidate.assetId,
+          purpose: ShadowOrderPurpose.ENTRY
+        }),
+        direction: candidate.direction,
         purpose: ShadowOrderPurpose.ENTRY,
-        side: ShadowOrderSide.BUY,
+        side: ENTRY_SIDE[candidate.direction] as ShadowOrderSide,
         orderType: ShadowOrderType.MARKET,
         timeInForce: ShadowOrderTimeInForce.NEXT_BARS,
         status: ShadowOrderStatus.WAITING_FOR_ENTRY,
@@ -326,13 +467,18 @@ export async function createShadowOrderForCandidate(
           stepSize: decimalString(executionProfile.stepSize),
           minQuantity: decimalString(executionProfile.minQuantity),
           minNotional: decimalString(executionProfile.minNotional),
-          maxQuantity: executionProfile.maxQuantity === null ? null : decimalString(executionProfile.maxQuantity)
+          maxQuantity:
+            executionProfile.maxQuantity === null
+              ? null
+              : decimalString(executionProfile.maxQuantity)
         }),
         costModelSnapshotJson: asJson({
           feeBps: executionProfile.feeBps,
           fullSpreadBps: executionProfile.fullSpreadBps,
           slippageBps: executionProfile.slippageBps,
-          maxParticipationRate: decimalString(executionProfile.maxParticipationRate),
+          maxParticipationRate: decimalString(
+            executionProfile.maxParticipationRate
+          ),
           executionProfileId: executionProfile.id,
           executionProfileSpecificationHash: executionProfile.specificationHash
         })
@@ -354,7 +500,9 @@ export async function createShadowOrderForCandidate(
       occurredAt: input.asOf.toISOString()
     });
     if (!finalReserve.ok || finalReserve.nextState === null) {
-      throw new Error(`Reservation became invalid inside the transaction: ${finalReserve.reasonCode}`);
+      throw new Error(
+        `Reservation became invalid inside the transaction: ${finalReserve.reasonCode}`
+      );
     }
 
     await tx.portfolioLedgerEntry.create({
@@ -371,7 +519,9 @@ export async function createShadowOrderForCandidate(
       }
     });
     if (updated.count === 0) {
-      throw new Error(`Portfolio ${portfolio.id} version conflict while reserving cash.`);
+      throw new Error(
+        `Portfolio ${portfolio.id} version conflict while reserving cash.`
+      );
     }
 
     await tx.tradingAuditEvent.create({
@@ -394,6 +544,9 @@ export async function createShadowOrderForCandidate(
         tradingSessionId: session.id,
         afterState: asJson({
           shadowOrderId: created.id,
+          direction: candidate.direction,
+          side: ENTRY_SIDE[candidate.direction],
+          syntheticShadowShort: candidate.direction === TradeDirection.SHORT,
           approvedQuantity: sizing.approvedQuantity,
           reservedQuoteAmount: sizing.reservedQuoteAmount,
           earliestFillAt: earliestFillAt.toISOString(),
@@ -463,7 +616,10 @@ async function recordExecutionProfileChange(
       reasonCode: "EXECUTION_PROFILE_CHANGE",
       portfolioId,
       tradeCandidateId,
-      payloadJson: asJson({ jobKey: SHADOW_ORDER_JOB_KEY, currentExecutionProfileId }),
+      payloadJson: asJson({
+        jobKey: SHADOW_ORDER_JOB_KEY,
+        currentExecutionProfileId
+      }),
       inputHash: currentExecutionProfileId
     }
   });

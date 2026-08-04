@@ -77,7 +77,11 @@ export interface ValidatedSnapshotV1 {
 }
 
 export type ValidateInputResultV1 =
-  | { readonly ok: true; readonly validated: ValidatedSnapshotV1; readonly checks: readonly StrategyCheckV1[] }
+  | {
+      readonly ok: true;
+      readonly validated: ValidatedSnapshotV1;
+      readonly checks: readonly StrategyCheckV1[];
+    }
   | {
       readonly ok: false;
       readonly checks: readonly StrategyCheckV1[];
@@ -99,7 +103,14 @@ class CheckLog {
     actual: string | null = null,
     limit: string | null = null
   ): true {
-    this.entries.push({ checkId, stage, passed: true, reasonCode, actual, limit });
+    this.entries.push({
+      checkId,
+      stage,
+      passed: true,
+      reasonCode,
+      actual,
+      limit
+    });
     return true;
   }
 
@@ -110,7 +121,14 @@ class CheckLog {
     actual: string | null = null,
     limit: string | null = null
   ): false {
-    this.entries.push({ checkId, stage, passed: false, reasonCode, actual, limit });
+    this.entries.push({
+      checkId,
+      stage,
+      passed: false,
+      reasonCode,
+      actual,
+      limit
+    });
     this.failed.push(reasonCode);
     return false;
   }
@@ -160,15 +178,26 @@ function isFiniteNumber(value: unknown): value is number {
 // Series validation
 // ───────────────────────────────────────────────────────────────────────────
 
-type SeriesFailure = { readonly reasonCode: StrategyReasonCode; readonly detail: string };
+type SeriesFailure = {
+  readonly reasonCode: StrategyReasonCode;
+  readonly detail: string;
+};
 
 function validateSeries(
   timeframe: StrategyTimeframe,
   candles: readonly SnapshotCandleV1[],
   asOfMs: number
-): { readonly ok: true; readonly series: ParsedSeriesV1 } | { readonly ok: false; readonly failure: SeriesFailure } {
+):
+  | { readonly ok: true; readonly series: ParsedSeriesV1 }
+  | { readonly ok: false; readonly failure: SeriesFailure } {
   if (!Array.isArray(candles) || candles.length === 0) {
-    return { ok: false, failure: { reasonCode: StrategyReasonCode.CANDLES_MISSING, detail: timeframe } };
+    return {
+      ok: false,
+      failure: {
+        reasonCode: StrategyReasonCode.CANDLES_MISSING,
+        detail: timeframe
+      }
+    };
   }
 
   if (candles.length < PARAMS.minimumCandlesPerTimeframe) {
@@ -191,7 +220,13 @@ function validateSeries(
       candle.id === "" ||
       typeof candle.source !== "string"
     ) {
-      return { ok: false, failure: { reasonCode: StrategyReasonCode.SNAPSHOT_MALFORMED, detail: timeframe } };
+      return {
+        ok: false,
+        failure: {
+          reasonCode: StrategyReasonCode.SNAPSHOT_MALFORMED,
+          detail: timeframe
+        }
+      };
     }
 
     const openTimeMs = parseInstant(candle.openTime);
@@ -199,7 +234,10 @@ function validateSeries(
     if (openTimeMs === null || closeTimeMs === null) {
       return {
         ok: false,
-        failure: { reasonCode: StrategyReasonCode.SNAPSHOT_TIMESTAMP_MALFORMED, detail: candle.id }
+        failure: {
+          reasonCode: StrategyReasonCode.SNAPSHOT_TIMESTAMP_MALFORMED,
+          detail: candle.id
+        }
       };
     }
 
@@ -208,35 +246,63 @@ function validateSeries(
     const low = parseDecimal(candle.low);
     const close = parseDecimal(candle.close);
     const volume = parseDecimal(candle.volume);
-    if (open === null || high === null || low === null || close === null || volume === null) {
+    if (
+      open === null ||
+      high === null ||
+      low === null ||
+      close === null ||
+      volume === null
+    ) {
       return {
         ok: false,
-        failure: { reasonCode: StrategyReasonCode.SNAPSHOT_DECIMAL_MALFORMED, detail: candle.id }
+        failure: {
+          reasonCode: StrategyReasonCode.SNAPSHOT_DECIMAL_MALFORMED,
+          detail: candle.id
+        }
       };
     }
 
-    if (PARAMS.forbiddenCandleSources.includes(candle.source.trim().toUpperCase() as never)) {
+    if (
+      PARAMS.forbiddenCandleSources.includes(
+        candle.source.trim().toUpperCase() as never
+      )
+    ) {
       return {
         ok: false,
-        failure: { reasonCode: StrategyReasonCode.CANDLE_SOURCE_UNKNOWN, detail: candle.id }
+        failure: {
+          reasonCode: StrategyReasonCode.CANDLE_SOURCE_UNKNOWN,
+          detail: candle.id
+        }
       };
     }
 
     // A candle counts as closed only when its close time is at or before asOf,
     // and its close time must sit inside its own interval.
     if (closeTimeMs > asOfMs) {
-      return { ok: false, failure: { reasonCode: StrategyReasonCode.CANDLE_NOT_CLOSED, detail: candle.id } };
+      return {
+        ok: false,
+        failure: {
+          reasonCode: StrategyReasonCode.CANDLE_NOT_CLOSED,
+          detail: candle.id
+        }
+      };
     }
     if (openTimeMs > asOfMs) {
       return {
         ok: false,
-        failure: { reasonCode: StrategyReasonCode.CANDLE_TIMESTAMP_AFTER_AS_OF, detail: candle.id }
+        failure: {
+          reasonCode: StrategyReasonCode.CANDLE_TIMESTAMP_AFTER_AS_OF,
+          detail: candle.id
+        }
       };
     }
     if (closeTimeMs <= openTimeMs || closeTimeMs - openTimeMs > interval) {
       return {
         ok: false,
-        failure: { reasonCode: StrategyReasonCode.CANDLE_INTERVAL_MISMATCH, detail: candle.id }
+        failure: {
+          reasonCode: StrategyReasonCode.CANDLE_INTERVAL_MISMATCH,
+          detail: candle.id
+        }
       };
     }
 
@@ -254,20 +320,29 @@ function validateSeries(
     ) {
       return {
         ok: false,
-        failure: { reasonCode: StrategyReasonCode.CANDLE_OHLC_INVARIANT_VIOLATED, detail: candle.id }
+        failure: {
+          reasonCode: StrategyReasonCode.CANDLE_OHLC_INVARIANT_VIOLATED,
+          detail: candle.id
+        }
       };
     }
     if (volume.isNegative()) {
       return {
         ok: false,
-        failure: { reasonCode: StrategyReasonCode.CANDLE_VOLUME_NEGATIVE, detail: candle.id }
+        failure: {
+          reasonCode: StrategyReasonCode.CANDLE_VOLUME_NEGATIVE,
+          detail: candle.id
+        }
       };
     }
 
     if (seenOpenTimes.has(openTimeMs)) {
       return {
         ok: false,
-        failure: { reasonCode: StrategyReasonCode.CANDLE_OPEN_TIME_DUPLICATE, detail: candle.openTime }
+        failure: {
+          reasonCode: StrategyReasonCode.CANDLE_OPEN_TIME_DUPLICATE,
+          detail: candle.openTime
+        }
       };
     }
     seenOpenTimes.add(openTimeMs);
@@ -276,7 +351,10 @@ function validateSeries(
     if (previous !== undefined && openTimeMs <= previous.openTimeMs) {
       return {
         ok: false,
-        failure: { reasonCode: StrategyReasonCode.CANDLE_SERIES_NOT_ASCENDING, detail: candle.openTime }
+        failure: {
+          reasonCode: StrategyReasonCode.CANDLE_SERIES_NOT_ASCENDING,
+          detail: candle.openTime
+        }
       };
     }
 
@@ -301,12 +379,18 @@ function validateSeries(
     if (parsed[index].openTimeMs - parsed[index - 1].openTimeMs !== interval) {
       return {
         ok: false,
-        failure: { reasonCode: StrategyReasonCode.CANDLE_SERIES_GAP, detail: parsed[index].openTime }
+        failure: {
+          reasonCode: StrategyReasonCode.CANDLE_SERIES_GAP,
+          detail: parsed[index].openTime
+        }
       };
     }
   }
 
-  return { ok: true, series: { timeframe, candles: parsed, anchor: parsed[parsed.length - 1] } };
+  return {
+    ok: true,
+    series: { timeframe, candles: parsed, anchor: parsed[parsed.length - 1] }
+  };
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -318,7 +402,27 @@ function validateSeries(
  * evaluated even after an earlier failure, so the persisted audit shows the
  * complete picture rather than only the first problem.
  */
-export function validateStrategyInput(snapshot: StrategyInputSnapshotV1): ValidateInputResultV1 {
+/**
+ * Identity a snapshot must declare. Defaults to the legacy long identity so
+ * every existing caller keeps its exact behaviour; the long and short
+ * registry entries pass their own (ADR 0011).
+ */
+export interface ExpectedStrategyIdentityV1 {
+  readonly key: string;
+  readonly engineVersion: string;
+  readonly specificationHash: string;
+}
+
+export const LEGACY_LONG_IDENTITY: ExpectedStrategyIdentityV1 = Object.freeze({
+  key: CRYPTO_MTF_BREAKOUT_V1_KEY,
+  engineVersion: CRYPTO_MTF_BREAKOUT_V1_ENGINE_VERSION,
+  specificationHash: CRYPTO_MTF_BREAKOUT_V1_SPECIFICATION_HASH
+});
+
+export function validateStrategyInput(
+  snapshot: StrategyInputSnapshotV1,
+  expected: ExpectedStrategyIdentityV1 = LEGACY_LONG_IDENTITY
+): ValidateInputResultV1 {
   const log = createCheckLog();
   const stage = StrategyCheckStage.PRE_VALIDATION;
 
@@ -337,54 +441,94 @@ export function validateStrategyInput(snapshot: StrategyInputSnapshotV1): Valida
     );
     return { ok: false, checks: log.checks, failures: log.failures };
   }
-  log.pass("SNAPSHOT_VERSION", stage, StrategyReasonCode.SNAPSHOT_VERSION_SUPPORTED);
+  log.pass(
+    "SNAPSHOT_VERSION",
+    stage,
+    StrategyReasonCode.SNAPSHOT_VERSION_SUPPORTED
+  );
 
   const asOfMs = parseInstant(snapshot.asOf);
   if (asOfMs === null) {
-    log.fail("SNAPSHOT_AS_OF", stage, StrategyReasonCode.SNAPSHOT_TIMESTAMP_MALFORMED, String(snapshot.asOf));
+    log.fail(
+      "SNAPSHOT_AS_OF",
+      stage,
+      StrategyReasonCode.SNAPSHOT_TIMESTAMP_MALFORMED,
+      String(snapshot.asOf)
+    );
     return { ok: false, checks: log.checks, failures: log.failures };
   }
 
   // ── 1. Strategy version (docs/trading/05, item 1) ────────────────────────
   const strategy = snapshot.strategy;
-  if (strategy?.strategyKey !== CRYPTO_MTF_BREAKOUT_V1_KEY) {
+  if (strategy?.strategyKey !== expected.key) {
     log.fail(
       "STRATEGY_KEY",
       stage,
       StrategyReasonCode.STRATEGY_KEY_MISMATCH,
       String(strategy?.strategyKey),
-      CRYPTO_MTF_BREAKOUT_V1_KEY
+      expected.key
     );
   } else if (strategy.status !== "ACTIVE") {
-    log.fail("STRATEGY_STATUS", stage, StrategyReasonCode.STRATEGY_VERSION_NOT_ACTIVE, strategy.status, "ACTIVE");
-  } else if (strategy.engineVersion !== CRYPTO_MTF_BREAKOUT_V1_ENGINE_VERSION) {
+    log.fail(
+      "STRATEGY_STATUS",
+      stage,
+      StrategyReasonCode.STRATEGY_VERSION_NOT_ACTIVE,
+      strategy.status,
+      "ACTIVE"
+    );
+  } else if (strategy.engineVersion !== expected.engineVersion) {
     log.fail(
       "STRATEGY_ENGINE_VERSION",
       stage,
       StrategyReasonCode.STRATEGY_ENGINE_VERSION_MISMATCH,
       strategy.engineVersion,
-      CRYPTO_MTF_BREAKOUT_V1_ENGINE_VERSION
+      expected.engineVersion
     );
-  } else if (strategy.specificationHash !== CRYPTO_MTF_BREAKOUT_V1_SPECIFICATION_HASH) {
+  } else if (strategy.specificationHash !== expected.specificationHash) {
     log.fail(
       "STRATEGY_SPECIFICATION_HASH",
       stage,
       StrategyReasonCode.STRATEGY_SPECIFICATION_HASH_MISMATCH,
       strategy.specificationHash,
-      CRYPTO_MTF_BREAKOUT_V1_SPECIFICATION_HASH
+      expected.specificationHash
     );
-  } else if (typeof strategy.codeVersion !== "string" || strategy.codeVersion.trim() === "") {
-    log.fail("STRATEGY_CODE_VERSION", stage, StrategyReasonCode.STRATEGY_CODE_VERSION_MISSING);
+  } else if (
+    typeof strategy.codeVersion !== "string" ||
+    strategy.codeVersion.trim() === ""
+  ) {
+    log.fail(
+      "STRATEGY_CODE_VERSION",
+      stage,
+      StrategyReasonCode.STRATEGY_CODE_VERSION_MISSING
+    );
   } else {
-    log.pass("STRATEGY_VERSION", stage, StrategyReasonCode.STRATEGY_VERSION_VALID);
+    log.pass(
+      "STRATEGY_VERSION",
+      stage,
+      StrategyReasonCode.STRATEGY_VERSION_VALID
+    );
   }
 
   // ── 1b. Assignment (docs/trading/05, item 1) ─────────────────────────────
   const assignment = snapshot.assignment;
-  if (assignment === null || assignment === undefined || typeof assignment.id !== "string") {
-    log.fail("ASSIGNMENT_PRESENT", stage, StrategyReasonCode.ASSIGNMENT_MISSING);
+  if (
+    assignment === null ||
+    assignment === undefined ||
+    typeof assignment.id !== "string"
+  ) {
+    log.fail(
+      "ASSIGNMENT_PRESENT",
+      stage,
+      StrategyReasonCode.ASSIGNMENT_MISSING
+    );
   } else if (assignment.enabled !== true) {
-    log.fail("ASSIGNMENT_ENABLED", stage, StrategyReasonCode.ASSIGNMENT_DISABLED, "false", "true");
+    log.fail(
+      "ASSIGNMENT_ENABLED",
+      stage,
+      StrategyReasonCode.ASSIGNMENT_DISABLED,
+      "false",
+      "true"
+    );
   } else if (assignment.timeframe !== PARAMS.decisionTimeframe) {
     log.fail(
       "ASSIGNMENT_TIMEFRAME",
@@ -393,15 +537,25 @@ export function validateStrategyInput(snapshot: StrategyInputSnapshotV1): Valida
       assignment.timeframe,
       PARAMS.decisionTimeframe
     );
-  } else if (!isAssignmentWithinWindow(assignment.validFrom, assignment.validTo, asOfMs)) {
-    log.fail("ASSIGNMENT_WINDOW", stage, StrategyReasonCode.ASSIGNMENT_OUTSIDE_VALIDITY_WINDOW);
+  } else if (
+    !isAssignmentWithinWindow(assignment.validFrom, assignment.validTo, asOfMs)
+  ) {
+    log.fail(
+      "ASSIGNMENT_WINDOW",
+      stage,
+      StrategyReasonCode.ASSIGNMENT_OUTSIDE_VALIDITY_WINDOW
+    );
   } else {
     log.pass("ASSIGNMENT", stage, StrategyReasonCode.ASSIGNMENT_ACTIVE);
   }
 
   // ── 2. Asset scope (docs/trading/05, item 2) ─────────────────────────────
   const asset = snapshot.asset;
-  if (asset === null || asset === undefined || typeof asset.symbol !== "string") {
+  if (
+    asset === null ||
+    asset === undefined ||
+    typeof asset.symbol !== "string"
+  ) {
     log.fail("ASSET_PRESENT", stage, StrategyReasonCode.SNAPSHOT_MALFORMED);
   } else if (!PARAMS.allowedSymbols.includes(asset.symbol as never)) {
     log.fail(
@@ -412,11 +566,29 @@ export function validateStrategyInput(snapshot: StrategyInputSnapshotV1): Valida
       PARAMS.allowedSymbols.join(",")
     );
   } else if (asset.assetType !== "CRYPTO") {
-    log.fail("ASSET_TYPE", stage, StrategyReasonCode.ASSET_NOT_CRYPTO, asset.assetType, "CRYPTO");
+    log.fail(
+      "ASSET_TYPE",
+      stage,
+      StrategyReasonCode.ASSET_NOT_CRYPTO,
+      asset.assetType,
+      "CRYPTO"
+    );
   } else if (asset.isActive !== true) {
-    log.fail("ASSET_ACTIVE", stage, StrategyReasonCode.ASSET_NOT_ACTIVE, "false", "true");
+    log.fail(
+      "ASSET_ACTIVE",
+      stage,
+      StrategyReasonCode.ASSET_NOT_ACTIVE,
+      "false",
+      "true"
+    );
   } else if (asset.isTradable !== true) {
-    log.fail("ASSET_TRADABLE", stage, StrategyReasonCode.ASSET_NOT_TRADABLE, "false", "true");
+    log.fail(
+      "ASSET_TRADABLE",
+      stage,
+      StrategyReasonCode.ASSET_NOT_TRADABLE,
+      "false",
+      "true"
+    );
   } else if (asset.instrumentStatus !== "ACTIVE") {
     log.fail(
       "ASSET_INSTRUMENT_STATUS",
@@ -434,11 +606,29 @@ export function validateStrategyInput(snapshot: StrategyInputSnapshotV1): Valida
       PARAMS.quoteCurrency
     );
   } else if (asset.isLeveraged === true) {
-    log.fail("ASSET_LEVERAGED", stage, StrategyReasonCode.ASSET_LEVERAGED_FORBIDDEN, "true", "false");
+    log.fail(
+      "ASSET_LEVERAGED",
+      stage,
+      StrategyReasonCode.ASSET_LEVERAGED_FORBIDDEN,
+      "true",
+      "false"
+    );
   } else if (asset.isInverse === true) {
-    log.fail("ASSET_INVERSE", stage, StrategyReasonCode.ASSET_INVERSE_FORBIDDEN, "true", "false");
+    log.fail(
+      "ASSET_INVERSE",
+      stage,
+      StrategyReasonCode.ASSET_INVERSE_FORBIDDEN,
+      "true",
+      "false"
+    );
   } else if (asset.isStablecoin === true) {
-    log.fail("ASSET_STABLECOIN", stage, StrategyReasonCode.ASSET_STABLECOIN_FORBIDDEN, "true", "false");
+    log.fail(
+      "ASSET_STABLECOIN",
+      stage,
+      StrategyReasonCode.ASSET_STABLECOIN_FORBIDDEN,
+      "true",
+      "false"
+    );
   } else {
     log.pass("ASSET_SCOPE", stage, StrategyReasonCode.ASSET_SCOPE_VALID);
   }
@@ -446,7 +636,11 @@ export function validateStrategyInput(snapshot: StrategyInputSnapshotV1): Valida
   // ── 2b. Execution profile must be active (docs/trading/05, item 2) ───────
   const executionProfile = snapshot.executionProfile ?? null;
   if (executionProfile === null) {
-    log.fail("EXECUTION_PROFILE", stage, StrategyReasonCode.EXECUTION_PROFILE_MISSING);
+    log.fail(
+      "EXECUTION_PROFILE",
+      stage,
+      StrategyReasonCode.EXECUTION_PROFILE_MISSING
+    );
   } else if (executionProfile.status !== "ACTIVE") {
     log.fail(
       "EXECUTION_PROFILE",
@@ -456,7 +650,11 @@ export function validateStrategyInput(snapshot: StrategyInputSnapshotV1): Valida
       "ACTIVE"
     );
   } else {
-    log.pass("EXECUTION_PROFILE", stage, StrategyReasonCode.EXECUTION_PROFILE_ACTIVE);
+    log.pass(
+      "EXECUTION_PROFILE",
+      stage,
+      StrategyReasonCode.EXECUTION_PROFILE_ACTIVE
+    );
   }
 
   // ── 3./4. Candle integrity and history (docs/trading/05, items 3–4) ──────
@@ -464,7 +662,11 @@ export function validateStrategyInput(snapshot: StrategyInputSnapshotV1): Valida
   for (const timeframe of STRATEGY_TIMEFRAMES) {
     const series = snapshot.series?.[timeframe];
     const checkId = `CANDLE_SERIES_${timeframe.toUpperCase()}`;
-    if (series === null || series === undefined || series.timeframe !== timeframe) {
+    if (
+      series === null ||
+      series === undefined ||
+      series.timeframe !== timeframe
+    ) {
       log.fail(checkId, stage, StrategyReasonCode.CANDLES_MISSING, timeframe);
       continue;
     }
@@ -490,7 +692,9 @@ export function validateStrategyInput(snapshot: StrategyInputSnapshotV1): Valida
   }
 
   // ── 5a. Candle freshness (docs/trading/05, item 5) ───────────────────────
-  const staleCandleCodes: Readonly<Record<StrategyTimeframe, StrategyReasonCode>> = {
+  const staleCandleCodes: Readonly<
+    Record<StrategyTimeframe, StrategyReasonCode>
+  > = {
     "1h": StrategyReasonCode.DATA_STALE_CANDLES_1H,
     "4h": StrategyReasonCode.DATA_STALE_CANDLES_4H,
     "1d": StrategyReasonCode.DATA_STALE_CANDLES_1D
@@ -502,9 +706,21 @@ export function validateStrategyInput(snapshot: StrategyInputSnapshotV1): Valida
     const maximum = PARAMS.maxCandleAgeMs[timeframe];
     const checkId = `CANDLE_FRESHNESS_${timeframe.toUpperCase()}`;
     if (age > maximum) {
-      log.fail(checkId, stage, staleCandleCodes[timeframe], String(age), String(maximum));
+      log.fail(
+        checkId,
+        stage,
+        staleCandleCodes[timeframe],
+        String(age),
+        String(maximum)
+      );
     } else {
-      log.pass(checkId, stage, StrategyReasonCode.DATA_FRESHNESS_VALID, String(age), String(maximum));
+      log.pass(
+        checkId,
+        stage,
+        StrategyReasonCode.DATA_FRESHNESS_VALID,
+        String(age),
+        String(maximum)
+      );
     }
   }
 
@@ -513,16 +729,32 @@ export function validateStrategyInput(snapshot: StrategyInputSnapshotV1): Valida
     const checkId = `DATA_QUALITY_${timeframe.toUpperCase()}`;
     const quality = snapshot.series?.[timeframe]?.dataQuality ?? null;
     if (quality === null) {
-      log.fail(checkId, stage, StrategyReasonCode.DATA_QUALITY_MISSING, timeframe);
+      log.fail(
+        checkId,
+        stage,
+        StrategyReasonCode.DATA_QUALITY_MISSING,
+        timeframe
+      );
       continue;
     }
     const observedAtMs = parseInstant(quality.observedAt);
     if (observedAtMs === null) {
-      log.fail(checkId, stage, StrategyReasonCode.SNAPSHOT_TIMESTAMP_MALFORMED, quality.id);
+      log.fail(
+        checkId,
+        stage,
+        StrategyReasonCode.SNAPSHOT_TIMESTAMP_MALFORMED,
+        quality.id
+      );
       continue;
     }
     if (observedAtMs > asOfMs) {
-      log.fail(checkId, stage, StrategyReasonCode.CANDLE_TIMESTAMP_AFTER_AS_OF, quality.observedAt, snapshot.asOf);
+      log.fail(
+        checkId,
+        stage,
+        StrategyReasonCode.CANDLE_TIMESTAMP_AFTER_AS_OF,
+        quality.observedAt,
+        snapshot.asOf
+      );
       continue;
     }
     const age = asOfMs - observedAtMs;
@@ -571,7 +803,13 @@ export function validateStrategyInput(snapshot: StrategyInputSnapshotV1): Valida
       );
       continue;
     }
-    log.pass(checkId, stage, StrategyReasonCode.DATA_QUALITY_VALID, String(age), String(PARAMS.maxDataQualityAgeMs));
+    log.pass(
+      checkId,
+      stage,
+      StrategyReasonCode.DATA_QUALITY_VALID,
+      String(age),
+      String(PARAMS.maxDataQualityAgeMs)
+    );
   }
 
   // ── 5c. Market regime freshness ──────────────────────────────────────────
@@ -581,7 +819,12 @@ export function validateStrategyInput(snapshot: StrategyInputSnapshotV1): Valida
   } else {
     const generatedAtMs = parseInstant(marketRegime.generatedAt);
     if (generatedAtMs === null) {
-      log.fail("REGIME_PRESENT", stage, StrategyReasonCode.SNAPSHOT_TIMESTAMP_MALFORMED, marketRegime.generatedAt);
+      log.fail(
+        "REGIME_PRESENT",
+        stage,
+        StrategyReasonCode.SNAPSHOT_TIMESTAMP_MALFORMED,
+        marketRegime.generatedAt
+      );
     } else if (generatedAtMs > asOfMs) {
       log.fail(
         "REGIME_FRESHNESS",
@@ -599,7 +842,12 @@ export function validateStrategyInput(snapshot: StrategyInputSnapshotV1): Valida
         String(PARAMS.maxRegimeAgeMs)
       );
     } else if (!isFiniteNumber(marketRegime.confidence)) {
-      log.fail("REGIME_FRESHNESS", stage, StrategyReasonCode.SNAPSHOT_MALFORMED, "confidence");
+      log.fail(
+        "REGIME_FRESHNESS",
+        stage,
+        StrategyReasonCode.SNAPSHOT_MALFORMED,
+        "confidence"
+      );
     } else {
       log.pass(
         "REGIME_FRESHNESS",
@@ -612,17 +860,22 @@ export function validateStrategyInput(snapshot: StrategyInputSnapshotV1): Valida
   }
 
   // ── 6. Signal references (docs/trading/05, item 6) ───────────────────────
-  const missingSignalCodes: Readonly<Record<StrategyTimeframe, StrategyReasonCode>> = {
+  const missingSignalCodes: Readonly<
+    Record<StrategyTimeframe, StrategyReasonCode>
+  > = {
     "1h": StrategyReasonCode.SIGNAL_MISSING_1H,
     "4h": StrategyReasonCode.SIGNAL_MISSING_4H,
     "1d": StrategyReasonCode.SIGNAL_MISSING_1D
   };
-  const staleSignalCodes: Readonly<Record<StrategyTimeframe, StrategyReasonCode>> = {
+  const staleSignalCodes: Readonly<
+    Record<StrategyTimeframe, StrategyReasonCode>
+  > = {
     "1h": StrategyReasonCode.DATA_STALE_SIGNAL_1H,
     "4h": StrategyReasonCode.DATA_STALE_SIGNAL_4H,
     "1d": StrategyReasonCode.DATA_STALE_SIGNAL_1D
   };
-  const validatedSignals: Partial<Record<StrategyTimeframe, SnapshotSignalV1>> = {};
+  const validatedSignals: Partial<Record<StrategyTimeframe, SnapshotSignalV1>> =
+    {};
   for (const timeframe of STRATEGY_TIMEFRAMES) {
     const checkId = `SIGNAL_REFERENCE_${timeframe.toUpperCase()}`;
     const signal = snapshot.signals?.[timeframe] ?? null;
@@ -632,14 +885,28 @@ export function validateStrategyInput(snapshot: StrategyInputSnapshotV1): Valida
     }
     const createdAtMs = parseInstant(signal.createdAt);
     if (createdAtMs === null) {
-      log.fail(checkId, stage, StrategyReasonCode.SNAPSHOT_TIMESTAMP_MALFORMED, signal.createdAt);
+      log.fail(
+        checkId,
+        stage,
+        StrategyReasonCode.SNAPSHOT_TIMESTAMP_MALFORMED,
+        signal.createdAt
+      );
       continue;
     }
     if (createdAtMs > asOfMs) {
-      log.fail(checkId, stage, StrategyReasonCode.SIGNAL_TIMESTAMP_AFTER_AS_OF, signal.createdAt, snapshot.asOf);
+      log.fail(
+        checkId,
+        stage,
+        StrategyReasonCode.SIGNAL_TIMESTAMP_AFTER_AS_OF,
+        signal.createdAt,
+        snapshot.asOf
+      );
       continue;
     }
-    if (!isFiniteNumber(signal.adjustedScore) || !isFiniteNumber(signal.baseScore)) {
+    if (
+      !isFiniteNumber(signal.adjustedScore) ||
+      !isFiniteNumber(signal.baseScore)
+    ) {
       log.fail(checkId, stage, StrategyReasonCode.SNAPSHOT_MALFORMED, "score");
       continue;
     }
@@ -667,13 +934,24 @@ export function validateStrategyInput(snapshot: StrategyInputSnapshotV1): Valida
       const age = asOfMs - createdAtMs;
       const maximum = PARAMS.maxSignalAgeMs[timeframe];
       if (age > maximum) {
-        log.fail(checkId, stage, staleSignalCodes[timeframe], String(age), String(maximum));
+        log.fail(
+          checkId,
+          stage,
+          staleSignalCodes[timeframe],
+          String(age),
+          String(maximum)
+        );
         continue;
       }
     }
 
     validatedSignals[timeframe] = signal;
-    log.pass(checkId, stage, StrategyReasonCode.SIGNAL_REFERENCES_VALID, signal.id);
+    log.pass(
+      checkId,
+      stage,
+      StrategyReasonCode.SIGNAL_REFERENCES_VALID,
+      signal.id
+    );
   }
 
   // ── 6b. Multi-timeframe summary must be present and derived ──────────────
@@ -681,15 +959,32 @@ export function validateStrategyInput(snapshot: StrategyInputSnapshotV1): Valida
   if (multiTimeframe === null || typeof multiTimeframe.alignment !== "string") {
     log.fail("MTF_PRESENT", stage, StrategyReasonCode.MTF_MISSING);
   } else if (parseDecimal(multiTimeframe.alignmentScore) === null) {
-    log.fail("MTF_PRESENT", stage, StrategyReasonCode.SNAPSHOT_DECIMAL_MALFORMED, "alignmentScore");
+    log.fail(
+      "MTF_PRESENT",
+      stage,
+      StrategyReasonCode.SNAPSHOT_DECIMAL_MALFORMED,
+      "alignmentScore"
+    );
   } else {
-    log.pass("MTF_PRESENT", stage, StrategyReasonCode.MTF_SNAPSHOT_PRESENT, multiTimeframe.alignment);
+    log.pass(
+      "MTF_PRESENT",
+      stage,
+      StrategyReasonCode.MTF_SNAPSHOT_PRESENT,
+      multiTimeframe.alignment
+    );
   }
 
   // ── Context events list is mandatory, even when empty ────────────────────
-  const contextEvents = Array.isArray(snapshot.contextEvents) ? snapshot.contextEvents : null;
+  const contextEvents = Array.isArray(snapshot.contextEvents)
+    ? snapshot.contextEvents
+    : null;
   if (contextEvents === null) {
-    log.fail("CONTEXT_EVENTS_PRESENT", stage, StrategyReasonCode.SNAPSHOT_MALFORMED, "contextEvents");
+    log.fail(
+      "CONTEXT_EVENTS_PRESENT",
+      stage,
+      StrategyReasonCode.SNAPSHOT_MALFORMED,
+      "contextEvents"
+    );
   }
 
   if (

@@ -22,7 +22,13 @@ import { randomUUID } from "node:crypto";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { BotRunStatus, Prisma, prisma, type PrismaClient } from "@signalpilot/database";
+import {
+  BotRunStatus,
+  Prisma,
+  TradeDirection,
+  prisma,
+  type PrismaClient
+} from "@signalpilot/database";
 import {
   RISK_ENGINE_VERSION,
   RISK_POLICY_HASH,
@@ -38,7 +44,10 @@ import {
   SHADOW_RISK_JOB_KEY,
   persistRiskAssessment
 } from "../lib/shadowRiskPersistence.js";
-import { checkShadowRiskJobAllowed, type TradingFlagSnapshot } from "../lib/tradingSafety.js";
+import {
+  checkShadowRiskJobAllowed,
+  type TradingFlagSnapshot
+} from "../lib/tradingSafety.js";
 
 const logger = pino({ name: "signalpilot-worker" });
 const jobDir = dirname(fileURLToPath(import.meta.url));
@@ -49,7 +58,11 @@ config();
 export const JOB_NAME = "shadowAssessRisk";
 
 /** Candidate states that still await a final decision (docs/trading/04). */
-const ASSESSABLE_STATUSES = ["CREATED", "VALIDATING", "READY_FOR_RISK"] as const;
+const ASSESSABLE_STATUSES = [
+  "CREATED",
+  "VALIDATING",
+  "READY_FOR_RISK"
+] as const;
 
 const DEFAULT_BATCH_SIZE = 25;
 
@@ -93,7 +106,9 @@ export interface RunShadowAssessRiskOptions {
   readonly tradeCandidateId?: string;
 }
 
-function resolveCodeVersion(env: Readonly<Record<string, string | undefined>>): string {
+function resolveCodeVersion(
+  env: Readonly<Record<string, string | undefined>>
+): string {
   const candidate = env.TRADING_CODE_VERSION ?? env.GIT_COMMIT_SHA ?? "";
   return candidate.trim() === "" ? "unversioned-local-build" : candidate.trim();
 }
@@ -126,22 +141,46 @@ export async function runShadowAssessRisk(
   });
 
   if (!gate.allowed) {
-    const summary = emptySummary(BotRunStatus.FAILED, correlationId, asOf, gate.reasonCode, gate.flags);
-    await writeBotLog(database, "warn", `${JOB_NAME} blocked by safety configuration`, {
-      botRunId: botRun.id,
-      reasonCode: gate.reasonCode,
-      message: gate.message,
-      flags: gate.flags
+    const summary = emptySummary(
+      BotRunStatus.FAILED,
+      correlationId,
+      asOf,
+      gate.reasonCode,
+      gate.flags
+    );
+    await writeBotLog(
+      database,
+      "warn",
+      `${JOB_NAME} blocked by safety configuration`,
+      {
+        botRunId: botRun.id,
+        reasonCode: gate.reasonCode,
+        message: gate.message,
+        flags: gate.flags
+      }
+    );
+    await finishBotRun(database, botRun.id, BotRunStatus.FAILED, {
+      ...summary,
+      message: gate.message
     });
-    await finishBotRun(database, botRun.id, BotRunStatus.FAILED, { ...summary, message: gate.message });
     return summary;
   }
 
   const candidates = await database.tradeCandidate.findMany({
     where: {
-      ...(options.tradeCandidateId === undefined ? {} : { id: options.tradeCandidateId }),
+      ...(options.tradeCandidateId === undefined
+        ? {}
+        : { id: options.tradeCandidateId }),
       status: { in: [...ASSESSABLE_STATUSES] },
-      decision: { is: null }
+      decision: { is: null },
+      direction: {
+        in: [
+          ...(gate.flags.strategyLongV1Enabled ? [TradeDirection.LONG] : []),
+          ...(gate.flags.shadowShortEnabled && gate.flags.strategyShortV1Enabled
+            ? [TradeDirection.SHORT]
+            : [])
+        ]
+      }
     },
     orderBy: { decisionTime: "asc" },
     take: batchSize,
@@ -160,7 +199,14 @@ export async function runShadowAssessRisk(
     tradingMode: gate.flags.tradingMode,
     enableLiveTrading: gate.flags.enableLiveTrading,
     shadowMasterFlagEnabled: gate.flags.shadowEnabled,
-    riskJobEnabled: gate.flags.riskV1Enabled
+    riskJobEnabled: gate.flags.riskV1Enabled,
+    strategyLongV1Enabled: gate.flags.strategyLongV1Enabled,
+    strategyShortV1Enabled: gate.flags.strategyShortV1Enabled,
+    shadowShortEnabled: gate.flags.shadowShortEnabled,
+    // This build contains no exchange, margin or futures execution adapter.
+    exchangeExecutionEnabled: false,
+    marginTradingEnabled: false,
+    futuresTradingEnabled: false
   };
 
   const results: ShadowRiskCandidateResult[] = [];
@@ -193,13 +239,18 @@ export async function runShadowAssessRisk(
           directive: null,
           riskAssessmentId: null
         });
-        await writeBotLog(database, "warn", `${JOB_NAME} could not assemble a risk snapshot`, {
-          botRunId: botRun.id,
-          correlationId,
-          tradeCandidateId: id,
-          reasonCode: assembled.reasonCode,
-          message: assembled.message
-        });
+        await writeBotLog(
+          database,
+          "warn",
+          `${JOB_NAME} could not assemble a risk snapshot`,
+          {
+            botRunId: botRun.id,
+            correlationId,
+            tradeCandidateId: id,
+            reasonCode: assembled.reasonCode,
+            message: assembled.message
+          }
+        );
         continue;
       }
 
@@ -220,13 +271,18 @@ export async function runShadowAssessRisk(
           directive: evaluation.directive,
           riskAssessmentId: null
         });
-        await writeBotLog(database, "error", `${JOB_NAME} has no active RiskLimitSet`, {
-          botRunId: botRun.id,
-          correlationId,
-          tradeCandidateId: id,
-          reasonCode: evaluation.primaryReasonCode,
-          hint: "Run pnpm worker:shadow-bootstrap first."
-        });
+        await writeBotLog(
+          database,
+          "error",
+          `${JOB_NAME} has no active RiskLimitSet`,
+          {
+            botRunId: botRun.id,
+            correlationId,
+            tradeCandidateId: id,
+            reasonCode: evaluation.primaryReasonCode,
+            hint: "Run pnpm worker:shadow-bootstrap first."
+          }
+        );
         continue;
       }
 
@@ -239,7 +295,8 @@ export async function runShadowAssessRisk(
       });
 
       if (persisted.outcome === RiskPersistOutcome.CONFLICT) conflicts += 1;
-      else if (persisted.outcome === RiskPersistOutcome.IDEMPOTENT_REPLAY) idempotentReplays += 1;
+      else if (persisted.outcome === RiskPersistOutcome.IDEMPOTENT_REPLAY)
+        idempotentReplays += 1;
       else if (evaluation.outcome === "APPROVED") approved += 1;
       else if (evaluation.outcome === "REJECTED") rejected += 1;
       else errored += 1;
@@ -258,7 +315,8 @@ export async function runShadowAssessRisk(
 
       await writeBotLog(
         database,
-        persisted.outcome === RiskPersistOutcome.CONFLICT || evaluation.outcome === "ERROR"
+        persisted.outcome === RiskPersistOutcome.CONFLICT ||
+          evaluation.outcome === "ERROR"
           ? "error"
           : "info",
         `${JOB_NAME} assessed ${assembled.snapshot.candidate.symbol}`,
@@ -282,7 +340,8 @@ export async function runShadowAssessRisk(
       );
     } catch (error) {
       workerErrors += 1;
-      const message = error instanceof Error ? error.message : "Unknown risk job error";
+      const message =
+        error instanceof Error ? error.message : "Unknown risk job error";
       results.push({
         tradeCandidateId: id,
         symbol: null,
@@ -294,17 +353,24 @@ export async function runShadowAssessRisk(
         directive: null,
         riskAssessmentId: null
       });
-      await writeBotLog(database, "error", `${JOB_NAME} failed for a candidate`, {
-        botRunId: botRun.id,
-        correlationId,
-        tradeCandidateId: id,
-        error: message
-      });
+      await writeBotLog(
+        database,
+        "error",
+        `${JOB_NAME} failed for a candidate`,
+        {
+          botRunId: botRun.id,
+          correlationId,
+          tradeCandidateId: id,
+          error: message
+        }
+      );
     }
   }
 
   const status =
-    workerErrors > 0 || conflicts > 0 || errored > 0 ? BotRunStatus.FAILED : BotRunStatus.SUCCESS;
+    workerErrors > 0 || conflicts > 0 || errored > 0
+      ? BotRunStatus.FAILED
+      : BotRunStatus.SUCCESS;
   const summary: ShadowAssessRiskSummary = {
     status,
     blocked: false,
@@ -324,10 +390,15 @@ export async function runShadowAssessRisk(
   };
 
   await finishBotRun(database, botRun.id, status, { ...summary });
-  await writeBotLog(database, status === BotRunStatus.SUCCESS ? "info" : "error", `${JOB_NAME} finished`, {
-    botRunId: botRun.id,
-    ...summary
-  });
+  await writeBotLog(
+    database,
+    status === BotRunStatus.SUCCESS ? "info" : "error",
+    `${JOB_NAME} finished`,
+    {
+      botRunId: botRun.id,
+      ...summary
+    }
+  );
   return summary;
 }
 
@@ -365,7 +436,11 @@ async function finishBotRun(
 ): Promise<void> {
   await database.botRun.update({
     where: { id: botRunId },
-    data: { status, finishedAt: new Date(), metadataJson: metadataJson as Prisma.InputJsonObject }
+    data: {
+      status,
+      finishedAt: new Date(),
+      metadataJson: metadataJson as Prisma.InputJsonObject
+    }
   });
 }
 
@@ -376,11 +451,19 @@ async function writeBotLog(
   metadataJson: Record<string, unknown>
 ): Promise<void> {
   await database.botLog.create({
-    data: { level, service: "worker", message, metadataJson: metadataJson as Prisma.InputJsonObject }
+    data: {
+      level,
+      service: "worker",
+      message,
+      metadataJson: metadataJson as Prisma.InputJsonObject
+    }
   });
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+if (
+  process.argv[1] &&
+  fileURLToPath(import.meta.url) === resolve(process.argv[1])
+) {
   runShadowAssessRisk()
     .then((summary) => {
       if (summary.blocked) {

@@ -1,11 +1,24 @@
 # ── Builder ───────────────────────────────────────────────────────────────────
 FROM node:22-alpine AS builder
 
+# Build-time configuration only.
+#
+# Next.js inlines every NEXT_PUBLIC_* value into the client bundle at BUILD
+# time, so these must be build args — setting them at container start has no
+# effect on an already-compiled bundle. That also means only values which are
+# safe to ship to a browser may appear here: never a secret, never a private
+# server variable. SIGNALPILOT_API_INTERNAL_URL is not NEXT_PUBLIC_* and stays
+# server-side (it is read in next.config.ts for the rewrite target).
 ARG NEXT_PUBLIC_SIGNALPILOT_API_URL=/api
 ARG SIGNALPILOT_API_INTERNAL_URL=http://api:3100
+# Shadow trading dashboard. Defaults to false: an image built without an
+# explicit opt-in has no trading navigation and no reachable
+# /dashboard/trading/* page (docs/trading P7).
+ARG NEXT_PUBLIC_TRADING_DASHBOARD_ENABLED=false
 
 ENV NEXT_PUBLIC_SIGNALPILOT_API_URL=${NEXT_PUBLIC_SIGNALPILOT_API_URL}
 ENV SIGNALPILOT_API_INTERNAL_URL=${SIGNALPILOT_API_INTERNAL_URL}
+ENV NEXT_PUBLIC_TRADING_DASHBOARD_ENABLED=${NEXT_PUBLIC_TRADING_DASHBOARD_ENABLED}
 
 RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 

@@ -23,11 +23,11 @@ import {
 } from "@signalpilot/multi-timeframe";
 import {
   CRYPTO_MTF_BREAKOUT_V1_KEY,
-  CRYPTO_MTF_BREAKOUT_V1_PARAMETERS,
   INDICATORS_V1_VERSION,
   STRATEGY_INPUT_SNAPSHOT_VERSION,
   STRATEGY_TIMEFRAMES,
   StrategyReasonCode,
+  getStrategy,
   type SnapshotCandleV1,
   type SnapshotContextEventV1,
   type SnapshotDataQualityV1,
@@ -36,9 +36,8 @@ import {
   type StrategyTimeframe
 } from "@signalpilot/strategy-engine";
 
-const PARAMS = CRYPTO_MTF_BREAKOUT_V1_PARAMETERS;
-
-export const STRATEGY_INPUT_ASSEMBLER_VERSION = "strategy-input-assembler-v1/1.0.0";
+export const STRATEGY_INPUT_ASSEMBLER_VERSION =
+  "strategy-input-assembler-v1/1.0.0";
 export const MULTI_TIMEFRAME_VERSION = "multi-timeframe/1.0.0";
 
 /**
@@ -62,11 +61,16 @@ export const AssemblerReasonCode = {
   ASSIGNMENT_MISSING: StrategyReasonCode.ASSIGNMENT_MISSING,
   STRATEGY_VERSION_NOT_ACTIVE: StrategyReasonCode.STRATEGY_VERSION_NOT_ACTIVE
 } as const;
-export type AssemblerReasonCode = (typeof AssemblerReasonCode)[keyof typeof AssemblerReasonCode];
+export type AssemblerReasonCode =
+  (typeof AssemblerReasonCode)[keyof typeof AssemblerReasonCode];
 
 export interface AssembleStrategyInputOptions {
   readonly symbol: string;
   readonly asOf: Date;
+  /** Closed registry key; an unknown key is refused before market data is read. */
+  readonly strategyKey?: string;
+  /** Optional exact assignment pin for scheduler and replay callers. */
+  readonly strategyAssignmentId?: string;
   /** Git commit or immutable build identifier of the running worker. */
   readonly codeVersion: string;
 }
@@ -110,7 +114,12 @@ function classifyMarketEventBias(
   positiveImpact: readonly string[],
   negativeImpact: readonly string[]
 ): SnapshotContextEventV1["directionalBias"] {
-  const needles = new Set([symbol.toUpperCase(), "CRYPTO", "CRYPTOCURRENCY", "DIGITAL_ASSETS"]);
+  const needles = new Set([
+    symbol.toUpperCase(),
+    "CRYPTO",
+    "CRYPTOCURRENCY",
+    "DIGITAL_ASSETS"
+  ]);
   const matches = (list: readonly string[]): boolean =>
     list.some((entry) => needles.has(entry.trim().toUpperCase()));
 
@@ -121,15 +130,24 @@ function classifyMarketEventBias(
   return "NEUTRAL";
 }
 
-function classifyNewsBias(sentiment: string | null): SnapshotContextEventV1["directionalBias"] {
+function classifyNewsBias(
+  sentiment: string | null
+): SnapshotContextEventV1["directionalBias"] {
   const normalized = (sentiment ?? "").trim().toUpperCase();
   if (normalized === "NEGATIVE" || normalized === "BEARISH") return "BEARISH";
   if (normalized === "POSITIVE" || normalized === "BULLISH") return "BULLISH";
   return "NEUTRAL";
 }
 
-function classifyRadarBias(movePercent: number | null): SnapshotContextEventV1["directionalBias"] {
-  if (movePercent === null || !Number.isFinite(movePercent) || movePercent === 0) return "NEUTRAL";
+function classifyRadarBias(
+  movePercent: number | null
+): SnapshotContextEventV1["directionalBias"] {
+  if (
+    movePercent === null ||
+    !Number.isFinite(movePercent) ||
+    movePercent === 0
+  )
+    return "NEUTRAL";
   return movePercent < 0 ? "BEARISH" : "BULLISH";
 }
 
@@ -141,7 +159,41 @@ export async function assembleStrategyInput(
   database: PrismaClient,
   options: AssembleStrategyInputOptions
 ): Promise<AssembleStrategyInputResult> {
-  const { symbol, asOf, codeVersion } = options;
+  const {
+    symbol,
+    asOf,
+    codeVersion,
+    strategyKey = CRYPTO_MTF_BREAKOUT_V1_KEY,
+    strategyAssignmentId
+  } = options;
+  const definition = getStrategy(strategyKey);
+  if (definition === null) {
+    return {
+      ok: false,
+      reasonCode: AssemblerReasonCode.ASSIGNMENT_MISSING,
+      message: `Unregistered strategy ${strategyKey}.`
+    };
+  }
+  const params = definition.parameters;
+  const requestedCandlesPerTimeframe = params.requestedCandlesPerTimeframe;
+  const freshnessPolicyVersion = params.freshnessPolicyVersion;
+  const directionalPolicyVersion =
+    "breakoutPolicyVersion" in params
+      ? params.breakoutPolicyVersion
+      : params.breakdownPolicyVersion;
+  if (
+    typeof requestedCandlesPerTimeframe !== "number" ||
+    !Number.isInteger(requestedCandlesPerTimeframe) ||
+    requestedCandlesPerTimeframe <= 0 ||
+    typeof freshnessPolicyVersion !== "string" ||
+    typeof directionalPolicyVersion !== "string"
+  ) {
+    return {
+      ok: false,
+      reasonCode: AssemblerReasonCode.ASSIGNMENT_MISSING,
+      message: `Registered strategy ${strategyKey} has unreadable immutable parameters.`
+    };
+  }
 
   const asset = await database.asset.findFirst({
     where: { symbol, assetType: AssetType.CRYPTO },
@@ -162,7 +214,10 @@ export async function assembleStrategyInput(
     where: {
       assetId: asset.id,
       enabled: true,
-      strategy: { key: CRYPTO_MTF_BREAKOUT_V1_KEY }
+      strategy: { key: strategyKey },
+      ...(strategyAssignmentId === undefined
+        ? {}
+        : { id: strategyAssignmentId })
     },
     include: { strategyVersion: true, strategy: true },
     orderBy: { createdAt: "desc" }
@@ -171,26 +226,27 @@ export async function assembleStrategyInput(
     return {
       ok: false,
       reasonCode: AssemblerReasonCode.ASSIGNMENT_MISSING,
-      message: `No enabled ${CRYPTO_MTF_BREAKOUT_V1_KEY} assignment for ${symbol}.`
+      message: `No enabled ${strategyKey} assignment for ${symbol}.`
     };
   }
 
-  const [series, signals, marketRegime, executionProfile, contextEvents] = await Promise.all([
-    loadSeries(database, asset.id, asOf),
-    loadSignals(database, asset.id, asOf),
-    database.marketRegimeSnapshot.findFirst({
-      where: { generatedAt: { lte: asOf } },
-      orderBy: { generatedAt: "desc" }
-    }),
-    database.instrumentExecutionProfile.findFirst({
-      where: { assetId: asset.id, status: "ACTIVE" },
-      orderBy: { version: "desc" }
-    }),
-    loadContextEvents(database, asset.id, symbol, asOf)
-  ]);
+  const [series, signals, marketRegime, executionProfile, contextEvents] =
+    await Promise.all([
+      loadSeries(database, asset.id, asOf, requestedCandlesPerTimeframe),
+      loadSignals(database, asset.id, asOf),
+      database.marketRegimeSnapshot.findFirst({
+        where: { generatedAt: { lte: asOf } },
+        orderBy: { generatedAt: "desc" }
+      }),
+      database.instrumentExecutionProfile.findFirst({
+        where: { assetId: asset.id, status: "ACTIVE" },
+        orderBy: { version: "desc" }
+      }),
+      loadContextEvents(database, asset.id, symbol, asOf)
+    ]);
 
-  const multiTimeframeInputs: MultiTimeframeSignalInput[] = STRATEGY_TIMEFRAMES.flatMap(
-    (timeframe) => {
+  const multiTimeframeInputs: MultiTimeframeSignalInput[] =
+    STRATEGY_TIMEFRAMES.flatMap((timeframe) => {
       const signal = signals[timeframe];
       return signal === null
         ? []
@@ -207,11 +263,12 @@ export async function assembleStrategyInput(
               createdAt: signal.record.createdAt
             } as MultiTimeframeSignalInput
           ];
-    }
-  );
+    });
 
   const multiTimeframe =
-    multiTimeframeInputs.length === 0 ? null : calculateMultiTimeframeSummary(multiTimeframeInputs);
+    multiTimeframeInputs.length === 0
+      ? null
+      : calculateMultiTimeframeSummary(multiTimeframeInputs);
 
   const snapshot: StrategyInputSnapshotV1 = {
     snapshotVersion: STRATEGY_INPUT_SNAPSHOT_VERSION,
@@ -246,8 +303,10 @@ export async function assembleStrategyInput(
       portfolioId: assignment.portfolioId,
       timeframe: assignment.timeframe,
       enabled: assignment.enabled,
-      validFrom: assignment.validFrom === null ? null : isoString(assignment.validFrom),
-      validTo: assignment.validTo === null ? null : isoString(assignment.validTo)
+      validFrom:
+        assignment.validFrom === null ? null : isoString(assignment.validFrom),
+      validTo:
+        assignment.validTo === null ? null : isoString(assignment.validTo)
     },
     series: {
       "1h": series["1h"],
@@ -265,7 +324,9 @@ export async function assembleStrategyInput(
         : {
             version: MULTI_TIMEFRAME_VERSION,
             alignment: multiTimeframe.alignment,
-            alignmentScore: normalizedAlignmentScore(multiTimeframe.alignmentScore),
+            alignmentScore: normalizedAlignmentScore(
+              multiTimeframe.alignmentScore
+            ),
             alignmentScoreRaw: multiTimeframe.alignmentScore,
             primaryTimeframe: multiTimeframe.primaryTimeframe,
             confirmingTimeframes: [...multiTimeframe.confirmingTimeframes],
@@ -302,7 +363,9 @@ export async function assembleStrategyInput(
             feeBps: executionProfile.feeBps,
             fullSpreadBps: executionProfile.fullSpreadBps,
             slippageBps: executionProfile.slippageBps,
-            maxParticipationRate: decimalString(executionProfile.maxParticipationRate),
+            maxParticipationRate: decimalString(
+              executionProfile.maxParticipationRate
+            ),
             source: executionProfile.source,
             sourceObservedAt: isoString(executionProfile.sourceObservedAt),
             specificationHash: executionProfile.specificationHash
@@ -312,8 +375,8 @@ export async function assembleStrategyInput(
       inputAssemblerVersion: STRATEGY_INPUT_ASSEMBLER_VERSION,
       indicatorVersion: INDICATORS_V1_VERSION,
       multiTimeframeVersion: MULTI_TIMEFRAME_VERSION,
-      breakoutPolicyVersion: PARAMS.breakoutPolicyVersion,
-      freshnessPolicyVersion: PARAMS.freshnessPolicyVersion
+      breakoutPolicyVersion: directionalPolicyVersion,
+      freshnessPolicyVersion
     }
   };
 
@@ -322,13 +385,18 @@ export async function assembleStrategyInput(
 
 type SnapshotSeriesMap = Record<
   StrategyTimeframe,
-  { readonly timeframe: StrategyTimeframe; readonly candles: SnapshotCandleV1[]; readonly dataQuality: SnapshotDataQualityV1 | null }
+  {
+    readonly timeframe: StrategyTimeframe;
+    readonly candles: SnapshotCandleV1[];
+    readonly dataQuality: SnapshotDataQualityV1 | null;
+  }
 >;
 
 async function loadSeries(
   database: PrismaClient,
   assetId: string,
-  asOf: Date
+  asOf: Date,
+  requestedCandlesPerTimeframe: number
 ): Promise<SnapshotSeriesMap> {
   const entries = await Promise.all(
     STRATEGY_TIMEFRAMES.map(async (timeframe) => {
@@ -337,7 +405,7 @@ async function loadSeries(
       const rows = await database.candle.findMany({
         where: { assetId, timeframe, closeTime: { lte: asOf } },
         orderBy: { openTime: "desc" },
-        take: PARAMS.requestedCandlesPerTimeframe
+        take: requestedCandlesPerTimeframe
       });
 
       const candles: SnapshotCandleV1[] = rows
@@ -369,7 +437,9 @@ async function loadSeries(
               timeframe,
               observedAt: isoString(quality.lastAuditAt ?? quality.updatedAt),
               latestClosedCandle:
-                quality.latestClosedCandle === null ? null : isoString(quality.latestClosedCandle),
+                quality.latestClosedCandle === null
+                  ? null
+                  : isoString(quality.latestClosedCandle),
               candleCount: quality.candleCount,
               expectedCandleCount: quality.expectedCandleCount,
               gapCount: quality.gapCount,
@@ -426,7 +496,8 @@ async function loadSignals(
           riskLevel: rule?.finalRiskLevel ?? signal.riskLevel,
           baseScore: signal.score,
           adjustedScore: rule?.adjustedScore ?? signal.score,
-          adjustedScoreSource: rule === null ? "BASE_SCORE" : "RULE_APPLICATION",
+          adjustedScoreSource:
+            rule === null ? "BASE_SCORE" : "RULE_APPLICATION",
           adjustedStatus: rule?.adjustedStatus ?? null,
           riskScore: signal.riskScore,
           ruleApplicationId: rule?.id ?? null,
@@ -447,7 +518,10 @@ async function loadSignals(
     })
   );
 
-  return Object.fromEntries(entries) as Record<StrategyTimeframe, LoadedSignal | null>;
+  return Object.fromEntries(entries) as Record<
+    StrategyTimeframe,
+    LoadedSignal | null
+  >;
 }
 
 async function loadContextEvents(
@@ -469,7 +543,10 @@ async function loadContextEvents(
       take: 20
     }),
     database.marketEvent.findMany({
-      where: { severity: { in: ["IMPORTANT", "CRITICAL"] }, detectedAt: { gte: since, lte: asOf } },
+      where: {
+        severity: { in: ["IMPORTANT", "CRITICAL"] },
+        detectedAt: { gte: since, lte: asOf }
+      },
       orderBy: { detectedAt: "desc" },
       take: 20
     }),
@@ -496,7 +573,11 @@ async function loadContextEvents(
       observedAt: isoString(event.detectedAt),
       eventType: event.eventType,
       severity: event.severity,
-      directionalBias: classifyMarketEventBias(symbol, event.positiveImpact, event.negativeImpact),
+      directionalBias: classifyMarketEventBias(
+        symbol,
+        event.positiveImpact,
+        event.negativeImpact
+      ),
       summary: event.title
     })),
     ...newsItems.map((item) => ({
@@ -513,5 +594,7 @@ async function loadContextEvents(
   ];
 
   // Stable order so the input hash does not depend on query scheduling.
-  return events.sort((left, right) => (left.id < right.id ? -1 : left.id > right.id ? 1 : 0));
+  return events.sort((left, right) =>
+    left.id < right.id ? -1 : left.id > right.id ? 1 : 0
+  );
 }

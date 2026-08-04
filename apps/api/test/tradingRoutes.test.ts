@@ -8,8 +8,14 @@ import Fastify, { type FastifyInstance } from "fastify";
 
 import { requireAdmin } from "../src/auth/helpers.js";
 import { registerAuthRoutes } from "../src/routes/auth.js";
-import { registerTradingOperationsRoutes, setTradingOperationsDatabaseForTests } from "../src/routes/trading/operations.js";
-import { registerTradingReadRoutes, setTradingReadsDatabaseForTests } from "../src/routes/trading/reads.js";
+import {
+  registerTradingOperationsRoutes,
+  setTradingOperationsDatabaseForTests
+} from "../src/routes/trading/operations.js";
+import {
+  registerTradingReadRoutes,
+  setTradingReadsDatabaseForTests
+} from "../src/routes/trading/reads.js";
 import { createFakeTradingDatabase } from "./support/tradingFixtures.js";
 
 const TEST_USERNAME = "testadmin";
@@ -37,7 +43,10 @@ afterEach(() => {
   }
 });
 
-async function buildTestServer(fakeDb: unknown, authEnabled = true): Promise<FastifyInstance> {
+async function buildTestServer(
+  fakeDb: unknown,
+  authEnabled = true
+): Promise<FastifyInstance> {
   process.env.API_AUTH_ENABLED = authEnabled ? "true" : "false";
   process.env.ADMIN_USERNAME = TEST_USERNAME;
   process.env.ADMIN_PASSWORD_HASH = TEST_PASSWORD_HASH;
@@ -62,15 +71,21 @@ async function buildTestServer(fakeDb: unknown, authEnabled = true): Promise<Fas
   return server;
 }
 
-async function loginAndGetCookies(server: FastifyInstance): Promise<{ session: string; csrfCookie: string; csrfToken: string }> {
+async function loginAndGetCookies(
+  server: FastifyInstance
+): Promise<{ session: string; csrfCookie: string; csrfToken: string }> {
   const loginResponse = await server.inject({
     method: "POST",
     url: "/auth/login",
     payload: { username: TEST_USERNAME, password: TEST_PASSWORD }
   });
   assert.equal(loginResponse.statusCode, 200);
-  const rawSessionCookie = loginResponse.headers["set-cookie"] as string | string[];
-  const session = (Array.isArray(rawSessionCookie) ? rawSessionCookie[0] : rawSessionCookie).split(";")[0];
+  const rawSessionCookie = loginResponse.headers["set-cookie"] as
+    | string
+    | string[];
+  const session = (
+    Array.isArray(rawSessionCookie) ? rawSessionCookie[0] : rawSessionCookie
+  ).split(";")[0];
 
   const csrfResponse = await server.inject({
     method: "GET",
@@ -80,7 +95,9 @@ async function loginAndGetCookies(server: FastifyInstance): Promise<{ session: s
   assert.equal(csrfResponse.statusCode, 200);
   const csrfToken = csrfResponse.json().csrfToken as string;
   const rawCsrfCookie = csrfResponse.headers["set-cookie"] as string | string[];
-  const csrfCookie = (Array.isArray(rawCsrfCookie) ? rawCsrfCookie : [rawCsrfCookie])
+  const csrfCookie = (
+    Array.isArray(rawCsrfCookie) ? rawCsrfCookie : [rawCsrfCookie]
+  )
     .map((entry) => entry.split(";")[0])
     .find((entry) => entry.startsWith("signalpilot_trading_csrf="));
   assert.ok(csrfCookie, "csrf cookie must be set");
@@ -101,7 +118,11 @@ describe("trading read routes — auth", () => {
     const { database } = createFakeTradingDatabase();
     const server = await buildTestServer(database, true);
     const { session } = await loginAndGetCookies(server);
-    const response = await server.inject({ method: "GET", url: "/trading/overview", headers: { cookie: session } });
+    const response = await server.inject({
+      method: "GET",
+      url: "/trading/overview",
+      headers: { cookie: session }
+    });
     assert.equal(response.statusCode, 200);
     await server.close();
   });
@@ -167,7 +188,9 @@ describe("trading read routes — 404 and filters", () => {
 
   it("filters candidates by status and respects limit/offset", async () => {
     const { database, tables } = createFakeTradingDatabase();
-    const portfolio = tables.get("portfolio")!.create({ data: { key: "SHADOW_V1", name: "Shadow v1", status: "ACTIVE" } });
+    const portfolio = tables.get("portfolio")!.create({
+      data: { key: "SHADOW_V1", name: "Shadow v1", status: "ACTIVE" }
+    });
     for (let i = 0; i < 3; i += 1) {
       tables.get("tradeCandidate")!.create({
         data: {
@@ -187,7 +210,9 @@ describe("trading read routes — 404 and filters", () => {
     }
     const server = await buildTestServer(database, false);
 
-    const filtered = await server.inject("/trading/candidates?status=APPROVED_FOR_SHADOW");
+    const filtered = await server.inject(
+      "/trading/candidates?status=APPROVED_FOR_SHADOW"
+    );
     assert.equal(filtered.statusCode, 200);
     assert.equal(filtered.json().length, 1);
 
@@ -200,6 +225,222 @@ describe("trading read routes — 404 and filters", () => {
 
     await server.close();
   });
+
+  it("filters assignment direction before applying pagination", async () => {
+    const { database, tables } = createFakeTradingDatabase();
+    const portfolio = tables.get("portfolio")!.create({
+      data: { key: "SHADOW_V1", name: "Shadow v1", status: "ACTIVE" }
+    });
+    const asset = tables.get("asset")!.create({
+      data: { symbol: "BTCUSDT", assetType: "CRYPTO" }
+    });
+    const strategies = [
+      { key: "CRYPTO_MTF_BREAKOUT_LONG_V1", direction: "LONG" },
+      { key: "CRYPTO_MTF_BREAKDOWN_SHORT_V1", direction: "SHORT" },
+      { key: "CRYPTO_MTF_BREAKDOWN_SHORT_V1", direction: "SHORT" }
+    ] as const;
+    for (const [index, definition] of strategies.entries()) {
+      const strategy = tables.get("strategy")!.create({
+        data: {
+          key: `${definition.key}-${index}`,
+          name: definition.key,
+          status: "ACTIVE"
+        }
+      });
+      const version = tables.get("strategyVersion")!.create({
+        data: {
+          strategyId: strategy.id,
+          version: 1,
+          status: "ACTIVE",
+          engineVersion: `engine-${index}`,
+          specificationHash: `hash-${index}`,
+          parametersJson: { direction: definition.direction }
+        }
+      });
+      tables.get("strategyAssignment")!.create({
+        data: {
+          id: `assignment-${index}`,
+          portfolioId: portfolio.id,
+          assetId: asset.id,
+          strategyId: strategy.id,
+          strategyVersionId: version.id,
+          timeframe: "1h",
+          enabled: false,
+          assignmentConfigJson: {
+            direction: definition.direction,
+            leverageAllowed: false,
+            marginAllowed: false,
+            futuresAllowed: false,
+            syntheticShadowShort: definition.direction === "SHORT"
+          },
+          createdAt: new Date(`2026-08-04T00:0${index}:00.000Z`)
+        }
+      });
+    }
+
+    const server = await buildTestServer(database, false);
+    const response = await server.inject(
+      "/trading/assignments?direction=SHORT&limit=1&offset=1"
+    );
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(
+      response.json().map((row: { id: string; direction: string }) => ({
+        id: row.id,
+        direction: row.direction
+      })),
+      [{ id: "assignment-2", direction: "SHORT" }]
+    );
+    await server.close();
+  });
+
+  it("filters SHORT candidates, orders, fills and positions with strategy provenance", async () => {
+    const { database, tables } = createFakeTradingDatabase();
+    const portfolio = tables.get("portfolio")!.create({
+      data: { key: "SHADOW_V1", name: "Shadow v1", status: "ACTIVE" }
+    });
+    const asset = tables
+      .get("asset")!
+      .create({ data: { symbol: "BTCUSDT", assetType: "CRYPTO" } });
+    const strategy = tables.get("strategy")!.create({
+      data: {
+        key: "CRYPTO_MTF_BREAKDOWN_SHORT_V1",
+        name: "Breakdown Short",
+        status: "ACTIVE"
+      }
+    });
+    const version = tables.get("strategyVersion")!.create({
+      data: {
+        strategyId: strategy.id,
+        version: 1,
+        engineVersion: "crypto-mtf-breakdown-short-v1",
+        codeVersion: "test",
+        specificationHash: "sha256:test-short",
+        parametersJson: { direction: "SHORT" }
+      }
+    });
+    const assignment = tables.get("strategyAssignment")!.create({
+      data: {
+        portfolioId: portfolio.id,
+        assetId: asset.id,
+        strategyId: strategy.id,
+        strategyVersionId: version.id,
+        assignmentConfigJson: { direction: "SHORT", syntheticShadowShort: true }
+      }
+    });
+
+    const candidate = tables.get("tradeCandidate")!.create({
+      data: {
+        candidateKey: "short-candidate",
+        portfolioId: portfolio.id,
+        assetId: asset.id,
+        direction: "SHORT",
+        strategyAssignmentId: assignment.id,
+        strategyVersionId: version.id,
+        entryType: "MARKET_NEXT_BAR",
+        status: "APPROVED_FOR_SHADOW",
+        referenceEntryPrice: "24000",
+        stopPrice: "24600",
+        takeProfitPrice: "22700",
+        minimumRewardRisk: "2",
+        plannedRewardRisk: "2.16",
+        invalidReasonCode: null,
+        cancelReasonCode: null,
+        dataAsOf: new Date("2026-08-04T09:00:00.000Z"),
+        decisionTime: new Date("2026-08-04T09:00:01.000Z"),
+        expiresAt: new Date("2026-08-04T11:00:00.000Z")
+      }
+    });
+    const order = tables.get("shadowOrder")!.create({
+      data: {
+        orderKey: "short-order",
+        portfolioId: portfolio.id,
+        assetId: asset.id,
+        tradeCandidateId: candidate.id,
+        shadowPositionId: null,
+        purpose: "ENTRY",
+        direction: "SHORT",
+        side: "SELL",
+        orderType: "MARKET_NEXT_BAR",
+        timeInForce: "GTC",
+        status: "FILLED",
+        requestedQuantity: "0.1",
+        filledQuantity: "0.1",
+        remainingQuantity: "0",
+        referencePrice: "24000",
+        reservedQuoteAmount: "2500",
+        rejectionReasonCode: null,
+        cancelReasonCode: null,
+        earliestFillAt: null,
+        expiresAt: null
+      }
+    });
+    const position = tables.get("shadowPosition")!.create({
+      data: {
+        positionKey: "short-position",
+        portfolioId: portfolio.id,
+        assetId: asset.id,
+        entryOrderId: order.id,
+        strategyAssignmentId: assignment.id,
+        strategyVersionId: version.id,
+        direction: "SHORT",
+        status: "OPEN",
+        initialQuantity: "0.1",
+        openQuantity: "0.1",
+        closedQuantity: "0",
+        averageEntryPrice: "23990",
+        averageExitPrice: "0",
+        grossEntryNotional: "2399",
+        grossExitNotional: "0",
+        realizedPnl: "0",
+        feesPaid: "1.2",
+        reservedCollateral: "2400.2",
+        stopPrice: "24600",
+        takeProfitPrice: "22700",
+        maxHoldUntil: new Date("2026-08-07T10:00:00.000Z"),
+        openedAt: new Date("2026-08-04T10:00:00.000Z"),
+        closedAt: null,
+        lastValuationAt: new Date("2026-08-04T10:00:00.000Z")
+      }
+    });
+    tables.get("shadowOrder")!.update({
+      where: { id: order.id },
+      data: { shadowPositionId: position.id }
+    });
+    tables.get("shadowFill")!.create({
+      data: {
+        fillKey: "short-fill",
+        shadowOrderId: order.id,
+        shadowPositionId: position.id,
+        assetId: asset.id,
+        side: "SELL",
+        quantity: "0.1",
+        referencePrice: "24000",
+        spreadAmount: "5",
+        slippageAmount: "5",
+        fillPrice: "23990",
+        notional: "2399",
+        feeAmount: "1.2",
+        feeAsset: "USDT",
+        triggerType: "ENTRY",
+        occurredAt: new Date("2026-08-04T10:00:00.000Z")
+      }
+    });
+
+    const server = await buildTestServer(database, false);
+    for (const path of ["candidates", "orders", "fills", "positions"]) {
+      const response = await server.inject(
+        `/trading/${path}?direction=SHORT&strategyVersionId=${version.id}&limit=1&offset=0`
+      );
+      assert.equal(response.statusCode, 200, path);
+      const rows = response.json();
+      assert.equal(rows.length, 1, path);
+      assert.equal(rows[0].direction, "SHORT", path);
+      assert.equal(rows[0].strategyVersionId, version.id, path);
+      assert.equal(rows[0].syntheticShadowShort, true, path);
+      assert.equal(rows[0].exchangePosition, false, path);
+    }
+    await server.close();
+  });
 });
 
 describe("trading operations — guards", () => {
@@ -209,7 +450,12 @@ describe("trading operations — guards", () => {
     const response = await server.inject({
       method: "POST",
       url: "/trading/operations/activate-portfolio",
-      payload: { portfolioId: "x", confirm: "ACTIVATE_PORTFOLIO", idempotencyKey: "k", expectedVersion: 0 }
+      payload: {
+        portfolioId: "x",
+        confirm: "ACTIVATE_PORTFOLIO",
+        idempotencyKey: "k",
+        expectedVersion: 0
+      }
     });
     assert.equal(response.statusCode, 401);
     await server.close();
@@ -217,7 +463,9 @@ describe("trading operations — guards", () => {
 
   it("blocks a request missing the CSRF header even with a valid session", async () => {
     const { database, tables } = createFakeTradingDatabase();
-    const portfolio = tables.get("portfolio")!.create({ data: { key: "SHADOW_V1", name: "Shadow v1", status: "DRAFT" } });
+    const portfolio = tables.get("portfolio")!.create({
+      data: { key: "SHADOW_V1", name: "Shadow v1", status: "DRAFT" }
+    });
     const server = await buildTestServer(database, true);
     const { session } = await loginAndGetCookies(server);
 
@@ -225,7 +473,12 @@ describe("trading operations — guards", () => {
       method: "POST",
       url: "/trading/operations/activate-portfolio",
       headers: { cookie: session },
-      payload: { portfolioId: portfolio.id, confirm: "ACTIVATE_PORTFOLIO", idempotencyKey: "k", expectedVersion: 0 }
+      payload: {
+        portfolioId: portfolio.id,
+        confirm: "ACTIVATE_PORTFOLIO",
+        idempotencyKey: "k",
+        expectedVersion: 0
+      }
     });
     assert.equal(response.statusCode, 403);
     await server.close();
@@ -233,16 +486,25 @@ describe("trading operations — guards", () => {
 
   it("requires confirm, idempotencyKey and expectedVersion (400 when any is missing)", async () => {
     const { database, tables } = createFakeTradingDatabase();
-    const portfolio = tables.get("portfolio")!.create({ data: { key: "SHADOW_V1", name: "Shadow v1", status: "DRAFT" } });
+    const portfolio = tables.get("portfolio")!.create({
+      data: { key: "SHADOW_V1", name: "Shadow v1", status: "DRAFT" }
+    });
     const server = await buildTestServer(database, true);
     const { session, csrfCookie, csrfToken } = await loginAndGetCookies(server);
-    const headers = { cookie: `${session}; ${csrfCookie}`, "x-trading-csrf-token": csrfToken };
+    const headers = {
+      cookie: `${session}; ${csrfCookie}`,
+      "x-trading-csrf-token": csrfToken
+    };
 
     const missingConfirm = await server.inject({
       method: "POST",
       url: "/trading/operations/activate-portfolio",
       headers,
-      payload: { portfolioId: portfolio.id, idempotencyKey: "k", expectedVersion: 0 }
+      payload: {
+        portfolioId: portfolio.id,
+        idempotencyKey: "k",
+        expectedVersion: 0
+      }
     });
     assert.equal(missingConfirm.statusCode, 400);
 
@@ -250,7 +512,11 @@ describe("trading operations — guards", () => {
       method: "POST",
       url: "/trading/operations/activate-portfolio",
       headers,
-      payload: { portfolioId: portfolio.id, confirm: "ACTIVATE_PORTFOLIO", expectedVersion: 0 }
+      payload: {
+        portfolioId: portfolio.id,
+        confirm: "ACTIVATE_PORTFOLIO",
+        expectedVersion: 0
+      }
     });
     assert.equal(missingIdempotency.statusCode, 400);
 
@@ -258,7 +524,11 @@ describe("trading operations — guards", () => {
       method: "POST",
       url: "/trading/operations/activate-portfolio",
       headers,
-      payload: { portfolioId: portfolio.id, confirm: "ACTIVATE_PORTFOLIO", idempotencyKey: "k" }
+      payload: {
+        portfolioId: portfolio.id,
+        confirm: "ACTIVATE_PORTFOLIO",
+        idempotencyKey: "k"
+      }
     });
     assert.equal(missingVersion.statusCode, 400);
 
@@ -267,16 +537,26 @@ describe("trading operations — guards", () => {
 
   it("returns 409 on a stale expectedVersion and 200 with replayed:true on a repeat of the same request", async () => {
     const { database, tables } = createFakeTradingDatabase();
-    const portfolio = tables.get("portfolio")!.create({ data: { key: "SHADOW_V1", name: "Shadow v1", status: "DRAFT" } });
+    const portfolio = tables.get("portfolio")!.create({
+      data: { key: "SHADOW_V1", name: "Shadow v1", status: "DRAFT" }
+    });
     const server = await buildTestServer(database, true);
     const { session, csrfCookie, csrfToken } = await loginAndGetCookies(server);
-    const headers = { cookie: `${session}; ${csrfCookie}`, "x-trading-csrf-token": csrfToken };
+    const headers = {
+      cookie: `${session}; ${csrfCookie}`,
+      "x-trading-csrf-token": csrfToken
+    };
 
     const stale = await server.inject({
       method: "POST",
       url: "/trading/operations/activate-portfolio",
       headers,
-      payload: { portfolioId: portfolio.id, confirm: "ACTIVATE_PORTFOLIO", idempotencyKey: "k1", expectedVersion: 7 }
+      payload: {
+        portfolioId: portfolio.id,
+        confirm: "ACTIVATE_PORTFOLIO",
+        idempotencyKey: "k1",
+        expectedVersion: 7
+      }
     });
     assert.equal(stale.statusCode, 409);
     // P8, "5.": the current version must be a field, not something a client
@@ -293,7 +573,12 @@ describe("trading operations — guards", () => {
       method: "POST",
       url: "/trading/operations/activate-portfolio",
       headers,
-      payload: { portfolioId: portfolio.id, confirm: "ACTIVATE_PORTFOLIO", idempotencyKey: "k2", expectedVersion: 0 }
+      payload: {
+        portfolioId: portfolio.id,
+        confirm: "ACTIVATE_PORTFOLIO",
+        idempotencyKey: "k2",
+        expectedVersion: 0
+      }
     });
     assert.equal(first.statusCode, 200);
     assert.equal(first.json().replayed, false);
@@ -302,7 +587,12 @@ describe("trading operations — guards", () => {
       method: "POST",
       url: "/trading/operations/activate-portfolio",
       headers,
-      payload: { portfolioId: portfolio.id, confirm: "ACTIVATE_PORTFOLIO", idempotencyKey: "k2", expectedVersion: 0 }
+      payload: {
+        portfolioId: portfolio.id,
+        confirm: "ACTIVATE_PORTFOLIO",
+        idempotencyKey: "k2",
+        expectedVersion: 0
+      }
     });
     assert.equal(replay.statusCode, 200);
     assert.equal(replay.json().replayed, true);
@@ -314,13 +604,20 @@ describe("trading operations — guards", () => {
     const { database } = createFakeTradingDatabase();
     const server = await buildTestServer(database, true);
     const { session, csrfCookie, csrfToken } = await loginAndGetCookies(server);
-    const headers = { cookie: `${session}; ${csrfCookie}`, "x-trading-csrf-token": csrfToken };
+    const headers = {
+      cookie: `${session}; ${csrfCookie}`,
+      "x-trading-csrf-token": csrfToken
+    };
 
     const response = await server.inject({
       method: "POST",
       url: "/trading/operations/run-job",
       headers,
-      payload: { jobName: "; rm -rf /", confirm: "RUN_JOB", idempotencyKey: "k3" }
+      payload: {
+        jobName: "; rm -rf /",
+        confirm: "RUN_JOB",
+        idempotencyKey: "k3"
+      }
     });
     assert.equal(response.statusCode, 422);
     assert.equal(response.json().reasonCode, "JOB_NOT_ALLOWLISTED");
@@ -338,7 +635,11 @@ describe("trading operations — disabled route registration", () => {
     await server.register(registerTradingReadRoutes);
     setTradingReadsDatabaseForTests(database as never);
 
-    const response = await server.inject({ method: "POST", url: "/trading/operations/activate-portfolio", payload: {} });
+    const response = await server.inject({
+      method: "POST",
+      url: "/trading/operations/activate-portfolio",
+      payload: {}
+    });
     assert.equal(response.statusCode, 404);
     await server.close();
   });

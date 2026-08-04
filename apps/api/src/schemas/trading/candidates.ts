@@ -22,6 +22,16 @@ export interface TradeCandidateRow {
   readonly assetId: string;
   readonly asset?: { readonly symbol: string } | null;
   readonly direction: string;
+  readonly strategyAssignmentId: string;
+  readonly strategyVersionId: string;
+  readonly strategyVersion?: {
+    readonly id: string;
+    readonly version: number;
+    readonly engineVersion: string;
+    readonly codeVersion: string;
+    readonly specificationHash: string;
+    readonly strategy?: { readonly key: string; readonly name: string } | null;
+  } | null;
   readonly entryType: string;
   readonly status: string;
   readonly referenceEntryPrice: unknown;
@@ -43,6 +53,7 @@ export interface TradeCandidateRow {
   readonly dataAsOf: Date;
   readonly decisionTime: Date;
   readonly expiresAt: Date;
+  readonly riskAssessments?: readonly RiskAssessmentRow[];
 }
 
 export function toCandidateListItem(candidate: TradeCandidateRow) {
@@ -53,6 +64,17 @@ export function toCandidateListItem(candidate: TradeCandidateRow) {
     assetId: candidate.assetId,
     symbol: candidate.asset?.symbol ?? null,
     direction: candidate.direction,
+    syntheticShadowShort: candidate.direction === "SHORT",
+    exchangePosition: false,
+    strategyAssignmentId: candidate.strategyAssignmentId,
+    strategyVersionId: candidate.strategyVersionId,
+    strategyKey: candidate.strategyVersion?.strategy?.key ?? null,
+    strategyName: candidate.strategyVersion?.strategy?.name ?? null,
+    strategyVersion: candidate.strategyVersion?.version ?? null,
+    strategyEngineVersion: candidate.strategyVersion?.engineVersion ?? null,
+    strategyCodeVersion: candidate.strategyVersion?.codeVersion ?? null,
+    strategySpecificationHash:
+      candidate.strategyVersion?.specificationHash ?? null,
     entryType: candidate.entryType,
     status: candidate.status,
     referenceEntryPrice: decimalToString(candidate.referenceEntryPrice),
@@ -79,7 +101,12 @@ export function toCandidateDetail(candidate: TradeCandidateRow) {
     validFrom: toIsoOrNull(candidate.validFrom),
     earliestFillAt: toIsoOrNull(candidate.earliestFillAt),
     maxHoldHours: candidate.maxHoldHours,
-    strategyReasonCodes: candidate.strategyReasonCodes
+    strategyReasonCodes: candidate.strategyReasonCodes,
+    latestRiskAssessment:
+      candidate.riskAssessments === undefined ||
+      candidate.riskAssessments.length === 0
+        ? null
+        : toRiskAssessment(candidate.riskAssessments[0]!)
   };
 }
 

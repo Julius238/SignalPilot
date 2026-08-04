@@ -16,7 +16,10 @@
  * candle or the plan the caller supplies.
  */
 
-import type { DecimalString } from "@signalpilot/trading-domain";
+import type {
+  DecimalString,
+  TradeDirection
+} from "@signalpilot/trading-domain";
 
 import type { SimulationReasonCode } from "./reason-codes.js";
 
@@ -69,13 +72,14 @@ export interface MarketFillComputationInputV1 {
   readonly candle: CandleSnapshotV1;
   readonly executionProfile: ExecutionProfileSnapshotV1;
   /**
-   * Reserve still tied to `requestedQuantity`, checked for `BUY` only. A
-   * `SELL` is funded by the position, not a cash reservation.
+   * Reserve still tied to an entry. LONG/BUY must cover notional plus fee;
+   * synthetic SHORT/SELL must at least cover its fee here while the worker
+   * retains the separately computed unleveraged collateral.
    */
   readonly reservedQuoteAmount?: DecimalString;
   /**
-   * Quantity already open on the position, checked for `SELL` only so a fill
-   * can never sell more than the position holds.
+   * Quantity already open on the position, checked for either exit side so a
+   * SELL long exit and BUY-to-close short exit cannot exceed exposure.
    */
   readonly openQuantity?: DecimalString;
 }
@@ -110,6 +114,7 @@ export const ExitTrigger = {
 export type ExitTrigger = (typeof ExitTrigger)[keyof typeof ExitTrigger];
 
 export interface ExitCandleInputV1 {
+  readonly direction: TradeDirection;
   readonly stopPrice: DecimalString;
   readonly takeProfitPrice: DecimalString;
   readonly maxHoldUntil: IsoDateTimeString;
@@ -128,8 +133,10 @@ export interface ExitResolutionResultV1 {
 
 /** Entry-gap check (docs/trading/07, "Entry und Gap" item 4). */
 export interface EntryGapCheckInputV1 {
+  readonly direction?: TradeDirection;
   readonly candleOpen: DecimalString;
-  readonly plannedEntryMaximum: DecimalString;
+  readonly plannedEntryMaximum?: DecimalString;
+  readonly plannedEntryMinimum?: DecimalString;
 }
 
 export interface EntryGapCheckResultV1 {

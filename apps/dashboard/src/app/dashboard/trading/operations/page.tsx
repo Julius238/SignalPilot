@@ -1,4 +1,5 @@
 import { EmptyState, ErrorState } from "../../../../components/empty-state";
+import { DirectionBadge } from "../../../../components/badges";
 import { PageHeader, SectionCard } from "../../../../components/ui";
 import { OperationConfirm } from "../../../../components/trading/operation-confirm";
 import {
@@ -13,14 +14,17 @@ import {
   fetchAlertOutboxSummary,
   fetchEligibilityReport,
   fetchShadowPositions,
+  fetchStrategyAssignments,
   fetchTradingPortfolio,
   fetchTradingSessions,
   fetchWorkerStatus,
-  isAllowedJobName,
   RUN_JOB_ALLOWLIST,
   RUN_JOB_LABELS
 } from "../../../../lib/trading-api";
-import { formatDecimalAmount, formatUtcDateTime } from "../../../../lib/trading-format";
+import {
+  formatDecimalAmount,
+  formatUtcDateTime
+} from "../../../../lib/trading-format";
 import { TRADING_DASHBOARD_ENABLED } from "../../../../lib/trading-flag";
 
 export default async function TradingOperationsPage() {
@@ -35,7 +39,8 @@ export default async function TradingOperationsPage() {
     openPositionsResult,
     eligibilityResult,
     outboxSummaryResult,
-    outboxResult
+    outboxResult,
+    assignmentsResult
   ] = await Promise.all([
     fetchTradingPortfolio(),
     fetchTradingSessions({ limit: 5 }),
@@ -43,7 +48,8 @@ export default async function TradingOperationsPage() {
     fetchShadowPositions({ open: "true", limit: 100 }),
     fetchEligibilityReport(),
     fetchAlertOutboxSummary(),
-    fetchAlertOutbox({ limit: 25 })
+    fetchAlertOutbox({ limit: 25 }),
+    fetchStrategyAssignments({ limit: 20 })
   ]);
 
   const portfolio = portfolioResult.data;
@@ -54,6 +60,7 @@ export default async function TradingOperationsPage() {
   const eligibility = eligibilityResult.data ?? null;
   const outboxSummary = outboxSummaryResult.data ?? null;
   const outboxEntries = outboxResult.data ?? [];
+  const assignments = assignmentsResult.data ?? [];
 
   return (
     <>
@@ -64,20 +71,31 @@ export default async function TradingOperationsPage() {
       />
 
       <p className="muted small" style={{ marginBottom: 16 }}>
-        Diese Seite ist Teil des regulär authentifizierten Dashboards; es gibt nur eine
-        Administrator-Rolle (kein separates Trading-Operator-Konto). Jede Aktion ruft die API mit
-        einem frisch geholten CSRF-Token auf und erwartet serverseitig eine erlaubte Zustandsübergangs
-        — das UI erzwingt keine eigene Trading-Logik.
+        Diese Seite ist Teil des regulär authentifizierten Dashboards; es gibt
+        nur eine Administrator-Rolle (kein separates Trading-Operator-Konto).
+        Jede Aktion ruft die API mit einem frisch geholten CSRF-Token auf und
+        erwartet serverseitig eine erlaubte Zustandsübergangs — das UI erzwingt
+        keine eigene Trading-Logik.
       </p>
 
-      {portfolioResult.error && !portfolioResult.error.toLowerCase().includes("no portfolio exists") ? (
-        <ErrorState title="Portfolio konnte nicht geladen werden" message={portfolioResult.error} />
+      {portfolioResult.error &&
+      !portfolioResult.error.toLowerCase().includes("no portfolio exists") ? (
+        <ErrorState
+          title="Portfolio konnte nicht geladen werden"
+          message={portfolioResult.error}
+        />
       ) : null}
       {sessionsResult.error ? (
-        <ErrorState title="Sessions konnten nicht geladen werden" message={sessionsResult.error} />
+        <ErrorState
+          title="Sessions konnten nicht geladen werden"
+          message={sessionsResult.error}
+        />
       ) : null}
       {workerResult.error ? (
-        <ErrorState title="Worker-Status konnte nicht geladen werden" message={workerResult.error} />
+        <ErrorState
+          title="Worker-Status konnte nicht geladen werden"
+          message={workerResult.error}
+        />
       ) : null}
 
       <SectionCard
@@ -115,10 +133,101 @@ export default async function TradingOperationsPage() {
           confirmPhrase={CONFIRM_PHRASES.activatePortfolio}
           endpoint="/trading/operations/activate-portfolio"
           reasonFieldName="reason"
-          buildBody={() => ({ portfolioId: portfolio?.id, expectedVersion: portfolio?.version })}
-          disabledReason={portfolio ? null : "Kein Portfolio vorhanden — Aktion nicht verfügbar."}
+          body={{
+            base: {
+              portfolioId: portfolio?.id,
+              expectedVersion: portfolio?.version
+            }
+          }}
+          disabledReason={
+            portfolio
+              ? null
+              : "Kein Portfolio vorhanden — Aktion nicht verfügbar."
+          }
         />
       </SectionCard>
+
+      <div style={{ marginTop: 16 }}>
+        <SectionCard
+          title="Strategy Assignments"
+          subtitle="BTCUSDT und ETHUSDT je Richtung einzeln; Änderungen sind versioniert und explizit bestätigt"
+        >
+          {assignmentsResult.error ? (
+            <ErrorState
+              title="Assignments konnten nicht geladen werden"
+              message={assignmentsResult.error}
+            />
+          ) : null}
+          {assignments.length > 0 ? (
+            <div className="stack-list">
+              {assignments.map((assignment) => {
+                const action = assignment.enabled ? "DISABLE" : "ENABLE";
+                const confirmation = `${action}_${assignment.symbol}_${assignment.direction ?? "UNKNOWN"}_${assignment.strategyKey}_V${assignment.version}`;
+                const blocked =
+                  !assignment.enabled &&
+                  (!assignment.directionConsistent ||
+                    assignment.direction === null ||
+                    !assignment.syntheticShadowOnly ||
+                    assignment.strategyStatus !== "ACTIVE" ||
+                    assignment.strategyVersionStatus !== "ACTIVE");
+                return (
+                  <div
+                    key={assignment.id}
+                    className="list-row"
+                    style={{ alignItems: "flex-start", gap: 16 }}
+                  >
+                    <div>
+                      <strong>{assignment.symbol}</strong>{" "}
+                      {assignment.direction ? (
+                        <DirectionBadge value={assignment.direction} />
+                      ) : (
+                        "UNKNOWN"
+                      )}
+                      <div className="muted small">
+                        {assignment.strategyKey} v{assignment.strategyVersion} ·
+                        Assignment v{assignment.version} ·{" "}
+                        {assignment.enabled ? "aktiv" : "deaktiviert"}
+                      </div>
+                    </div>
+                    <div style={{ minWidth: 360 }}>
+                      <OperationConfirm
+                        title={
+                          assignment.enabled
+                            ? "Assignment deaktivieren"
+                            : "Assignment aktivieren"
+                        }
+                        impact={
+                          assignment.enabled
+                            ? "Entzieht nur diesem Assignment die Berechtigung für neue Candidates; bestehende Exits bleiben möglich."
+                            : "Erlaubt Candidates nur bei erfüllten Feature-Flags und Risk-/Session-Gates. Aktiviert weder Portfolio noch Session."
+                        }
+                        dangerous={!assignment.enabled}
+                        confirmPhrase={confirmation}
+                        endpoint="/trading/operations/set-assignment"
+                        reasonFieldName="reason"
+                        body={{
+                          base: {
+                            assignmentId: assignment.id,
+                            expectedVersion: assignment.version,
+                            enabled: !assignment.enabled
+                          }
+                        }}
+                        disabledReason={
+                          blocked
+                            ? "Inkonsistentes oder nicht freigegebenes Shadow-Assignment — Änderung blockiert."
+                            : null
+                        }
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <EmptyState title="Keine Assignments vorhanden." />
+          )}
+        </SectionCard>
+      </div>
 
       <div style={{ marginTop: 16 }}>
         <SectionCard
@@ -160,7 +269,12 @@ export default async function TradingOperationsPage() {
                 confirmPhrase={CONFIRM_PHRASES.activateSession}
                 endpoint="/trading/operations/activate-session"
                 reasonFieldName="reason"
-                buildBody={() => ({ sessionId: session.id, expectedVersion: session.version })}
+                body={{
+                  base: {
+                    sessionId: session.id,
+                    expectedVersion: session.version
+                  }
+                }}
               />
               <OperationConfirm
                 title="Session pausieren"
@@ -168,7 +282,12 @@ export default async function TradingOperationsPage() {
                 confirmPhrase={CONFIRM_PHRASES.pauseSession}
                 endpoint="/trading/operations/pause-session"
                 reasonFieldName="reason"
-                buildBody={() => ({ sessionId: session.id, expectedVersion: session.version })}
+                body={{
+                  base: {
+                    sessionId: session.id,
+                    expectedVersion: session.version
+                  }
+                }}
               />
               <OperationConfirm
                 title="Kill-Switch aktivieren"
@@ -178,7 +297,12 @@ export default async function TradingOperationsPage() {
                 endpoint="/trading/operations/engage-kill-switch"
                 reasonFieldName="reasonCode"
                 reasonLabel="Grund (reasonCode)"
-                buildBody={() => ({ sessionId: session.id, expectedVersion: session.version })}
+                body={{
+                  base: {
+                    sessionId: session.id,
+                    expectedVersion: session.version
+                  }
+                }}
               />
               <OperationConfirm
                 title="Kill-Switch kontrolliert lösen"
@@ -187,7 +311,12 @@ export default async function TradingOperationsPage() {
                 confirmPhrase={CONFIRM_PHRASES.releaseKillSwitch}
                 endpoint="/trading/operations/release-kill-switch"
                 reasonFieldName="reason"
-                buildBody={() => ({ sessionId: session.id, expectedVersion: session.version })}
+                body={{
+                  base: {
+                    sessionId: session.id,
+                    expectedVersion: session.version
+                  }
+                }}
               />
               <OperationConfirm
                 title="Session entsperren (ERROR_LOCKED → STOPPED)"
@@ -204,11 +333,13 @@ export default async function TradingOperationsPage() {
                     required: true
                   }
                 ]}
-                buildBody={({ extra }) => ({
-                  sessionId: session.id,
-                  expectedVersion: session.version,
-                  confirmCauseResolved: extra.confirmCauseResolved === true
-                })}
+                body={{
+                  base: {
+                    sessionId: session.id,
+                    expectedVersion: session.version
+                  },
+                  passthrough: ["confirmCauseResolved"]
+                }}
               />
             </>
           )}
@@ -241,19 +372,29 @@ export default async function TradingOperationsPage() {
                   }))
                 }
               ]}
-              buildBody={({ extra }) => {
-                const [shadowPositionId, versionStr] = String(extra.positionId ?? "").split("::");
-                return { shadowPositionId, expectedVersion: Number(versionStr) };
+              body={{
+                split: {
+                  from: "positionId",
+                  separator: "::",
+                  idKey: "shadowPositionId",
+                  versionKey: "expectedVersion"
+                }
               }}
             />
           ) : (
-            <EmptyState title="Keine offenen Positionen vorhanden." tone="calm" />
+            <EmptyState
+              title="Keine offenen Positionen vorhanden."
+              tone="calm"
+            />
           )}
         </SectionCard>
       </div>
 
       <div style={{ marginTop: 16 }}>
-        <SectionCard title="Worker & geplante Jobs" subtitle="Lease-, Circuit-Breaker- und Laufstatus je Job">
+        <SectionCard
+          title="Worker & geplante Jobs"
+          subtitle="Lease-, Circuit-Breaker- und Laufstatus je Job"
+        >
           {worker && worker.jobs.length > 0 ? (
             <div className="table-wrap">
               <table className="responsive-table">
@@ -275,10 +416,14 @@ export default async function TradingOperationsPage() {
                           : "Noch nie gelaufen"}
                       </td>
                       <td data-label="Lease">
-                        {job.lease?.active ? `aktiv · ${job.lease.claimedBy ?? "—"}` : "frei"}
+                        {job.lease?.active
+                          ? `aktiv · ${job.lease.claimedBy ?? "—"}`
+                          : "frei"}
                       </td>
                       <td data-label="Circuit Breaker">
-                        <CircuitBreakerBadge allowed={job.circuitBreaker.allowed} />
+                        <CircuitBreakerBadge
+                          allowed={job.circuitBreaker.allowed}
+                        />
                       </td>
                     </tr>
                   ))}
@@ -307,9 +452,12 @@ export default async function TradingOperationsPage() {
                 }))
               }
             ]}
-            buildBody={({ extra }) => {
-              const jobName = String(extra.jobName ?? "");
-              return { jobName: isAllowedJobName(jobName) ? jobName : undefined };
+            body={{
+              allowlisted: {
+                from: "jobName",
+                to: "jobName",
+                allowed: RUN_JOB_ALLOWLIST
+              }
             }}
           />
         </SectionCard>
@@ -325,13 +473,16 @@ export default async function TradingOperationsPage() {
           }
         >
           <p className="muted small" style={{ marginBottom: 12 }}>
-            Der Report ist rein lesend. Er aktiviert nichts, löst keinen Kill Switch und ändert kein
-            Flag — ein einziges fehlgeschlagenes Blocker-Kriterium macht den Gesamtstatus
-            NOT_READY.
+            Der Report ist rein lesend. Er aktiviert nichts, löst keinen Kill
+            Switch und ändert kein Flag — ein einziges fehlgeschlagenes
+            Blocker-Kriterium macht den Gesamtstatus NOT_READY.
           </p>
 
           {eligibilityResult.error ? (
-            <ErrorState title="Eligibility-Report konnte nicht geladen werden" message={eligibilityResult.error} />
+            <ErrorState
+              title="Eligibility-Report konnte nicht geladen werden"
+              message={eligibilityResult.error}
+            />
           ) : null}
 
           {eligibility ? (
@@ -373,13 +524,17 @@ export default async function TradingOperationsPage() {
           }
         >
           <p className="muted small" style={{ marginBottom: 12 }}>
-            Ausschließlich sicherheits- und betriebsrelevante Ereignisse. Ein Zustellungsausfall
-            blockiert weder die Positionsüberwachung noch risikoreduzierende Exits — die Zustellung
-            läuft in einem eigenen Job. DEAD bedeutet: alle Versuche verbraucht, kein weiterer Retry.
+            Ausschließlich sicherheits- und betriebsrelevante Ereignisse. Ein
+            Zustellungsausfall blockiert weder die Positionsüberwachung noch
+            risikoreduzierende Exits — die Zustellung läuft in einem eigenen
+            Job. DEAD bedeutet: alle Versuche verbraucht, kein weiterer Retry.
           </p>
 
           {outboxResult.error ? (
-            <ErrorState title="Alert-Outbox konnte nicht geladen werden" message={outboxResult.error} />
+            <ErrorState
+              title="Alert-Outbox konnte nicht geladen werden"
+              message={outboxResult.error}
+            />
           ) : null}
 
           {outboxEntries.length > 0 ? (
@@ -400,7 +555,9 @@ export default async function TradingOperationsPage() {
                 <tbody>
                   {outboxEntries.map((entry) => (
                     <tr key={entry.id}>
-                      <td className="nowrap">{formatUtcDateTime(entry.createdAt)}</td>
+                      <td className="nowrap">
+                        {formatUtcDateTime(entry.createdAt)}
+                      </td>
                       <td>{entry.eventType}</td>
                       <td>{entry.severity}</td>
                       <td>{entry.status}</td>

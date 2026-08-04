@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { DirectionBadge } from "../../../../components/badges";
 import { EmptyState, ErrorState } from "../../../../components/empty-state";
 import { PageHeader, SectionCard } from "../../../../components/ui";
 import { PositionStatusBadge } from "../../../../components/trading/trading-status";
@@ -18,7 +19,12 @@ import { TRADING_DASHBOARD_ENABLED } from "../../../../lib/trading-flag";
 const LIMIT = 50;
 
 type PageProps = {
-  searchParams: Promise<{ open?: string; offset?: string }>;
+  searchParams: Promise<{
+    open?: string;
+    direction?: string;
+    strategyVersionId?: string;
+    offset?: string;
+  }>;
 };
 
 export default async function PositionsPage({ searchParams }: PageProps) {
@@ -28,10 +34,17 @@ export default async function PositionsPage({ searchParams }: PageProps) {
 
   const params = await searchParams;
   const offset = Math.max(0, Number(params.offset) || 0);
-  const openFilter = params.open === "false" ? "false" : params.open === "true" ? "true" : undefined;
+  const openFilter =
+    params.open === "false"
+      ? "false"
+      : params.open === "true"
+        ? "true"
+        : undefined;
 
   const result = await fetchShadowPositions({
     open: openFilter,
+    direction: params.direction || undefined,
+    strategyVersionId: params.strategyVersionId || undefined,
     limit: LIMIT,
     offset
   });
@@ -47,7 +60,10 @@ export default async function PositionsPage({ searchParams }: PageProps) {
       />
 
       {result.error ? (
-        <ErrorState title="Positionen konnten nicht geladen werden" message={result.error} />
+        <ErrorState
+          title="Positionen konnten nicht geladen werden"
+          message={result.error}
+        />
       ) : null}
 
       <form className="filter-bar" method="GET">
@@ -56,15 +72,32 @@ export default async function PositionsPage({ searchParams }: PageProps) {
           <option value="true">Nur offene</option>
           <option value="false">Nur geschlossene</option>
         </select>
+        <select name="direction" defaultValue={params.direction ?? ""}>
+          <option value="">Long &amp; Short</option>
+          <option value="LONG">Nur Long</option>
+          <option value="SHORT">Nur Short</option>
+        </select>
+        <input
+          name="strategyVersionId"
+          placeholder="StrategyVersion-ID"
+          defaultValue={params.strategyVersionId ?? ""}
+        />
         <button type="submit">Filtern</button>
-        {params.open ? (
-          <a href="/dashboard/trading/positions" className="section-link" style={{ alignSelf: "center" }}>
+        {params.open || params.direction || params.strategyVersionId ? (
+          <a
+            href="/dashboard/trading/positions"
+            className="section-link"
+            style={{ alignSelf: "center" }}
+          >
             Zurücksetzen
           </a>
         ) : null}
       </form>
 
-      <SectionCard title="Positionen" subtitle={`${positions.length} Einträge auf dieser Seite`}>
+      <SectionCard
+        title="Positionen"
+        subtitle={`${positions.length} Einträge auf dieser Seite`}
+      >
         {positions.length > 0 ? (
           <>
             <div className="table-wrap">
@@ -72,12 +105,16 @@ export default async function PositionsPage({ searchParams }: PageProps) {
                 <thead>
                   <tr>
                     <th>Symbol</th>
+                    <th>Richtung</th>
+                    <th>Strategie</th>
                     <th>Status</th>
                     <th>Offene Menge</th>
                     <th>Ø Entry</th>
                     <th>Stop</th>
                     <th>Take Profit</th>
                     <th>Realisiertes P&L</th>
+                    <th>Collateral</th>
+                    <th>Exit-Grund</th>
                     <th>Eröffnet</th>
                   </tr>
                 </thead>
@@ -85,19 +122,50 @@ export default async function PositionsPage({ searchParams }: PageProps) {
                   {positions.map((position) => (
                     <tr key={position.id}>
                       <td data-label="Symbol">
-                        <Link href={`/dashboard/trading/positions/${position.id}`}>
+                        <Link
+                          href={`/dashboard/trading/positions/${position.id}`}
+                        >
                           {position.symbol ?? position.assetId}
                         </Link>
+                      </td>
+                      <td data-label="Richtung">
+                        <DirectionBadge value={position.direction} />
+                      </td>
+                      <td data-label="Strategie" className="muted small">
+                        {position.strategyKey ?? "—"}
+                        {position.strategyVersion === null
+                          ? ""
+                          : ` v${position.strategyVersion}`}
                       </td>
                       <td data-label="Status">
                         <PositionStatusBadge value={position.status} />
                       </td>
-                      <td data-label="Offene Menge">{formatDecimalAmount(position.openQuantity, { maximumFractionDigits: 6 })}</td>
-                      <td data-label="Ø Entry">{formatDecimalAmount(position.averageEntryPrice)}</td>
-                      <td data-label="Stop">{formatDecimalAmount(position.stopPrice)}</td>
-                      <td data-label="Take Profit">{formatDecimalAmount(position.takeProfitPrice)}</td>
+                      <td data-label="Collateral">
+                        {formatDecimalAmount(position.reservedCollateral)}
+                      </td>
+                      <td data-label="Exit-Grund" className="muted small">
+                        {position.exitReason ?? "—"}
+                      </td>
+                      <td data-label="Offene Menge">
+                        {formatDecimalAmount(position.openQuantity, {
+                          maximumFractionDigits: 6
+                        })}
+                      </td>
+                      <td data-label="Ø Entry">
+                        {formatDecimalAmount(position.averageEntryPrice)}
+                      </td>
+                      <td data-label="Stop">
+                        {formatDecimalAmount(position.stopPrice)}
+                      </td>
+                      <td data-label="Take Profit">
+                        {formatDecimalAmount(position.takeProfitPrice)}
+                      </td>
                       <td data-label="Realisiertes P&L">
-                        <span style={{ color: toneColor(decimalTone(position.realizedPnl)) }}>
+                        <span
+                          style={{
+                            color: toneColor(decimalTone(position.realizedPnl))
+                          }}
+                        >
                           {formatSignedDecimal(position.realizedPnl)}
                         </span>
                       </td>

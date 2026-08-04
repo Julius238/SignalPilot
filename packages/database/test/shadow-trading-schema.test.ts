@@ -35,7 +35,9 @@ const migration = readFileSync(migrationPath, "utf8");
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 function block(kind: "model" | "enum", name: string): string {
-  const match = schema.match(new RegExp(`^${kind} ${name} \\{$([\\s\\S]*?)^\\}$`, "m"));
+  const match = schema.match(
+    new RegExp(`^${kind} ${name} \\{$([\\s\\S]*?)^\\}$`, "m")
+  );
   assert.ok(match, `${kind} ${name} is missing from schema.prisma`);
   return match[1];
 }
@@ -44,7 +46,9 @@ function bodyLines(kind: "model" | "enum", name: string): string[] {
   return block(kind, name)
     .split("\n")
     .map((line) => line.trim())
-    .filter((line) => line !== "" && !line.startsWith("//") && !line.startsWith("///"));
+    .filter(
+      (line) => line !== "" && !line.startsWith("//") && !line.startsWith("///")
+    );
 }
 
 /** `fieldName Type` for every field, attributes stripped. */
@@ -59,7 +63,9 @@ function enumValues(name: string): string[] {
 }
 
 function fieldLine(model: string, field: string): string {
-  const line = bodyLines("model", model).find((entry) => entry.split(/\s+/)[0] === field);
+  const line = bodyLines("model", model).find(
+    (entry) => entry.split(/\s+/)[0] === field
+  );
   assert.ok(line, `${model}.${field} is missing`);
   return line;
 }
@@ -95,12 +101,17 @@ const SHADOW_MODELS = [
 describe("shadow trading schema — models", () => {
   it("declares every aggregate from docs/trading/03", () => {
     for (const model of SHADOW_MODELS) {
-      assert.ok(schema.includes(`model ${model} {`), `model ${model} is missing`);
+      assert.ok(
+        schema.includes(`model ${model} {`),
+        `model ${model} is missing`
+      );
     }
   });
 
   it("creates exactly these 23 tables in the migration", () => {
-    const created = [...migration.matchAll(/CREATE TABLE "([A-Za-z]+)"/g)].map((m) => m[1]).sort();
+    const created = [...migration.matchAll(/CREATE TABLE "([A-Za-z]+)"/g)]
+      .map((m) => m[1])
+      .sort();
     assert.deepEqual(created, [...SHADOW_MODELS].sort());
   });
 
@@ -127,7 +138,11 @@ describe("shadow trading schema — models", () => {
       ["TradingAlertOutbox", "idempotencyKey"]
     ];
     for (const [model, field] of keyColumns) {
-      assert.match(fieldLine(model, field), /@unique/, `${model}.${field} must be unique`);
+      assert.match(
+        fieldLine(model, field),
+        /@unique/,
+        `${model}.${field} must be unique`
+      );
     }
   });
 
@@ -135,15 +150,24 @@ describe("shadow trading schema — models", () => {
     const composites: ReadonlyArray<[string, string]> = [
       ["StrategyVersion", "@@unique([strategyId, version])"],
       ["InstrumentExecutionProfile", "@@unique([assetId, version])"],
-      ["TradeCandidate", "@@unique([strategyAssignmentId, strategyVersionId, assetId, anchorCandleId])"],
-      ["TradeCandidateEvidence", "@@unique([tradeCandidateId, type, sourceType, sourceKey])"],
+      [
+        "TradeCandidate",
+        "@@unique([strategyAssignmentId, strategyVersionId, assetId, anchorCandleId])"
+      ],
+      [
+        "TradeCandidateEvidence",
+        "@@unique([tradeCandidateId, type, sourceType, sourceKey])"
+      ],
       ["RiskRuleResult", "@@unique([riskAssessmentId, ruleCode])"],
       ["RiskLimitSet", "@@unique([key, version])"],
       ["ShadowFill", "@@unique([shadowOrderId, sequence])"],
       ["ShadowPositionEvent", "@@unique([shadowPositionId, sequence])"],
       ["ExitPlan", "@@unique([shadowPositionId, version])"],
       ["PortfolioLedgerEntry", "@@unique([portfolioId, sequence])"],
-      ["PortfolioSnapshot", "@@unique([portfolioId, asOf, sourceLedgerSequence])"],
+      [
+        "PortfolioSnapshot",
+        "@@unique([portfolioId, asOf, sourceLedgerSequence])"
+      ],
       ["TradingJobCursor", "@@unique([jobKey, scopeKey])"]
     ];
     for (const [model, constraint] of composites) {
@@ -181,14 +205,21 @@ describe("shadow trading schema — models", () => {
       "TradingSession",
       "TradingJobCursor"
     ]) {
-      assert.match(fieldLine(model, "version"), /Int\s+@default\(0\)/, `${model}.version`);
+      assert.match(
+        fieldLine(model, "version"),
+        /Int\s+@default\(0\)/,
+        `${model}.version`
+      );
     }
   });
 
   it("gives every claimable aggregate the recovery claim triple", () => {
     for (const model of ["TradeCandidate", "ShadowOrder", "TradingJobCursor"]) {
       for (const field of ["claimedBy", "claimedAt", "claimExpiresAt"]) {
-        assert.ok(fieldLine(model, field).includes("?"), `${model}.${field} must be nullable`);
+        assert.ok(
+          fieldLine(model, field).includes("?"),
+          `${model}.${field} must be nullable`
+        );
       }
     }
   });
@@ -211,7 +242,10 @@ describe("shadow trading schema — models", () => {
       ["RiskEvent", "inputHash"]
     ];
     for (const [model, field] of hashes) {
-      assert.ok(fieldLine(model, field).startsWith(field), `${model}.${field} is missing`);
+      assert.ok(
+        fieldLine(model, field).startsWith(field),
+        `${model}.${field} is missing`
+      );
     }
   });
 });
@@ -251,7 +285,11 @@ describe("shadow trading schema — money precision", () => {
       ["RiskLimitSet", "maxSpreadBps"],
       ["RiskLimitSet", "maxSlippageBps"]
     ] as const) {
-      assert.match(fieldLine(model, field), /\bInt\b/, `${model}.${field} must be Int`);
+      assert.match(
+        fieldLine(model, field),
+        /\bInt\b/,
+        `${model}.${field} must be Int`
+      );
     }
     for (const [model, field] of [
       ["InstrumentExecutionProfile", "maxParticipationRate"],
@@ -259,7 +297,11 @@ describe("shadow trading schema — money precision", () => {
       ["RiskLimitSet", "maxDailyLossPct"],
       ["RiskLimitSet", "maxGrossExposurePct"]
     ] as const) {
-      assert.match(fieldLine(model, field), /Decimal.*@db\.Decimal\(30, 12\)/, `${model}.${field}`);
+      assert.match(
+        fieldLine(model, field),
+        /Decimal.*@db\.Decimal\(30, 12\)/,
+        `${model}.${field}`
+      );
     }
   });
 
@@ -281,7 +323,8 @@ describe("shadow trading schema — referential integrity", () => {
           `${model}: ${line} must not cascade-delete financial history`
         );
         assert.ok(
-          line.includes("onDelete: Restrict") || line.includes("onDelete: SetNull"),
+          line.includes("onDelete: Restrict") ||
+            line.includes("onDelete: SetNull"),
           `${model}: ${line} must declare Restrict or SetNull`
         );
       }
@@ -306,7 +349,11 @@ describe("shadow trading schema — referential integrity", () => {
       ["TradingSession", "portfolio"]
     ];
     for (const [model, relation] of restricted) {
-      assert.match(fieldLine(model, relation), /onDelete: Restrict/, `${model}.${relation}`);
+      assert.match(
+        fieldLine(model, relation),
+        /onDelete: Restrict/,
+        `${model}.${relation}`
+      );
     }
   });
 
@@ -318,12 +365,19 @@ describe("shadow trading schema — referential integrity", () => {
       ["ShadowPositionEvent", "sourceCandle"],
       ["TradingJobCursor", "lastCandle"]
     ] as const) {
-      assert.match(fieldLine(model, relation), /onDelete: SetNull/, `${model}.${relation}`);
+      assert.match(
+        fieldLine(model, relation),
+        /onDelete: SetNull/,
+        `${model}.${relation}`
+      );
     }
   });
 
   it("pins the reproducibility-critical candle references with Restrict", () => {
-    assert.match(fieldLine("TradeCandidate", "anchorCandle"), /onDelete: Restrict/);
+    assert.match(
+      fieldLine("TradeCandidate", "anchorCandle"),
+      /onDelete: Restrict/
+    );
     assert.match(fieldLine("ShadowFill", "sourceCandle"), /onDelete: Restrict/);
   });
 });
@@ -334,21 +388,47 @@ describe("shadow trading schema — fail-closed defaults", () => {
   it("starts every structure disabled", () => {
     assert.match(fieldLine("Strategy", "status"), /@default\(DRAFT\)/);
     assert.match(fieldLine("StrategyVersion", "status"), /@default\(DRAFT\)/);
-    assert.match(fieldLine("StrategyAssignment", "enabled"), /Boolean\s+@default\(false\)/);
-    assert.match(fieldLine("InstrumentExecutionProfile", "status"), /@default\(DRAFT\)/);
+    assert.match(
+      fieldLine("StrategyAssignment", "enabled"),
+      /Boolean\s+@default\(false\)/
+    );
+    assert.match(
+      fieldLine("InstrumentExecutionProfile", "status"),
+      /@default\(DRAFT\)/
+    );
     assert.match(fieldLine("RiskLimitSet", "status"), /@default\(DRAFT\)/);
     assert.match(fieldLine("Portfolio", "status"), /@default\(DRAFT\)/);
     assert.match(fieldLine("TradingSession", "status"), /@default\(STOPPED\)/);
-    assert.match(fieldLine("TradingSession", "killSwitchEngaged"), /Boolean\s+@default\(true\)/);
+    assert.match(
+      fieldLine("TradingSession", "killSwitchEngaged"),
+      /Boolean\s+@default\(true\)/
+    );
   });
 
   it("offers no live mode and no limit order type", () => {
     assert.deepEqual(enumValues("TradingSessionMode"), ["SHADOW"]);
     assert.deepEqual(enumValues("ShadowOrderType"), ["MARKET"]);
-    assert.deepEqual(enumValues("TradeDirection"), ["LONG"]);
     assert.deepEqual(enumValues("TradeEntryType"), ["MARKET"]);
     assert.deepEqual(enumValues("IntrabarConflictPolicy"), ["STOP_FIRST"]);
     assert.deepEqual(enumValues("RiskLimitScope"), ["PORTFOLIO"]);
+  });
+
+  it("allows exactly LONG and SHORT, and SHORT stays synthetic", () => {
+    // A shadow SHORT is a synthetic, unleveraged simulation (ADR 0012): no
+    // borrow, funding, liquidation or margin is modelled and no exchange
+    // adapter exists. The absence of a LIVE session mode and of a LIMIT order
+    // type above is what keeps that true.
+    assert.deepEqual(enumValues("TradeDirection"), ["LONG", "SHORT"]);
+  });
+
+  it("keeps both long/short exclusivity scope keys direction-free", () => {
+    // ADR 0013: the exclusivity is enforced by a unique index whose key does
+    // NOT contain the direction, so a short collides with an existing long.
+    // Adding `direction` to either key would silently permit hedging.
+    assert.match(fieldLine("ShadowPosition", "openScopeKey"), /@unique/);
+    assert.match(fieldLine("ShadowOrder", "openEntryScopeKey"), /@unique/);
+    assert.match(fieldLine("ShadowPosition", "direction"), /@default\(LONG\)/);
+    assert.match(fieldLine("ShadowOrder", "direction"), /@default\(LONG\)/);
   });
 });
 
@@ -389,19 +469,34 @@ describe("shadow trading schema — enum parity with @signalpilot/trading-domain
   ] as const;
 
   it("declares the same members in the same order on both sides", () => {
-    const registry = domain as unknown as Record<string, Record<string, string>>;
+    const registry = domain as unknown as Record<
+      string,
+      Record<string, string>
+    >;
     for (const name of parity) {
       const domainEnum = registry[name];
-      assert.ok(domainEnum, `@signalpilot/trading-domain does not export ${name}`);
-      assert.deepEqual(Object.values(domainEnum), enumValues(name), `enum ${name} differs`);
+      assert.ok(
+        domainEnum,
+        `@signalpilot/trading-domain does not export ${name}`
+      );
+      assert.deepEqual(
+        Object.values(domainEnum),
+        enumValues(name),
+        `enum ${name} differs`
+      );
     }
   });
 
   it("covers every shadow enum declared in the migration", () => {
-    const created = [...migration.matchAll(/CREATE TYPE "([A-Za-z]+)" AS ENUM/g)].map((m) => m[1]);
+    const created = [
+      ...migration.matchAll(/CREATE TYPE "([A-Za-z]+)" AS ENUM/g)
+    ].map((m) => m[1]);
     assert.equal(created.length, 30);
     for (const name of created) {
-      assert.ok(schema.includes(`enum ${name} {`), `enum ${name} is missing from schema.prisma`);
+      assert.ok(
+        schema.includes(`enum ${name} {`),
+        `enum ${name} is missing from schema.prisma`
+      );
     }
   });
 });
@@ -498,9 +593,19 @@ describe("legacy paper models stay untouched", () => {
 
   it("keeps every legacy paper enum unchanged", () => {
     assert.deepEqual(enumValues("PaperOrderSide"), ["BUY", "SELL"]);
-    assert.deepEqual(enumValues("PaperOrderStatus"), ["PENDING", "FILLED", "CANCELLED", "REJECTED"]);
+    assert.deepEqual(enumValues("PaperOrderStatus"), [
+      "PENDING",
+      "FILLED",
+      "CANCELLED",
+      "REJECTED"
+    ]);
     assert.deepEqual(enumValues("PaperPositionStatus"), ["OPEN", "CLOSED"]);
-    assert.deepEqual(enumValues("PaperEvaluationStatus"), ["OPEN", "EVALUATED", "EXPIRED", "SKIPPED"]);
+    assert.deepEqual(enumValues("PaperEvaluationStatus"), [
+      "OPEN",
+      "EVALUATED",
+      "EXPIRED",
+      "SKIPPED"
+    ]);
     assert.deepEqual(enumValues("PaperEvaluationOutcome"), [
       "POSITIVE",
       "NEGATIVE",
@@ -515,13 +620,21 @@ describe("legacy paper models stay untouched", () => {
       "OBSERVATION",
       "SKIPPED"
     ]);
-    assert.deepEqual(enumValues("PaperExpectedMoveDirection"), ["UP", "DOWN", "ANY", "NONE"]);
+    assert.deepEqual(enumValues("PaperExpectedMoveDirection"), [
+      "UP",
+      "DOWN",
+      "ANY",
+      "NONE"
+    ]);
   });
 
   it("never reuses a legacy paper enum inside the shadow domain", () => {
     for (const model of SHADOW_MODELS) {
       for (const line of bodyLines("model", model)) {
-        assert.ok(!/\bPaper[A-Za-z]*\b/.test(line), `${model}: ${line} must not reference a legacy Paper type`);
+        assert.ok(
+          !/\bPaper[A-Za-z]*\b/.test(line),
+          `${model}: ${line} must not reference a legacy Paper type`
+        );
       }
     }
   });
@@ -548,31 +661,50 @@ describe("shadow trading migration is strictly additive", () => {
     ];
     for (const statement of statements) {
       for (const pattern of forbidden) {
-        assert.ok(!pattern.test(statement), `destructive statement found: ${statement}`);
+        assert.ok(
+          !pattern.test(statement),
+          `destructive statement found: ${statement}`
+        );
       }
     }
   });
 
   it("only alters the tables it just created", () => {
-    const altered = new Set([...migration.matchAll(/ALTER TABLE "([A-Za-z]+)"/g)].map((m) => m[1]));
-    const created = new Set([...migration.matchAll(/CREATE TABLE "([A-Za-z]+)"/g)].map((m) => m[1]));
+    const altered = new Set(
+      [...migration.matchAll(/ALTER TABLE "([A-Za-z]+)"/g)].map((m) => m[1])
+    );
+    const created = new Set(
+      [...migration.matchAll(/CREATE TABLE "([A-Za-z]+)"/g)].map((m) => m[1])
+    );
     for (const table of altered) {
-      assert.ok(created.has(table), `migration alters pre-existing table ${table}`);
+      assert.ok(
+        created.has(table),
+        `migration alters pre-existing table ${table}`
+      );
     }
   });
 
   it("only adds foreign keys, never other kinds of ALTER", () => {
-    const alters = statements.filter((statement) => statement.startsWith("ALTER TABLE"));
+    const alters = statements.filter((statement) =>
+      statement.startsWith("ALTER TABLE")
+    );
     assert.ok(alters.length > 0);
     for (const statement of alters) {
-      assert.match(statement, /ADD CONSTRAINT "[A-Za-z_]+" FOREIGN KEY/, `unexpected ALTER: ${statement}`);
+      assert.match(
+        statement,
+        /ADD CONSTRAINT "[A-Za-z_]+" FOREIGN KEY/,
+        `unexpected ALTER: ${statement}`
+      );
     }
   });
 
   it("never references a legacy paper table or enum in an executed statement", () => {
     // The header comment names them; no statement may.
     for (const statement of statements) {
-      assert.ok(!/Paper/.test(statement), `the migration must not touch a legacy paper model: ${statement}`);
+      assert.ok(
+        !/Paper/.test(statement),
+        `the migration must not touch a legacy paper model: ${statement}`
+      );
     }
   });
 
@@ -582,7 +714,14 @@ describe("shadow trading migration is strictly additive", () => {
   });
 
   it("creates no exchange, credential or live trading artefact", () => {
-    for (const forbidden of ["bitget", "binance_key", "apiKey", "apiSecret", "passphrase", "LIVE"]) {
+    for (const forbidden of [
+      "bitget",
+      "binance_key",
+      "apiKey",
+      "apiSecret",
+      "passphrase",
+      "LIVE"
+    ]) {
       assert.ok(
         !new RegExp(forbidden, "i").test(migration),
         `the migration must not reference ${forbidden}`
@@ -592,8 +731,12 @@ describe("shadow trading migration is strictly additive", () => {
 
   it("is the single shadow trading migration in the history", () => {
     const migrationsDir = join(here, "..", "prisma", "migrations");
-    const shadowMigrations = readdirSync(migrationsDir).filter((entry) => entry.includes("shadow_trading"));
-    assert.deepEqual(shadowMigrations, ["20260802090000_add_shadow_trading_domain"]);
+    const shadowMigrations = readdirSync(migrationsDir).filter((entry) =>
+      entry.includes("shadow_trading")
+    );
+    assert.deepEqual(shadowMigrations, [
+      "20260802090000_add_shadow_trading_domain"
+    ]);
   });
 });
 
@@ -618,7 +761,10 @@ describe("shadow performance and alert outbox schema (P8)", () => {
   it("keeps strategyVersionId nullable so cross-version segments can exist", () => {
     // An ASSET, MARKET_REGIME or EXIT_REASON segment aggregates across
     // strategy versions and has no single version to point at.
-    assert.match(fieldLine("StrategyPerformance", "strategyVersionId"), /String\?/);
+    assert.match(
+      fieldLine("StrategyPerformance", "strategyVersionId"),
+      /String\?/
+    );
   });
 
   it("models every new P8 metric as Decimal, never Float", () => {
@@ -645,7 +791,11 @@ describe("shadow performance and alert outbox schema (P8)", () => {
       const line = body.find((entry) => entry.startsWith(`${field} `));
       assert.ok(line, `StrategyPerformance.${field} must exist`);
       assert.match(line, /Decimal/, `${field} must be Decimal`);
-      assert.match(line, /@db\.Decimal\(30, 12\)/, `${field} must use Decimal(30,12)`);
+      assert.match(
+        line,
+        /@db\.Decimal\(30, 12\)/,
+        `${field} must use Decimal(30,12)`
+      );
       assert.doesNotMatch(line, /Float/, `${field} must never be Float`);
     }
   });
@@ -653,14 +803,26 @@ describe("shadow performance and alert outbox schema (P8)", () => {
   it("gives the alert outbox a stable idempotency key and a bounded retry budget", () => {
     const body = bodyLines("model", "TradingAlertOutbox");
     assert.match(fieldLine("TradingAlertOutbox", "idempotencyKey"), /@unique/);
-    for (const field of ["attemptCount", "maxAttempts", "nextAttemptAt", "payloadHash", "status"]) {
-      assert.ok(body.some((line) => line.startsWith(`${field} `)), `TradingAlertOutbox.${field} must exist`);
+    for (const field of [
+      "attemptCount",
+      "maxAttempts",
+      "nextAttemptAt",
+      "payloadHash",
+      "status"
+    ]) {
+      assert.ok(
+        body.some((line) => line.startsWith(`${field} `)),
+        `TradingAlertOutbox.${field} must exist`
+      );
     }
   });
 
   it("declares every documented outbox status, including a terminal DEAD", () => {
     const statuses = bodyLines("enum", "TradingAlertOutboxStatus");
-    assert.deepEqual(statuses.sort(), ["DEAD", "FAILED", "PENDING", "PROCESSING", "SENT"].sort());
+    assert.deepEqual(
+      statuses.sort(),
+      ["DEAD", "FAILED", "PENDING", "PROCESSING", "SENT"].sort()
+    );
   });
 
   it("limits the alert catalogue to safety- and operations-relevant events", () => {
@@ -687,7 +849,10 @@ describe("shadow performance and alert outbox schema (P8)", () => {
     const body = bodyLines("model", "TradingAlertOutboxAttempt");
     assert.ok(body.includes("@@unique([outboxId, attempt])"));
     for (const field of ["attempt", "status", "startedAt", "finishedAt"]) {
-      assert.ok(body.some((line) => line.startsWith(`${field} `)), `${field} must exist`);
+      assert.ok(
+        body.some((line) => line.startsWith(`${field} `)),
+        `${field} must exist`
+      );
     }
   });
 });

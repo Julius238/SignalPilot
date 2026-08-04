@@ -28,7 +28,12 @@ import {
   prisma,
   type PrismaClient
 } from "@signalpilot/database";
-import { computeConservativeBidMark, computePortfolioValuation, computePositionMark } from "@signalpilot/portfolio";
+import {
+  computeConservativeMark,
+  computePortfolioValuation,
+  computePositionMark,
+  type PositionMarkResultV1
+} from "@signalpilot/portfolio";
 
 import { getWorkerStatus } from "./workerStatusService.js";
 
@@ -45,8 +50,12 @@ const OPEN_ORDER_STATUSES = [
   ShadowOrderStatus.PARTIALLY_FILLED
 ];
 
-const decimalString = (value: unknown): string => (value === null || value === undefined ? "0" : String(value));
-const startOfUtcDay = (value: Date): Date => new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()));
+const decimalString = (value: unknown): string =>
+  value === null || value === undefined ? "0" : String(value);
+const startOfUtcDay = (value: Date): Date =>
+  new Date(
+    Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate())
+  );
 
 export async function getOverview(database: PrismaClient = prisma) {
   const now = new Date();
@@ -78,36 +87,66 @@ export async function getOverview(database: PrismaClient = prisma) {
     };
   }
 
-  const [session, openPositions, todayStartSnapshot, latestCandidate, latestRiskAssessment, latestOrder, openOrderCount, activeCriticalRiskEventCount, workerStatus] =
-    await Promise.all([
-      database.tradingSession.findFirst({
-        where: { portfolioId: portfolio.id, status: { not: "CLOSED" } },
-        orderBy: { createdAt: "desc" }
-      }),
-      database.shadowPosition.findMany({
-        where: { portfolioId: portfolio.id, status: { in: OPEN_POSITION_STATUSES } },
-        include: { asset: { select: { symbol: true } } }
-      }),
-      database.portfolioSnapshot.findFirst({
-        where: { portfolioId: portfolio.id, tradingDateUtc: startOfUtcDay(now) },
-        orderBy: { asOf: "asc" }
-      }),
-      database.tradeCandidate.findFirst({
-        where: { portfolioId: portfolio.id },
-        orderBy: { dataAsOf: "desc" },
-        include: { asset: { select: { symbol: true } } }
-      }),
-      database.riskAssessment.findFirst({ where: { portfolioId: portfolio.id }, orderBy: { assessedAt: "desc" } }),
-      database.shadowOrder.findFirst({ where: { portfolioId: portfolio.id }, orderBy: { createdAt: "desc" } }),
-      database.shadowOrder.count({ where: { portfolioId: portfolio.id, status: { in: OPEN_ORDER_STATUSES } } }),
-      database.riskEvent.count({ where: { portfolioId: portfolio.id, severity: RiskSeverity.CRITICAL, acknowledgedAt: null } }),
-      getWorkerStatus(database)
-    ]);
+  const [
+    session,
+    openPositions,
+    todayStartSnapshot,
+    latestCandidate,
+    latestRiskAssessment,
+    latestOrder,
+    openOrderCount,
+    activeCriticalRiskEventCount,
+    workerStatus
+  ] = await Promise.all([
+    database.tradingSession.findFirst({
+      where: { portfolioId: portfolio.id, status: { not: "CLOSED" } },
+      orderBy: { createdAt: "desc" }
+    }),
+    database.shadowPosition.findMany({
+      where: {
+        portfolioId: portfolio.id,
+        status: { in: OPEN_POSITION_STATUSES }
+      },
+      include: { asset: { select: { symbol: true } } }
+    }),
+    database.portfolioSnapshot.findFirst({
+      where: { portfolioId: portfolio.id, tradingDateUtc: startOfUtcDay(now) },
+      orderBy: { asOf: "asc" }
+    }),
+    database.tradeCandidate.findFirst({
+      where: { portfolioId: portfolio.id },
+      orderBy: { dataAsOf: "desc" },
+      include: { asset: { select: { symbol: true } } }
+    }),
+    database.riskAssessment.findFirst({
+      where: { portfolioId: portfolio.id },
+      orderBy: { assessedAt: "desc" }
+    }),
+    database.shadowOrder.findFirst({
+      where: { portfolioId: portfolio.id },
+      orderBy: { createdAt: "desc" }
+    }),
+    database.shadowOrder.count({
+      where: { portfolioId: portfolio.id, status: { in: OPEN_ORDER_STATUSES } }
+    }),
+    database.riskEvent.count({
+      where: {
+        portfolioId: portfolio.id,
+        severity: RiskSeverity.CRITICAL,
+        acknowledgedAt: null
+      }
+    }),
+    getWorkerStatus(database)
+  ]);
 
-  const marks: { marketValue: string; unrealizedPnl: string }[] = [];
+  const marks: PositionMarkResultV1[] = [];
   for (const position of openPositions) {
     const latestCandle = await database.candle.findFirst({
-      where: { assetId: position.assetId, timeframe: "1h", closeTime: { lte: now } },
+      where: {
+        assetId: position.assetId,
+        timeframe: "1h",
+        closeTime: { lte: now }
+      },
       orderBy: { closeTime: "desc" }
     });
     const profile = await database.instrumentExecutionProfile.findFirst({
@@ -115,12 +154,18 @@ export async function getOverview(database: PrismaClient = prisma) {
       orderBy: { version: "desc" }
     });
     if (latestCandle === null || profile === null) continue;
-    const bidMark = computeConservativeBidMark(decimalString(latestCandle.close), profile.fullSpreadBps, decimalString(profile.tickSize));
-    if (bidMark === null) continue;
+    const markPrice = computeConservativeMark(
+      position.direction,
+      decimalString(latestCandle.close),
+      profile.fullSpreadBps,
+      decimalString(profile.tickSize)
+    );
+    if (markPrice === null) continue;
     const mark = computePositionMark({
+      direction: position.direction,
       openQuantity: decimalString(position.openQuantity),
       averageEntryPrice: decimalString(position.averageEntryPrice),
-      conservativeBidMark: bidMark,
+      conservativeBidMark: markPrice,
       estimatedExitFeeRate: (profile.feeBps / 10_000).toFixed(12)
     });
     if (mark !== null) marks.push(mark);
@@ -133,15 +178,22 @@ export async function getOverview(database: PrismaClient = prisma) {
     feesPaid: decimalString(portfolio.feesPaid),
     openPositionMarks: marks,
     highWaterMark: decimalString(portfolio.highWaterMark),
-    startOfDayEquity: todayStartSnapshot ? decimalString(todayStartSnapshot.equity) : null
+    startOfDayEquity: todayStartSnapshot
+      ? decimalString(todayStartSnapshot.equity)
+      : null
   });
 
   const todayStart = startOfUtcDay(now);
   const tradesToday = await database.shadowFill.count({
-    where: { occurredAt: { gte: todayStart, lte: now }, shadowOrder: { portfolioId: portfolio.id } }
+    where: {
+      occurredAt: { gte: todayStart, lte: now },
+      shadowOrder: { portfolioId: portfolio.id }
+    }
   });
 
-  const entryJobsBlocked = workerStatus.jobs.filter((job) => job.scope === "ENTRY" && !job.circuitBreaker.allowed);
+  const entryJobsBlocked = workerStatus.jobs.filter(
+    (job) => job.scope === "ENTRY" && !job.circuitBreaker.allowed
+  );
 
   return {
     asOf: now.toISOString(),
@@ -182,11 +234,19 @@ export async function getOverview(database: PrismaClient = prisma) {
       riskAssessment:
         latestRiskAssessment === null
           ? null
-          : { id: latestRiskAssessment.id, status: latestRiskAssessment.status, assessedAt: latestRiskAssessment.assessedAt.toISOString() },
+          : {
+              id: latestRiskAssessment.id,
+              status: latestRiskAssessment.status,
+              assessedAt: latestRiskAssessment.assessedAt.toISOString()
+            },
       order:
         latestOrder === null
           ? null
-          : { id: latestOrder.id, status: latestOrder.status, createdAt: latestOrder.createdAt.toISOString() }
+          : {
+              id: latestOrder.id,
+              status: latestOrder.status,
+              createdAt: latestOrder.createdAt.toISOString()
+            }
     },
     lastReconciledAt: portfolio.lastReconciledAt?.toISOString() ?? null,
     workerHeartbeatAt: session?.heartbeatAt?.toISOString() ?? null,

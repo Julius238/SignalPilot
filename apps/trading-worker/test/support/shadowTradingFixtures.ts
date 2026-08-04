@@ -8,6 +8,9 @@
 
 import { AssetType, Prisma } from "@signalpilot/database";
 import {
+  CRYPTO_MTF_BREAKDOWN_SHORT_V1_ENGINE_VERSION,
+  CRYPTO_MTF_BREAKDOWN_SHORT_V1_KEY,
+  CRYPTO_MTF_BREAKDOWN_SHORT_V1_SPECIFICATION_HASH,
   CRYPTO_MTF_BREAKOUT_V1_ENGINE_VERSION,
   CRYPTO_MTF_BREAKOUT_V1_KEY,
   CRYPTO_MTF_BREAKOUT_V1_SPECIFICATION_HASH,
@@ -26,7 +29,8 @@ export const ANCHOR_CLOSE: Readonly<Record<StrategyTimeframe, string>> = {
 const CANDLE_COUNT = 250;
 const WAVE = [0, 1, -1, 2, -2, 1] as const;
 
-const decimal = (value: number): Prisma.Decimal => new Prisma.Decimal(value.toFixed(6));
+const decimal = (value: number): Prisma.Decimal =>
+  new Prisma.Decimal(value.toFixed(6));
 
 export interface SeriesShape {
   readonly base: number;
@@ -39,9 +43,33 @@ export interface SeriesShape {
 }
 
 export const SHAPES: Readonly<Record<StrategyTimeframe, SeriesShape>> = {
-  "1h": { base: 20000, drift: 15, waveAmplitude: 40, halfRange: 110, volume: 100, anchorMove: 420, anchorVolume: 320 },
-  "4h": { base: 15000, drift: 40, waveAmplitude: 60, halfRange: 200, volume: 400, anchorMove: 120, anchorVolume: 500 },
-  "1d": { base: 8000, drift: 70, waveAmplitude: 90, halfRange: 400, volume: 2000, anchorMove: 200, anchorVolume: 2400 }
+  "1h": {
+    base: 20000,
+    drift: 15,
+    waveAmplitude: 40,
+    halfRange: 110,
+    volume: 100,
+    anchorMove: 420,
+    anchorVolume: 320
+  },
+  "4h": {
+    base: 15000,
+    drift: 40,
+    waveAmplitude: 60,
+    halfRange: 200,
+    volume: 400,
+    anchorMove: 120,
+    anchorVolume: 500
+  },
+  "1d": {
+    base: 8000,
+    drift: 70,
+    waveAmplitude: 90,
+    halfRange: 400,
+    volume: 2000,
+    anchorMove: 200,
+    anchorVolume: 2400
+  }
 };
 
 export interface CandleRow {
@@ -71,7 +99,11 @@ export function buildCandleRows(
 
   const closes: number[] = [];
   for (let index = 0; index < CANDLE_COUNT; index += 1) {
-    closes.push(shape.base + index * shape.drift + WAVE[index % WAVE.length] * shape.waveAmplitude);
+    closes.push(
+      shape.base +
+        index * shape.drift +
+        WAVE[index % WAVE.length] * shape.waveAmplitude
+    );
   }
   closes[CANDLE_COUNT - 1] = closes[CANDLE_COUNT - 2] + shape.anchorMove;
 
@@ -110,6 +142,7 @@ export interface FakeWorldOptions {
   readonly withExecutionProfile?: boolean;
   readonly cryptoRegime?: string;
   readonly candleOverrides?: Partial<Record<StrategyTimeframe, SeriesShape>>;
+  readonly direction?: "LONG" | "SHORT";
 }
 
 export interface FakeWorld {
@@ -126,6 +159,23 @@ export function buildFakeWorld(options: FakeWorldOptions = {}): FakeWorld {
   const symbol = options.symbol ?? "BTCUSDT";
   const assetId = options.assetId ?? `asset-${symbol.toLowerCase()}`;
   const timeframes: StrategyTimeframe[] = ["1h", "4h", "1d"];
+  const direction = options.direction ?? "LONG";
+  const short = direction === "SHORT";
+  const strategyKey = short
+    ? CRYPTO_MTF_BREAKDOWN_SHORT_V1_KEY
+    : CRYPTO_MTF_BREAKOUT_V1_KEY;
+  const strategyEngineVersion = short
+    ? CRYPTO_MTF_BREAKDOWN_SHORT_V1_ENGINE_VERSION
+    : CRYPTO_MTF_BREAKOUT_V1_ENGINE_VERSION;
+  const strategyHash = short
+    ? CRYPTO_MTF_BREAKDOWN_SHORT_V1_SPECIFICATION_HASH
+    : CRYPTO_MTF_BREAKOUT_V1_SPECIFICATION_HASH;
+  const assignmentSuffix = `${symbol.toLowerCase()}-${direction.toLowerCase()}`;
+  const shortShapes: Readonly<Record<StrategyTimeframe, SeriesShape>> = {
+    "1h": { ...SHAPES["1h"], base: 30000, drift: -15, anchorMove: -420 },
+    "4h": { ...SHAPES["4h"], base: 35000, drift: -40, anchorMove: -120 },
+    "1d": { ...SHAPES["1d"], base: 45000, drift: -70, anchorMove: -200 }
+  };
 
   return {
     assets: [
@@ -152,9 +202,9 @@ export function buildFakeWorld(options: FakeWorldOptions = {}): FakeWorld {
         ? []
         : [
             {
-              id: `assignment-${symbol.toLowerCase()}`,
-              strategyId: "strategy-1",
-              strategyVersionId: "strategy-version-1",
+              id: `assignment-${assignmentSuffix}`,
+              strategyId: `strategy-${direction.toLowerCase()}`,
+              strategyVersionId: `strategy-version-${direction.toLowerCase()}`,
               portfolioId: "portfolio-shadow-1",
               assetId,
               timeframe: "1h",
@@ -162,18 +212,35 @@ export function buildFakeWorld(options: FakeWorldOptions = {}): FakeWorld {
               validFrom: new Date("2026-07-01T00:00:00.000Z"),
               validTo: null,
               createdAt: new Date("2026-07-01T00:00:00.000Z"),
-              strategy: { id: "strategy-1", key: CRYPTO_MTF_BREAKOUT_V1_KEY, status: "ACTIVE" },
+              assignmentConfigJson: {
+                direction,
+                syntheticShadowShort: short,
+                leverageAllowed: false,
+                marginAllowed: false,
+                futuresAllowed: false
+              },
+              strategy: {
+                id: `strategy-${direction.toLowerCase()}`,
+                key: strategyKey,
+                status: "ACTIVE"
+              },
               strategyVersion: {
-                id: "strategy-version-1",
+                id: `strategy-version-${direction.toLowerCase()}`,
                 version: 1,
                 status: "ACTIVE",
-                engineVersion: CRYPTO_MTF_BREAKOUT_V1_ENGINE_VERSION,
-                specificationHash: CRYPTO_MTF_BREAKOUT_V1_SPECIFICATION_HASH
+                engineVersion: strategyEngineVersion,
+                specificationHash: strategyHash
               }
             }
           ],
     candles: timeframes.flatMap((timeframe) =>
-      buildCandleRows(timeframe, assetId, symbol, options.candleOverrides?.[timeframe] ?? SHAPES[timeframe])
+      buildCandleRows(
+        timeframe,
+        assetId,
+        symbol,
+        options.candleOverrides?.[timeframe] ??
+          (short ? shortShapes[timeframe] : SHAPES[timeframe])
+      )
     ),
     dataQuality: timeframes.map((timeframe) => ({
       id: `dq-${symbol.toLowerCase()}-${timeframe}`,
@@ -198,9 +265,9 @@ export function buildFakeWorld(options: FakeWorldOptions = {}): FakeWorld {
       assetId,
       symbol,
       timeframe,
-      signalType: "BREAKOUT",
+      signalType: short ? "BREAKDOWN" : "BREAKOUT",
       status: timeframe === "1h" ? "STRONG_WATCH" : "WATCH",
-      direction: "BULLISH",
+      direction: short ? "BEARISH" : "BULLISH",
       riskLevel: "MEDIUM",
       score: 74,
       riskScore: 30,
@@ -218,8 +285,8 @@ export function buildFakeWorld(options: FakeWorldOptions = {}): FakeWorld {
         id: "regime-1",
         generatedAt: new Date("2026-08-02T09:00:00.000Z"),
         equityRegime: "RISK_ON",
-        cryptoRegime: options.cryptoRegime ?? "RISK_ON",
-        overallRegime: "RISK_ON",
+        cryptoRegime: options.cryptoRegime ?? (short ? "RISK_OFF" : "RISK_ON"),
+        overallRegime: short ? "RISK_OFF" : "RISK_ON",
         riskMode: "NORMAL",
         confidence: 72
       }
@@ -264,8 +331,10 @@ export interface RecordedWrites {
 function matchesDateFilter(value: Date, filter: unknown): boolean {
   if (filter === undefined || filter === null) return true;
   const range = filter as { lte?: Date; gte?: Date };
-  if (range.lte !== undefined && value.getTime() > range.lte.getTime()) return false;
-  if (range.gte !== undefined && value.getTime() < range.gte.getTime()) return false;
+  if (range.lte !== undefined && value.getTime() > range.lte.getTime())
+    return false;
+  if (range.gte !== undefined && value.getTime() < range.gte.getTime())
+    return false;
   return true;
 }
 
@@ -311,15 +380,35 @@ export function createFakeDatabase(worlds: readonly FakeWorld[]) {
 
   const database = {
     asset: {
-      findFirst: async ({ where }: { where: { symbol: string; assetType: string } }) =>
+      findFirst: async ({
+        where
+      }: {
+        where: { symbol: string; assetType: string };
+      }) =>
         merged.assets.find(
-          (asset) => asset.symbol === where.symbol && asset.assetType === where.assetType
+          (asset) =>
+            asset.symbol === where.symbol && asset.assetType === where.assetType
         ) ?? null
     },
     strategyAssignment: {
-      findFirst: async ({ where }: { where: { assetId: string; enabled: boolean } }) =>
+      findFirst: async ({
+        where
+      }: {
+        where: {
+          assetId: string;
+          enabled: boolean;
+          strategy?: { key?: string };
+          id?: string;
+        };
+      }) =>
         merged.assignments.find(
-          (assignment) => assignment.assetId === where.assetId && assignment.enabled === where.enabled
+          (assignment) =>
+            assignment.assetId === where.assetId &&
+            assignment.enabled === where.enabled &&
+            (where.id === undefined || assignment.id === where.id) &&
+            (where.strategy?.key === undefined ||
+              (assignment.strategy as { key?: string } | undefined)?.key ===
+                where.strategy.key)
         ) ?? null
     },
     candle: {
@@ -327,7 +416,11 @@ export function createFakeDatabase(worlds: readonly FakeWorld[]) {
         where,
         take
       }: {
-        where: { assetId: string; timeframe: string; closeTime?: { lte?: Date } };
+        where: {
+          assetId: string;
+          timeframe: string;
+          closeTime?: { lte?: Date };
+        };
         take: number;
       }) =>
         merged.candles
@@ -337,20 +430,32 @@ export function createFakeDatabase(worlds: readonly FakeWorld[]) {
               candle.timeframe === where.timeframe &&
               matchesDateFilter(candle.closeTime, where.closeTime)
           )
-          .sort((left, right) => right.openTime.getTime() - left.openTime.getTime())
+          .sort(
+            (left, right) => right.openTime.getTime() - left.openTime.getTime()
+          )
           .slice(0, take)
     },
     candleDataQuality: {
-      findFirst: async ({ where }: { where: { assetId: string; timeframe: string } }) =>
+      findFirst: async ({
+        where
+      }: {
+        where: { assetId: string; timeframe: string };
+      }) =>
         merged.dataQuality.find(
-          (quality) => quality.assetId === where.assetId && quality.timeframe === where.timeframe
+          (quality) =>
+            quality.assetId === where.assetId &&
+            quality.timeframe === where.timeframe
         ) ?? null
     },
     signal: {
       findFirst: async ({
         where
       }: {
-        where: { assetId: string; timeframe: string; createdAt?: { lte?: Date } };
+        where: {
+          assetId: string;
+          timeframe: string;
+          createdAt?: { lte?: Date };
+        };
       }) =>
         merged.signals.find(
           (signal) =>
@@ -363,9 +468,14 @@ export function createFakeDatabase(worlds: readonly FakeWorld[]) {
       findFirst: async () => merged.regimes[0] ?? null
     },
     instrumentExecutionProfile: {
-      findFirst: async ({ where }: { where: { assetId: string; status: string } }) =>
+      findFirst: async ({
+        where
+      }: {
+        where: { assetId: string; status: string };
+      }) =>
         merged.executionProfiles.find(
-          (profile) => profile.assetId === where.assetId && profile.status === where.status
+          (profile) =>
+            profile.assetId === where.assetId && profile.status === where.status
         ) ?? null
     },
     radarEvent: { findMany: async () => [] },
@@ -378,7 +488,13 @@ export function createFakeDatabase(worlds: readonly FakeWorld[]) {
         writes.botRuns.push(row);
         return row;
       },
-      update: async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
+      update: async ({
+        where,
+        data
+      }: {
+        where: { id: string };
+        data: Record<string, unknown>;
+      }) => {
         writes.botRunUpdates.push({ id: where.id, ...data });
         return { id: where.id, ...data };
       }
@@ -392,7 +508,9 @@ export function createFakeDatabase(worlds: readonly FakeWorld[]) {
 
     tradeCandidate: {
       findUnique: async ({ where }: { where: { candidateKey: string } }) =>
-        writes.tradeCandidates.find((row) => row.candidateKey === where.candidateKey) ?? null,
+        writes.tradeCandidates.find(
+          (row) => row.candidateKey === where.candidateKey
+        ) ?? null,
       create: async ({ data }: { data: Record<string, unknown> }) => {
         candidateSequence += 1;
         const row = { id: `trade-candidate-${candidateSequence}`, ...data };
@@ -418,7 +536,9 @@ export function createFakeDatabase(worlds: readonly FakeWorld[]) {
         where: { eventKey: string };
         create: Record<string, unknown>;
       }) => {
-        const existing = writes.auditEvents.find((row) => row.eventKey === where.eventKey);
+        const existing = writes.auditEvents.find(
+          (row) => row.eventKey === where.eventKey
+        );
         if (existing !== undefined) return existing;
         writes.auditEvents.push(create);
         return create;
@@ -432,7 +552,9 @@ export function createFakeDatabase(worlds: readonly FakeWorld[]) {
         where: { eventKey: string };
         create: Record<string, unknown>;
       }) => {
-        const existing = writes.riskEvents.find((row) => row.eventKey === where.eventKey);
+        const existing = writes.riskEvents.find(
+          (row) => row.eventKey === where.eventKey
+        );
         if (existing !== undefined) return existing;
         writes.riskEvents.push(create);
         return create;
@@ -451,17 +573,19 @@ export function createFakeDatabase(worlds: readonly FakeWorld[]) {
     portfolioSnapshot: forbidden("portfolioSnapshot"),
     tradingSession: forbidden("tradingSession"),
 
-    $transaction: async <T>(handler: (tx: unknown) => Promise<T>): Promise<T> => handler(database)
+    $transaction: async <T>(handler: (tx: unknown) => Promise<T>): Promise<T> =>
+      handler(database)
   };
 
   return { database, writes };
 }
 
 /** Environment that satisfies all four safety flags. */
-export const ENABLED_ENV: Readonly<Record<string, string | undefined>> = Object.freeze({
-  ENABLE_LIVE_TRADING: "false",
-  TRADING_MODE: "SHADOW",
-  TRADING_SHADOW_ENABLED: "true",
-  TRADING_STRATEGY_V1_ENABLED: "true",
-  TRADING_CODE_VERSION: "test-code-version"
-});
+export const ENABLED_ENV: Readonly<Record<string, string | undefined>> =
+  Object.freeze({
+    ENABLE_LIVE_TRADING: "false",
+    TRADING_MODE: "SHADOW",
+    TRADING_SHADOW_ENABLED: "true",
+    TRADING_STRATEGY_V1_ENABLED: "true",
+    TRADING_CODE_VERSION: "test-code-version"
+  });

@@ -20,11 +20,14 @@
 
 import {
   PortfolioStatus,
+  StrategyStatus,
+  StrategyVersionStatus,
   TradingActorType,
   TradingSessionStatus,
   type PrismaClient
 } from "@signalpilot/database";
 import {
+  buildActiveAssignmentScopeKey,
   checkKillSwitchTransition,
   checkSessionTransition,
   buildAuditEventKey,
@@ -37,6 +40,12 @@ export const SHADOW_OPS_JOB_KEY = "trading:shadow-session-ops";
 
 const RECONCILE_FRESHNESS_MS = 5 * 60 * 1000;
 const ALLOWED_ASSIGNMENT_SYMBOLS = ["BTCUSDT", "ETHUSDT"];
+const P9_PORTFOLIO_KEY = "SHADOW_V1";
+const ALLOWED_STRATEGY_KEYS = [
+  "CRYPTO_MTF_BREAKOUT_V1",
+  "CRYPTO_MTF_BREAKOUT_LONG_V1",
+  "CRYPTO_MTF_BREAKDOWN_SHORT_V1"
+] as const;
 
 export interface OpsGuardFailure {
   readonly ok: false;
@@ -48,6 +57,195 @@ export interface OpsGuardSuccess<T> {
   readonly result: T;
 }
 export type OpsResult<T> = OpsGuardSuccess<T> | OpsGuardFailure;
+
+// ───────────────────────────────────────────────────────────────────────────
+// Per-assignment enable/disable (always explicit, never part of bootstrap)
+// ───────────────────────────────────────────────────────────────────────────
+
+export interface SetStrategyAssignmentEnabledInput {
+  readonly assignmentId: string;
+  readonly actorId: string;
+  readonly enabled: boolean;
+  readonly asOf: Date;
+  readonly idempotencyKey: string;
+  readonly expectedVersion: number;
+  readonly confirmation: string;
+}
+
+/**
+ * Enable or disable one pinned BTCUSDT/ETHUSDT assignment. This is intentionally a
+ * separate operation from setup, portfolio activation, kill-switch release
+ * and session activation: no bootstrap or restart can silently grant entry
+ * permission. Every other symbol is refused here.
+ */
+export async function setStrategyAssignmentEnabled(
+  database: PrismaClient,
+  input: SetStrategyAssignmentEnabledInput
+): Promise<
+  OpsResult<{ readonly assignmentId: string; readonly enabled: boolean }>
+> {
+  const assignment = await database.strategyAssignment.findUnique({
+    where: { id: input.assignmentId },
+    include: { asset: true, strategy: true, strategyVersion: true }
+  });
+  if (assignment === null) {
+    return {
+      ok: false,
+      reasonCode: "ASSIGNMENT_NOT_FOUND",
+      message: `No StrategyAssignment ${input.assignmentId}.`
+    };
+  }
+  if (!ALLOWED_ASSIGNMENT_SYMBOLS.includes(assignment.asset.symbol)) {
+    return {
+      ok: false,
+      reasonCode: "ASSIGNMENT_SYMBOL_NOT_ALLOWED",
+      message: `Only ${ALLOWED_ASSIGNMENT_SYMBOLS.join("/")} are permitted, assignment is ${assignment.asset.symbol}.`
+    };
+  }
+  const portfolio = await database.portfolio.findUnique({
+    where: { id: assignment.portfolioId }
+  });
+  if (
+    portfolio?.key !== P9_PORTFOLIO_KEY ||
+    !ALLOWED_STRATEGY_KEYS.includes(assignment.strategy.key as never) ||
+    assignment.strategy.status !== StrategyStatus.ACTIVE
+  ) {
+    return {
+      ok: false,
+      reasonCode: "ASSIGNMENT_SCOPE_NOT_ALLOWED",
+      message: `Only pinned shadow strategies in ${P9_PORTFOLIO_KEY} are permitted.`
+    };
+  }
+  if (
+    input.enabled &&
+    assignment.strategyVersion.status !== StrategyVersionStatus.ACTIVE
+  ) {
+    return {
+      ok: false,
+      reasonCode: "STRATEGY_VERSION_NOT_ACTIVE",
+      message: `StrategyVersion is ${assignment.strategyVersion.status}, not ACTIVE.`
+    };
+  }
+  const params = assignment.strategyVersion.parametersJson;
+  const config = assignment.assignmentConfigJson;
+  const strategyDirection =
+    typeof params === "object" && params !== null && !Array.isArray(params)
+      ? (params as Record<string, unknown>).direction
+      : null;
+  const assignmentDirection =
+    typeof config === "object" && config !== null && !Array.isArray(config)
+      ? (config as Record<string, unknown>).direction
+      : null;
+  if (
+    (strategyDirection !== "LONG" && strategyDirection !== "SHORT") ||
+    assignmentDirection !== strategyDirection
+  ) {
+    return {
+      ok: false,
+      reasonCode: "ASSIGNMENT_DIRECTION_CONFLICT",
+      message:
+        "StrategyVersion and assignment do not declare the same known direction."
+    };
+  }
+  if (input.expectedVersion !== assignment.version) {
+    return {
+      ok: false,
+      reasonCode: "ASSIGNMENT_VERSION_CONFLICT",
+      message: `Expected assignment version ${input.expectedVersion}, current version is ${assignment.version}.`
+    };
+  }
+  const expectedConfirmation = `${input.enabled ? "ENABLE" : "DISABLE"}_${assignment.asset.symbol}_${strategyDirection}_${assignment.strategy.key}_V${assignment.version}`;
+  if (input.confirmation !== expectedConfirmation) {
+    return {
+      ok: false,
+      reasonCode: "CONFIRMATION_MISMATCH",
+      message: `Confirmation must be exactly ${expectedConfirmation}.`
+    };
+  }
+  if (input.actorId.trim() === "" || input.idempotencyKey.trim() === "") {
+    return {
+      ok: false,
+      reasonCode: "OPERATOR_INPUT_REQUIRED",
+      message: "Operator and idempotency key are required."
+    };
+  }
+  if (assignment.enabled === input.enabled) {
+    return {
+      ok: true,
+      result: { assignmentId: assignment.id, enabled: assignment.enabled }
+    };
+  }
+
+  const eventType = input.enabled
+    ? "STRATEGY_ASSIGNMENT_ENABLED"
+    : "STRATEGY_ASSIGNMENT_DISABLED";
+  const idempotencyKey = input.idempotencyKey;
+
+  await database.$transaction(async (tx) => {
+    const updated = await tx.strategyAssignment.updateMany({
+      where: {
+        id: assignment.id,
+        version: assignment.version,
+        enabled: assignment.enabled
+      },
+      data: {
+        enabled: input.enabled,
+        validFrom: input.enabled ? input.asOf : assignment.validFrom,
+        validTo: input.enabled ? null : input.asOf,
+        activeScopeKey: input.enabled
+          ? buildActiveAssignmentScopeKey({
+              portfolioId: assignment.portfolioId,
+              assetId: assignment.assetId,
+              strategyId: assignment.strategyId
+            })
+          : null,
+        version: { increment: 1 }
+      }
+    });
+    if (updated.count === 0) {
+      throw new Error(
+        `StrategyAssignment ${assignment.id} version conflict while changing enabled state.`
+      );
+    }
+    await tx.tradingAuditEvent.create({
+      data: {
+        eventKey: buildAuditEventKey({
+          eventType,
+          aggregateType: "StrategyAssignment",
+          aggregateId: assignment.id,
+          idempotencyKey
+        }),
+        eventType,
+        aggregateType: "StrategyAssignment",
+        aggregateId: assignment.id,
+        actorType: TradingActorType.ADMIN,
+        actorId: input.actorId,
+        correlationId: `${SHADOW_OPS_JOB_KEY}|${assignment.id}`,
+        causationId: `${SHADOW_OPS_JOB_KEY}|${assignment.id}`,
+        idempotencyKey,
+        reasonCode: eventType,
+        beforeState: { enabled: assignment.enabled },
+        afterState: {
+          enabled: input.enabled,
+          symbol: assignment.asset.symbol,
+          direction: strategyDirection,
+          strategyKey: assignment.strategy.key,
+          version: assignment.version + 1
+        },
+        occurredAt: input.asOf
+      }
+    });
+  });
+
+  return {
+    ok: true,
+    result: { assignmentId: assignment.id, enabled: input.enabled }
+  };
+}
+
+/** Backwards-compatible export name; all new mandatory guards still apply. */
+export const setBtcAssignmentEnabled = setStrategyAssignmentEnabled;
+export type SetBtcAssignmentEnabledInput = SetStrategyAssignmentEnabledInput;
 
 // ───────────────────────────────────────────────────────────────────────────
 // Portfolio activation
@@ -68,9 +266,15 @@ export async function activatePortfolio(
   database: PrismaClient,
   input: ActivatePortfolioInput
 ): Promise<OpsResult<{ readonly portfolioId: string }>> {
-  const portfolio = await database.portfolio.findUnique({ where: { id: input.portfolioId } });
+  const portfolio = await database.portfolio.findUnique({
+    where: { id: input.portfolioId }
+  });
   if (portfolio === null) {
-    return { ok: false, reasonCode: "PORTFOLIO_NOT_FOUND", message: `No Portfolio ${input.portfolioId}.` };
+    return {
+      ok: false,
+      reasonCode: "PORTFOLIO_NOT_FOUND",
+      message: `No Portfolio ${input.portfolioId}.`
+    };
   }
   if (portfolio.status === PortfolioStatus.ACTIVE) {
     return { ok: true, result: { portfolioId: portfolio.id } };
@@ -90,7 +294,10 @@ export async function activatePortfolio(
       where: { id: portfolio.id, version: portfolio.version },
       data: { status: PortfolioStatus.ACTIVE, version: { increment: 1 } }
     });
-    if (updated.count === 0) throw new Error(`Portfolio ${portfolio.id} version conflict during activation.`);
+    if (updated.count === 0)
+      throw new Error(
+        `Portfolio ${portfolio.id} version conflict during activation.`
+      );
     await tx.tradingAuditEvent.create({
       data: {
         eventKey: buildAuditEventKey({
@@ -131,29 +338,56 @@ export async function releaseKillSwitch(
   database: PrismaClient,
   input: ReleaseKillSwitchInput
 ): Promise<OpsResult<{ readonly sessionId: string }>> {
-  const session = await database.tradingSession.findUnique({ where: { id: input.sessionId } });
+  const session = await database.tradingSession.findUnique({
+    where: { id: input.sessionId }
+  });
   if (session === null) {
-    return { ok: false, reasonCode: "SESSION_NOT_FOUND", message: `No TradingSession ${input.sessionId}.` };
+    return {
+      ok: false,
+      reasonCode: "SESSION_NOT_FOUND",
+      message: `No TradingSession ${input.sessionId}.`
+    };
+  }
+  if (
+    session.status === TradingSessionStatus.STOPPED &&
+    !session.killSwitchEngaged
+  ) {
+    return { ok: true, result: { sessionId: session.id } };
   }
   const reconcileFresh =
-    session.reconciledAt !== null && input.asOf.getTime() - session.reconciledAt.getTime() <= RECONCILE_FRESHNESS_MS;
+    session.reconciledAt !== null &&
+    input.asOf.getTime() - session.reconciledAt.getTime() <=
+      RECONCILE_FRESHNESS_MS;
 
   const guard = checkKillSwitchTransition(
     { status: session.status, killSwitchEngaged: session.killSwitchEngaged },
-    { action: "RELEASE", actorType: TradingActorType.ADMIN, reconcileSucceeded: reconcileFresh }
+    {
+      action: "RELEASE",
+      actorType: TradingActorType.ADMIN,
+      reconcileSucceeded: reconcileFresh
+    }
   );
   if (!guard.ok) {
     return { ok: false, reasonCode: guard.reasonCode, message: guard.message };
   }
 
-  const idempotencyKey = input.idempotencyKey ?? `${session.id}-kill-release-${session.version}`;
+  const idempotencyKey =
+    input.idempotencyKey ?? `${session.id}-kill-release-${session.version}`;
 
   await database.$transaction(async (tx) => {
     const updated = await tx.tradingSession.updateMany({
       where: { id: session.id, version: session.version },
-      data: { killSwitchEngaged: false, killReasonCode: null, lastChangedBy: input.actorId, version: { increment: 1 } }
+      data: {
+        killSwitchEngaged: false,
+        killReasonCode: null,
+        lastChangedBy: input.actorId,
+        version: { increment: 1 }
+      }
     });
-    if (updated.count === 0) throw new Error(`TradingSession ${session.id} version conflict releasing the kill switch.`);
+    if (updated.count === 0)
+      throw new Error(
+        `TradingSession ${session.id} version conflict releasing the kill switch.`
+      );
     await tx.tradingAuditEvent.create({
       data: {
         eventKey: buildAuditEventKey({
@@ -192,17 +426,32 @@ export async function engageKillSwitch(
   database: PrismaClient,
   input: EngageKillSwitchInput
 ): Promise<OpsResult<{ readonly sessionId: string }>> {
-  const session = await database.tradingSession.findUnique({ where: { id: input.sessionId } });
+  const session = await database.tradingSession.findUnique({
+    where: { id: input.sessionId }
+  });
   if (session === null) {
-    return { ok: false, reasonCode: "SESSION_NOT_FOUND", message: `No TradingSession ${input.sessionId}.` };
+    return {
+      ok: false,
+      reasonCode: "SESSION_NOT_FOUND",
+      message: `No TradingSession ${input.sessionId}.`
+    };
+  }
+  if (session.killSwitchEngaged) {
+    return { ok: true, result: { sessionId: session.id } };
   }
   const guard = checkKillSwitchTransition(
     { status: session.status, killSwitchEngaged: session.killSwitchEngaged },
-    { action: "ENGAGE", reasonCode: input.reasonCode, actorType: TradingActorType.ADMIN }
+    {
+      action: "ENGAGE",
+      reasonCode: input.reasonCode,
+      actorType: TradingActorType.ADMIN
+    }
   );
-  if (!guard.ok) return { ok: false, reasonCode: guard.reasonCode, message: guard.message };
+  if (!guard.ok)
+    return { ok: false, reasonCode: guard.reasonCode, message: guard.message };
 
-  const idempotencyKey = input.idempotencyKey ?? `${session.id}-kill-engage-${session.version}`;
+  const idempotencyKey =
+    input.idempotencyKey ?? `${session.id}-kill-engage-${session.version}`;
 
   await database.$transaction(async (tx) => {
     const updated = await tx.tradingSession.updateMany({
@@ -215,7 +464,10 @@ export async function engageKillSwitch(
         version: { increment: 1 }
       }
     });
-    if (updated.count === 0) throw new Error(`TradingSession ${session.id} version conflict engaging the kill switch.`);
+    if (updated.count === 0)
+      throw new Error(
+        `TradingSession ${session.id} version conflict engaging the kill switch.`
+      );
     await tx.tradingAuditEvent.create({
       data: {
         eventKey: buildAuditEventKey({
@@ -258,19 +510,34 @@ export async function pauseSession(
   database: PrismaClient,
   input: PauseSessionInput
 ): Promise<OpsResult<{ readonly sessionId: string }>> {
-  const session = await database.tradingSession.findUnique({ where: { id: input.sessionId } });
+  const session = await database.tradingSession.findUnique({
+    where: { id: input.sessionId }
+  });
   if (session === null) {
-    return { ok: false, reasonCode: "SESSION_NOT_FOUND", message: `No TradingSession ${input.sessionId}.` };
+    return {
+      ok: false,
+      reasonCode: "SESSION_NOT_FOUND",
+      message: `No TradingSession ${input.sessionId}.`
+    };
   }
 
-  const guard = checkSessionTransition(session.status, TradingSessionStatus.PAUSED);
-  if (!guard.ok) return { ok: false, reasonCode: guard.reasonCode, message: guard.message };
+  const guard = checkSessionTransition(
+    session.status,
+    TradingSessionStatus.PAUSED
+  );
+  if (!guard.ok)
+    return { ok: false, reasonCode: guard.reasonCode, message: guard.message };
 
-  const idempotencyKey = input.idempotencyKey ?? `${session.id}-pause-${session.version}`;
+  const idempotencyKey =
+    input.idempotencyKey ?? `${session.id}-pause-${session.version}`;
 
   await database.$transaction(async (tx) => {
     const updated = await tx.tradingSession.updateMany({
-      where: { id: session.id, version: session.version, status: session.status },
+      where: {
+        id: session.id,
+        version: session.version,
+        status: session.status
+      },
       data: {
         status: TradingSessionStatus.PAUSED,
         pausedAt: input.asOf,
@@ -278,7 +545,10 @@ export async function pauseSession(
         version: { increment: 1 }
       }
     });
-    if (updated.count === 0) throw new Error(`TradingSession ${session.id} version conflict during pause.`);
+    if (updated.count === 0)
+      throw new Error(
+        `TradingSession ${session.id} version conflict during pause.`
+      );
     await tx.tradingAuditEvent.create({
       data: {
         eventKey: buildAuditEventKey({
@@ -321,32 +591,64 @@ export async function activateSession(
   database: PrismaClient,
   input: ActivateSessionInput
 ): Promise<OpsResult<{ readonly sessionId: string }>> {
-  const session = await database.tradingSession.findUnique({ where: { id: input.sessionId } });
+  const session = await database.tradingSession.findUnique({
+    where: { id: input.sessionId }
+  });
   if (session === null) {
-    return { ok: false, reasonCode: "SESSION_NOT_FOUND", message: `No TradingSession ${input.sessionId}.` };
+    return {
+      ok: false,
+      reasonCode: "SESSION_NOT_FOUND",
+      message: `No TradingSession ${input.sessionId}.`
+    };
   }
-  const portfolio = await database.portfolio.findUnique({ where: { id: session.portfolioId } });
+  const portfolio = await database.portfolio.findUnique({
+    where: { id: session.portfolioId }
+  });
   if (portfolio === null) {
-    return { ok: false, reasonCode: "PORTFOLIO_NOT_FOUND", message: `No Portfolio ${session.portfolioId}.` };
+    return {
+      ok: false,
+      reasonCode: "PORTFOLIO_NOT_FOUND",
+      message: `No Portfolio ${session.portfolioId}.`
+    };
   }
 
-  const [activeRiskLimitSets, executionProfiles, assignments, unacknowledgedCriticalRiskEvents, expiredClaims] =
-    await Promise.all([
-      database.riskLimitSet.count({ where: { status: "ACTIVE" } }),
-      database.instrumentExecutionProfile.count({ where: { status: "ACTIVE" } }),
-      database.strategyAssignment.findMany({ where: { portfolioId: portfolio.id, enabled: true }, include: { asset: true } }),
-      database.riskEvent.count({ where: { portfolioId: portfolio.id, severity: "CRITICAL", acknowledgedAt: null } }),
-      database.tradeCandidate.count({
-        where: { portfolioId: portfolio.id, claimExpiresAt: { lt: input.asOf }, claimedBy: { not: null } }
-      })
-    ]);
+  const [
+    activeRiskLimitSets,
+    executionProfiles,
+    assignments,
+    unacknowledgedCriticalRiskEvents,
+    expiredClaims
+  ] = await Promise.all([
+    database.riskLimitSet.count({ where: { status: "ACTIVE" } }),
+    database.instrumentExecutionProfile.count({ where: { status: "ACTIVE" } }),
+    database.strategyAssignment.findMany({
+      where: { portfolioId: portfolio.id, enabled: true },
+      include: { asset: true }
+    }),
+    database.riskEvent.count({
+      where: {
+        portfolioId: portfolio.id,
+        severity: "CRITICAL",
+        acknowledgedAt: null
+      }
+    }),
+    database.tradeCandidate.count({
+      where: {
+        portfolioId: portfolio.id,
+        claimExpiresAt: { lt: input.asOf },
+        claimedBy: { not: null }
+      }
+    })
+  ]);
 
   const assignmentScopeAllowed = assignments.every((assignment) =>
     ALLOWED_ASSIGNMENT_SYMBOLS.includes(assignment.asset.symbol)
   );
 
   const reconcileFresh =
-    session.reconciledAt !== null && input.asOf.getTime() - session.reconciledAt.getTime() <= RECONCILE_FRESHNESS_MS;
+    session.reconciledAt !== null &&
+    input.asOf.getTime() - session.reconciledAt.getTime() <=
+      RECONCILE_FRESHNESS_MS;
 
   const activation: SessionActivationContext = {
     capability: input.capability,
@@ -365,14 +667,22 @@ export async function activateSession(
     idempotencyKey: input.idempotencyKey
   };
 
-  const guard = checkSessionTransition(session.status, TradingSessionStatus.SHADOW_ACTIVE, { activation });
+  const guard = checkSessionTransition(
+    session.status,
+    TradingSessionStatus.SHADOW_ACTIVE,
+    { activation }
+  );
   if (!guard.ok) {
     return { ok: false, reasonCode: guard.reasonCode, message: guard.message };
   }
 
   await database.$transaction(async (tx) => {
     const updated = await tx.tradingSession.updateMany({
-      where: { id: session.id, version: session.version, status: session.status },
+      where: {
+        id: session.id,
+        version: session.version,
+        status: session.status
+      },
       data: {
         status: TradingSessionStatus.SHADOW_ACTIVE,
         activatedBy: input.actorId,
@@ -381,7 +691,10 @@ export async function activateSession(
         version: { increment: 1 }
       }
     });
-    if (updated.count === 0) throw new Error(`TradingSession ${session.id} version conflict during activation.`);
+    if (updated.count === 0)
+      throw new Error(
+        `TradingSession ${session.id} version conflict during activation.`
+      );
     await tx.tradingAuditEvent.create({
       data: {
         eventKey: buildAuditEventKey({
@@ -425,13 +738,25 @@ export async function unlockSessionToStopped(
   database: PrismaClient,
   input: UnlockSessionInput
 ): Promise<OpsResult<{ readonly sessionId: string }>> {
-  const session = await database.tradingSession.findUnique({ where: { id: input.sessionId } });
+  const session = await database.tradingSession.findUnique({
+    where: { id: input.sessionId }
+  });
   if (session === null) {
-    return { ok: false, reasonCode: "SESSION_NOT_FOUND", message: `No TradingSession ${input.sessionId}.` };
+    return {
+      ok: false,
+      reasonCode: "SESSION_NOT_FOUND",
+      message: `No TradingSession ${input.sessionId}.`
+    };
   }
 
   const [unacknowledgedRiskEvents, unclearOrders] = await Promise.all([
-    database.riskEvent.count({ where: { portfolioId: session.portfolioId, severity: "CRITICAL", acknowledgedAt: null } }),
+    database.riskEvent.count({
+      where: {
+        portfolioId: session.portfolioId,
+        severity: "CRITICAL",
+        acknowledgedAt: null
+      }
+    }),
     database.shadowOrder.count({
       where: {
         portfolioId: session.portfolioId,
@@ -449,12 +774,21 @@ export async function unlockSessionToStopped(
     idempotencyKey: input.idempotencyKey
   };
 
-  const guard = checkSessionTransition(session.status, TradingSessionStatus.STOPPED, { unlock });
-  if (!guard.ok) return { ok: false, reasonCode: guard.reasonCode, message: guard.message };
+  const guard = checkSessionTransition(
+    session.status,
+    TradingSessionStatus.STOPPED,
+    { unlock }
+  );
+  if (!guard.ok)
+    return { ok: false, reasonCode: guard.reasonCode, message: guard.message };
 
   await database.$transaction(async (tx) => {
     const updated = await tx.tradingSession.updateMany({
-      where: { id: session.id, version: session.version, status: session.status },
+      where: {
+        id: session.id,
+        version: session.version,
+        status: session.status
+      },
       data: {
         status: TradingSessionStatus.STOPPED,
         killReasonCode: null,
@@ -462,7 +796,10 @@ export async function unlockSessionToStopped(
         version: { increment: 1 }
       }
     });
-    if (updated.count === 0) throw new Error(`TradingSession ${session.id} version conflict during unlock.`);
+    if (updated.count === 0)
+      throw new Error(
+        `TradingSession ${session.id} version conflict during unlock.`
+      );
     await tx.tradingAuditEvent.create({
       data: {
         eventKey: buildAuditEventKey({

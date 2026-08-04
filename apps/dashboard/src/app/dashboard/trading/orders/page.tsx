@@ -1,10 +1,17 @@
 import { EmptyState, ErrorState } from "../../../../components/empty-state";
+import { DirectionBadge } from "../../../../components/badges";
 import { PageHeader, SectionCard } from "../../../../components/ui";
 import { OrderStatusBadge } from "../../../../components/trading/trading-status";
 import { TradingDisabled } from "../../../../components/trading/trading-disabled";
 import { TradingPagination } from "../../../../components/trading/trading-pagination";
-import { fetchShadowFills, fetchShadowOrders } from "../../../../lib/trading-api";
-import { formatDecimalAmount, formatUtcDateTime } from "../../../../lib/trading-format";
+import {
+  fetchShadowFills,
+  fetchShadowOrders
+} from "../../../../lib/trading-api";
+import {
+  formatDecimalAmount,
+  formatUtcDateTime
+} from "../../../../lib/trading-format";
 import { TRADING_DASHBOARD_ENABLED } from "../../../../lib/trading-flag";
 
 const LIMIT = 50;
@@ -22,7 +29,14 @@ const ORDER_STATUS_OPTIONS = [
 ];
 
 type PageProps = {
-  searchParams: Promise<{ status?: string; purpose?: string; orderOffset?: string; fillOffset?: string }>;
+  searchParams: Promise<{
+    status?: string;
+    purpose?: string;
+    direction?: string;
+    strategyVersionId?: string;
+    orderOffset?: string;
+    fillOffset?: string;
+  }>;
 };
 
 export default async function OrdersPage({ searchParams }: PageProps) {
@@ -38,10 +52,17 @@ export default async function OrdersPage({ searchParams }: PageProps) {
     fetchShadowOrders({
       status: params.status || undefined,
       purpose: params.purpose || undefined,
+      direction: params.direction || undefined,
+      strategyVersionId: params.strategyVersionId || undefined,
       limit: LIMIT,
       offset: orderOffset
     }),
-    fetchShadowFills({ limit: LIMIT, offset: fillOffset })
+    fetchShadowFills({
+      direction: params.direction || undefined,
+      strategyVersionId: params.strategyVersionId || undefined,
+      limit: LIMIT,
+      offset: fillOffset
+    })
   ]);
 
   const orders = ordersResult.data ?? [];
@@ -56,10 +77,16 @@ export default async function OrdersPage({ searchParams }: PageProps) {
       />
 
       {ordersResult.error ? (
-        <ErrorState title="Orders konnten nicht geladen werden" message={ordersResult.error} />
+        <ErrorState
+          title="Orders konnten nicht geladen werden"
+          message={ordersResult.error}
+        />
       ) : null}
       {fillsResult.error ? (
-        <ErrorState title="Fills konnten nicht geladen werden" message={fillsResult.error} />
+        <ErrorState
+          title="Fills konnten nicht geladen werden"
+          message={fillsResult.error}
+        />
       ) : null}
 
       <form className="filter-bar" method="GET">
@@ -75,15 +102,35 @@ export default async function OrdersPage({ searchParams }: PageProps) {
           <option value="ENTRY">Nur Entry</option>
           <option value="EXIT">Nur Exit</option>
         </select>
+        <select name="direction" defaultValue={params.direction ?? ""}>
+          <option value="">Long &amp; Short</option>
+          <option value="LONG">Nur Long</option>
+          <option value="SHORT">Nur Short</option>
+        </select>
+        <input
+          name="strategyVersionId"
+          placeholder="StrategyVersion-ID"
+          defaultValue={params.strategyVersionId ?? ""}
+        />
         <button type="submit">Filtern</button>
-        {params.status || params.purpose ? (
-          <a href="/dashboard/trading/orders" className="section-link" style={{ alignSelf: "center" }}>
+        {params.status ||
+        params.purpose ||
+        params.direction ||
+        params.strategyVersionId ? (
+          <a
+            href="/dashboard/trading/orders"
+            className="section-link"
+            style={{ alignSelf: "center" }}
+          >
             Zurücksetzen
           </a>
         ) : null}
       </form>
 
-      <SectionCard title="Shadow Orders" subtitle={`${orders.length} Einträge auf dieser Seite`}>
+      <SectionCard
+        title="Shadow Orders"
+        subtitle={`${orders.length} Einträge auf dieser Seite`}
+      >
         {orders.length > 0 ? (
           <>
             <div className="table-wrap">
@@ -91,6 +138,8 @@ export default async function OrdersPage({ searchParams }: PageProps) {
                 <thead>
                   <tr>
                     <th>Symbol</th>
+                    <th>Richtung</th>
+                    <th>Strategie</th>
                     <th>Zweck</th>
                     <th>Seite</th>
                     <th>Status</th>
@@ -107,20 +156,45 @@ export default async function OrdersPage({ searchParams }: PageProps) {
                   {orders.map((order) => (
                     <tr key={order.id}>
                       <td>{order.symbol ?? order.assetId}</td>
+                      <td>
+                        <DirectionBadge value={order.direction} />
+                      </td>
+                      <td className="muted small">
+                        {order.strategyKey ?? "—"}
+                        {order.strategyVersion === null
+                          ? ""
+                          : ` v${order.strategyVersion}`}
+                      </td>
                       <td>{order.purpose}</td>
                       <td>{order.side}</td>
                       <td>
                         <OrderStatusBadge value={order.status} />
                       </td>
-                      <td>{formatDecimalAmount(order.requestedQuantity, { maximumFractionDigits: 6 })}</td>
-                      <td>{formatDecimalAmount(order.filledQuantity, { maximumFractionDigits: 6 })}</td>
-                      <td>{formatDecimalAmount(order.remainingQuantity, { maximumFractionDigits: 6 })}</td>
+                      <td>
+                        {formatDecimalAmount(order.requestedQuantity, {
+                          maximumFractionDigits: 6
+                        })}
+                      </td>
+                      <td>
+                        {formatDecimalAmount(order.filledQuantity, {
+                          maximumFractionDigits: 6
+                        })}
+                      </td>
+                      <td>
+                        {formatDecimalAmount(order.remainingQuantity, {
+                          maximumFractionDigits: 6
+                        })}
+                      </td>
                       <td>{formatDecimalAmount(order.referencePrice)}</td>
                       <td>{formatDecimalAmount(order.reservedQuoteAmount)}</td>
                       <td className="muted small">
-                        {order.rejectionReasonCode ?? order.cancelReasonCode ?? "—"}
+                        {order.rejectionReasonCode ??
+                          order.cancelReasonCode ??
+                          "—"}
                       </td>
-                      <td className="nowrap">{formatUtcDateTime(order.createdAt)}</td>
+                      <td className="nowrap">
+                        {formatUtcDateTime(order.createdAt)}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -152,6 +226,8 @@ export default async function OrdersPage({ searchParams }: PageProps) {
                   <thead>
                     <tr>
                       <th>Symbol</th>
+                      <th>Richtung</th>
+                      <th>Strategie</th>
                       <th>Seite</th>
                       <th>Auslöser</th>
                       <th>Menge</th>
@@ -168,18 +244,40 @@ export default async function OrdersPage({ searchParams }: PageProps) {
                     {fills.map((fill) => (
                       <tr key={fill.id}>
                         <td>{fill.symbol ?? fill.assetId}</td>
+                        <td>
+                          {fill.direction ? (
+                            <DirectionBadge value={fill.direction} />
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                        <td className="muted small">
+                          {fill.strategyKey ?? "—"}
+                          {fill.strategyVersion === null
+                            ? ""
+                            : ` v${fill.strategyVersion}`}
+                        </td>
                         <td>{fill.side}</td>
                         <td>{fill.triggerType}</td>
-                        <td>{formatDecimalAmount(fill.quantity, { maximumFractionDigits: 6 })}</td>
+                        <td>
+                          {formatDecimalAmount(fill.quantity, {
+                            maximumFractionDigits: 6
+                          })}
+                        </td>
                         <td>{formatDecimalAmount(fill.referencePrice)}</td>
                         <td>{formatDecimalAmount(fill.spreadAmount)}</td>
                         <td>{formatDecimalAmount(fill.slippageAmount)}</td>
                         <td>{formatDecimalAmount(fill.fillPrice)}</td>
                         <td>{formatDecimalAmount(fill.notional)}</td>
                         <td>
-                          {formatDecimalAmount(fill.feeAmount, { maximumFractionDigits: 6 })} {fill.feeAsset}
+                          {formatDecimalAmount(fill.feeAmount, {
+                            maximumFractionDigits: 6
+                          })}{" "}
+                          {fill.feeAsset}
                         </td>
-                        <td className="nowrap">{formatUtcDateTime(fill.occurredAt)}</td>
+                        <td className="nowrap">
+                          {formatUtcDateTime(fill.occurredAt)}
+                        </td>
                       </tr>
                     ))}
                   </tbody>

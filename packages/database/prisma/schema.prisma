@@ -1035,8 +1035,13 @@ enum StrategyVersionStatus {
   RETIRED
 }
 
+/// `SHORT` is a synthetic, unleveraged shadow simulation only — no borrow, no
+/// funding, no liquidation, no margin, and no exchange adapter exists
+/// (ADR 0012). A real short requires a futures- or margin-capable exchange
+/// capability that this SHADOW_ONLY build cannot express.
 enum TradeDirection {
   LONG
+  SHORT
 }
 
 enum TradeEntryType {
@@ -1244,6 +1249,7 @@ enum StrategyPerformanceWindow {
 /// Exit-Grund"). The UTC period is the row's own `from`/`to`, not an axis.
 enum StrategyPerformanceSegment {
   OVERALL
+  DIRECTION
   STRATEGY_VERSION
   ASSET
   MARKET_REGIME
@@ -1657,6 +1663,15 @@ model ShadowOrder {
   executionProfileId    String
   /// Non-null only for ENTRY orders — at most one entry order per candidate.
   entryCandidateKey     String?                    @unique
+  /// Non-null while a non-terminal ENTRY order exists for this portfolio and
+  /// asset. Deliberately direction-free, so a long and a short entry order for
+  /// the same asset collide on this unique index instead of coexisting — the
+  /// database, not the scheduler, is what enforces the exclusivity (ADR 0013).
+  /// Built by `buildOpenEntryOrderScopeKey`.
+  openEntryScopeKey     String?                    @unique
+  /// Direction of the position this order opens or closes. Defaults to LONG so
+  /// every pre-existing row keeps its meaning unchanged.
+  direction             TradeDirection             @default(LONG)
   purpose               ShadowOrderPurpose
   side                  ShadowOrderSide
   orderType             ShadowOrderType            @default(MARKET)
@@ -1753,6 +1768,9 @@ model ShadowPosition {
   strategyVersionId     String
   strategyAssignmentId  String
   entryOrderId          String                 @unique
+  /// Drives the PnL sign and which side of the price triggers stop vs. take
+  /// profit. Defaults to LONG so every pre-existing row keeps its meaning.
+  direction             TradeDirection         @default(LONG)
   status                ShadowPositionStatus   @default(OPENING)
   /// Non-null while the position is non-terminal — at most one open position
   /// per portfolio and asset.
@@ -1764,6 +1782,10 @@ model ShadowPosition {
   averageExitPrice      Decimal?               @db.Decimal(30, 12)
   grossEntryNotional    Decimal                @default(0) @db.Decimal(30, 12)
   grossExitNotional     Decimal                @default(0) @db.Decimal(30, 12)
+  /// Cash backing retained while a synthetic SHORT is open. Always zero for
+  /// LONG. It is typed because reconciliation must not infer collateral from
+  /// audit JSON (ADR 0012).
+  reservedCollateral    Decimal                @default(0) @db.Decimal(30, 12)
   realizedPnl           Decimal                @default(0) @db.Decimal(30, 12)
   feesPaid              Decimal                @default(0) @db.Decimal(30, 12)
   stopPrice             Decimal                @db.Decimal(30, 12)
@@ -1794,6 +1816,7 @@ model ShadowPosition {
   @@index([assetId, status])
   @@index([strategyVersionId, closedAt])
   @@index([status, openedAt])
+  @@index([direction, closedAt])
 }
 
 /// Append-only, gapless event log of a position.

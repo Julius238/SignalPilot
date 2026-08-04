@@ -12,25 +12,35 @@
  *
  * Usage:
  *   tsx src/jobs/shadowOps.ts activate-portfolio --portfolio-id=<id> --actor=<name>
+ *   tsx src/jobs/shadowOps.ts enable-btc-assignment --assignment-id=<id> --actor=<name>
+ *   tsx src/jobs/shadowOps.ts disable-btc-assignment --assignment-id=<id> --actor=<name>
  *   tsx src/jobs/shadowOps.ts release-kill-switch --session-id=<id> --actor=<name>
  *   tsx src/jobs/shadowOps.ts activate-session --session-id=<id> --actor=<name> --idempotency-key=<key>
+ *   tsx src/jobs/shadowOps.ts pause-session --session-id=<id> --actor=<name>
  *   tsx src/jobs/shadowOps.ts engage-kill-switch --session-id=<id> --actor=<name> --reason=<code>
  *   tsx src/jobs/shadowOps.ts unlock-session --session-id=<id> --actor=<name> --idempotency-key=<key> --confirm-cause-resolved
+ *   tsx src/jobs/shadowOps.ts manual-risk-close --position-id=<id> --actor=<name> --reason-note=<text> --idempotency-key=<key>
  */
 
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { prisma, type PrismaClient } from "@signalpilot/database";
-import { TradingBuildCapability, TradingMode } from "@signalpilot/trading-domain";
+import {
+  TradingBuildCapability,
+  TradingMode
+} from "@signalpilot/trading-domain";
 import { config } from "dotenv";
 import pino from "pino";
 
+import { requestManualRiskClose } from "../lib/manualRiskClose.js";
 import {
   activatePortfolio,
   activateSession,
   engageKillSwitch,
+  pauseSession,
   releaseKillSwitch,
+  setStrategyAssignmentEnabled,
   unlockSessionToStopped,
   type OpsResult
 } from "../lib/shadowSessionOps.js";
@@ -52,7 +62,10 @@ function parseArgs(argv: readonly string[]): Readonly<Record<string, string>> {
   return args;
 }
 
-function requireArg(args: Readonly<Record<string, string>>, name: string): string {
+function requireArg(
+  args: Readonly<Record<string, string>>,
+  name: string
+): string {
   const value = args[name];
   if (value === undefined || value.trim() === "") {
     throw new Error(`Missing required --${name}.`);
@@ -60,7 +73,21 @@ function requireArg(args: Readonly<Record<string, string>>, name: string): strin
   return value;
 }
 
-async function run(database: PrismaClient, argv: readonly string[]): Promise<OpsResult<unknown>> {
+function requireIntegerArg(
+  args: Readonly<Record<string, string>>,
+  name: string
+): number {
+  const raw = requireArg(args, name);
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < 0)
+    throw new Error(`--${name} must be a non-negative integer.`);
+  return value;
+}
+
+async function run(
+  database: PrismaClient,
+  argv: readonly string[]
+): Promise<OpsResult<unknown>> {
   const [command, ...rest] = argv;
   const args = parseArgs(rest);
   const asOf = new Date();
@@ -70,6 +97,31 @@ async function run(database: PrismaClient, argv: readonly string[]): Promise<Ops
       return activatePortfolio(database, {
         portfolioId: requireArg(args, "portfolio-id"),
         actorId: requireArg(args, "actor"),
+        idempotencyKey: requireArg(args, "idempotency-key"),
+        asOf
+      });
+
+    case "enable-assignment":
+    case "enable-btc-assignment":
+      return setStrategyAssignmentEnabled(database, {
+        assignmentId: requireArg(args, "assignment-id"),
+        actorId: requireArg(args, "actor"),
+        enabled: true,
+        idempotencyKey: requireArg(args, "idempotency-key"),
+        expectedVersion: requireIntegerArg(args, "expected-version"),
+        confirmation: requireArg(args, "confirmation"),
+        asOf
+      });
+
+    case "disable-assignment":
+    case "disable-btc-assignment":
+      return setStrategyAssignmentEnabled(database, {
+        assignmentId: requireArg(args, "assignment-id"),
+        actorId: requireArg(args, "actor"),
+        enabled: false,
+        idempotencyKey: requireArg(args, "idempotency-key"),
+        expectedVersion: requireIntegerArg(args, "expected-version"),
+        confirmation: requireArg(args, "confirmation"),
         asOf
       });
 
@@ -77,6 +129,7 @@ async function run(database: PrismaClient, argv: readonly string[]): Promise<Ops
       return releaseKillSwitch(database, {
         sessionId: requireArg(args, "session-id"),
         actorId: requireArg(args, "actor"),
+        idempotencyKey: requireArg(args, "idempotency-key"),
         asOf
       });
 
@@ -84,7 +137,11 @@ async function run(database: PrismaClient, argv: readonly string[]): Promise<Ops
       const env = process.env;
       const base = checkShadowBaseAllowed(env);
       if (!base.allowed) {
-        return { ok: false, reasonCode: base.reasonCode, message: base.message };
+        return {
+          ok: false,
+          reasonCode: base.reasonCode,
+          message: base.message
+        };
       }
       return activateSession(database, {
         sessionId: requireArg(args, "session-id"),
@@ -92,7 +149,8 @@ async function run(database: PrismaClient, argv: readonly string[]): Promise<Ops
         idempotencyKey: requireArg(args, "idempotency-key"),
         capability: {
           buildCapability: TradingBuildCapability.SHADOW_ONLY,
-          tradingMode: base.flags.tradingMode as (typeof TradingMode)[keyof typeof TradingMode],
+          tradingMode: base.flags
+            .tradingMode as (typeof TradingMode)[keyof typeof TradingMode],
           enableLiveTrading: base.flags.enableLiveTrading,
           shadowMasterFlagEnabled: base.flags.shadowEnabled
         },
@@ -100,11 +158,20 @@ async function run(database: PrismaClient, argv: readonly string[]): Promise<Ops
       });
     }
 
+    case "pause-session":
+      return pauseSession(database, {
+        sessionId: requireArg(args, "session-id"),
+        actorId: requireArg(args, "actor"),
+        idempotencyKey: requireArg(args, "idempotency-key"),
+        asOf
+      });
+
     case "engage-kill-switch":
       return engageKillSwitch(database, {
         sessionId: requireArg(args, "session-id"),
         actorId: requireArg(args, "actor"),
         reasonCode: requireArg(args, "reason"),
+        idempotencyKey: requireArg(args, "idempotency-key"),
         asOf
       });
 
@@ -117,18 +184,36 @@ async function run(database: PrismaClient, argv: readonly string[]): Promise<Ops
         asOf
       });
 
+    case "manual-risk-close": {
+      const result = await requestManualRiskClose(database, {
+        shadowPositionId: requireArg(args, "position-id"),
+        actorId: requireArg(args, "actor"),
+        reasonNote: requireArg(args, "reason-note"),
+        idempotencyKey: requireArg(args, "idempotency-key"),
+        asOf
+      });
+      if (!result.ok) return result;
+      return { ok: true, result };
+    }
+
     default:
       throw new Error(
-        `Unknown command ${JSON.stringify(command)}. Expected one of: activate-portfolio, release-kill-switch, activate-session, engage-kill-switch, unlock-session.`
+        `Unknown command ${JSON.stringify(command)}. Expected one of: activate-portfolio, enable-assignment, disable-assignment, release-kill-switch, activate-session, pause-session, engage-kill-switch, unlock-session, manual-risk-close.`
       );
   }
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+if (
+  process.argv[1] &&
+  fileURLToPath(import.meta.url) === resolve(process.argv[1])
+) {
   run(prisma, process.argv.slice(2))
     .then((result) => {
       if (!result.ok) {
-        logger.error({ reasonCode: result.reasonCode, message: result.message }, "shadowOps command refused");
+        logger.error(
+          { reasonCode: result.reasonCode, message: result.message },
+          "shadowOps command refused"
+        );
         process.exitCode = 1;
         return;
       }

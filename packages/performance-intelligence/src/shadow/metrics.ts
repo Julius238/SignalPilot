@@ -18,7 +18,11 @@
  * `NOT_DEFINED_FOR_SEGMENT` everywhere else.
  */
 
-import { DecimalValue, RoundingMode, canonicalHash } from "@signalpilot/trading-domain";
+import {
+  DecimalValue,
+  RoundingMode,
+  canonicalHash
+} from "@signalpilot/trading-domain";
 
 import {
   ALL_SEGMENT_KEY,
@@ -60,7 +64,8 @@ function toDecimalOrZero(value: DecimalString | null): DecimalValue {
 
 /** Integer square root of a non-negative BigInt (Newton, exact, no floats). */
 function bigintSqrt(value: bigint): bigint {
-  if (value < 0n) throw new RangeError("bigintSqrt expects a non-negative value.");
+  if (value < 0n)
+    throw new RangeError("bigintSqrt expects a non-negative value.");
   if (value < 2n) return value;
   let guess = value;
   let next = (guess + 1n) / 2n;
@@ -77,7 +82,9 @@ function bigintSqrt(value: bigint): bigint {
  */
 function decimalSqrt(value: DecimalValue): DecimalValue {
   if (value.isNegative()) return ZERO;
-  return DecimalValue.fromUnscaled(bigintSqrt(value.unscaled * 1_000_000_000_000n));
+  return DecimalValue.fromUnscaled(
+    bigintSqrt(value.unscaled * 1_000_000_000_000n)
+  );
 }
 
 function parseIsoMs(value: string | null): number | null {
@@ -99,7 +106,10 @@ function millisecondsToMinutes(milliseconds: number): DecimalValue {
 
 /** Mean of a non-empty list; the caller guarantees non-emptiness. */
 function mean(values: readonly DecimalValue[]): DecimalValue {
-  return DecimalValue.sum(values).div(DecimalValue.fromSafeInteger(values.length), RoundingMode.HALF_UP);
+  return DecimalValue.sum(values).div(
+    DecimalValue.fromSafeInteger(values.length),
+    RoundingMode.HALF_UP
+  );
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -124,7 +134,10 @@ interface DerivedTrade {
   readonly mfePct: DecimalValue | null;
 }
 
-function deriveTrade(trade: ClosedShadowTradeInput, fallbackOrder: number): DerivedTrade {
+function deriveTrade(
+  trade: ClosedShadowTradeInput,
+  fallbackOrder: number
+): DerivedTrade {
   const netPnl = toDecimalOrZero(trade.netPnl);
   const fees = toDecimalOrZero(trade.fees);
   const plannedRisk = toDecimal(trade.plannedRiskAmount);
@@ -155,12 +168,24 @@ function deriveTrade(trade: ClosedShadowTradeInput, fallbackOrder: number): Deri
     holdMinutes,
     orderKey: closedAtMs ?? openedAtMs ?? fallbackOrder,
     maePct:
-      priceBaseUsable && lowest !== null
-        ? entryPrice.sub(lowest).mul(HUNDRED, RoundingMode.HALF_UP).div(entryPrice, RoundingMode.HALF_UP)
+      priceBaseUsable &&
+      (trade.direction === "LONG" ? lowest !== null : highest !== null)
+        ? (trade.direction === "LONG"
+            ? entryPrice.sub(lowest as DecimalValue)
+            : (highest as DecimalValue).sub(entryPrice)
+          )
+            .mul(HUNDRED, RoundingMode.HALF_UP)
+            .div(entryPrice, RoundingMode.HALF_UP)
         : null,
     mfePct:
-      priceBaseUsable && highest !== null
-        ? highest.sub(entryPrice).mul(HUNDRED, RoundingMode.HALF_UP).div(entryPrice, RoundingMode.HALF_UP)
+      priceBaseUsable &&
+      (trade.direction === "LONG" ? highest !== null : lowest !== null)
+        ? (trade.direction === "LONG"
+            ? (highest as DecimalValue).sub(entryPrice)
+            : entryPrice.sub(lowest as DecimalValue)
+          )
+            .mul(HUNDRED, RoundingMode.HALF_UP)
+            .div(entryPrice, RoundingMode.HALF_UP)
         : null
   };
 }
@@ -211,7 +236,10 @@ function computeDrawdown(
       ? metricUnavailable(MetricNullReason.NO_EQUITY_BASE)
       : peakAtMaxDrawdown.isPositive()
         ? metricValue(
-            maxDrawdown.mul(HUNDRED, RoundingMode.HALF_UP).div(peakAtMaxDrawdown, RoundingMode.HALF_UP).toString()
+            maxDrawdown
+              .mul(HUNDRED, RoundingMode.HALF_UP)
+              .div(peakAtMaxDrawdown, RoundingMode.HALF_UP)
+              .toString()
           )
         : metricUnavailable(MetricNullReason.NO_EQUITY_BASE);
 
@@ -261,19 +289,26 @@ interface RatioResult {
  * measurement (P8 task, "Sharpe und Sortino nur bei ausreichender
  * Datenbasis").
  */
-function computeRiskAdjustedRatios(equityCurve: readonly PortfolioEquityPointInput[]): RatioResult {
+function computeRiskAdjustedRatios(
+  equityCurve: readonly PortfolioEquityPointInput[]
+): RatioResult {
   const returns: DecimalValue[] = [];
   for (let index = 1; index < equityCurve.length; index += 1) {
     const previous = toDecimal(equityCurve[index - 1].equity);
     const current = toDecimal(equityCurve[index].equity);
-    if (previous === null || current === null || !previous.isPositive()) continue;
+    if (previous === null || current === null || !previous.isPositive())
+      continue;
     returns.push(current.sub(previous).div(previous, RoundingMode.HALF_UP));
   }
 
   if (returns.length < MIN_RETURN_OBSERVATIONS) {
     return {
-      sharpe: metricUnavailable(MetricNullReason.INSUFFICIENT_RETURN_OBSERVATIONS),
-      sortino: metricUnavailable(MetricNullReason.INSUFFICIENT_RETURN_OBSERVATIONS),
+      sharpe: metricUnavailable(
+        MetricNullReason.INSUFFICIENT_RETURN_OBSERVATIONS
+      ),
+      sortino: metricUnavailable(
+        MetricNullReason.INSUFFICIENT_RETURN_OBSERVATIONS
+      ),
       observations: returns.length
     };
   }
@@ -290,7 +325,9 @@ function computeRiskAdjustedRatios(equityCurve: readonly PortfolioEquityPointInp
     RoundingMode.HALF_UP
   );
   const standardDeviation = decimalSqrt(variance);
-  const annualisation = decimalSqrt(DecimalValue.fromSafeInteger(ANNUALISATION_PERIODS_PER_YEAR));
+  const annualisation = decimalSqrt(
+    DecimalValue.fromSafeInteger(ANNUALISATION_PERIODS_PER_YEAR)
+  );
 
   const sharpe = standardDeviation.isPositive()
     ? metricValue(
@@ -336,7 +373,9 @@ function computeMetrics(
   trades: readonly DerivedTrade[],
   context: MetricsContext
 ): ShadowPerformanceMetrics {
-  const ordered = [...trades].sort((left, right) => left.orderKey - right.orderKey);
+  const ordered = [...trades].sort(
+    (left, right) => left.orderKey - right.orderKey
+  );
   const count = ordered.length;
 
   const winners = ordered.filter((trade) => trade.netPnl.isPositive());
@@ -346,7 +385,9 @@ function computeMetrics(
   const netPnl = DecimalValue.sum(ordered.map((trade) => trade.netPnl));
   const fees = DecimalValue.sum(ordered.map((trade) => trade.fees));
   const grossPnl = DecimalValue.sum(ordered.map((trade) => trade.grossPnl));
-  const executionCost = DecimalValue.sum(ordered.map((trade) => trade.executionCost));
+  const executionCost = DecimalValue.sum(
+    ordered.map((trade) => trade.executionCost)
+  );
   const grossProfit = DecimalValue.sum(winners.map((trade) => trade.netPnl));
   const grossLoss = DecimalValue.sum(losers.map((trade) => trade.netPnl)).abs();
 
@@ -374,7 +415,11 @@ function computeMetrics(
 
   const profitFactor = grossLoss.isPositive()
     ? metricValue(grossProfit.div(grossLoss, RoundingMode.HALF_UP).toString())
-    : metricUnavailable(count === 0 ? MetricNullReason.NO_CLOSED_TRADES : MetricNullReason.NO_GROSS_LOSS);
+    : metricUnavailable(
+        count === 0
+          ? MetricNullReason.NO_CLOSED_TRADES
+          : MetricNullReason.NO_GROSS_LOSS
+      );
 
   const expectancy =
     count === 0
@@ -386,11 +431,19 @@ function computeMetrics(
     .filter((value): value is DecimalValue => value !== null);
   const averageR =
     rMultiples.length === 0
-      ? metricUnavailable(count === 0 ? MetricNullReason.NO_CLOSED_TRADES : MetricNullReason.NO_PLANNED_RISK)
+      ? metricUnavailable(
+          count === 0
+            ? MetricNullReason.NO_CLOSED_TRADES
+            : MetricNullReason.NO_PLANNED_RISK
+        )
       : metricValue(mean(rMultiples).toString());
   const cumulativeR =
     rMultiples.length === 0
-      ? metricUnavailable(count === 0 ? MetricNullReason.NO_CLOSED_TRADES : MetricNullReason.NO_PLANNED_RISK)
+      ? metricUnavailable(
+          count === 0
+            ? MetricNullReason.NO_CLOSED_TRADES
+            : MetricNullReason.NO_PLANNED_RISK
+        )
       : metricValue(DecimalValue.sum(rMultiples).toString());
 
   const streaks = computeStreaks(ordered);
@@ -411,7 +464,11 @@ function computeMetrics(
     .filter((value): value is DecimalValue => value !== null);
   const averageHoldMinutes =
     holdDurations.length === 0
-      ? metricUnavailable(count === 0 ? MetricNullReason.NO_CLOSED_TRADES : MetricNullReason.NO_HOLD_DURATION)
+      ? metricUnavailable(
+          count === 0
+            ? MetricNullReason.NO_CLOSED_TRADES
+            : MetricNullReason.NO_HOLD_DURATION
+        )
       : metricValue(mean(holdDurations).toString());
   const exposureMinutes = DecimalValue.sum(holdDurations);
 
@@ -425,17 +482,30 @@ function computeMetrics(
     windowMinutes === null || !windowMinutes.isPositive()
       ? metricUnavailable(MetricNullReason.EMPTY_WINDOW)
       : metricValue(
-          exposureMinutes.mul(HUNDRED, RoundingMode.HALF_UP).div(windowMinutes, RoundingMode.HALF_UP).toString()
+          exposureMinutes
+            .mul(HUNDRED, RoundingMode.HALF_UP)
+            .div(windowMinutes, RoundingMode.HALF_UP)
+            .toString()
         );
 
-  const maeValues = ordered.map((trade) => trade.maePct).filter((value): value is DecimalValue => value !== null);
-  const mfeValues = ordered.map((trade) => trade.mfePct).filter((value): value is DecimalValue => value !== null);
+  const maeValues = ordered
+    .map((trade) => trade.maePct)
+    .filter((value): value is DecimalValue => value !== null);
+  const mfeValues = ordered
+    .map((trade) => trade.mfePct)
+    .filter((value): value is DecimalValue => value !== null);
   const extremesReason =
-    count === 0 ? MetricNullReason.NO_CLOSED_TRADES : MetricNullReason.NO_PRICE_EXTREMES;
+    count === 0
+      ? MetricNullReason.NO_CLOSED_TRADES
+      : MetricNullReason.NO_PRICE_EXTREMES;
   const averageMaePct =
-    maeValues.length === 0 ? metricUnavailable(extremesReason) : metricValue(mean(maeValues).toString());
+    maeValues.length === 0
+      ? metricUnavailable(extremesReason)
+      : metricValue(mean(maeValues).toString());
   const averageMfePct =
-    mfeValues.length === 0 ? metricUnavailable(extremesReason) : metricValue(mean(mfeValues).toString());
+    mfeValues.length === 0
+      ? metricUnavailable(extremesReason)
+      : metricValue(mean(mfeValues).toString());
 
   const sharpeRatio = context.isOverall
     ? context.ratios.sharpe
@@ -449,7 +519,12 @@ function computeMetrics(
   // never had either.
   const funnel = context.isOverall
     ? context.riskFunnel
-    : { assessedCandidates: 0, riskRejectedCandidates: 0, invalidCandidates: 0, expiredCandidates: 0 };
+    : {
+        assessedCandidates: 0,
+        riskRejectedCandidates: 0,
+        invalidCandidates: 0,
+        expiredCandidates: 0
+      };
   const riskRejectionRatePct = !context.isOverall
     ? metricUnavailable(MetricNullReason.NOT_DEFINED_FOR_SEGMENT)
     : funnel.assessedCandidates === 0
@@ -457,7 +532,10 @@ function computeMetrics(
       : metricValue(
           DecimalValue.fromSafeInteger(funnel.riskRejectedCandidates)
             .mul(HUNDRED, RoundingMode.HALF_UP)
-            .div(DecimalValue.fromSafeInteger(funnel.assessedCandidates), RoundingMode.HALF_UP)
+            .div(
+              DecimalValue.fromSafeInteger(funnel.assessedCandidates),
+              RoundingMode.HALF_UP
+            )
             .toString()
         );
 
@@ -515,6 +593,12 @@ interface SegmentAxis {
 
 const SEGMENT_AXES: readonly SegmentAxis[] = [
   {
+    type: ShadowPerformanceSegment.DIRECTION,
+    keyOf: (trade) => trade.source.direction,
+    labelOf: (_trade, key) => key,
+    strategyVersionOf: () => null
+  },
+  {
     type: ShadowPerformanceSegment.STRATEGY_VERSION,
     keyOf: (trade) => trade.source.strategyVersionId,
     labelOf: (_trade, key) => key,
@@ -559,7 +643,10 @@ export function computeShadowPerformance(
     ratios,
     isOverall: true
   };
-  const segmentContext: MetricsContext = { ...overallContext, isOverall: false };
+  const segmentContext: MetricsContext = {
+    ...overallContext,
+    isOverall: false
+  };
 
   const segments: ShadowPerformanceSegmentResult[] = [
     {
@@ -603,8 +690,12 @@ export function computeShadowPerformance(
     riskFunnel: input.riskFunnel,
     sourceThroughPositionEventId: input.sourceThroughPositionEventId,
     dataThroughAt: input.dataThroughAt,
-    trades: [...input.trades].sort((left, right) => left.positionId.localeCompare(right.positionId)),
-    equityCurve: [...input.equityCurve].sort((left, right) => left.asOf.localeCompare(right.asOf))
+    trades: [...input.trades].sort((left, right) =>
+      left.positionId.localeCompare(right.positionId)
+    ),
+    equityCurve: [...input.equityCurve].sort((left, right) =>
+      left.asOf.localeCompare(right.asOf)
+    )
   };
 
   return {

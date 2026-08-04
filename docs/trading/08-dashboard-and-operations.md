@@ -6,19 +6,19 @@ Das vorhandene Dashboard organisiert Seiten über Navigationsgruppen und nutzt s
 
 Vorgesehene Pfade:
 
-| Seite | Route | Inhalt |
-| --- | --- | --- |
-| Trading Overview | `/dashboard/trading` | Session/Kill, Equity, Cash/Reserve, offene Exposure, Tages-P&L/Drawdown, Pipelinezustand |
-| Trade Candidates | `/dashboard/trading/candidates` | Status, Asset, Strategieversion, Anchor, Ablauf, Reason Codes, Evidence-Drilldown |
-| Risk Decisions | `/dashboard/trading/risk` | PASS/FAIL, alle Rule Results, actual/limit, Severity, Inputhash |
-| Shadow Orders | `/dashboard/trading/orders` | Status, Restmenge, Reserve, Profile, Fills, Ablauf |
-| offene Positionen | `/dashboard/trading/positions` | Menge, Entry, konservativer Mark, Stop/TP, unrealized P&L, Max-Hold |
-| abgeschlossene Trades | `/dashboard/trading/trades` | Exitgrund, Fills, netto P&L/R, Gebühren, Haltedauer |
-| Portfolio | `/dashboard/trading/portfolio` | Cash, Reserve, Equity Curve, Drawdown, Exposure, Ledger-/Snapshotstatus |
-| Strategy Performance | `/dashboard/trading/strategies` | strikt Shadow-Trades pro StrategyVersion, nicht Paper Evaluation |
-| Risk Events | `/dashboard/trading/risk-events` | Severity, Grund, Aggregat, Acknowledge-/Resolutionstatus |
-| Sessions | `/dashboard/trading/sessions` | Zustand, Heartbeat/Reconcile, Kill-Switch-Historie, Adminaktionen |
-| Audit Timeline | `/dashboard/trading/audit` | unveränderliche Ereigniskette mit Korrelation/Hashes |
+| Seite                 | Route                            | Inhalt                                                                                   |
+| --------------------- | -------------------------------- | ---------------------------------------------------------------------------------------- |
+| Trading Overview      | `/dashboard/trading`             | Session/Kill, Equity, Cash/Reserve, offene Exposure, Tages-P&L/Drawdown, Pipelinezustand |
+| Trade Candidates      | `/dashboard/trading/candidates`  | Status, Asset, Strategieversion, Anchor, Ablauf, Reason Codes, Evidence-Drilldown        |
+| Risk Decisions        | `/dashboard/trading/risk`        | PASS/FAIL, alle Rule Results, actual/limit, Severity, Inputhash                          |
+| Shadow Orders         | `/dashboard/trading/orders`      | Status, Restmenge, Reserve, Profile, Fills, Ablauf                                       |
+| offene Positionen     | `/dashboard/trading/positions`   | Menge, Entry, konservativer Mark, Stop/TP, unrealized P&L, Max-Hold                      |
+| abgeschlossene Trades | `/dashboard/trading/trades`      | Exitgrund, Fills, netto P&L/R, Gebühren, Haltedauer                                      |
+| Portfolio             | `/dashboard/trading/portfolio`   | Cash, Reserve, Equity Curve, Drawdown, Exposure, Ledger-/Snapshotstatus                  |
+| Strategy Performance  | `/dashboard/trading/strategies`  | strikt Shadow-Trades pro StrategyVersion, nicht Paper Evaluation                         |
+| Risk Events           | `/dashboard/trading/risk-events` | Severity, Grund, Aggregat, Acknowledge-/Resolutionstatus                                 |
+| Sessions              | `/dashboard/trading/sessions`    | Zustand, Heartbeat/Reconcile, Kill-Switch-Historie, Adminaktionen                        |
+| Audit Timeline        | `/dashboard/trading/audit`       | unveränderliche Ereigniskette mit Korrelation/Hashes                                     |
 
 Desktop und Mobile müssen bestehende responsive Tabellen-/Kartenmuster einhalten. Die bereits verwendete Chart-Bibliothek kann für Equity/Drawdown wiederverwendet werden; Charts berechnen keine Fachkennzahl im Browser.
 
@@ -35,12 +35,14 @@ Trading Overview zeigt oberhalb des Folds:
 
 Fehlende Daten werden als `UNBEKANNT/BLOCKIERT` dargestellt, nie als 0 oder gesund. Modellierte Spreads/Slippage tragen sichtbar das Label „simuliert, nicht beobachtet“.
 
+Jeder Candidate, jede Order, jeder Fill und jede Position zeigt ein eindeutiges `LONG`-/`SHORT`-Badge sowie Strategy, StrategyVersion und Direction. Short-Ansichten tragen dauerhaft „synthetischer ungehebelter Shadow-Short – keine Börsenposition“. Positionen zeigen reserviertes Collateral und ein richtungsabhängig serverseitig berechnetes P&L; der Browser berechnet oder dreht kein Vorzeichen selbst.
+
 ## Drilldowns
 
-- Candidate: StrategyVersion/Hash, Anchor-Candle, alle Evidence-Typen, Snapshotzeiten, Entry/Stop/TP/RR, Status-Timeline.
+- Candidate: Direction, Strategy/StrategyVersion/Hash, Anchor-Candle, alle Evidence-Typen, Snapshotzeiten, Entry/Stop/TP/RR, Strategy- und Risk-Gründe, Status-Timeline.
 - Risk: jede Regel inklusive PASS, stabile Codes, actual/limit/unit, Rule-/Limitset-Version, Assessment-Inputhash.
 - Order/Fill: Preisbrücke Referenz -> Spread -> Slippage -> Rundung -> Fee, Candle und Intrabar-/Gapregel.
-- Position: Entry-/Exitfills, PositionEvents, ExitPlan-Versionen und P&L-Brücke gross -> fees -> net.
+- Position: Direction, reserviertes Short-Collateral, Entry-/Exitfills einschließlich BUY/SELL-Seite, PositionEvents, ExitPlan-Versionen, Exitgrund und richtungsabhängige P&L-Brücke gross -> fees -> net.
 - Portfolio: Ledgersequenz und Snapshotsequenz; nur Admins dürfen Korrekturdetails sehen, keine Korrektur in v1-UI.
 - Audit: Filter nach CorrelationId, Aggregate, Actor, Reason und Zeit; keine Secrets/Headers/raw Credentials.
 
@@ -69,7 +71,7 @@ GET /trading/sessions
 GET /trading/audit
 ```
 
-Filter: `cursor`, begrenztes `limit`, UTC-`from/to`, Status, Asset, StrategyVersion, Severity. Cursor ist stabil (`createdAt,id`), kein unbounded Export. DTOs nutzen Decimalstrings und ISO-UTC-Zeiten.
+Filter: begrenztes `limit`/`offset`, UTC-`from/to`, Status, Asset, `direction`, StrategyVersion und Severity. Candidate-, Order-, Fill- und Positionlisten unterstützen Short-Filter und Paginierung. DTOs nutzen Decimalstrings und ISO-UTC-Zeiten; `exchangePosition=false` ist serverseitig fest und bei Short kommt `syntheticShadowShort=true` hinzu.
 
 ### Mutationen
 
@@ -81,6 +83,7 @@ POST /trading/sessions/:id/resolve-to-stopped
 POST /trading/orders/:id/cancel
 POST /trading/positions/:id/request-risk-close
 POST /trading/risk-events/:id/acknowledge
+POST /trading/operations/set-assignment
 ```
 
 Kein Endpoint heißt oder akzeptiert `live`, `execute`, `exchange`, Futures oder Leverage. Jede Mutation verlangt:
@@ -94,6 +97,8 @@ Kein Endpoint heißt oder akzeptiert `live`, `execute`, `exchange`, Futures oder
 - API-Featureflag standardmäßig aus.
 
 Die API führt keine Strategie-, Risk- oder Fillberechnung aus.
+
+`set-assignment` ruft ausschließlich den gemeinsamen sicheren Operations-Service auf. Er verlangt Operator, eindeutigen Idempotency-Key, erwartete Assignment-Version und den exakten dynamischen Bestätigungstext. Es gibt keine direkte Statusmutation aus Route oder UI. Long- und Short-Assignments für BTCUSDT/ETHUSDT werden einzeln bedient und bleiben nach Setup standardmäßig deaktiviert.
 
 ## Kill-Switch-UX
 
@@ -176,3 +181,7 @@ Session bleibt nicht automatisch entry-bereit. Startup-Reconcile, abgelaufene Cl
 ## Rollback-Prinzip
 
 App-Rollback bedeutet Flags aus/Session killen und auf die vorherige Applikationsversion zurückrollen. Additive Tabellen bleiben bestehen. Keine Migration darf beim Rollback Shadow-Historie löschen. Offene Shadow-Positionen werden entweder bis zum normalen simulierten Exit durch eine kompatible Monitorversion verwaltet oder vor Versionsrollback explizit risikoreduzierend simuliert geschlossen und auditiert.
+
+Der Audit-/Incident-Drilldown verfolgt die vollständige Kette `Candidate -> Risk -> Order -> Fill -> Position -> Exit/ExitPlan -> Ledger -> Performance`. Sensitive Keys, Tokens, URLs, Authfelder und übergroße Payloads werden serverseitig bereinigt, bevor die Response SignalPilot verlässt.
+
+Performance wird serverseitig nach Direction, StrategyVersion, Asset, Entry-Regime und Exitgrund segmentiert. Win Rate, Profit Factor, Expectancy, Fees, R-Multiple, Drawdown sowie MAE/MFE verwenden für Short das Short-P&L und die entgegengesetzte adverse/favorable Preisrichtung. Exposure- und Risk-Auswertungen aggregieren beide Richtungen brutto und bieten keinen Netting-Vorteil.

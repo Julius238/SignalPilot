@@ -41,7 +41,8 @@ import {
  * unconditionally (ADR 0001). The constant exists so the guard has something to
  * compare against and a capability test has something to assert.
  */
-export const TRADING_BUILD_CAPABILITY: string = TradingBuildCapability.SHADOW_ONLY;
+export const TRADING_BUILD_CAPABILITY: string =
+  TradingBuildCapability.SHADOW_ONLY;
 
 /**
  * Reason codes owned by the worker gate. The shared domain codes cover build,
@@ -62,9 +63,15 @@ export const ShadowJobReasonCode = {
   PERFORMANCE_JOB_DISABLED: "PERFORMANCE_JOB_DISABLED",
   ALERT_OUTBOX_DISABLED: "ALERT_OUTBOX_DISABLED",
   ALERT_DELIVERY_DISABLED: "ALERT_DELIVERY_DISABLED",
-  RETENTION_DISABLED: "RETENTION_DISABLED"
+  RETENTION_DISABLED: "RETENTION_DISABLED",
+  // Work package "Shadow Short". Three independent gates: the long strategy,
+  // the short strategy, and the shadow-short execution capability itself.
+  STRATEGY_LONG_V1_DISABLED: "STRATEGY_LONG_V1_DISABLED",
+  STRATEGY_SHORT_V1_DISABLED: "STRATEGY_SHORT_V1_DISABLED",
+  SHADOW_SHORT_DISABLED: "SHADOW_SHORT_DISABLED"
 } as const;
-export type ShadowJobReasonCode = (typeof ShadowJobReasonCode)[keyof typeof ShadowJobReasonCode];
+export type ShadowJobReasonCode =
+  (typeof ShadowJobReasonCode)[keyof typeof ShadowJobReasonCode];
 
 export type TradingGateReasonCode = TradingReasonCode | ShadowJobReasonCode;
 
@@ -83,6 +90,9 @@ export interface TradingFlagSnapshot {
   readonly alertOutboxEnabled: boolean;
   readonly alertDeliveryEnabled: boolean;
   readonly retentionEnabled: boolean;
+  readonly strategyLongV1Enabled: boolean;
+  readonly strategyShortV1Enabled: boolean;
+  readonly shadowShortEnabled: boolean;
 }
 
 export type TradingGateResult =
@@ -105,20 +115,32 @@ export function parseStrictBoolean(
   name: string,
   raw: string | undefined,
   fallback: boolean
-): { readonly ok: true; readonly value: boolean } | { readonly ok: false; readonly message: string } {
-  if (raw === undefined || raw.trim() === "") return { ok: true, value: fallback };
+):
+  | { readonly ok: true; readonly value: boolean }
+  | { readonly ok: false; readonly message: string } {
+  if (raw === undefined || raw.trim() === "")
+    return { ok: true, value: fallback };
   const normalized = raw.trim().toLowerCase();
   if (normalized === "true") return { ok: true, value: true };
   if (normalized === "false") return { ok: true, value: false };
-  return { ok: false, message: `${name} must be "true" or "false", got ${JSON.stringify(raw)}.` };
+  return {
+    ok: false,
+    message: `${name} must be "true" or "false", got ${JSON.stringify(raw)}.`
+  };
 }
 
 function parseTradingMode(
   raw: string | undefined
-): { readonly ok: true; readonly value: string } | { readonly ok: false; readonly message: string } {
-  if (raw === undefined || raw.trim() === "") return { ok: true, value: TradingMode.DISABLED };
+):
+  | { readonly ok: true; readonly value: string }
+  | { readonly ok: false; readonly message: string } {
+  if (raw === undefined || raw.trim() === "")
+    return { ok: true, value: TradingMode.DISABLED };
   const normalized = raw.trim().toUpperCase();
-  if (normalized === TradingMode.DISABLED || normalized === TradingMode.SHADOW) {
+  if (
+    normalized === TradingMode.DISABLED ||
+    normalized === TradingMode.SHADOW
+  ) {
     return { ok: true, value: normalized };
   }
   return {
@@ -131,8 +153,14 @@ function parseTradingMode(
  * Shared part of the gate: shadow-only build, no live trading, `TRADING_MODE`
  * `SHADOW` and the master flag on. Job-specific flags are checked on top.
  */
-export function checkShadowBaseAllowed(env: EnvSource = process.env): TradingGateResult {
-  const liveTrading = parseStrictBoolean("ENABLE_LIVE_TRADING", env.ENABLE_LIVE_TRADING, false);
+export function checkShadowBaseAllowed(
+  env: EnvSource = process.env
+): TradingGateResult {
+  const liveTrading = parseStrictBoolean(
+    "ENABLE_LIVE_TRADING",
+    env.ENABLE_LIVE_TRADING,
+    false
+  );
   const shadowEnabled = parseStrictBoolean(
     "TRADING_SHADOW_ENABLED",
     env.TRADING_SHADOW_ENABLED,
@@ -188,6 +216,21 @@ export function checkShadowBaseAllowed(env: EnvSource = process.env): TradingGat
     env.TRADING_RETENTION_ENABLED,
     false
   );
+  const strategyLongV1Enabled = parseStrictBoolean(
+    "TRADING_STRATEGY_LONG_V1_ENABLED",
+    env.TRADING_STRATEGY_LONG_V1_ENABLED,
+    false
+  );
+  const strategyShortV1Enabled = parseStrictBoolean(
+    "TRADING_STRATEGY_SHORT_V1_ENABLED",
+    env.TRADING_STRATEGY_SHORT_V1_ENABLED,
+    false
+  );
+  const shadowShortEnabled = parseStrictBoolean(
+    "TRADING_SHADOW_SHORT_ENABLED",
+    env.TRADING_SHADOW_SHORT_ENABLED,
+    false
+  );
   const tradingMode = parseTradingMode(env.TRADING_MODE);
 
   for (const parsed of [
@@ -203,6 +246,9 @@ export function checkShadowBaseAllowed(env: EnvSource = process.env): TradingGat
     alertOutboxEnabled,
     alertDeliveryEnabled,
     retentionEnabled,
+    strategyLongV1Enabled,
+    strategyShortV1Enabled,
+    shadowShortEnabled,
     tradingMode
   ]) {
     if (!parsed.ok) {
@@ -224,12 +270,17 @@ export function checkShadowBaseAllowed(env: EnvSource = process.env): TradingGat
     riskV1Enabled: (riskEnabled as { value: boolean }).value,
     bootstrapEnabled: (bootstrapEnabled as { value: boolean }).value,
     executionEnabled: (executionEnabled as { value: boolean }).value,
-    positionMonitorEnabled: (positionMonitorEnabled as { value: boolean }).value,
+    positionMonitorEnabled: (positionMonitorEnabled as { value: boolean })
+      .value,
     reconciliationEnabled: (reconciliationEnabled as { value: boolean }).value,
     performanceJobEnabled: (performanceJobEnabled as { value: boolean }).value,
     alertOutboxEnabled: (alertOutboxEnabled as { value: boolean }).value,
     alertDeliveryEnabled: (alertDeliveryEnabled as { value: boolean }).value,
-    retentionEnabled: (retentionEnabled as { value: boolean }).value
+    retentionEnabled: (retentionEnabled as { value: boolean }).value,
+    strategyLongV1Enabled: (strategyLongV1Enabled as { value: boolean }).value,
+    strategyShortV1Enabled: (strategyShortV1Enabled as { value: boolean })
+      .value,
+    shadowShortEnabled: (shadowShortEnabled as { value: boolean }).value
   };
 
   const capability: TradingCapabilityContext = {
@@ -253,7 +304,9 @@ export function checkShadowBaseAllowed(env: EnvSource = process.env): TradingGat
 }
 
 /** Gate for `shadowGenerateCandidates` (work package 2). */
-export function checkShadowStrategyJobAllowed(env: EnvSource = process.env): TradingGateResult {
+export function checkShadowStrategyJobAllowed(
+  env: EnvSource = process.env
+): TradingGateResult {
   const base = checkShadowBaseAllowed(env);
   if (!base.allowed) return base;
   if (!base.flags.strategyV1Enabled) {
@@ -268,7 +321,9 @@ export function checkShadowStrategyJobAllowed(env: EnvSource = process.env): Tra
 }
 
 /** Gate for `shadowAssessRisk` (work package 3). */
-export function checkShadowRiskJobAllowed(env: EnvSource = process.env): TradingGateResult {
+export function checkShadowRiskJobAllowed(
+  env: EnvSource = process.env
+): TradingGateResult {
   const base = checkShadowBaseAllowed(env);
   if (!base.allowed) return base;
   if (!base.flags.riskV1Enabled) {
@@ -287,7 +342,9 @@ export function checkShadowRiskJobAllowed(env: EnvSource = process.env): Trading
  * only, but still requires the full shadow configuration plus its own flag so
  * no environment can seed trading rows by accident (ADR 0006).
  */
-export function checkShadowBootstrapAllowed(env: EnvSource = process.env): TradingGateResult {
+export function checkShadowBootstrapAllowed(
+  env: EnvSource = process.env
+): TradingGateResult {
   const base = checkShadowBaseAllowed(env);
   if (!base.allowed) return base;
   if (!base.flags.bootstrapEnabled) {
@@ -302,7 +359,9 @@ export function checkShadowBootstrapAllowed(env: EnvSource = process.env): Tradi
 }
 
 /** Gate for `shadowCreateOrders` / `shadowProcessFills` (work package 4). */
-export function checkShadowExecutionJobAllowed(env: EnvSource = process.env): TradingGateResult {
+export function checkShadowExecutionJobAllowed(
+  env: EnvSource = process.env
+): TradingGateResult {
   const base = checkShadowBaseAllowed(env);
   if (!base.allowed) return base;
   if (!base.flags.executionEnabled) {
@@ -322,7 +381,9 @@ export function checkShadowExecutionJobAllowed(env: EnvSource = process.env): Tr
  * (docs/trading/04, "Kill-Switch-Auslöser"), so this flag is independent of
  * `executionEnabled` rather than layered on top of it.
  */
-export function checkShadowPositionMonitorJobAllowed(env: EnvSource = process.env): TradingGateResult {
+export function checkShadowPositionMonitorJobAllowed(
+  env: EnvSource = process.env
+): TradingGateResult {
   const base = checkShadowBaseAllowed(env);
   if (!base.allowed) return base;
   if (!base.flags.positionMonitorEnabled) {
@@ -337,7 +398,9 @@ export function checkShadowPositionMonitorJobAllowed(env: EnvSource = process.en
 }
 
 /** Gate for `shadowReconcilePortfolio` / `shadowStartTradingDay` (work package 4). */
-export function checkShadowReconciliationJobAllowed(env: EnvSource = process.env): TradingGateResult {
+export function checkShadowReconciliationJobAllowed(
+  env: EnvSource = process.env
+): TradingGateResult {
   const base = checkShadowBaseAllowed(env);
   if (!base.allowed) return base;
   if (!base.flags.reconciliationEnabled) {
@@ -361,7 +424,9 @@ export function checkShadowReconciliationJobAllowed(env: EnvSource = process.env
  * a risk decision — but it still requires the full shadow-only base so no
  * environment can produce trading projections by accident (ADR 0006).
  */
-export function checkShadowPerformanceJobAllowed(env: EnvSource = process.env): TradingGateResult {
+export function checkShadowPerformanceJobAllowed(
+  env: EnvSource = process.env
+): TradingGateResult {
   const base = checkShadowBaseAllowed(env);
   if (!base.allowed) return base;
   if (!base.flags.performanceJobEnabled) {
@@ -376,7 +441,9 @@ export function checkShadowPerformanceJobAllowed(env: EnvSource = process.env): 
 }
 
 /** Gate for *recording* a trading alert in the outbox. */
-export function checkTradingAlertOutboxAllowed(env: EnvSource = process.env): TradingGateResult {
+export function checkTradingAlertOutboxAllowed(
+  env: EnvSource = process.env
+): TradingGateResult {
   const base = checkShadowBaseAllowed(env);
   if (!base.allowed) return base;
   if (!base.flags.alertOutboxEnabled) {
@@ -396,7 +463,9 @@ export function checkTradingAlertOutboxAllowed(env: EnvSource = process.env): Tr
  * recorded is impossible, and recording without delivering is the safe
  * intermediate state an operator wants while validating the alert catalogue.
  */
-export function checkTradingAlertDeliveryAllowed(env: EnvSource = process.env): TradingGateResult {
+export function checkTradingAlertDeliveryAllowed(
+  env: EnvSource = process.env
+): TradingGateResult {
   const outbox = checkTradingAlertOutboxAllowed(env);
   if (!outbox.allowed) return outbox;
   if (!outbox.flags.alertDeliveryEnabled) {
@@ -415,7 +484,9 @@ export function checkTradingAlertDeliveryAllowed(env: EnvSource = process.env): 
  * unless the caller explicitly asks to apply it (P8, "8. Retention": "Keine
  * produktive Löschung ohne klaren Dry-Run und eigene Aktivierung").
  */
-export function checkTradingRetentionAllowed(env: EnvSource = process.env): TradingGateResult {
+export function checkTradingRetentionAllowed(
+  env: EnvSource = process.env
+): TradingGateResult {
   const base = checkShadowBaseAllowed(env);
   if (!base.allowed) return base;
   if (!base.flags.retentionEnabled) {
@@ -423,6 +494,73 @@ export function checkTradingRetentionAllowed(env: EnvSource = process.env): Trad
       allowed: false,
       reasonCode: ShadowJobReasonCode.RETENTION_DISABLED,
       message: "TRADING_RETENTION_ENABLED is not true.",
+      flags: base.flags
+    };
+  }
+  return base;
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Shadow Short gates
+// ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * Gate for the long strategy `CRYPTO_MTF_BREAKOUT_LONG_V1`.
+ *
+ * Layered on the existing `TRADING_STRATEGY_V1_ENABLED` rather than replacing
+ * it: the older flag stays the master switch for strategy evaluation at all,
+ * and this one selects the long strategy within it. An existing deployment
+ * that only sets the old flag therefore keeps exactly its current behaviour
+ * until the operator opts in explicitly.
+ */
+export function checkStrategyLongV1Allowed(
+  env: EnvSource = process.env
+): TradingGateResult {
+  const base = checkShadowStrategyJobAllowed(env);
+  if (!base.allowed) return base;
+  if (!base.flags.strategyLongV1Enabled) {
+    return {
+      allowed: false,
+      reasonCode: ShadowJobReasonCode.STRATEGY_LONG_V1_DISABLED,
+      message: "TRADING_STRATEGY_LONG_V1_ENABLED is not true.",
+      flags: base.flags
+    };
+  }
+  return base;
+}
+
+/**
+ * Gate for the short strategy `CRYPTO_MTF_BREAKDOWN_SHORT_V1`.
+ *
+ * Requires ALL of, simultaneously (task "12. Feature Flags"):
+ *   TRADING_MODE=SHADOW, TRADING_SHADOW_ENABLED=true, ENABLE_LIVE_TRADING=false
+ *   (the shared shadow-only base gate), plus
+ *   TRADING_STRATEGY_V1_ENABLED=true, TRADING_SHADOW_SHORT_ENABLED=true and
+ *   TRADING_STRATEGY_SHORT_V1_ENABLED=true.
+ *
+ * A shadow short is a synthetic, unleveraged simulation with no borrow, no
+ * funding and no liquidation (ADR 0012). It is NOT a step towards a real
+ * short: that needs a futures- or margin-capable exchange capability which
+ * this build cannot express at all.
+ */
+export function checkShadowShortAllowed(
+  env: EnvSource = process.env
+): TradingGateResult {
+  const base = checkShadowStrategyJobAllowed(env);
+  if (!base.allowed) return base;
+  if (!base.flags.shadowShortEnabled) {
+    return {
+      allowed: false,
+      reasonCode: ShadowJobReasonCode.SHADOW_SHORT_DISABLED,
+      message: "TRADING_SHADOW_SHORT_ENABLED is not true.",
+      flags: base.flags
+    };
+  }
+  if (!base.flags.strategyShortV1Enabled) {
+    return {
+      allowed: false,
+      reasonCode: ShadowJobReasonCode.STRATEGY_SHORT_V1_DISABLED,
+      message: "TRADING_STRATEGY_SHORT_V1_ENABLED is not true.",
       flags: base.flags
     };
   }

@@ -27,12 +27,17 @@ import {
   pauseSessionOperation,
   releaseKillSwitchOperation,
   runJobOperation,
+  setAssignmentOperation,
   unlockSessionOperation,
   type OperationOutcome
 } from "../../services/trading/operationsService.js";
 import { issueTradingCsrfToken, requireTradingCsrf } from "./csrf.js";
 import { asBodyRecord, conflict, notFound } from "./http.js";
-import { requireConfirmation, requireExpectedVersion, requireIdempotencyKey } from "./operationGuards.js";
+import {
+  requireConfirmation,
+  requireExpectedVersion,
+  requireIdempotencyKey
+} from "./operationGuards.js";
 import { requireTradingOperator } from "./operatorAuth.js";
 
 let database: PrismaClient = prisma;
@@ -46,12 +51,18 @@ const OPERATIONS_RATE_LIMIT = {
   timeWindow: "1 minute"
 } as const;
 
-async function resolveActorId(request: Parameters<typeof getSessionPayload>[0]): Promise<string> {
+async function resolveActorId(
+  request: Parameters<typeof getSessionPayload>[0]
+): Promise<string> {
   const payload = await getSessionPayload(request);
   return payload?.username ?? process.env.ADMIN_USERNAME ?? "admin";
 }
 
-function respondToOutcome(reply: FastifyReply, outcome: OperationOutcome<unknown>, notFoundEntity: string) {
+function respondToOutcome(
+  reply: FastifyReply,
+  outcome: OperationOutcome<unknown>,
+  notFoundEntity: string
+) {
   switch (outcome.kind) {
     case "replayed":
       return reply.code(200).send({ replayed: true, result: outcome.result });
@@ -63,39 +74,123 @@ function respondToOutcome(reply: FastifyReply, outcome: OperationOutcome<unknown
       // P8, "5.": "Ergänze strukturierte `currentVersion`-Informationen bei
       // API-409-Konflikten." The prose message stays for humans, but a client
       // must not have to regex it out of a sentence to recover.
-      return conflict(reply, `Current version is ${outcome.currentVersion}. Reload and retry with the current version.`, {
-        reasonCode: "VERSION_CONFLICT",
-        currentVersion: outcome.currentVersion,
-        entityType: notFoundEntity,
-        entityId: outcome.entityId ?? null,
-        expectedVersion: outcome.expectedVersion
-      });
+      return conflict(
+        reply,
+        `Current version is ${outcome.currentVersion}. Reload and retry with the current version.`,
+        {
+          reasonCode: "VERSION_CONFLICT",
+          currentVersion: outcome.currentVersion,
+          entityType: notFoundEntity,
+          entityId: outcome.entityId ?? null,
+          expectedVersion: outcome.expectedVersion
+        }
+      );
     case "guard_failed":
-      return reply.code(422).send({ error: "Unprocessable Entity", reasonCode: outcome.reasonCode, message: outcome.message });
+      return reply
+        .code(422)
+        .send({
+          error: "Unprocessable Entity",
+          reasonCode: outcome.reasonCode,
+          message: outcome.message
+        });
     default:
-      return reply.code(500).send({ error: "Internal Server Error", message: "Unknown operation outcome." });
+      return reply
+        .code(500)
+        .send({
+          error: "Internal Server Error",
+          message: "Unknown operation outcome."
+        });
   }
 }
 
 export async function registerTradingOperationsRoutes(server: FastifyInstance) {
-  server.get("/trading/csrf-token", { preHandler: requireTradingOperator }, async (_request, reply) => {
-    const token = issueTradingCsrfToken(reply);
-    return { csrfToken: token };
-  });
+  server.get(
+    "/trading/csrf-token",
+    { preHandler: requireTradingOperator },
+    async (_request, reply) => {
+      const token = issueTradingCsrfToken(reply);
+      return { csrfToken: token };
+    }
+  );
 
   const preHandler = [requireTradingOperator, requireTradingCsrf];
+
+  server.post(
+    "/trading/operations/set-assignment",
+    { preHandler, config: { rateLimit: OPERATIONS_RATE_LIMIT } },
+    async (request, reply) => {
+      const body = asBodyRecord(request.body);
+      const assignmentId =
+        typeof body.assignmentId === "string" ? body.assignmentId : undefined;
+      const confirmation =
+        typeof body.confirm === "string" ? body.confirm : undefined;
+      const enabled = body.enabled;
+      if (!assignmentId)
+        return reply
+          .code(400)
+          .send({ error: "Bad Request", message: "assignmentId is required" });
+      if (enabled !== true && enabled !== false) {
+        return reply
+          .code(400)
+          .send({ error: "Bad Request", message: "enabled must be a boolean" });
+      }
+      if (!confirmation)
+        return reply
+          .code(400)
+          .send({ error: "Bad Request", message: "confirm is required" });
+      const idempotencyKey = requireIdempotencyKey(body, reply);
+      const expectedVersion = requireExpectedVersion(body, reply);
+      if (
+        reply.sent ||
+        idempotencyKey === undefined ||
+        expectedVersion === undefined
+      )
+        return reply;
+
+      const actorId = await resolveActorId(request);
+      const outcome = await setAssignmentOperation(database, {
+        assignmentId,
+        actorId,
+        enabled,
+        confirmation,
+        idempotencyKey,
+        expectedVersion,
+        asOf: new Date()
+      });
+      void logAudit({
+        action: enabled
+          ? "trading_enable_assignment"
+          : "trading_disable_assignment",
+        actor: actorId,
+        targetType: "StrategyAssignment",
+        targetId: assignmentId,
+        metadata: { outcome: outcome.kind },
+        ...extractRequestContext(request)
+      });
+      return respondToOutcome(reply, outcome, "StrategyAssignment");
+    }
+  );
 
   server.post(
     "/trading/operations/activate-portfolio",
     { preHandler, config: { rateLimit: OPERATIONS_RATE_LIMIT } },
     async (request, reply) => {
       const body = asBodyRecord(request.body);
-      const portfolioId = typeof body.portfolioId === "string" ? body.portfolioId : undefined;
-      if (!portfolioId) return reply.code(400).send({ error: "Bad Request", message: "portfolioId is required" });
+      const portfolioId =
+        typeof body.portfolioId === "string" ? body.portfolioId : undefined;
+      if (!portfolioId)
+        return reply
+          .code(400)
+          .send({ error: "Bad Request", message: "portfolioId is required" });
       if (!requireConfirmation(body, "ACTIVATE_PORTFOLIO", reply)) return reply;
       const idempotencyKey = requireIdempotencyKey(body, reply);
       const expectedVersion = requireExpectedVersion(body, reply);
-      if (reply.sent || idempotencyKey === undefined || expectedVersion === undefined) return reply;
+      if (
+        reply.sent ||
+        idempotencyKey === undefined ||
+        expectedVersion === undefined
+      )
+        return reply;
 
       const actorId = await resolveActorId(request);
       const outcome = await activatePortfolioOperation(database, {
@@ -122,12 +217,22 @@ export async function registerTradingOperationsRoutes(server: FastifyInstance) {
     { preHandler, config: { rateLimit: OPERATIONS_RATE_LIMIT } },
     async (request, reply) => {
       const body = asBodyRecord(request.body);
-      const sessionId = typeof body.sessionId === "string" ? body.sessionId : undefined;
-      if (!sessionId) return reply.code(400).send({ error: "Bad Request", message: "sessionId is required" });
-      if (!requireConfirmation(body, "RELEASE_KILL_SWITCH", reply)) return reply;
+      const sessionId =
+        typeof body.sessionId === "string" ? body.sessionId : undefined;
+      if (!sessionId)
+        return reply
+          .code(400)
+          .send({ error: "Bad Request", message: "sessionId is required" });
+      if (!requireConfirmation(body, "RELEASE_KILL_SWITCH", reply))
+        return reply;
       const idempotencyKey = requireIdempotencyKey(body, reply);
       const expectedVersion = requireExpectedVersion(body, reply);
-      if (reply.sent || idempotencyKey === undefined || expectedVersion === undefined) return reply;
+      if (
+        reply.sent ||
+        idempotencyKey === undefined ||
+        expectedVersion === undefined
+      )
+        return reply;
 
       const actorId = await resolveActorId(request);
       const outcome = await releaseKillSwitchOperation(database, {
@@ -154,12 +259,21 @@ export async function registerTradingOperationsRoutes(server: FastifyInstance) {
     { preHandler, config: { rateLimit: OPERATIONS_RATE_LIMIT } },
     async (request, reply) => {
       const body = asBodyRecord(request.body);
-      const sessionId = typeof body.sessionId === "string" ? body.sessionId : undefined;
-      if (!sessionId) return reply.code(400).send({ error: "Bad Request", message: "sessionId is required" });
+      const sessionId =
+        typeof body.sessionId === "string" ? body.sessionId : undefined;
+      if (!sessionId)
+        return reply
+          .code(400)
+          .send({ error: "Bad Request", message: "sessionId is required" });
       if (!requireConfirmation(body, "ACTIVATE_SESSION", reply)) return reply;
       const idempotencyKey = requireIdempotencyKey(body, reply);
       const expectedVersion = requireExpectedVersion(body, reply);
-      if (reply.sent || idempotencyKey === undefined || expectedVersion === undefined) return reply;
+      if (
+        reply.sent ||
+        idempotencyKey === undefined ||
+        expectedVersion === undefined
+      )
+        return reply;
 
       const actorId = await resolveActorId(request);
       const outcome = await activateSessionOperation(database, {
@@ -186,12 +300,21 @@ export async function registerTradingOperationsRoutes(server: FastifyInstance) {
     { preHandler, config: { rateLimit: OPERATIONS_RATE_LIMIT } },
     async (request, reply) => {
       const body = asBodyRecord(request.body);
-      const sessionId = typeof body.sessionId === "string" ? body.sessionId : undefined;
-      if (!sessionId) return reply.code(400).send({ error: "Bad Request", message: "sessionId is required" });
+      const sessionId =
+        typeof body.sessionId === "string" ? body.sessionId : undefined;
+      if (!sessionId)
+        return reply
+          .code(400)
+          .send({ error: "Bad Request", message: "sessionId is required" });
       if (!requireConfirmation(body, "PAUSE_SESSION", reply)) return reply;
       const idempotencyKey = requireIdempotencyKey(body, reply);
       const expectedVersion = requireExpectedVersion(body, reply);
-      if (reply.sent || idempotencyKey === undefined || expectedVersion === undefined) return reply;
+      if (
+        reply.sent ||
+        idempotencyKey === undefined ||
+        expectedVersion === undefined
+      )
+        return reply;
 
       const actorId = await resolveActorId(request);
       const outcome = await pauseSessionOperation(database, {
@@ -218,14 +341,29 @@ export async function registerTradingOperationsRoutes(server: FastifyInstance) {
     { preHandler, config: { rateLimit: OPERATIONS_RATE_LIMIT } },
     async (request, reply) => {
       const body = asBodyRecord(request.body);
-      const sessionId = typeof body.sessionId === "string" ? body.sessionId : undefined;
-      const reasonCode = typeof body.reasonCode === "string" && body.reasonCode.trim().length > 0 ? body.reasonCode.trim() : undefined;
-      if (!sessionId) return reply.code(400).send({ error: "Bad Request", message: "sessionId is required" });
-      if (!reasonCode) return reply.code(400).send({ error: "Bad Request", message: "reasonCode is required" });
+      const sessionId =
+        typeof body.sessionId === "string" ? body.sessionId : undefined;
+      const reasonCode =
+        typeof body.reasonCode === "string" && body.reasonCode.trim().length > 0
+          ? body.reasonCode.trim()
+          : undefined;
+      if (!sessionId)
+        return reply
+          .code(400)
+          .send({ error: "Bad Request", message: "sessionId is required" });
+      if (!reasonCode)
+        return reply
+          .code(400)
+          .send({ error: "Bad Request", message: "reasonCode is required" });
       if (!requireConfirmation(body, "ENGAGE_KILL_SWITCH", reply)) return reply;
       const idempotencyKey = requireIdempotencyKey(body, reply);
       const expectedVersion = requireExpectedVersion(body, reply);
-      if (reply.sent || idempotencyKey === undefined || expectedVersion === undefined) return reply;
+      if (
+        reply.sent ||
+        idempotencyKey === undefined ||
+        expectedVersion === undefined
+      )
+        return reply;
 
       const actorId = await resolveActorId(request);
       const outcome = await engageKillSwitchOperation(database, {
@@ -253,15 +391,29 @@ export async function registerTradingOperationsRoutes(server: FastifyInstance) {
     { preHandler, config: { rateLimit: OPERATIONS_RATE_LIMIT } },
     async (request, reply) => {
       const body = asBodyRecord(request.body);
-      const sessionId = typeof body.sessionId === "string" ? body.sessionId : undefined;
-      if (!sessionId) return reply.code(400).send({ error: "Bad Request", message: "sessionId is required" });
+      const sessionId =
+        typeof body.sessionId === "string" ? body.sessionId : undefined;
+      if (!sessionId)
+        return reply
+          .code(400)
+          .send({ error: "Bad Request", message: "sessionId is required" });
       if (!requireConfirmation(body, "UNLOCK_SESSION", reply)) return reply;
       const idempotencyKey = requireIdempotencyKey(body, reply);
       const expectedVersion = requireExpectedVersion(body, reply);
-      if (reply.sent || idempotencyKey === undefined || expectedVersion === undefined) return reply;
+      if (
+        reply.sent ||
+        idempotencyKey === undefined ||
+        expectedVersion === undefined
+      )
+        return reply;
       const confirmCauseResolved = body.confirmCauseResolved === true;
       if (!confirmCauseResolved) {
-        return reply.code(400).send({ error: "Bad Request", message: "confirmCauseResolved must be true." });
+        return reply
+          .code(400)
+          .send({
+            error: "Bad Request",
+            message: "confirmCauseResolved must be true."
+          });
       }
 
       const actorId = await resolveActorId(request);
@@ -290,15 +442,34 @@ export async function registerTradingOperationsRoutes(server: FastifyInstance) {
     { preHandler, config: { rateLimit: OPERATIONS_RATE_LIMIT } },
     async (request, reply) => {
       const body = asBodyRecord(request.body);
-      const shadowPositionId = typeof body.shadowPositionId === "string" ? body.shadowPositionId : undefined;
+      const shadowPositionId =
+        typeof body.shadowPositionId === "string"
+          ? body.shadowPositionId
+          : undefined;
       const reasonNote =
-        typeof body.reasonNote === "string" && body.reasonNote.trim().length > 0 ? body.reasonNote.trim() : undefined;
-      if (!shadowPositionId) return reply.code(400).send({ error: "Bad Request", message: "shadowPositionId is required" });
-      if (!reasonNote) return reply.code(400).send({ error: "Bad Request", message: "reasonNote is required" });
+        typeof body.reasonNote === "string" && body.reasonNote.trim().length > 0
+          ? body.reasonNote.trim()
+          : undefined;
+      if (!shadowPositionId)
+        return reply
+          .code(400)
+          .send({
+            error: "Bad Request",
+            message: "shadowPositionId is required"
+          });
+      if (!reasonNote)
+        return reply
+          .code(400)
+          .send({ error: "Bad Request", message: "reasonNote is required" });
       if (!requireConfirmation(body, "MANUAL_RISK_CLOSE", reply)) return reply;
       const idempotencyKey = requireIdempotencyKey(body, reply);
       const expectedVersion = requireExpectedVersion(body, reply);
-      if (reply.sent || idempotencyKey === undefined || expectedVersion === undefined) return reply;
+      if (
+        reply.sent ||
+        idempotencyKey === undefined ||
+        expectedVersion === undefined
+      )
+        return reply;
 
       const actorId = await resolveActorId(request);
       const outcome = await manualRiskCloseOperation(database, {
@@ -326,14 +497,23 @@ export async function registerTradingOperationsRoutes(server: FastifyInstance) {
     { preHandler, config: { rateLimit: OPERATIONS_RATE_LIMIT } },
     async (request, reply) => {
       const body = asBodyRecord(request.body);
-      const jobName = typeof body.jobName === "string" ? body.jobName : undefined;
-      if (!jobName) return reply.code(400).send({ error: "Bad Request", message: "jobName is required" });
+      const jobName =
+        typeof body.jobName === "string" ? body.jobName : undefined;
+      if (!jobName)
+        return reply
+          .code(400)
+          .send({ error: "Bad Request", message: "jobName is required" });
       if (!requireConfirmation(body, "RUN_JOB", reply)) return reply;
       const idempotencyKey = requireIdempotencyKey(body, reply);
       if (reply.sent || idempotencyKey === undefined) return reply;
 
       const actorId = await resolveActorId(request);
-      const outcome = await runJobOperation(database, { jobName, actorId, idempotencyKey, asOf: new Date() });
+      const outcome = await runJobOperation(database, {
+        jobName,
+        actorId,
+        idempotencyKey,
+        asOf: new Date()
+      });
       void logAudit({
         action: "trading_run_job",
         actor: actorId,

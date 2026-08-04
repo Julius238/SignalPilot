@@ -2,7 +2,8 @@
  * Audit and incident drilldown (P8, "5. Audit und Incident Review").
  *
  * Assembles the complete event chain behind one aggregate — candidate,
- * assessment, decision, order, fill, position, session — from the append-only
+ * assessment, decision, order, fill, position, exit, ledger, performance and
+ * session — from the append-only
  * `TradingAuditEvent` log plus the domain rows it references, and sanitises
  * every before/after state **server-side** before it leaves this process.
  *
@@ -52,7 +53,9 @@ const MAX_STATE_ARRAY = 50;
 
 function isRedactedKey(key: string): boolean {
   const normalized = key.toLowerCase();
-  return REDACTED_KEY_FRAGMENTS.some((fragment) => normalized.includes(fragment));
+  return REDACTED_KEY_FRAGMENTS.some((fragment) =>
+    normalized.includes(fragment)
+  );
 }
 
 /**
@@ -67,16 +70,24 @@ export function sanitiseState(value: unknown, depth = 0): unknown {
   if (typeof value === "bigint") return value.toString();
   if (value instanceof Date) return value.toISOString();
   if (typeof value === "string") {
-    return value.length > MAX_STATE_STRING ? `${value.slice(0, MAX_STATE_STRING)}…` : value;
+    return value.length > MAX_STATE_STRING
+      ? `${value.slice(0, MAX_STATE_STRING)}…`
+      : value;
   }
   if (depth >= MAX_STATE_DEPTH) return "[truncated]";
   if (Array.isArray(value)) {
-    return value.slice(0, MAX_STATE_ARRAY).map((entry) => sanitiseState(entry, depth + 1));
+    return value
+      .slice(0, MAX_STATE_ARRAY)
+      .map((entry) => sanitiseState(entry, depth + 1));
   }
   if (typeof value === "object") {
     const output: Record<string, unknown> = {};
-    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
-      output[key] = isRedactedKey(key) ? "[redacted]" : sanitiseState(entry, depth + 1);
+    for (const [key, entry] of Object.entries(
+      value as Record<string, unknown>
+    )) {
+      output[key] = isRedactedKey(key)
+        ? "[redacted]"
+        : sanitiseState(entry, depth + 1);
     }
     return output;
   }
@@ -118,7 +129,7 @@ export interface AuditDrilldown {
   readonly rootAggregateType: string;
   readonly rootAggregateId: string;
   readonly found: boolean;
-  /** The aggregates involved, in causal order candidate → … → position. */
+  /** The aggregates involved, in causal order candidate → … → performance. */
   readonly chain: readonly AuditChainNode[];
   readonly events: readonly AuditChainEvent[];
   readonly correlationIds: readonly string[];
@@ -136,16 +147,19 @@ export const DRILLDOWN_AGGREGATE_TYPES = [
 ] as const;
 export type DrilldownAggregateType = (typeof DRILLDOWN_AGGREGATE_TYPES)[number];
 
-export function isDrilldownAggregateType(value: string): value is DrilldownAggregateType {
+export function isDrilldownAggregateType(
+  value: string
+): value is DrilldownAggregateType {
   return (DRILLDOWN_AGGREGATE_TYPES as readonly string[]).includes(value);
 }
 
-const iso = (value: Date | null | undefined): string | null => value?.toISOString() ?? null;
+const iso = (value: Date | null | undefined): string | null =>
+  value?.toISOString() ?? null;
 
 /**
  * Resolve the whole aggregate chain around one starting point. Whatever the
  * entry point, the result covers the same causal path: candidate → decision →
- * risk assessment → order → fills → position → session.
+ * risk assessment → order → fills → position → exit → ledger → performance → session.
  */
 async function resolveChain(
   database: PrismaClient,
@@ -183,7 +197,11 @@ async function resolveChain(
     case "ShadowOrder": {
       const order = await database.shadowOrder.findUnique({
         where: { id: aggregateId },
-        select: { tradeCandidateId: true, shadowPositionId: true, tradingSessionId: true }
+        select: {
+          tradeCandidateId: true,
+          shadowPositionId: true,
+          tradingSessionId: true
+        }
       });
       candidateId = order?.tradeCandidateId ?? null;
       positionId = order?.shadowPositionId ?? null;
@@ -193,7 +211,12 @@ async function resolveChain(
     case "ShadowFill": {
       const fill = await database.shadowFill.findUnique({
         where: { id: aggregateId },
-        select: { shadowPositionId: true, shadowOrder: { select: { tradeCandidateId: true, tradingSessionId: true } } }
+        select: {
+          shadowPositionId: true,
+          shadowOrder: {
+            select: { tradeCandidateId: true, tradingSessionId: true }
+          }
+        }
       });
       candidateId = fill?.shadowOrder?.tradeCandidateId ?? null;
       positionId = fill?.shadowPositionId ?? null;
@@ -204,7 +227,11 @@ async function resolveChain(
       positionId = aggregateId;
       const position = await database.shadowPosition.findUnique({
         where: { id: aggregateId },
-        select: { entryOrder: { select: { tradeCandidateId: true, tradingSessionId: true } } }
+        select: {
+          entryOrder: {
+            select: { tradeCandidateId: true, tradingSessionId: true }
+          }
+        }
       });
       candidateId = position?.entryOrder?.tradeCandidateId ?? null;
       sessionId = position?.entryOrder?.tradingSessionId ?? null;
@@ -220,10 +247,17 @@ async function resolveChain(
       where: { id: candidateId },
       include: {
         asset: { select: { symbol: true } },
-        decision: { select: { id: true, outcome: true, reasonCode: true, decidedAt: true } },
+        decision: {
+          select: { id: true, outcome: true, reasonCode: true, decidedAt: true }
+        },
         riskAssessments: {
           orderBy: { assessedAt: "asc" },
-          select: { id: true, status: true, assessedAt: true, ruleSetVersion: true }
+          select: {
+            id: true,
+            status: true,
+            assessedAt: true,
+            ruleSetVersion: true
+          }
         },
         shadowOrders: {
           orderBy: { createdAt: "asc" },
@@ -250,9 +284,10 @@ async function resolveChain(
         label: `${candidate.asset?.symbol ?? candidate.assetId} ${candidate.direction}`,
         status: candidate.status,
         occurredAt: iso(candidate.decisionTime),
-        reasonCodes: [candidate.invalidReasonCode, candidate.cancelReasonCode].filter(
-          (value): value is string => typeof value === "string"
-        ),
+        reasonCodes: [
+          candidate.invalidReasonCode,
+          candidate.cancelReasonCode
+        ].filter((value): value is string => typeof value === "string"),
         version: candidate.version
       });
 
@@ -290,7 +325,8 @@ async function resolveChain(
       for (const order of candidate.shadowOrders) {
         addId("ShadowOrder", order.id);
         entryOrderIds.push(order.id);
-        if (positionId === null && order.shadowPositionId !== null) positionId = order.shadowPositionId;
+        if (positionId === null && order.shadowPositionId !== null)
+          positionId = order.shadowPositionId;
         if (sessionId === null) sessionId = order.tradingSessionId;
         nodes.push({
           aggregateType: "ShadowOrder",
@@ -298,9 +334,10 @@ async function resolveChain(
           label: `${order.purpose}-Order`,
           status: order.status,
           occurredAt: iso(order.createdAt),
-          reasonCodes: [order.rejectionReasonCode, order.cancelReasonCode].filter(
-            (value): value is string => typeof value === "string"
-          ),
+          reasonCodes: [
+            order.rejectionReasonCode,
+            order.cancelReasonCode
+          ].filter((value): value is string => typeof value === "string"),
           version: order.version
         });
       }
@@ -330,7 +367,30 @@ async function resolveChain(
           take: 100,
           select: { id: true, type: true, sequence: true, occurredAt: true }
         },
-        exitPlans: { orderBy: { version: "asc" }, select: { id: true, version: true, status: true, createdAt: true } }
+        exitPlans: {
+          orderBy: { version: "asc" },
+          select: { id: true, version: true, status: true, createdAt: true }
+        },
+        exitOrders: {
+          orderBy: { createdAt: "asc" },
+          take: 100,
+          select: {
+            id: true,
+            status: true,
+            purpose: true,
+            side: true,
+            direction: true,
+            createdAt: true,
+            rejectionReasonCode: true,
+            cancelReasonCode: true,
+            version: true
+          }
+        },
+        ledgerEntries: {
+          orderBy: { sequence: "asc" },
+          take: 100,
+          select: { id: true, sequence: true, type: true, occurredAt: true }
+        }
       }
     });
 
@@ -339,7 +399,7 @@ async function resolveChain(
       nodes.push({
         aggregateType: "ShadowPosition",
         aggregateId: position.id,
-        label: `Position ${position.asset?.symbol ?? position.assetId}`,
+        label: `Position ${position.asset?.symbol ?? position.assetId} ${position.direction}`,
         status: position.status,
         occurredAt: iso(position.openedAt),
         reasonCodes: [],
@@ -347,6 +407,7 @@ async function resolveChain(
       });
 
       for (const plan of position.exitPlans) {
+        addId("ExitPlan", plan.id);
         nodes.push({
           aggregateType: "ExitPlan",
           aggregateId: plan.id,
@@ -355,6 +416,22 @@ async function resolveChain(
           occurredAt: iso(plan.createdAt),
           reasonCodes: [],
           version: plan.version
+        });
+      }
+
+      for (const order of position.exitOrders) {
+        addId("ShadowOrder", order.id);
+        nodes.push({
+          aggregateType: "ShadowOrder",
+          aggregateId: order.id,
+          label: `${order.direction} ${order.side} ${order.purpose}-Order`,
+          status: order.status,
+          occurredAt: iso(order.createdAt),
+          reasonCodes: [
+            order.rejectionReasonCode,
+            order.cancelReasonCode
+          ].filter((value): value is string => typeof value === "string"),
+          version: order.version
         });
       }
 
@@ -372,6 +449,7 @@ async function resolveChain(
       }
 
       for (const event of position.events) {
+        addId("ShadowPositionEvent", event.id);
         nodes.push({
           aggregateType: "ShadowPositionEvent",
           aggregateId: event.id,
@@ -382,11 +460,56 @@ async function resolveChain(
           version: event.sequence
         });
       }
+      for (const entry of position.ledgerEntries) {
+        addId("PortfolioLedgerEntry", entry.id);
+        nodes.push({
+          aggregateType: "PortfolioLedgerEntry",
+          aggregateId: entry.id,
+          label: `Ledger #${entry.sequence}`,
+          status: entry.type,
+          occurredAt: iso(entry.occurredAt),
+          reasonCodes: [],
+          version: entry.sequence
+        });
+      }
+
+      const performanceRows = await database.strategyPerformance.findMany({
+        where: {
+          portfolioId: position.portfolioId,
+          dataThroughAt:
+            position.closedAt === null ? undefined : { gte: position.closedAt },
+          OR: [
+            {
+              segmentType: "STRATEGY_VERSION",
+              segmentKey: position.strategyVersionId
+            },
+            { segmentType: "DIRECTION", segmentKey: position.direction },
+            { segmentType: "ASSET", segmentKey: position.assetId },
+            { segmentType: "OVERALL", segmentKey: "ALL" }
+          ]
+        },
+        orderBy: [{ asOf: "asc" }, { createdAt: "asc" }],
+        take: 20
+      });
+      for (const performance of performanceRows) {
+        addId("StrategyPerformance", performance.id);
+        nodes.push({
+          aggregateType: "StrategyPerformance",
+          aggregateId: performance.id,
+          label: `${performance.segmentType}:${performance.segmentLabel}`,
+          status: performance.window,
+          occurredAt: iso(performance.computedAt ?? performance.createdAt),
+          reasonCodes: [],
+          version: null
+        });
+      }
     }
   }
 
   if (sessionId !== null) {
-    const session = await database.tradingSession.findUnique({ where: { id: sessionId } });
+    const session = await database.tradingSession.findUnique({
+      where: { id: sessionId }
+    });
     if (session !== null) {
       addId("TradingSession", session.id);
       nodes.push({
@@ -395,13 +518,17 @@ async function resolveChain(
         label: `Session ${session.mode}`,
         status: session.status,
         occurredAt: iso(session.startedAt ?? session.createdAt),
-        reasonCodes: [session.killReasonCode].filter((value): value is string => typeof value === "string"),
+        reasonCodes: [session.killReasonCode].filter(
+          (value): value is string => typeof value === "string"
+        ),
         version: session.version
       });
     }
   }
 
-  nodes.sort((left, right) => (left.occurredAt ?? "").localeCompare(right.occurredAt ?? ""));
+  nodes.sort((left, right) =>
+    (left.occurredAt ?? "").localeCompare(right.occurredAt ?? "")
+  );
   return { nodes, ids };
 }
 
@@ -415,15 +542,24 @@ export async function getAuditDrilldown(
   database: PrismaClient = prisma,
   options: GetAuditDrilldownOptions
 ): Promise<AuditDrilldown> {
-  const { nodes, ids } = await resolveChain(database, options.aggregateType, options.aggregateId);
+  const { nodes, ids } = await resolveChain(
+    database,
+    options.aggregateType,
+    options.aggregateId
+  );
 
-  const aggregateFilters = [...ids.entries()].map(([aggregateType, aggregateIds]) => ({
-    aggregateType,
-    aggregateId: { in: aggregateIds }
-  }));
+  const aggregateFilters = [...ids.entries()].map(
+    ([aggregateType, aggregateIds]) => ({
+      aggregateType,
+      aggregateId: { in: aggregateIds }
+    })
+  );
   // Always include the requested aggregate itself, even when the chain walk
   // found nothing (a deleted or never-linked id still has audit events).
-  aggregateFilters.push({ aggregateType: options.aggregateType, aggregateId: { in: [options.aggregateId] } });
+  aggregateFilters.push({
+    aggregateType: options.aggregateType,
+    aggregateId: { in: [options.aggregateId] }
+  });
 
   const rows = await database.tradingAuditEvent.findMany({
     where: { OR: aggregateFilters },

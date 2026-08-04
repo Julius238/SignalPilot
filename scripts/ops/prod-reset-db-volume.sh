@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-COMPOSE="docker compose -f docker-compose.prod.yml"
+# shellcheck source=./_common.sh
+source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
+require_production_env
 
 echo ""
 echo "╔══════════════════════════════════════════════════════════════════╗"
@@ -15,7 +17,7 @@ echo "║    • The volume has no data worth keeping, AND                  ║"
 echo "║    • Credentials drifted (volume was initialised with a         ║"
 echo "║      different POSTGRES_PASSWORD than .env.production).         ║"
 echo "║                                                                  ║"
-echo "║  If you have data to keep: run pnpm ops:prod:backup FIRST.      ║"
+echo "║  If data matters: run scripts/ops/backup-postgres.sh FIRST.    ║"
 echo "╚══════════════════════════════════════════════════════════════════╝"
 echo ""
 
@@ -29,20 +31,12 @@ fi
 
 # ── Stop all services ────────────────────────────────────────────────────────
 echo "Step 1/3: Stopping all production services..."
-$COMPOSE down --remove-orphans 2>/dev/null || true
+"${COMPOSE[@]}" down --remove-orphans 2>/dev/null || true
 
 # ── Find the postgres data volume ────────────────────────────────────────────
 # Docker Compose names volumes as: <project-name>_<volume-name>
 # The project name defaults to the directory name.
-COMPOSE_PROJECT=$(
-  # Try to get it from Docker Compose's own output
-  $COMPOSE config 2>/dev/null \
-    | grep -E "^name:" \
-    | awk '{print $2}' \
-    || basename "$(pwd)"
-)
-
-VOLUME_NAME="${COMPOSE_PROJECT}_postgres_data"
+VOLUME_NAME="${COMPOSE_PROJECT_NAME}_postgres_data"
 
 echo "Step 2/3: Removing volume: $VOLUME_NAME"
 
@@ -62,10 +56,10 @@ echo "Step 3/3: Done."
 echo ""
 echo "Next steps:"
 echo "  1. Run migrations (this re-initialises the database):"
-echo "       pnpm ops:prod:migrate"
+echo "       ./scripts/ops/prod-migrate-docker.sh"
 echo ""
 echo "  2. Start all services:"
-echo "       pnpm ops:prod:up"
+echo "       ./scripts/ops/prod-up.sh"
 echo ""
 echo "  3. If you have a backup to restore:"
-echo "       pnpm ops:prod:restore <backup-file>"
+echo "       ./scripts/ops/restore-postgres.sh <backup-file>"

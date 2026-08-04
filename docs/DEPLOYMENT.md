@@ -21,55 +21,40 @@ SignalPilot must stay on its own Compose project and Docker network:
 
 ```bash
 cd /opt/signalpilot
-git pull
-docker compose --env-file .env.production -f docker-compose.prod.yml build
-docker compose --env-file .env.production -f docker-compose.prod.yml up -d postgres redis
+git pull --ff-only
+./scripts/ops/validate-prod-config.sh
+./scripts/ops/prod-build.sh
+./scripts/ops/prod-up.sh postgres redis
 ./scripts/ops/prod-migrate-docker.sh
-./scripts/ops/prod-seed-docker.sh
-docker compose --env-file .env.production -f docker-compose.prod.yml up -d
+./scripts/ops/prod-up.sh
+./scripts/ops/healthcheck.sh
+./scripts/ops/prisma-smoke.sh
 ```
 
-The migration and seed scripts start a temporary `node:22-bookworm` container on the `signalpilot_internal` network, mount the current repo at `/app`, enable Corepack, install the repo with the pinned pnpm version, and run the root `db:*` scripts. They do not run `migrate dev`, reset, drop, or print secrets.
-
-Override defaults only when the VPS differs:
-
-```bash
-SIGNALPILOT_DOCKER_NETWORK=signalpilot_internal \
-SIGNALPILOT_ENV_FILE=.env.production \
-SIGNALPILOT_NODE_IMAGE=node:22-bookworm \
-./scripts/ops/prod-migrate-docker.sh
-```
+Migration and seed use the repository's built Compose `migrate` image on project `signalpilot` with `.env.production` and `docker-compose.prod.yml`. They do not install on the host, run `migrate dev`, reset, drop, or print secrets. Seed is not part of a normal update; run `./scripts/ops/prod-seed-docker.sh` only when a reviewed initialisation explicitly requires it.
 
 Check that migrations created tables:
 
 ```bash
-docker compose -f docker-compose.prod.yml exec postgres \
+COMPOSE_PROJECT_NAME=signalpilot docker compose --project-name signalpilot \
+  --env-file .env.production -f docker-compose.prod.yml exec postgres \
   sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "\dt"'
 ```
 
 Check service health and logs:
 
 ```bash
-docker compose -f docker-compose.prod.yml ps
-curl -fsS http://127.0.0.1:3100/health
-curl -fsS http://127.0.0.1:3000/
-docker compose -f docker-compose.prod.yml logs --tail=100 api
-docker compose -f docker-compose.prod.yml logs --tail=100 worker-scheduler
-```
-
-Manually verify the worker image can start:
-
-```bash
-docker compose -f docker-compose.prod.yml run --rm --no-deps worker-scheduler node dist/index.js
-docker compose -f docker-compose.prod.yml up -d worker-scheduler
-docker compose -f docker-compose.prod.yml logs --tail=100 worker-scheduler
+./scripts/ops/healthcheck.sh
+./scripts/ops/prisma-smoke.sh
+./scripts/ops/prod-logs.sh api
+./scripts/ops/prod-logs.sh worker-scheduler
 ```
 
 Cron examples for routine operations:
 
 ```cron
-0 3 * * * cd /opt/signalpilot && pnpm ops:prod:backup >> /var/log/signalpilot-backup.log 2>&1
-*/10 * * * * cd /opt/signalpilot && docker compose -f docker-compose.prod.yml ps >/dev/null 2>&1
+0 3 * * * cd /opt/signalpilot && ./scripts/ops/backup-postgres.sh >> /var/log/signalpilot-backup.log 2>&1
+*/10 * * * * cd /opt/signalpilot && ./scripts/ops/healthcheck.sh >/dev/null 2>&1
 ```
 
 n8n stays separate. SignalPilot sends alerts only through `N8N_WEBHOOK_SIGNAL_URL`; do not merge it into the n8n Traefik stack unless you intentionally add routing later.
@@ -95,7 +80,28 @@ DASHBOARD_AUTH_ENABLED=true
 
 Replace `YOUR_VPS_IP` and do not add a trailing slash to `DASHBOARD_ORIGIN`.
 
-`NEXT_PUBLIC_SIGNALPILOT_API_URL` is a Docker build argument and is embedded in the browser bundle. Always build with `--env-file .env.production` (or use `pnpm ops:prod:build`) after changing it. The internal API URL is used for server-side rendering and the same-origin rewrite; it must not be `localhost` inside the dashboard container.
+### Build-time variables (`NEXT_PUBLIC_*`)
+
+Next.js bakes every `NEXT_PUBLIC_*` value into the browser bundle **when the image is built**. Changing one in `.env.production` and restarting the container has no effect — the dashboard image must be rebuilt. `docker-compose.prod.yml` forwards each one explicitly as a build arg with a safe default:
+
+| Variable                                | Default | Effect                                                    |
+| --------------------------------------- | ------- | --------------------------------------------------------- |
+| `NEXT_PUBLIC_SIGNALPILOT_API_URL`       | `/api`  | Browser-side API origin; keep same-origin so cookies work |
+| `NEXT_PUBLIC_TRADING_DASHBOARD_ENABLED` | `false` | Shadow-trading navigation and `/dashboard/trading/*`      |
+
+Always build with `--env-file .env.production` (or `pnpm ops:prod:build`) after changing either. `SIGNALPILOT_API_INTERNAL_URL` is deliberately **not** `NEXT_PUBLIC_*`: it is the server-side rewrite target and must never reach the browser. It must not be `localhost` inside the dashboard container.
+
+Only browser-safe values may be build args. A Docker build arg is visible in the image history, so never pass a secret this way.
+
+```bash
+# Dashboard without the trading UI (default)
+pnpm ops:prod:build dashboard
+
+# Dashboard with the shadow-trading UI
+NEXT_PUBLIC_TRADING_DASHBOARD_ENABLED=true pnpm ops:prod:build dashboard
+```
+
+The flag only controls the UI. It does not enable trading: the API still needs `TRADING_API_ENABLED` and the trading worker still needs its own flags.
 
 ### 1. Clone and prepare
 
@@ -113,11 +119,11 @@ cp .env.production.example .env.production
 
 Fill in all values (see the comments in the file). Critical fields:
 
-| Variable | How to generate |
-|---|---|
-| `POSTGRES_PASSWORD` | Random string: `openssl rand -hex 20` |
+| Variable              | How to generate                                                        |
+| --------------------- | ---------------------------------------------------------------------- |
+| `POSTGRES_PASSWORD`   | Random string: `openssl rand -hex 20`                                  |
 | `ADMIN_PASSWORD_HASH` | `ADMIN_PASSWORD='choose-a-cleartext-password' pnpm auth:hash-password` |
-| `AUTH_SESSION_SECRET` | `openssl rand -hex 32` |
+| `AUTH_SESSION_SECRET` | `openssl rand -hex 32`                                                 |
 
 ### 3. Build images
 
@@ -134,7 +140,7 @@ Subsequent builds use Docker layer cache.
 ./scripts/ops/prod-migrate-docker.sh
 ```
 
-This runs `prisma migrate deploy` with `--schema=packages/database/prisma/schema.prisma` in a temporary Node container. Safe to run multiple times.
+This runs `prisma migrate deploy` in the built Compose `migrate` image. Safe to run multiple times.
 
 Seed initial watchlist data after the migrations:
 
@@ -150,28 +156,29 @@ pnpm ops:prod:up
 
 Services started:
 
-| Service | Port | Notes |
-|---|---|---|
-| `postgres` | — | Internal only |
-| `redis` | — | Internal only |
-| `api` | `127.0.0.1:3100` | Loopback only by default |
-| `dashboard` | `3000` | Exposed publicly |
-| `worker-scheduler` | — | Background cron |
+| Service            | Port             | Notes                                                     |
+| ------------------ | ---------------- | --------------------------------------------------------- |
+| `postgres`         | —                | Internal only                                             |
+| `redis`            | —                | Internal only                                             |
+| `api`              | `127.0.0.1:3100` | Loopback only by default                                  |
+| `dashboard`        | `3000`           | Exposed publicly                                          |
+| `worker-scheduler` | —                | Background cron                                           |
+| `trading-worker`   | —                | Shadow-only; healthy and idle while trading flags are off |
 
 ### Worker scheduling
 
 The worker scheduler reads its cadence from `.env.production`. The always-on `worker-scheduler`
 container schedules these jobs in-process — no host crontab entries are needed for them:
 
-| In-process job | Enabled by | Cron variable | Default | Recommended |
-|---|---|---|---|---|
-| Crypto Full Pipeline (candles + regime + signals + paper eval) | always on | `CRYPTO_PIPELINE_CRON` | `0 * * * *` | `*/15 * * * *` |
-| Equity Pipeline | `ENABLE_EQUITY_PIPELINE=true` | `EQUITY_PIPELINE_CRON` | `30 * * * *` | `0 */4 * * *` |
-| Quick Crypto Radar | `QUICK_RADAR_ENABLED=true` | `QUICK_RADAR_CRON` | `*/5 * * * *` | `*/5 * * * *` |
-| Equity/ETF Radar | `EQUITY_RADAR_ENABLED=true` | `EQUITY_RADAR_CRON` | `15 */4 * * *` | `15 */4 * * *` (nach der Equity-Pipeline) |
-| Radar Summary / Daily Briefing | `RADAR_SUMMARY_ENABLED=true` | `RADAR_SUMMARY_CRON` | `0 * * * *` | `0 7,19 * * *` + `RADAR_SUMMARY_LOOKBACK_MINUTES=720` |
-| Global Event Monitor | `GLOBAL_EVENT_MONITOR_ENABLED=true` | `GLOBAL_EVENT_MONITOR_CRON` | `*/30 * * * *` | `*/30 * * * *` (Finnhub-Limits beachten) |
-| Asset Discovery | `ASSET_DISCOVERY_ENABLED=true` | `ASSET_DISCOVERY_CRON` | `30 2 * * *` | zunächst nur mit `ASSET_DISCOVERY_DRY_RUN=true` |
+| In-process job                                                 | Enabled by                          | Cron variable               | Default        | Recommended                                           |
+| -------------------------------------------------------------- | ----------------------------------- | --------------------------- | -------------- | ----------------------------------------------------- |
+| Crypto Full Pipeline (candles + regime + signals + paper eval) | always on                           | `CRYPTO_PIPELINE_CRON`      | `0 * * * *`    | `*/15 * * * *`                                        |
+| Equity Pipeline                                                | `ENABLE_EQUITY_PIPELINE=true`       | `EQUITY_PIPELINE_CRON`      | `30 * * * *`   | `0 */4 * * *`                                         |
+| Quick Crypto Radar                                             | `QUICK_RADAR_ENABLED=true`          | `QUICK_RADAR_CRON`          | `*/5 * * * *`  | `*/5 * * * *`                                         |
+| Equity/ETF Radar                                               | `EQUITY_RADAR_ENABLED=true`         | `EQUITY_RADAR_CRON`         | `15 */4 * * *` | `15 */4 * * *` (nach der Equity-Pipeline)             |
+| Radar Summary / Daily Briefing                                 | `RADAR_SUMMARY_ENABLED=true`        | `RADAR_SUMMARY_CRON`        | `0 * * * *`    | `0 7,19 * * *` + `RADAR_SUMMARY_LOOKBACK_MINUTES=720` |
+| Global Event Monitor                                           | `GLOBAL_EVENT_MONITOR_ENABLED=true` | `GLOBAL_EVENT_MONITOR_CRON` | `*/30 * * * *` | `*/30 * * * *` (Finnhub-Limits beachten)              |
+| Asset Discovery                                                | `ASSET_DISCOVERY_ENABLED=true`      | `ASSET_DISCOVERY_CRON`      | `30 2 * * *`   | zunächst nur mit `ASSET_DISCOVERY_DRY_RUN=true`       |
 
 Market Regime and Paper Evaluation run as steps inside the Crypto Full Pipeline
 (`ENABLE_MARKET_REGIME`, `ENABLE_PAPER_EVALUATION`) and do not need separate schedules.
@@ -286,12 +293,12 @@ Telegram). SignalPilot never calls the Telegram Bot API directly.
 
 Every payload is JSON with a `type` discriminator the n8n flow can switch on:
 
-| `type` | Sent by | Purpose |
-|---|---|---|
-| `signal` fields (no discriminator, has `signalId`) | Signal pipeline | Signal-Beobachtung |
-| `radar_event` | Quick Crypto Radar | Auffällige Marktbewegung |
-| `radar_summary` | Radar Summary | Kompakte Research-Zusammenfassung |
-| `market_event` | Global Event Monitor | Makro-/Geopolitik-/Markt-Ereignis |
+| `type`                                             | Sent by              | Purpose                           |
+| -------------------------------------------------- | -------------------- | --------------------------------- |
+| `signal` fields (no discriminator, has `signalId`) | Signal pipeline      | Signal-Beobachtung                |
+| `radar_event`                                      | Quick Crypto Radar   | Auffällige Marktbewegung          |
+| `radar_summary`                                    | Radar Summary        | Kompakte Research-Zusammenfassung |
+| `market_event`                                     | Global Event Monitor | Makro-/Geopolitik-/Markt-Ereignis |
 
 `radar_event` and `market_event` payloads share the research-alert format from
 `@signalpilot/alerts`:
@@ -345,7 +352,7 @@ within `QUICK_RADAR_ALERT_COOLDOWN_MINUTES`, and only events at or above
 
 ### Manual worker runs
 
-Use the production worker Docker runner for one-off worker jobs on the VPS. It starts a temporary Node container on the production Docker network, loads `.env.production`, installs dependencies, generates Prisma Client, builds the packages, builds the worker, and then runs the requested root worker script.
+Use the production worker Docker runner for an allowlisted one-off research job on the VPS. It runs the already-built JavaScript in the existing `worker-scheduler` container. It does not use host pnpm, install dependencies, build, migrate, seed, or start a second scheduler.
 
 Manual Crypto Full Pipeline test:
 
@@ -365,12 +372,7 @@ pnpm ops:prod:run-worker:docker worker:run-crypto-pipeline
 
 Override defaults only when the VPS differs:
 
-```bash
-SIGNALPILOT_DOCKER_NETWORK=signalpilot_internal \
-SIGNALPILOT_ENV_FILE=.env.production \
-SIGNALPILOT_NODE_IMAGE=node:22-bookworm \
-./scripts/ops/prod-run-worker-docker.sh worker:run-crypto-pipeline
-```
+The runner always uses Compose project `signalpilot`, `.env.production`, and `docker-compose.prod.yml`. Unsupported script names are refused.
 
 ### Hostinger VPS cron plan
 
@@ -385,8 +387,8 @@ If you previously installed crontab entries for `worker:quick-crypto-radar`,
 those cadences via `.env.production` instead.
 
 Use host cron only for heavy jobs that should stay manual or nightly, via
-`scripts/ops/prod-run-worker-docker.sh` (each run prepares a temporary Node container, generates
-Prisma Client, builds packages, and runs the requested root worker script):
+`scripts/ops/prod-run-worker-docker.sh` (each run uses allowlisted code already built into the
+running `worker-scheduler` container):
 
 Create the log directory once:
 
@@ -531,13 +533,28 @@ Keep backups off-site (S3, rsync, etc.).
 ## Update Deployment
 
 ```bash
-git pull
-docker compose --env-file .env.production -f docker-compose.prod.yml build
-docker compose --env-file .env.production -f docker-compose.prod.yml up -d postgres redis
+git pull --ff-only
+./scripts/ops/validate-prod-config.sh
+./scripts/ops/prod-build.sh
+./scripts/ops/prod-up.sh postgres redis
 ./scripts/ops/prod-migrate-docker.sh
-./scripts/ops/prod-seed-docker.sh
-docker compose --env-file .env.production -f docker-compose.prod.yml up -d
+./scripts/ops/prod-up.sh
+./scripts/ops/healthcheck.sh
+./scripts/ops/prisma-smoke.sh
 ```
+
+Production seed is not part of every update. Run `./scripts/ops/prod-seed-docker.sh` only when a reviewed change explicitly requires the existing idempotent seed.
+
+### Shadow trading P9
+
+Do not activate shadow trading from this generic deployment sequence. The P9 runbooks define the exact disabled-first flags, idempotent BTC/ETH Long-/Short-Setup, the BTC-first manual gates, observation criteria and emergency rollback:
+
+- [Production deployment and bootstrap](trading/13-production-deployment-runbook.md)
+- [BTC activation](trading/14-shadow-test-activation-runbook.md)
+- [Observation](trading/15-shadow-observation-plan.md)
+- [Rollback and emergency](trading/16-shadow-rollback-and-emergency.md)
+
+The operator entrypoint is `./scripts/ops/trading-shadow.sh --help`. It only invokes built code in the existing `trading-worker` container, never activates a session during bootstrap, and never runs a migration.
 
 ---
 
@@ -604,16 +621,16 @@ See `.env.production.example` for the full list with comments.
 
 Key groups:
 
-| Group | Variables |
-|---|---|
-| Database | `DATABASE_URL`, `POSTGRES_*` |
-| Auth | `ADMIN_*`, `AUTH_*`, `API_AUTH_ENABLED`, `DASHBOARD_AUTH_ENABLED` |
-| Trading safety | `ENABLE_LIVE_TRADING=false`, `PAPER_TRADING_ONLY=true` |
-| Scheduling | `CRYPTO_PIPELINE_CRON`, `WORKER_RUN_ON_START`, `EQUITY_PIPELINE_CRON`, `RUN_EQUITY_PIPELINE_ON_START`, `QUICK_RADAR_CRON`, `EQUITY_RADAR_CRON`, `RADAR_SUMMARY_CRON`, `GLOBAL_EVENT_MONITOR_CRON` |
-| Pattern/Equity Radar | `QUICK_RADAR_PATTERNS_ENABLED`, `EQUITY_RADAR_ENABLED`, `EQUITY_RADAR_TIMEFRAME`, `EQUITY_RADAR_MAX_DATA_AGE_HOURS`, `EQUITY_RADAR_ALERTS_ENABLED`, `RADAR_SUMMARY_LOOKBACK_MINUTES` |
-| Global Events | `GLOBAL_EVENT_MONITOR_ENABLED`, `GLOBAL_EVENT_MONITOR_CATEGORIES`, `GLOBAL_EVENT_ALERTS_ENABLED`, `MIN_EVENT_ALERT_SEVERITY`, `GLOBAL_EVENT_ALERT_COOLDOWN_MINUTES`, `GLOBAL_EVENT_MAX_ALERTS_PER_RUN` |
-| Feature flags | `ENABLE_MARKET_REGIME`, `ENABLE_EQUITY_*`, `ENABLE_EQUITY_PIPELINE` |
-| Alerts | `ALERT_MODE`, `ALERT_COOLDOWN_MINUTES` |
+| Group                | Variables                                                                                                                                                                                              |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Database             | `DATABASE_URL`, `POSTGRES_*`                                                                                                                                                                           |
+| Auth                 | `ADMIN_*`, `AUTH_*`, `API_AUTH_ENABLED`, `DASHBOARD_AUTH_ENABLED`                                                                                                                                      |
+| Trading safety       | `ENABLE_LIVE_TRADING=false`, `PAPER_TRADING_ONLY=true`                                                                                                                                                 |
+| Scheduling           | `CRYPTO_PIPELINE_CRON`, `WORKER_RUN_ON_START`, `EQUITY_PIPELINE_CRON`, `RUN_EQUITY_PIPELINE_ON_START`, `QUICK_RADAR_CRON`, `EQUITY_RADAR_CRON`, `RADAR_SUMMARY_CRON`, `GLOBAL_EVENT_MONITOR_CRON`      |
+| Pattern/Equity Radar | `QUICK_RADAR_PATTERNS_ENABLED`, `EQUITY_RADAR_ENABLED`, `EQUITY_RADAR_TIMEFRAME`, `EQUITY_RADAR_MAX_DATA_AGE_HOURS`, `EQUITY_RADAR_ALERTS_ENABLED`, `RADAR_SUMMARY_LOOKBACK_MINUTES`                   |
+| Global Events        | `GLOBAL_EVENT_MONITOR_ENABLED`, `GLOBAL_EVENT_MONITOR_CATEGORIES`, `GLOBAL_EVENT_ALERTS_ENABLED`, `MIN_EVENT_ALERT_SEVERITY`, `GLOBAL_EVENT_ALERT_COOLDOWN_MINUTES`, `GLOBAL_EVENT_MAX_ALERTS_PER_RUN` |
+| Feature flags        | `ENABLE_MARKET_REGIME`, `ENABLE_EQUITY_*`, `ENABLE_EQUITY_PIPELINE`                                                                                                                                    |
+| Alerts               | `ALERT_MODE`, `ALERT_COOLDOWN_MINUTES`                                                                                                                                                                 |
 
 ---
 
@@ -627,6 +644,33 @@ pnpm ops:prod:logs api
 
 Common cause: missing env var or `ENABLE_LIVE_TRADING=true`.
 
+**`validate-prod-config.sh` reports a configuration warning**
+
+The validator refuses to print Compose's warning text, because that text quotes the fragment Compose mistook for a variable name — for a password or a bcrypt hash that is secret material. It names the affected **variable** instead:
+
+```
+Affected variable(s) in .env.production (names only, values never shown): ADMIN_PASSWORD_HASH
+```
+
+Cause: the value contains a `$`, which Compose reads as a variable reference and replaces with an empty string. The value is **silently truncated**, not merely warned about — `$2b$10$abcdef` becomes `$2b$10`.
+
+| Written as             | Warning | Result        |
+| ---------------------- | ------- | ------------- |
+| `KEY=$2b$10$abcdef`    | yes     | **truncated** |
+| `KEY="$2b$10$abcdef"`  | yes     | **truncated** |
+| `KEY='$2b$10$abcdef'`  | no      | correct       |
+| `KEY=$$2b$$10$$abcdef` | no      | correct       |
+
+Fix by quoting, without regenerating or displaying the secret:
+
+```env
+ADMIN_PASSWORD_HASH='<existing value, unchanged>'
+```
+
+Double quotes do **not** escape `$`. Prefer single quotes so the stored value stays byte-identical to what the generator produced. If the value itself contains a single quote, double every `$` instead.
+
+After fixing, re-run the validator until it is silent. A hash that was previously truncated was never valid, so verify the admin login once; if it fails, regenerate with `pnpm auth:hash-password`.
+
 **Migration fails with P1000 (authentication failed)**
 
 Cause: the credentials in `DATABASE_URL` do not match what Postgres was initialised with.
@@ -634,6 +678,7 @@ Cause: the credentials in `DATABASE_URL` do not match what Postgres was initiali
 Checklist:
 
 1. `DATABASE_URL` in `.env.production` must use the `postgres` hostname (the Docker service name), **not** `localhost`:
+
    ```env
    DATABASE_URL=postgresql://signalpilot:signalpilot@postgres:5432/signalpilot
    ```
@@ -643,6 +688,7 @@ Checklist:
 3. If the Postgres volume was previously initialised with **different** credentials (e.g. you changed the password in `.env.production`), Postgres will reject the new credentials because the volume still holds the old ones.
 
    **Option A — reset the volume** (use when there is no important data):
+
    ```bash
    pnpm ops:prod:reset-db-volume
    pnpm ops:prod:migrate
@@ -650,6 +696,7 @@ Checklist:
    ```
 
    **Option B — change the password inside the running database** (use when you have data to keep):
+
    ```bash
    docker compose -f docker-compose.prod.yml exec postgres \
      psql -U signalpilot -c "ALTER USER signalpilot WITH PASSWORD 'new-password';"
@@ -661,6 +708,7 @@ Checklist:
 If you change `POSTGRES_PASSWORD` in `.env.production` after the volume has already been initialised, Postgres will refuse connections. There are two recovery paths described above.
 
 To check what password Postgres was initialised with, there is no direct way — you can only test by trying a connection:
+
 ```bash
 docker compose -f docker-compose.prod.yml exec postgres \
   psql -U signalpilot -c "\l"
