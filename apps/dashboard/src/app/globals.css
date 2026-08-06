@@ -1090,6 +1090,36 @@ pre {
   font-size: 13px;
 }
 
+.error-state .error-state-hint {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.error-state-action {
+  margin-top: 4px;
+}
+
+.retry-button {
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-s);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 7px 14px;
+}
+
+.retry-button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.retry-button:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+
 @media (max-width: 860px) {
   .page {
     padding: 18px 16px 28px;
@@ -1691,7 +1721,7 @@ pre {
   align-items: center;
   display: grid;
   gap: 8px;
-  grid-template-columns: 120px 1fr 40px;
+  grid-template-columns: 110px 1fr auto 96px;
 }
 
 .score-bar-label {
@@ -1711,6 +1741,21 @@ pre {
   color: var(--text);
   font-size: 13px;
   font-weight: 700;
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* Skala am Wert: sichtbar, aber dem Zahlenwert klar untergeordnet. */
+.score-bar-scale {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+/* Zweite Codierung neben der Farbe — auch ohne Farbwahrnehmung lesbar. */
+.score-bar-meaning {
+  color: var(--muted);
+  font-size: 11px;
   text-align: right;
 }
 
@@ -1986,7 +2031,12 @@ details[open] > summary {
   }
 
   .score-bar-row {
-    grid-template-columns: 90px 1fr 36px;
+    grid-template-columns: 90px 1fr auto;
+  }
+
+  /* Auf schmalen Bildschirmen trägt der Balken die Aussage, der Klartext entfällt. */
+  .score-bar-meaning {
+    display: none;
   }
 
   .watchlist-focus-row {
@@ -2767,7 +2817,10 @@ summary:focus-visible {
     padding: 0 16px;
   }
 
-  .brand {
+  /* Nur die alte Kopfzeilen-Navigation braucht die feste Zeilenhöhe. Ohne den
+     `.top-nav`-Präfix traf die Regel auch die Marke in der Seitenleiste und blähte
+     sie zwischen 641 und 900 px auf drei Zeilen auf. */
+  .top-nav .brand {
     line-height: 60px;
   }
 
@@ -4795,5 +4848,741 @@ td a {
     content: attr(data-label);
     font-weight: 600;
     text-align: left;
+  }
+}
+
+/* ── Seiteneinleitung: Zweck + Zustand + nächster Schritt ────────────────── */
+.page-intro {
+  background: var(--panel-soft);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--muted);
+  border-radius: var(--radius-s);
+  display: grid;
+  gap: 8px;
+  margin-bottom: 18px;
+  padding: 15px 18px;
+}
+
+.page-intro--good {
+  border-left-color: var(--good);
+}
+
+.page-intro--warn {
+  background: rgba(210, 153, 34, 0.05);
+  border-left-color: var(--warn);
+}
+
+.page-intro--bad {
+  background: rgba(244, 124, 118, 0.05);
+  border-left-color: var(--bad);
+}
+
+.page-intro-purpose {
+  color: var(--muted);
+  font-size: 13px;
+  margin: 0;
+}
+
+.page-intro-verdict {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.page-intro-verdict strong {
+  font-size: 16px;
+  letter-spacing: -0.01em;
+}
+
+.page-intro-verdict .status-dot {
+  align-self: center;
+  flex-shrink: 0;
+}
+
+.page-intro-detail {
+  color: var(--text-soft);
+  font-size: 13px;
+}
+
+.page-intro-next {
+  color: var(--text-soft);
+  font-size: 13px;
+  margin: 0;
+}
+
+.page-intro-next-label {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.page-intro-action {
+  margin-top: 2px;
+}
+
+/* ── Tooltip-Marker für Fachbegriffe ─────────────────────────────────────── */
+.info-hint {
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  color: var(--muted);
+  cursor: help;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 700;
+  height: 13px;
+  margin-left: 5px;
+  vertical-align: middle;
+  width: 13px;
+}
+
+.info-hint:hover,
+.info-hint:focus-visible {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* ── Aufklappbare technische Rohdaten ────────────────────────────────────── */
+.technical-details {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  margin-top: 14px;
+}
+
+.technical-details > summary {
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12.5px;
+  font-weight: 600;
+  list-style: none;
+  padding: 10px 14px;
+  user-select: none;
+}
+
+.technical-details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.technical-details > summary::before {
+  content: "▸";
+  display: inline-block;
+  margin-right: 8px;
+  transition: transform 0.15s;
+}
+
+.technical-details[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.technical-details > summary:hover {
+  color: var(--text);
+}
+
+.technical-details-count {
+  background: var(--panel-soft);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 11px;
+  margin-left: 8px;
+  padding: 1px 7px;
+}
+
+.technical-details-body {
+  border-top: 1px solid var(--line);
+  padding: 14px;
+}
+
+.technical-details-body > .table-wrap {
+  border: 0;
+}
+
+/* ── Kennzahl-Kacheln: nicht alle gleich gewichten ───────────────────────── */
+.metric-card--quiet .metric-value {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.metric-card--good .metric-value {
+  color: var(--good);
+}
+
+.metric-card--warn .metric-value {
+  color: var(--warn);
+}
+
+.metric-card--bad .metric-value {
+  color: var(--bad);
+}
+
+/* ── Befund-Listen (Warnungen, Empfehlungen, Hinweise) ───────────────────── */
+.finding-list {
+  display: grid;
+  gap: 8px;
+}
+
+.finding {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  display: grid;
+  gap: 3px;
+  grid-template-columns: 18px minmax(0, 1fr);
+  padding: 10px 12px;
+}
+
+.finding-icon {
+  font-size: 13px;
+  grid-row: 1 / span 2;
+  line-height: 1.5;
+}
+
+.finding-text {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.finding-action {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.finding--warn {
+  background: rgba(210, 153, 34, 0.06);
+  border-color: rgba(210, 153, 34, 0.28);
+}
+
+.finding--warn .finding-icon {
+  color: var(--warn);
+}
+
+.finding--bad {
+  background: rgba(244, 124, 118, 0.06);
+  border-color: rgba(244, 124, 118, 0.28);
+}
+
+.finding--bad .finding-icon {
+  color: var(--bad);
+}
+
+.finding--info {
+  background: rgba(101, 215, 195, 0.05);
+  border-color: rgba(101, 215, 195, 0.22);
+}
+
+.finding--info .finding-icon {
+  color: var(--accent);
+}
+
+/* Gruppierte Befunde je Asset — statt einer flachen Liste aus Wiederholungen. */
+.finding-group {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+}
+
+.finding-group > summary {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  gap: 10px;
+  list-style: none;
+  padding: 10px 12px;
+}
+
+.finding-group > summary::-webkit-details-marker {
+  display: none;
+}
+
+.finding-group-title {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.finding-group-count {
+  color: var(--muted);
+  font-size: 12px;
+  margin-left: auto;
+}
+
+.finding-group-body {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+}
+
+/* ── Zeitebenen als Kartenliste (löst die abgeschnittene Tabelle ab) ─────── */
+.tf-list {
+  display: grid;
+  gap: 10px;
+}
+
+.tf-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px;
+}
+
+.tf-card-head {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.tf-card-symbol {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.tf-card-type {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.tf-card-spacer {
+  flex: 1;
+}
+
+.tf-card-summary {
+  font-size: 13.5px;
+  line-height: 1.55;
+  margin: 0;
+}
+
+.tf-card-next {
+  color: var(--text-soft);
+  font-size: 12.5px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.tf-card-facts {
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 22px;
+  padding-top: 10px;
+}
+
+.tf-fact {
+  display: grid;
+  gap: 1px;
+}
+
+.tf-fact-label {
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.tf-fact-value {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.tf-fact-value--conflict {
+  color: var(--bad);
+}
+
+/* ── Audit-Einträge ──────────────────────────────────────────────────────── */
+.audit-entry {
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  gap: 6px;
+  padding: 12px 0;
+}
+
+.audit-entry:last-child {
+  border-bottom: 0;
+}
+
+.audit-entry-head {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.audit-entry-target {
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.audit-entry-target code {
+  background: var(--panel-soft);
+  border-radius: 4px;
+  font-size: 11px;
+  padding: 1px 5px;
+}
+
+.audit-entry-meta {
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 12px;
+  gap: 4px 14px;
+  margin-left: auto;
+}
+
+@media (max-width: 640px) {
+  .audit-entry-meta {
+    margin-left: 0;
+  }
+
+  .page-intro {
+    padding: 13px 14px;
+  }
+
+  .tf-card-facts {
+    gap: 8px 16px;
+  }
+}
+
+/* ── Weltlage: Karte + Liste + Detail als ein Analysebereich ─────────────── */
+.map-explorer {
+  align-items: start;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1.55fr) minmax(300px, 0.85fr);
+}
+
+.map-explorer-main {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.world-map-figure--large {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-m);
+  margin: 0;
+  padding: 12px 14px 10px;
+}
+
+.world-map-svg--empty {
+  opacity: 0.45;
+}
+
+.map-explorer-hint {
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-s);
+  color: var(--muted);
+  font-size: 13px;
+  margin: 0;
+  padding: 16px 18px;
+}
+
+/* ── Marker ──────────────────────────────────────────────────────────────── */
+.map-marker {
+  cursor: pointer;
+}
+
+.map-marker circle {
+  transition: fill-opacity 0.15s;
+}
+
+.map-marker:hover circle,
+.map-marker:focus-visible circle {
+  fill-opacity: 0.42;
+}
+
+.map-marker:focus-visible {
+  outline: none;
+}
+
+.map-marker:focus-visible .map-marker-ring,
+.map-marker--active .map-marker-ring {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+.map-marker:focus-visible .map-marker-ring {
+  stroke-dasharray: 4 3;
+}
+
+/* ── Liste ───────────────────────────────────────────────────────────────── */
+.map-explorer-list {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-m);
+  display: flex;
+  flex-direction: column;
+  max-height: 720px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.map-explorer-list-head {
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  padding: 12px 14px;
+}
+
+.map-explorer-clear {
+  background: var(--panel-soft);
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 11.5px;
+  padding: 3px 10px;
+}
+
+.map-explorer-clear:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.map-explorer-items {
+  display: grid;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  overflow-y: auto;
+  padding: 10px;
+}
+
+.event-item {
+  background: transparent;
+  border: 1px solid transparent;
+  border-left: 3px solid var(--muted);
+  border-radius: var(--radius-s);
+  color: var(--text);
+  cursor: pointer;
+  display: grid;
+  gap: 4px;
+  padding: 9px 11px;
+  text-align: left;
+  width: 100%;
+}
+
+.event-item:hover {
+  background: var(--panel-soft);
+}
+
+.event-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Aktiver Eintrag doppelt codiert: Rahmen UND Flächenfarbe UND Akzentkante. */
+.event-item--active {
+  background: rgba(101, 215, 195, 0.09);
+  border-color: var(--accent);
+}
+
+.event-item--critical {
+  border-left-color: var(--sev-critical);
+}
+
+.event-item--important {
+  border-left-color: var(--sev-important);
+}
+
+.event-item--info {
+  border-left-color: var(--sev-watch);
+}
+
+.event-item-top {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+
+.event-item-severity {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.event-item-category {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.event-item-title {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.event-item-meta {
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+/* ── Detailansicht ───────────────────────────────────────────────────────── */
+.event-detail {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--muted);
+  border-radius: var(--radius-m);
+  display: grid;
+  gap: 12px;
+  padding: 16px 18px;
+}
+
+.event-detail--critical {
+  border-left-color: var(--sev-critical);
+}
+
+.event-detail--important {
+  border-left-color: var(--sev-important);
+}
+
+.event-detail--info {
+  border-left-color: var(--sev-watch);
+}
+
+.event-detail-head {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.event-detail-severity {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.event-detail-category {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.event-detail-close {
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  margin-left: auto;
+  padding: 4px 8px;
+}
+
+.event-detail-close:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.event-detail-title {
+  font-size: 17px;
+  line-height: 1.35;
+  margin: 0;
+}
+
+.event-detail-summary {
+  font-size: 13.5px;
+  line-height: 1.6;
+  margin: 0;
+}
+
+.event-detail-summary--derived {
+  border-left: 2px solid var(--line-strong);
+  color: var(--text-soft);
+  padding-left: 11px;
+}
+
+.event-detail-derived-note {
+  color: var(--muted);
+  display: block;
+  font-size: 11.5px;
+  margin-top: 5px;
+}
+
+.event-detail-facts {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 10px 22px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  margin: 0;
+  padding-top: 12px;
+}
+
+.event-detail-facts dt {
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.event-detail-facts dd {
+  font-size: 13px;
+  margin: 2px 0 0;
+}
+
+.event-detail-relevance {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 7px;
+  padding-top: 12px;
+}
+
+.event-detail-areas {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+}
+
+.event-detail-impact {
+  align-items: baseline;
+  display: flex;
+  font-size: 13px;
+  gap: 7px;
+  margin: 0;
+}
+
+.event-detail-uncertainty {
+  background: var(--panel-soft);
+  border-radius: var(--radius-s);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+  padding: 9px 11px;
+}
+
+@media (max-width: 1180px) {
+  /* Karte, Detail und Liste untereinander — die Reihenfolge im DOM sorgt dafür,
+     dass das Detail direkt unter der Karte steht und nicht hinter der Liste. */
+  .map-explorer {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .map-explorer-list {
+    max-height: 560px;
+  }
+}
+
+@media (max-width: 640px) {
+  .world-map-figure--large {
+    padding: 8px 8px 6px;
+  }
+
+  .event-detail {
+    padding: 14px;
+  }
+
+  .event-detail-facts {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .map-explorer-list {
+    max-height: 460px;
   }
 }

@@ -1,20 +1,24 @@
 import Link from "next/link";
 
 import { ErrorState, EmptyState } from "../../../components/empty-state";
-import { PageHeader } from "../../../components/ui";
-import { formatDateTime } from "../../../lib/format";
+import { RetryButton } from "../../../components/retry-button";
+import { PageHeader, PageIntro, SectionCard, TechnicalDetails } from "../../../components/ui";
+import { describeApiError } from "../../../lib/api-error";
+import { formatDateTime, formatRelativeTime } from "../../../lib/format";
+import { logLevelLabel, logLevelTone, type LogTone } from "../../../lib/labels";
 import { fetchApi, type BotLog } from "../../../lib/signalpilot-api";
 
-type LogLevel = "ERROR" | "WARN" | "WARNING" | "INFO" | "DEBUG" | string;
+const TONE_CLASS: Record<LogTone, string> = {
+  error: "alert-failed",
+  warn: "alert-pending",
+  info: "alert-sent",
+  neutral: "status-no_edge"
+};
 
-function LevelBadge({ level }: { level: LogLevel }) {
-  const upper = level.toUpperCase();
-  let cls = "";
-  if (upper === "ERROR") cls = "alert-failed";
-  else if (upper === "WARN" || upper === "WARNING") cls = "alert-pending";
-  else if (upper === "INFO") cls = "alert-sent";
-  else cls = "status-no_edge";
-  return <span className={`badge ${cls}`}>{upper}</span>;
+function LevelBadge({ level }: { level: string }) {
+  return (
+    <span className={`badge ${TONE_CLASS[logLevelTone(level)]}`}>{logLevelLabel(level)}</span>
+  );
 }
 
 function MetaCell({ value }: { value: unknown }) {
@@ -23,7 +27,18 @@ function MetaCell({ value }: { value: unknown }) {
   }
   try {
     const str = typeof value === "string" ? value : JSON.stringify(value, null, 2);
-    return <pre style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: 11 }}>{str}</pre>;
+    return (
+      <pre
+        style={{
+          margin: 0,
+          whiteSpace: "pre-wrap",
+          wordBreak: "break-word",
+          fontSize: 11
+        }}
+      >
+        {str}
+      </pre>
+    );
   } catch {
     return <span className="muted">—</span>;
   }
@@ -32,18 +47,56 @@ function MetaCell({ value }: { value: unknown }) {
 export default async function LogsPage() {
   const botLogs = await fetchApi<BotLog[]>("/logs?limit=200");
   const logs = botLogs.data ?? [];
+  const errorCopy = describeApiError(
+    botLogs.errorKind,
+    botLogs.error ?? "",
+    "Das Ausführungsprotokoll"
+  );
 
-  const errorCount = logs.filter((l) => l.level.toUpperCase() === "ERROR").length;
-  const warnCount = logs.filter(
-    (l) => l.level.toUpperCase() === "WARN" || l.level.toUpperCase() === "WARNING"
-  ).length;
+  const errors = logs.filter((log) => logLevelTone(log.level) === "error");
+  const warnings = logs.filter((log) => logLevelTone(log.level) === "warn");
+  const newest = logs[0];
+
+  // Testläufe schreiben in dieselbe Datenbank. Sie als Betriebsfehler zu zählen
+  // würde den Zustand der Seite dauerhaft falsch darstellen.
+  const fromTestRun = (log: BotLog) =>
+    log.message.startsWith("test:") ||
+    JSON.stringify(log.metadataJson ?? {}).includes("simulated database failure");
+  const realErrors = errors.filter((log) => !fromTestRun(log));
+  const testErrors = errors.length - realErrors.length;
+
+  const tone = botLogs.error
+    ? "bad"
+    : realErrors.length > 0
+      ? "bad"
+      : warnings.length > 0
+        ? "warn"
+        : "good";
+  const verdict = botLogs.error
+    ? "Protokoll nicht abrufbar."
+    : logs.length === 0
+      ? "Noch keine Einträge vorhanden."
+      : realErrors.length > 0
+        ? `${realErrors.length} Fehler in den letzten Läufen.`
+        : warnings.length > 0
+          ? `Keine Fehler, aber ${warnings.length} Warnung${warnings.length !== 1 ? "en" : ""}.`
+          : "Alle protokollierten Läufe sind ohne Fehler durchgelaufen.";
+  const detail = newest
+    ? `Neuester Eintrag: ${formatRelativeTime(newest.createdAt)}`
+    : undefined;
+  const nextStep = botLogs.error
+    ? undefined
+    : realErrors.length > 0
+      ? "Den obersten Fehler unten aufklappen — die Meldung nennt den betroffenen Job."
+      : warnings.length > 0
+        ? "Warnungen deuten meist auf Datenlücken hin; die Datenqualität gibt darüber Auskunft."
+        : "Nichts zu tun.";
 
   return (
     <>
       <PageHeader
-        eyebrow="System · Technische Ebene"
+        eyebrow="System"
         title="Ausführungsprotokoll"
-        subtitle="Technische Meldungen der letzten Worker- und Datenläufe."
         actions={
           <Link className="primary-link secondary-link" href="/dashboard/operations">
             Zur Systemübersicht
@@ -51,48 +104,64 @@ export default async function LogsPage() {
         }
       />
 
+      <PageIntro
+        purpose="Diese Seite protokolliert, was die Hintergrund-Jobs zuletzt getan haben — Datenabrufe, Analysen und Zustellungen."
+        tone={tone}
+        verdict={verdict}
+        detail={detail}
+        nextStep={nextStep}
+      />
+
       {botLogs.error ? (
-        <ErrorState title="Logs nicht verfügbar" message={botLogs.error} />
+        <ErrorState
+          title={errorCopy.title}
+          message={errorCopy.message}
+          hint={errorCopy.hint}
+          action={errorCopy.retryable ? <RetryButton /> : null}
+        />
       ) : null}
 
-      {(errorCount > 0 || warnCount > 0) && (
-        <div className="warning-section" style={{ marginBottom: 16 }}>
-          <h3 className="warning-section-title">
-            Log-Auffälligkeiten
-          </h3>
-          <ul className="warning-list">
-            {errorCount > 0 && (
-              <li className="warning-item">
-                <span className="warning-icon">✕</span>
-                <span>
-                  <strong>{errorCount} ERROR</strong>-Einträge gefunden — Details in der Tabelle
-                  unten prüfen.
-                </span>
-              </li>
-            )}
-            {warnCount > 0 && (
-              <li className="warning-item">
-                <span className="warning-icon">⚠</span>
-                <span>
-                  <strong>{warnCount} WARN</strong>-Einträge — können auf
-                  Konfigurationsprobleme oder Datenlücken hinweisen.
-                </span>
-              </li>
-            )}
-          </ul>
-        </div>
-      )}
+      {testErrors > 0 ? (
+        <p className="muted small" style={{ marginBottom: 14 }}>
+          {testErrors} weitere Fehlermeldung{testErrors !== 1 ? "en" : ""} stammen aus
+          automatisierten Testläufen und sind kein Betriebsproblem.
+        </p>
+      ) : null}
 
-      <section className="card">
-        <h2>Log-Einträge ({logs.length})</h2>
+      {/* Fehler zuerst — sie sind der Grund, warum jemand diese Seite öffnet. */}
+      {realErrors.length > 0 ? (
+        <SectionCard
+          title="Fehler zuerst"
+          subtitle="Diese Läufe sind abgebrochen oder unvollständig geblieben."
+        >
+          <div className="finding-list">
+            {realErrors.slice(0, 5).map((log) => (
+              <div className="finding finding--bad" key={log.id}>
+                <span className="finding-icon">✕</span>
+                <span className="finding-text">{log.message}</span>
+                <span className="finding-action">
+                  {log.service} · {formatDateTime(log.createdAt)}
+                </span>
+              </div>
+            ))}
+          </div>
+          {realErrors.length > 5 ? (
+            <p className="muted small" style={{ marginTop: 10 }}>
+              {realErrors.length - 5} weitere Fehler stehen in der vollständigen Liste.
+            </p>
+          ) : null}
+        </SectionCard>
+      ) : null}
+
+      <TechnicalDetails summary="Vollständiges Protokoll" count={logs.length}>
         {logs.length > 0 ? (
           <div className="table-wrap">
-            <table>
+            <table className="responsive-table">
               <thead>
                 <tr>
                   <th>Zeit</th>
-                  <th>Level</th>
-                  <th>Service</th>
+                  <th>Einstufung</th>
+                  <th>Dienst</th>
                   <th>Meldung</th>
                   <th>Details</th>
                 </tr>
@@ -100,15 +169,17 @@ export default async function LogsPage() {
               <tbody>
                 {logs.map((log) => (
                   <tr key={log.id}>
-                    <td style={{ whiteSpace: "nowrap" }}>{formatDateTime(log.createdAt)}</td>
-                    <td>
+                    <td data-label="Zeit" style={{ whiteSpace: "nowrap" }}>
+                      {formatDateTime(log.createdAt)}
+                    </td>
+                    <td data-label="Einstufung">
                       <LevelBadge level={log.level} />
                     </td>
-                    <td>
+                    <td data-label="Dienst">
                       <span className="muted small">{log.service}</span>
                     </td>
-                    <td>{log.message}</td>
-                    <td className="wide-cell">
+                    <td data-label="Meldung">{log.message}</td>
+                    <td data-label="Details" className="wide-cell">
                       <MetaCell value={log.metadataJson} />
                     </td>
                   </tr>
@@ -117,9 +188,12 @@ export default async function LogsPage() {
             </table>
           </div>
         ) : (
-          <EmptyState title="Keine Log-Einträge gefunden." />
+          <EmptyState
+            title="Noch keine Protokolleinträge."
+            description="Sie entstehen, sobald ein Hintergrund-Job gelaufen ist."
+          />
         )}
-      </section>
+      </TechnicalDetails>
     </>
   );
 }

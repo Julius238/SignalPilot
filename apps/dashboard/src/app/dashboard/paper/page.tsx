@@ -4,6 +4,7 @@ import { EmptyState, ErrorState } from "../../../components/empty-state";
 import { MetricCard, PageHeader, SectionCard } from "../../../components/ui";
 import { buildQuery, fetchApi, type PaperSignalEvaluation, type PaperStats } from "../../../lib/signalpilot-api";
 import { formatDateTime, formatScore } from "../../../lib/format";
+import { signalTypeLabel } from "../../../lib/labels";
 
 type PaperPageProps = {
   searchParams: Promise<{
@@ -203,7 +204,7 @@ export default async function PaperPage({ searchParams }: PaperPageProps) {
                           <Link
                             href={`/dashboard/signals/${encodeURIComponent(ev.signalId)}`}
                           >
-                            {ev.signalType}
+                            {signalTypeLabel(ev.signalType)}
                           </Link>
                         </td>
                         <td>

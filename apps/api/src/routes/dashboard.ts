@@ -61,6 +61,9 @@ const botRunStatuses = Object.values(BotRunStatus);
 const radarEventTypes = Object.values(RadarEventType);
 const radarEventSeverities = Object.values(RadarEventSeverity);
 const marketEventTypes = Object.values(MarketEventType);
+// Sentinel für `?region=` — Prisma kann "region IS NULL" nicht über einen leeren
+// String ausdrücken, und ein echter Regionsname kann diesen Wert nie annehmen.
+export const UNASSIGNED_REGION_KEY = "__none__";
 const marketEventSeverities = Object.values(MarketEventSeverity);
 const alertStatuses = Object.values(AlertStatus);
 const alertChannels = Object.values(AlertChannel);
@@ -1721,6 +1724,11 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
       reply
     );
     const limit = parseLimit(query.limit, 50, 200, reply);
+    // Zeitfenster serverseitig statt erst im Dashboard — gleiches Muster wie /news.
+    const maxAgeHours = parseOptionalInteger(query.maxAgeHours, "maxAgeHours", reply);
+    // `region=__none__` liefert gezielt die Meldungen ohne Regionszuordnung; sie
+    // gehen sonst still verloren, weil `region` nullbar ist.
+    const regionFilter = parseOptionalString(query.region);
 
     if (reply.sent) {
       return reply;
@@ -1730,7 +1738,16 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
       where: {
         eventType,
         severity,
-        region: parseOptionalString(query.region)
+        region:
+          regionFilter === UNASSIGNED_REGION_KEY
+            ? null
+            : regionFilter,
+        detectedAt:
+          maxAgeHours === undefined
+            ? undefined
+            : {
+                gte: new Date(Date.now() - Math.max(1, maxAgeHours) * 60 * 60 * 1000)
+              }
       },
       orderBy: {
         detectedAt: "desc"
@@ -2226,7 +2243,7 @@ type DiscoveryCandidateForDashboard = Prisma.AssetDiscoveryCandidateGetPayload<{
   };
 }>;
 
-type ActiveMembershipForDashboard = Prisma.AssetUniverseMembershipGetPayload<{
+type ActiveMembershipWithCandidates = Prisma.AssetUniverseMembershipGetPayload<{
   include: {
     asset: {
       include: {
@@ -2237,6 +2254,15 @@ type ActiveMembershipForDashboard = Prisma.AssetUniverseMembershipGetPayload<{
     };
   };
 }>;
+
+// Ohne vorherigen Discovery-Lauf lädt `/discovery/overview` die Relation bewusst nicht
+// (`include: false`) — Prisma lässt das Feld dann komplett weg. Der Typ muss das abbilden,
+// sonst kompiliert ein `[0]`-Zugriff, der zur Laufzeit auf `undefined` trifft.
+type ActiveMembershipForDashboard = Omit<ActiveMembershipWithCandidates, "asset"> & {
+  asset: Omit<ActiveMembershipWithCandidates["asset"], "discoveryCandidates"> & {
+    discoveryCandidates?: ActiveMembershipWithCandidates["asset"]["discoveryCandidates"];
+  };
+};
 
 function toDiscoveryCandidate(
   candidate: DiscoveryCandidateForDashboard,
@@ -2341,7 +2367,9 @@ function toDiscoveryRun(run: {
 }
 
 function toActiveUniverseAsset(membership: ActiveMembershipForDashboard) {
-  const latestCandidate = membership.asset.discoveryCandidates[0] ?? null;
+  // `discoveryCandidates` fehlt, solange es keinen erfolgreichen Discovery-Lauf gibt.
+  // Score und Datenqualität bleiben dann `null` — es wird nichts geraten.
+  const latestCandidate = membership.asset.discoveryCandidates?.[0] ?? null;
   return {
     asset: {
       id: membership.asset.id,

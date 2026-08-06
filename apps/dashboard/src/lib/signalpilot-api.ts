@@ -1014,14 +1014,24 @@ export type AuditLog = {
   createdAt: string;
 };
 
+// Warum ein Aufruf gescheitert ist — damit das UI "nicht erreichbar", "nicht angemeldet"
+// und "Serverfehler" unterscheiden kann, statt jeden Fehler als "keine Daten" zu deuten.
+export type ApiErrorKind =
+  | "unauthorized" // 401 — Session fehlt oder ist abgelaufen
+  | "unreachable" // fetch selbst ist gescheitert (API aus, falsche URL, Netzwerk)
+  | "server" // 5xx — interner Fehler der API
+  | "request"; // sonstige 4xx — fehlerhafte Anfrage
+
 export type ApiResult<T> =
   | {
       data: T;
       error: null;
+      errorKind?: undefined;
     }
   | {
       data: null;
       error: string;
+      errorKind: ApiErrorKind;
     };
 
 const SESSION_COOKIE = process.env.AUTH_COOKIE_NAME ?? "signalpilot_session";
@@ -1060,7 +1070,7 @@ export async function fetchApi<T>(
 
     if (!response.ok) {
       if (response.status === 401) {
-        return { data: null, error: "Unauthorized" };
+        return { data: null, error: "Unauthorized", errorKind: "unauthorized" };
       }
 
       const body = await response.json().catch(() => null);
@@ -1069,7 +1079,11 @@ export async function fetchApi<T>(
           ? body.message
           : `SignalPilot API returned HTTP ${response.status}`;
 
-      return { data: null, error: message };
+      return {
+        data: null,
+        error: message,
+        errorKind: response.status >= 500 ? "server" : "request"
+      };
     }
 
     if (response.status === 204) {
@@ -1080,7 +1094,8 @@ export async function fetchApi<T>(
   } catch (error) {
     return {
       data: null,
-      error: error instanceof Error ? error.message : "Unable to reach SignalPilot API"
+      error: error instanceof Error ? error.message : "Unable to reach SignalPilot API",
+      errorKind: "unreachable"
     };
   }
 }

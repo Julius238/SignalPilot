@@ -1,6 +1,7 @@
 import { EmptyState } from "./empty-state";
 import { formatDateTime } from "../lib/format";
 import type { AlertState } from "../lib/signalpilot-api";
+import { signalTypeLabel } from "../lib/labels";
 
 export function AlertStatesTable({ alertStates }: { alertStates: AlertState[] }) {
   if (alertStates.length === 0) {
@@ -28,7 +29,7 @@ export function AlertStatesTable({ alertStates }: { alertStates: AlertState[] })
             <tr key={state.id}>
               <td>{state.symbol}</td>
               <td>{state.timeframe}</td>
-              <td>{state.signalType}</td>
+              <td>{signalTypeLabel(state.signalType)}</td>
               <td>{state.status}</td>
               <td>{state.lastScore.toFixed(1)}</td>
               <td>{state.lastRiskLevel}</td>

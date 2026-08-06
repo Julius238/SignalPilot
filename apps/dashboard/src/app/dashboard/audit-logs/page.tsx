@@ -1,16 +1,19 @@
-import { fetchApi, type AuditLog } from "../../../lib/signalpilot-api";
-import { formatDateTime } from "../../../lib/format";
 import { ErrorState, EmptyState } from "../../../components/empty-state";
-import { PageHeader } from "../../../components/ui";
+import { RetryButton } from "../../../components/retry-button";
+import { PageHeader, PageIntro, SectionCard, TechnicalDetails } from "../../../components/ui";
+import { describeApiError } from "../../../lib/api-error";
+import { formatDateTime, formatRelativeTime } from "../../../lib/format";
+import { auditActionLabel, auditActionTone, type AuditTone } from "../../../lib/labels";
+import { fetchApi, type AuditLog } from "../../../lib/signalpilot-api";
 
-function actionBadgeClass(action: string): string {
-  const a = action.toUpperCase();
-  if (a.includes("DELETE") || a.includes("REMOVE")) return "alert-failed";
-  if (a.includes("CREATE") || a.includes("ADD")) return "alert-sent";
-  if (a.includes("UPDATE") || a.includes("EDIT") || a.includes("CHANGE")) return "badge-info";
-  if (a.includes("LOGIN") || a.includes("LOGOUT") || a.includes("AUTH")) return "alert-pending";
-  return "status-no_edge";
-}
+const AUDIT_LIMIT = 200;
+
+const TONE_CLASS: Record<AuditTone, string> = {
+  success: "alert-sent",
+  warn: "alert-pending",
+  error: "alert-failed",
+  neutral: "badge-info"
+};
 
 function MetaDetail({ value }: { value: unknown }) {
   if (!value || (typeof value === "object" && Object.keys(value as object).length === 0)) {
@@ -40,77 +43,108 @@ function MetaDetail({ value }: { value: unknown }) {
 }
 
 export default async function AuditLogsPage() {
-  const { data: logs, error } = await fetchApi<AuditLog[]>("/audit-logs?limit=200");
+  const result = await fetchApi<AuditLog[]>(`/audit-logs?limit=${AUDIT_LIMIT}`);
+  const logs = result.data ?? [];
+  const errorCopy = describeApiError(result.errorKind, result.error ?? "", "Das Audit-Protokoll");
+
+  const failedLogins = logs.filter((log) => log.action.toLowerCase().includes("failed"));
+  const newest = logs[0];
+  const reachedLimit = logs.length >= AUDIT_LIMIT;
+
+  const tone = result.error ? "bad" : failedLogins.length > 0 ? "warn" : "good";
+  const verdict = result.error
+    ? "Audit-Protokoll nicht abrufbar."
+    : logs.length === 0
+      ? "Noch keine administrativen Änderungen protokolliert."
+      : failedLogins.length > 0
+        ? `${failedLogins.length} fehlgeschlagene Anmeldeversuche im Protokoll.`
+        : "Keine auffälligen Zugriffe im Protokoll.";
+  const detail = newest
+    ? `Letzte Aktion: ${formatRelativeTime(newest.createdAt)} durch ${newest.actor}`
+    : undefined;
+  const nextStep = result.error
+    ? undefined
+    : failedLogins.length > 0
+      ? "Prüfen, ob die fehlgeschlagenen Versuche von einer bekannten Adresse stammen."
+      : "Nichts zu tun. Dieses Protokoll ist eine Nachweisspur, kein Betriebsmonitor.";
 
   return (
     <>
-      <PageHeader
-        eyebrow="System · Administration"
-        title="Audit"
-        subtitle="Nachvollziehbare administrative und sicherheitsrelevante Änderungen."
+      <PageHeader eyebrow="System" title="Audit" />
+
+      <PageIntro
+        purpose="Diese Seite hält fest, wer wann welche administrative oder sicherheitsrelevante Änderung ausgelöst hat."
+        tone={tone}
+        verdict={verdict}
+        detail={detail}
+        nextStep={nextStep}
       />
 
-      {error ? (
-        <ErrorState title="Audit-Logs nicht verfügbar" message={error} />
+      {result.error ? (
+        <ErrorState
+          title={errorCopy.title}
+          message={errorCopy.message}
+          hint={errorCopy.hint}
+          action={errorCopy.retryable ? <RetryButton /> : null}
+        />
       ) : null}
 
-      <section className="card">
-        {logs && logs.length > 0 ? (
-          <>
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                marginBottom: 12
-              }}
-            >
-              <h2 style={{ margin: 0 }}>Einträge ({logs.length})</h2>
-              <span className="muted small">Neueste zuerst</span>
-            </div>
-            <div className="stack-list">
-              {logs.map((log) => (
-                <div
-                  key={log.id}
-                  style={{
-                    padding: "12px 0",
-                    borderBottom: "1px solid var(--line)"
-                  }}
-                >
-                  <div className="list-row" style={{ alignItems: "flex-start" }}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                        <span className={`badge ${actionBadgeClass(log.action)}`}>
-                          {log.action}
-                        </span>
-                        {log.targetType && (
-                          <span className="muted small">
-                            {log.targetType}
-                            {log.targetId ? ` #${log.targetId}` : ""}
-                          </span>
-                        )}
-                      </div>
-                      <div className="muted small" style={{ marginTop: 4 }}>
-                        Ausgeführt von: <strong style={{ color: "var(--text)" }}>{log.actor}</strong>
-                      </div>
-                      <MetaDetail value={log.metadataJson} />
-                    </div>
-                    <div
-                      className="right-meta"
-                      style={{ flexShrink: 0, textAlign: "right", paddingLeft: 16 }}
-                    >
-                      <div className="muted small">{log.ip}</div>
-                      <div className="muted small">{formatDateTime(log.createdAt)}</div>
-                    </div>
-                  </div>
+      <SectionCard
+        title={logs.length > 0 ? `${logs.length} Einträge` : undefined}
+        subtitle={
+          reachedLimit
+            ? `Neueste zuerst. Es werden höchstens ${AUDIT_LIMIT} Einträge angezeigt — ältere sind über die API abrufbar.`
+            : logs.length > 0
+              ? "Neueste zuerst."
+              : undefined
+        }
+      >
+        {logs.length > 0 ? (
+          <div className="stack-list">
+            {logs.map((log) => (
+              <div className="audit-entry" key={log.id}>
+                <div className="audit-entry-head">
+                  <span className={`badge ${TONE_CLASS[auditActionTone(log.action)]}`}>
+                    {auditActionLabel(log.action)}
+                  </span>
+                  {log.targetType ? (
+                    <span className="audit-entry-target">
+                      {log.targetType}
+                      {/* Zielbezeichner sind frei wählbare Werte — als Datenwert
+                          kenntlich machen, nicht als Fließtext neben der Aktion. */}
+                      {log.targetId ? (
+                        <>
+                          {" "}
+                          <code>{log.targetId}</code>
+                        </>
+                      ) : null}
+                    </span>
+                  ) : null}
+                  <span className="audit-entry-meta">
+                    <span>{log.actor}</span>
+                    <span>{log.ip}</span>
+                    <span>{formatDateTime(log.createdAt)}</span>
+                  </span>
                 </div>
-              ))}
-            </div>
-          </>
+                {log.metadataJson &&
+                Object.keys(log.metadataJson as object).length > 0 ? (
+                  <TechnicalDetails summary="Technische Details">
+                    <MetaDetail value={log.metadataJson} />
+                    <p className="muted small" style={{ marginTop: 8 }}>
+                      Interner Aktionsschlüssel: <code>{log.action}</code>
+                    </p>
+                  </TechnicalDetails>
+                ) : null}
+              </div>
+            ))}
+          </div>
         ) : (
-          <EmptyState title="Keine Audit-Log-Einträge gefunden." />
+          <EmptyState
+            title="Noch keine Audit-Einträge."
+            description="Anmeldungen und administrative Änderungen erscheinen hier automatisch."
+          />
         )}
-      </section>
+      </SectionCard>
     </>
   );
 }

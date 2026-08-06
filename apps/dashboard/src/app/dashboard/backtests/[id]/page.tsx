@@ -11,6 +11,7 @@ import {
   type BacktestSignal,
   type BacktestSummary
 } from "../../../../lib/signalpilot-api";
+import { signalTypeLabel } from "../../../../lib/labels";
 
 type BacktestDetailPageProps = {
   params: Promise<{ id: string }>;
@@ -249,7 +250,7 @@ export default async function BacktestDetailPage({ params }: BacktestDetailPageP
                           <td>{sig.timeframe}</td>
                           <td className="nowrap">{formatDateTime(sig.signalTime)}</td>
                           <td>{sig.status}</td>
-                          <td>{sig.signalType}</td>
+                          <td>{signalTypeLabel(sig.signalType)}</td>
                           <td>{formatScore(sig.score)}</td>
                           <td style={{ color: outcomeColor(outcome ?? "") }}>
                             {OUTCOME_LABELS[outcome ?? ""] ?? outcome ?? "—"}

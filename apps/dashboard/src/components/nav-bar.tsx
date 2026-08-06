@@ -96,8 +96,8 @@ const NAV_GROUPS: Array<{ label: string; items: NavItem[] }> = [
       },
       {
         href: "/dashboard/news",
-        label: "Nachrichten",
-        description: "Meldungen zur Watchlist",
+        label: "Weltlage",
+        description: "Karte, Ereignisse und Nachrichten",
         icon: "news"
       },
       {

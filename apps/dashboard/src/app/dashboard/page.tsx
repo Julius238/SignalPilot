@@ -1,7 +1,10 @@
 import Link from "next/link";
 
 import { EmptyState, ErrorState } from "../../components/empty-state";
+import { RetryButton } from "../../components/retry-button";
 import { PageHeader, SectionCard } from "../../components/ui";
+import { describeApiError } from "../../lib/api-error";
+import { discoveryEmptyCopy, resolveDiscoveryStatus } from "../../lib/discovery-status";
 import { HeroBand, type HeroMetric } from "../../components/dashboard/hero-band";
 import { PriorityFeed, type PriorityItem } from "../../components/dashboard/priority-feed";
 import { RadarOverviewCard, SignalsCompactCard } from "../../components/dashboard/radar-compact";
@@ -253,6 +256,7 @@ export default async function DashboardPage() {
   const clusterChips = riskClusters
     .map((cluster) => ({
       label: cluster.label,
+      types: cluster.types,
       count: countBy(eventsLast48h, (event) => cluster.types.includes(event.eventType))
     }))
     .filter((chip) => chip.count > 0)
@@ -420,6 +424,12 @@ export default async function DashboardPage() {
   const highPriorityWatchlist = countBy(watchlistItems, (item) => item.priority === "HIGH");
 
   const criticalErrors = [health, config, scanner].filter((result) => result.error);
+  const criticalErrorCopy = describeApiError(
+    criticalErrors[0]?.errorKind,
+    criticalErrors.map((result) => result.error).join(" | "),
+    "Kernbereiche der Übersicht"
+  );
+
   const discoveryToday = (discoveryData?.candidates ?? [])
     .filter(
       (candidate) =>
@@ -429,6 +439,27 @@ export default async function DashboardPage() {
           (candidate.scoreDelta ?? 0) >= 5)
     )
     .slice(0, 4);
+
+  // Getrennte Aussagen, die vorher alle als "sicher deaktiviert" erschienen sind:
+  // Aufruf fehlgeschlagen · Feature deaktiviert · aktiviert, aber noch kein Lauf.
+  const discoveryErrorCopy = describeApiError(
+    discovery.errorKind,
+    discovery.error ?? "",
+    "Die Discovery-Daten"
+  );
+  const discoveryStatus = resolveDiscoveryStatus({
+    errorKind: discovery.errorKind,
+    hasError: Boolean(discovery.error),
+    enabled: discoveryData?.config.enabled,
+    hasRun: discoveryData?.latestRun != null,
+    candidateCountToday: discoveryToday.length
+  });
+  const discoveryEmpty = discoveryEmptyCopy(discoveryStatus);
+  const newsErrorCopy = describeApiError(
+    relevantNews.errorKind,
+    relevantNews.error ?? "",
+    "Die Nachrichten"
+  );
 
   return (
     <>
@@ -451,8 +482,10 @@ export default async function DashboardPage() {
       {criticalErrors.length > 0 ? (
         <div style={{ marginBottom: 16 }}>
           <ErrorState
-            title="Daten konnten nicht geladen werden"
-            message={criticalErrors.map((result) => result.error).join(" | ")}
+            title={criticalErrorCopy.title}
+            message={criticalErrorCopy.message}
+            hint={criticalErrorCopy.hint}
+            action={criticalErrorCopy.retryable ? <RetryButton /> : null}
           />
         </div>
       ) : null}
@@ -484,7 +517,16 @@ export default async function DashboardPage() {
           </Link>
         }
       >
-        {discoveryToday.length > 0 ? (
+        {discoveryStatus === "error" ? (
+          // Ein fehlgeschlagener Aufruf darf nie als "deaktiviert" oder "nichts vorhanden"
+          // erscheinen — das wäre eine falsche Tatsachenbehauptung über den Systemzustand.
+          <ErrorState
+            title={discoveryErrorCopy.title}
+            message={discoveryErrorCopy.message}
+            hint={discoveryErrorCopy.hint}
+            action={discoveryErrorCopy.retryable ? <RetryButton /> : null}
+          />
+        ) : discoveryToday.length > 0 ? (
           <div className="discovery-overview-list">
             {discoveryToday.map((candidate) => (
               <Link
@@ -507,14 +549,7 @@ export default async function DashboardPage() {
             ))}
           </div>
         ) : (
-          <EmptyState
-            title="Heute noch keine neuen Discovery-Kandidaten."
-            description={
-              discoveryData?.config.enabled
-                ? "Der nächste Lauf aktualisiert diese kompakte Auswahl."
-                : "Asset Discovery ist sicher deaktiviert; Vorschläge entstehen erst nach Aktivierung."
-            }
-          />
+          <EmptyState title={discoveryEmpty.title} description={discoveryEmpty.description} />
         )}
       </SectionCard>
 
@@ -523,13 +558,24 @@ export default async function DashboardPage() {
         <SectionCard
           title="Wo gerade etwas passiert"
           subtitle="Herkunftsregionen der erkannten Ereignisse — letzte 48 Stunden."
+          action={
+            <Link className="section-link" href="/dashboard/news">
+              Weltlage öffnen
+            </Link>
+          }
         >
+          {/* Die Kategorie-Chips waren reine Anzeige; sie filtern jetzt die
+              Weltlage-Seite vor. */}
           {clusterChips.length > 0 ? (
             <div className="cluster-chips">
               {clusterChips.map((chip) => (
-                <span key={chip.label} className="cluster-chip">
+                <Link
+                  key={chip.label}
+                  className="cluster-chip"
+                  href={`/dashboard/news?range=48&eventType=${encodeURIComponent(chip.types[0])}`}
+                >
                   {chip.label} <strong>{chip.count}</strong>
-                </span>
+                </Link>
               ))}
             </div>
           ) : null}
@@ -597,8 +643,10 @@ export default async function DashboardPage() {
         >
           {relevantNews.error ? (
             <ErrorState
-              title="Nachrichten derzeit nicht verfügbar"
-              message={relevantNews.error}
+              title={newsErrorCopy.title}
+              message={newsErrorCopy.message}
+              hint={newsErrorCopy.hint}
+              action={newsErrorCopy.retryable ? <RetryButton /> : null}
             />
           ) : relevantNewsItems.length === 0 ? (
             <EmptyState

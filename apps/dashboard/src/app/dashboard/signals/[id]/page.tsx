@@ -12,8 +12,29 @@ import {
 } from "../../../../components/badges";
 import { DebugJsonBlock } from "../../../../components/debug-json-block";
 import { ErrorState } from "../../../../components/empty-state";
-import { SectionCard } from "../../../../components/ui";
-import { formatDateTime, formatScore } from "../../../../lib/format";
+import {
+  PageIntro,
+  SectionCard,
+  TechnicalDetails,
+  type PageVerdictTone
+} from "../../../../components/ui";
+import { formatDateTime, formatRelativeTime, formatScore } from "../../../../lib/format";
+import {
+  assetTypeLabel,
+  germanizeAnalysisText,
+  signalStatusExplanation,
+  signalTypeExplanation,
+  signalTypeLabel,
+  timeframeLabel
+} from "../../../../lib/labels";
+import {
+  NEWS_HIGH_RELEVANCE,
+  SCORE_SCALE_MAX,
+  scoreBarColor,
+  scoreBarMeaning,
+  scoreBarPercent,
+  type ScoreFactorPolarity
+} from "../../../../lib/score-scale";
 import {
   fetchApi,
   type EventContext,
@@ -27,16 +48,22 @@ type SignalDetailPageProps = {
   params: Promise<{ id: string }>;
 };
 
-const SCORE_FACTORS: { key: keyof SignalDetail["signal"]; label: string }[] = [
-  { key: "trendScore", label: "Trend" },
-  { key: "momentumScore", label: "Momentum" },
-  { key: "volumeScore", label: "Volumen" },
-  { key: "volatilityScore", label: "Volatilität" },
-  { key: "rsiScore", label: "RSI" },
-  { key: "newsScore", label: "News" },
-  { key: "socialScore", label: "Social" },
-  { key: "eventScore", label: "Events" },
-  { key: "riskScore", label: "Risiko" }
+// Alle Faktoren liegen auf der Skala 0–100 (packages/scoring-engine klemmt dort).
+// `polarity` steuert Farbe und Klartext — siehe lib/score-scale.
+const SCORE_FACTORS: {
+  key: keyof SignalDetail["signal"];
+  label: string;
+  polarity: ScoreFactorPolarity;
+}[] = [
+  { key: "trendScore", label: "Trend", polarity: "benefit" },
+  { key: "momentumScore", label: "Momentum", polarity: "benefit" },
+  { key: "volumeScore", label: "Volumen", polarity: "benefit" },
+  { key: "volatilityScore", label: "Volatilität", polarity: "benefit" },
+  { key: "rsiScore", label: "RSI", polarity: "benefit" },
+  { key: "newsScore", label: "News", polarity: "benefit" },
+  { key: "socialScore", label: "Social", polarity: "benefit" },
+  { key: "eventScore", label: "Events", polarity: "benefit" },
+  { key: "riskScore", label: "Risiko", polarity: "risk" }
 ];
 
 const OUTCOME_LABELS: Record<string, string> = {
@@ -69,12 +96,6 @@ const EVAL_STATUS_LABELS: Record<string, string> = {
   SKIPPED: "Übersprungen"
 };
 
-function scoreBarColor(val: number | null | undefined): string {
-  if (typeof val !== "number") return "var(--line)";
-  if (val >= 7) return "var(--good)";
-  if (val >= 4) return "var(--accent)";
-  return "var(--bad)";
-}
 
 function sentimentLabel(s: string): string {
   const map: Record<string, string> = {
@@ -164,7 +185,7 @@ export default async function SignalDetailPage({ params }: SignalDetailPageProps
   const newsLevel =
     !newsContext.data?.hasRecentNews
       ? "none"
-      : (newsContext.data.relevanceScore ?? 0) >= 7
+      : (newsContext.data.relevanceScore ?? 0) >= NEWS_HIGH_RELEVANCE
         ? "high"
         : "relevant";
   const eventLevel =
@@ -184,18 +205,45 @@ export default async function SignalDetailPage({ params }: SignalDetailPageProps
           : "neutral";
   const rulesLevel = isAdjusted ? "adjusted" : "none";
 
+  // Wichtigste Aussage zuerst: Wie ist dieses Signal einzuordnen?
+  const introTone: PageVerdictTone =
+    s.status === "STRONG_WATCH"
+      ? "good"
+      : s.status === "WATCH"
+        ? "good"
+        : s.status === "AVOID"
+          ? "warn"
+          : "neutral";
+  const introVerdict =
+    out?.shortConclusion ??
+    `${s.symbol}: ${signalTypeLabel(s.signalType).toLowerCase()}.`;
+  const introNextStep = out?.nextTrigger
+    ? germanizeAnalysisText(out.nextTrigger) ?? undefined
+    : signalTypeExplanation(s.signalType) ?? undefined;
+  const relativeAge = formatRelativeTime(s.createdAt);
+
   return (
     <>
       {/* ── Breadcrumb ── */}
       <p className="page-header-breadcrumb" style={{ marginBottom: 12 }}>
-        <Link href="/dashboard/signals">Signal Feed</Link>
+        <Link href="/dashboard/signals">Signale</Link>
         {" / "}
         <Link href={`/dashboard/assets/${encodeURIComponent(s.symbol)}`}>
           {s.symbol}
         </Link>
         {" / "}
-        <span>{s.timeframe} · {s.signalType}</span>
+        <span>
+          {timeframeLabel(s.timeframe)} · {signalTypeLabel(s.signalType)}
+        </span>
       </p>
+
+      <PageIntro
+        purpose={`Diese Seite erklärt, wie SignalPilot ${s.symbol} auf der Zeitebene ${timeframeLabel(s.timeframe)} eingeordnet hat — und woraus sich diese Einordnung ergibt.`}
+        tone={introTone}
+        verdict={introVerdict}
+        detail={signalStatusExplanation(s.status) ?? undefined}
+        nextStep={introNextStep}
+      />
 
       {/* ── Signal-Akte Header ── */}
       <div className="card sig-header-card">
@@ -203,13 +251,16 @@ export default async function SignalDetailPage({ params }: SignalDetailPageProps
           <div>
             <p className="sig-header-symbol">{s.symbol}</p>
             <p className="sig-header-meta">
-              {data.asset.assetType}
+              {assetTypeLabel(data.asset.assetType)}
               {data.asset.name ? ` · ${data.asset.name}` : ""}
-              {" · "}{s.timeframe}
-              {" · "}{s.signalType}
+              {" · "}Zeitebene {timeframeLabel(s.timeframe)}
+              {" · "}{signalTypeLabel(s.signalType)}
             </p>
             <p className="muted small" style={{ marginTop: 3 }}>
               {formatDateTime(s.createdAt)}
+              {/* formatRelativeTime fällt jenseits von 7 Tagen auf das Datum zurück —
+                  dann wäre die Angabe doppelt. */}
+              {relativeAge !== formatDateTime(s.createdAt) ? ` · ${relativeAge}` : ""}
             </p>
           </div>
           <ScoreBadge
@@ -259,39 +310,55 @@ export default async function SignalDetailPage({ params }: SignalDetailPageProps
 
           {out?.counterArgument ? (
             <div style={{ marginTop: 16 }}>
-              <p className="context-block-title">Gegenargument / Konflikt</p>
-              <p className="signal-card-counter">{out.counterArgument}</p>
+              <p className="context-block-title">Was dagegen spricht</p>
+              <p className="signal-card-counter">
+                {germanizeAnalysisText(out.counterArgument)}
+              </p>
             </div>
           ) : null}
 
           {out?.nextTrigger ? (
             <div style={{ marginTop: 16 }}>
-              <p className="context-block-title">Nächste Bestätigung</p>
-              <p className="signal-card-trigger">{out.nextTrigger}</p>
+              <p className="context-block-title">Worauf als Nächstes zu achten ist</p>
+              <p className="signal-card-trigger">{germanizeAnalysisText(out.nextTrigger)}</p>
             </div>
           ) : null}
         </SectionCard>
 
         {/* Technische Faktoren */}
-        <SectionCard title="Technische Faktoren">
+        <SectionCard
+          title="Technische Faktoren"
+          subtitle={`Jeweils 0–${SCORE_SCALE_MAX}. Bei „Risiko“ ist ein hoher Wert ungünstig, bei allen anderen günstig.`}
+        >
           <div className="score-breakdown">
-            {SCORE_FACTORS.map(({ key, label }) => {
+            {SCORE_FACTORS.map(({ key, label, polarity }) => {
               const val = s[key];
               const numVal = typeof val === "number" ? val : null;
-              const pct = numVal != null ? Math.min(100, (numVal / 10) * 100) : 0;
+              const meaning = scoreBarMeaning(numVal, polarity);
               return (
                 <div key={String(key)} className="score-bar-row">
                   <span className="score-bar-label">{label}</span>
-                  <div className="progress-track">
+                  <div
+                    className="progress-track"
+                    role="meter"
+                    aria-valuemin={0}
+                    aria-valuemax={SCORE_SCALE_MAX}
+                    aria-valuenow={numVal ?? undefined}
+                    aria-label={`${label}: ${formatScore(numVal)} von ${SCORE_SCALE_MAX} — ${meaning}`}
+                  >
                     <div
                       className="score-bar-fill progress-fill"
                       style={{
-                        width: `${pct}%`,
-                        background: scoreBarColor(numVal)
+                        width: `${scoreBarPercent(numVal)}%`,
+                        background: scoreBarColor(numVal, polarity)
                       }}
                     />
                   </div>
-                  <span className="score-bar-value">{formatScore(numVal)}</span>
+                  <span className="score-bar-value">
+                    {formatScore(numVal)}
+                    <span className="score-bar-scale"> / {SCORE_SCALE_MAX}</span>
+                  </span>
+                  <span className="score-bar-meaning">{meaning}</span>
                 </div>
               );
             })}
@@ -299,15 +366,22 @@ export default async function SignalDetailPage({ params }: SignalDetailPageProps
         </SectionCard>
       </div>
 
-      {/* ── Score-Anpassungen (nur wenn vorhanden) ── */}
-      {rule ? (
+      {/* ── Score-Anpassungen ── Wenn keine Regel gegriffen hat, ist eine volle
+          Karte zu viel Gewicht für die Aussage "nichts passiert". ── */}
+      {rule && !isAdjusted ? (
+        <TechnicalDetails summary="Regelanpassungen: keine Regel hat die Bewertung verändert">
+          <p className="muted small" style={{ margin: 0 }}>
+            Die Basisbewertung von {formatScore(rule.originalScore)} galt unverändert.
+            {rule.summary ? ` ${rule.summary}` : ""}
+          </p>
+        </TechnicalDetails>
+      ) : null}
+
+      {rule && isAdjusted ? (
         <div style={{ marginTop: 16 }}>
           <SectionCard
-            title={
-              isAdjusted
-                ? "Score-Anpassungen · Aktiv"
-                : "Score-Anpassungen · Keine Änderung"
-            }
+            title="Regeln haben die Bewertung angepasst"
+            subtitle="Zusätzliche Regeln haben den Basiswert nach oben oder unten korrigiert."
           >
             <div className="health-rows">
               <div className="health-row">
@@ -397,9 +471,9 @@ export default async function SignalDetailPage({ params }: SignalDetailPageProps
           time: data.candles.at(-1)?.openTime ?? s.createdAt,
           direction: s.direction,
           status: s.status,
-          label: s.signalType
+          label: signalTypeLabel(s.signalType)
         }}
-        title={`Kerzen · ${s.symbol} · ${s.timeframe}`}
+        title={`Kursverlauf · ${s.symbol} · ${timeframeLabel(s.timeframe)}`}
       />
 
       {/* ── Kontext-Analyse ── */}

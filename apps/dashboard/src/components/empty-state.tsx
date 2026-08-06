@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+
 // Leere Zustände erklären, warum nichts zu sehen ist und was den Bereich füllt.
 // tone="calm": Leere ist hier eine gute Nachricht (ruhige Lage), grüner Punkt.
 
@@ -21,11 +23,26 @@ export function EmptyState({
   );
 }
 
-export function ErrorState({ title, message }: { title: string; message: string }) {
+// `hint` trägt den nächsten Schritt (oder die technische Meldung), `action` eine
+// konkrete Handlungsmöglichkeit — z. B. <RetryButton />. Nur ReactNode, keine
+// Funktions-Props: der Aufrufer ist meist eine Server-Komponente.
+export function ErrorState({
+  title,
+  message,
+  hint,
+  action
+}: {
+  title: string;
+  message: string;
+  hint?: string;
+  action?: ReactNode;
+}) {
   return (
     <div className="error-state" role="alert">
       <strong>{title}</strong>
       <span>{message}</span>
+      {hint ? <span className="error-state-hint">{hint}</span> : null}
+      {action ? <div className="error-state-action">{action}</div> : null}
     </div>
   );
 }

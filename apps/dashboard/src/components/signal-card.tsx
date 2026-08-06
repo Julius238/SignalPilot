@@ -2,6 +2,13 @@ import Link from "next/link";
 
 import { ContextBadge, DirectionBadge, RiskBadge, ScoreBadge, StatusBadge } from "./badges";
 import { formatDateTime } from "../lib/format";
+import {
+  assetTypeLabel,
+  germanizeAnalysisText,
+  signalTypeLabel,
+  timeframeLabel
+} from "../lib/labels";
+import { NEWS_HIGH_RELEVANCE } from "../lib/score-scale";
 import type { SignalListItem } from "../lib/signalpilot-api";
 
 function extractDashboardField<T>(
@@ -21,7 +28,12 @@ function deriveNewsLevel(dashboardJson: unknown): "none" | "relevant" | "high" {
     relevanceScore?: number;
   }>(dashboardJson, "newsContext");
   if (!newsContext?.hasRecentNews) return "none";
-  if ((newsContext.relevanceScore ?? 0) >= 7 || (newsContext.relevantNewsCount ?? 0) >= 3) {
+  // relevanceScore ist 0–100 (packages/news-intelligence). Die frühere Schwelle 7 stammte
+  // von einer 0–10-Annahme und stufte praktisch jede Meldung als "hoch" ein.
+  if (
+    (newsContext.relevanceScore ?? 0) >= NEWS_HIGH_RELEVANCE ||
+    (newsContext.relevantNewsCount ?? 0) >= 3
+  ) {
     return "high";
   }
   return "relevant";
@@ -56,31 +68,6 @@ function deriveRulesLevel(dashboardJson: unknown): "adjusted" | "none" {
   return "none";
 }
 
-function assetTypeLabel(value: string) {
-  const labels: Record<string, string> = {
-    CRYPTO: "Krypto",
-    STOCK: "Aktie",
-    EQUITY: "Aktie",
-    ETF: "ETF",
-    INDEX: "Index"
-  };
-  return labels[value] ?? value;
-}
-
-function signalTypeLabel(value: string) {
-  const labels: Record<string, string> = {
-    MOMENTUM_ALERT: "Momentum",
-    TREND_ALERT: "Trend",
-    VOLUME_SPIKE: "Ungewöhnliches Volumen",
-    VOLATILITY_SPIKE: "Erhöhte Schwankung",
-    BREAKOUT_ALERT: "Markante Kurszone",
-    NEWS_REACTION: "Nachrichtenreaktion",
-    EVENT_IMPACT: "Ereigniseffekt",
-    NO_SIGNAL: "Keine besondere Auffälligkeit"
-  };
-  return labels[value] ?? value.replaceAll("_", " ");
-}
-
 export function SignalCard({ signal }: { signal: SignalListItem }) {
   const dashboardJson = signal.signalOutput?.dashboardJson;
   const originalScore = extractDashboardField<number>(dashboardJson, "originalScore");
@@ -101,7 +88,7 @@ export function SignalCard({ signal }: { signal: SignalListItem }) {
             {signal.symbol}
           </Link>
           <span className="signal-card-meta">
-            {assetTypeLabel(signal.asset.assetType)} · {signal.timeframe} ·{" "}
+            {assetTypeLabel(signal.asset.assetType)} · {timeframeLabel(signal.timeframe)} ·{" "}
             {signalTypeLabel(signal.signalType)}
           </span>
           <span className="signal-card-meta">{formatDateTime(signal.createdAt)}</span>
@@ -120,8 +107,16 @@ export function SignalCard({ signal }: { signal: SignalListItem }) {
       </div>
 
       {conclusion ? <p className="signal-card-conclusion">{conclusion}</p> : null}
-      {counter ? <p className="signal-card-counter">Gegenargument: {counter}</p> : null}
-      {trigger ? <p className="signal-card-trigger">Nächster Auslöser: {trigger}</p> : null}
+      {counter ? (
+        <p className="signal-card-counter">
+          Was dagegen spricht: {germanizeAnalysisText(counter)}
+        </p>
+      ) : null}
+      {trigger ? (
+        <p className="signal-card-trigger">
+          Worauf zu achten ist: {germanizeAnalysisText(trigger)}
+        </p>
+      ) : null}
 
       <div className="signal-card-footer">
         <div className="signal-card-context">

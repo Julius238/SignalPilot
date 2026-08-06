@@ -64,14 +64,15 @@ export function PriorityBadge({ value }: { value: WatchlistPriority | string }) 
 }
 
 export function AlignmentBadge({ value }: { value: MultiTimeframeAlignment | string }) {
+  // Ohne Fachjargon: "Multi-TF" und "HTF" sagen Nutzern ohne Chart-Vorwissen nichts.
   const labels: Record<string, string> = {
-    BULLISH_ALIGNED: "Multi-TF: Aufwärts",
-    BEARISH_ALIGNED: "Multi-TF: Abwärts",
-    MIXED: "Multi-TF: Gemischt",
+    BULLISH_ALIGNED: "Einheitlich aufwärts",
+    BEARISH_ALIGNED: "Einheitlich abwärts",
+    MIXED: "Uneinheitlich",
     SHORT_TERM_ONLY: "Nur kurzfristig",
-    HIGHER_TIMEFRAME_CONFIRMATION: "HTF-Bestätigung",
-    CONFLICT: "Multi-TF: Konflikt",
-    NO_EDGE: "Multi-TF: Kein Vorteil"
+    HIGHER_TIMEFRAME_CONFIRMATION: "Längere Zeitebene bestätigt",
+    CONFLICT: "Zeitebenen widersprechen sich",
+    NO_EDGE: "Kein Vorteil erkennbar"
   };
   return (
     <span className={`badge alignment-${value.toLowerCase()}`}>

@@ -65,18 +65,24 @@ describe("dashboard comprehension and responsive states", () => {
     assert.match(source, /@media \(max-width: 390px\)/);
     assert.match(source, /\.skeleton/);
     assert.match(loading, /Beobachtungen werden nach Relevanz geordnet/);
-    assert.match(news, /Keine passenden Nachrichten gefunden/);
+    // Die Weltlage-Seite unterscheidet jetzt zwei Leerzustände: keine Ereignisse im
+    // Zeitraum und keine Treffer für die gesetzten Filter. Details in
+    // test/market-event-detail.test.ts.
+    assert.match(news, /Keine erkannten Ereignisse in den letzten/);
+    assert.match(news, /Keine Meldung passt zu diesen Filtern/);
   });
 
   it("keeps data-driven signal types while presenting readable labels", async () => {
-    const source = await readFile(
-      resolve(appDir, "src/components/signal-card.tsx"),
-      "utf8"
-    );
+    // Die Zuordnung lag früher lokal in signal-card.tsx und war dort dupliziert.
+    // Sie liegt jetzt zentral in lib/labels.ts — inhaltlich geprüft in labels.test.ts.
+    const labels = await readFile(resolve(appDir, "src/lib/labels.ts"), "utf8");
+    const card = await readFile(resolve(appDir, "src/components/signal-card.tsx"), "utf8");
 
-    assert.match(source, /MOMENTUM_ALERT: "Momentum"/);
-    assert.match(source, /NO_SIGNAL: "Keine besondere Auffälligkeit"/);
-    assert.match(source, /signalTypeLabel\(signal\.signalType\)/);
+    assert.match(labels, /MOMENTUM_ALERT: "/);
+    assert.match(labels, /NO_SIGNAL: "/);
+    assert.match(card, /signalTypeLabel\(signal\.signalType\)/);
+    // Keine lokale Zweitzuordnung mehr.
+    assert.doesNotMatch(card, /function signalTypeLabel/);
   });
 
   it("shows relevant news with explicit empty, error, and stale states on the overview", async () => {
@@ -84,7 +90,11 @@ describe("dashboard comprehension and responsive states", () => {
 
     assert.match(source, /Relevante Nachrichten/);
     assert.match(source, /Keine ausreichend relevante aktuelle Meldung/);
-    assert.match(source, /Nachrichten derzeit nicht verfügbar/);
+    // Der Fehlerzustand wird nicht mehr über einen festen Titel gerendert, sondern über
+    // describeApiError — dadurch nennt er die Ursache (nicht erreichbar / Serverfehler)
+    // statt einer pauschalen Meldung. Siehe test/discovery-status.test.ts.
+    assert.match(source, /relevantNews\.error \?/);
+    assert.match(source, /newsErrorCopy\.title/);
     assert.match(source, /älter als 24 h/);
     assert.match(source, /minRelevance=30&maxAgeHours=72&limit=5/);
   });

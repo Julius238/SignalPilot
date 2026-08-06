@@ -2,7 +2,20 @@ import Link from "next/link";
 
 import { DiscoveryControls } from "../../../components/discovery-controls";
 import { EmptyState, ErrorState } from "../../../components/empty-state";
-import { MetricCard, PageHeader, SectionCard } from "../../../components/ui";
+import { RetryButton } from "../../../components/retry-button";
+import {
+  MetricCard,
+  PageHeader,
+  PageIntro,
+  SectionCard,
+  type PageVerdictTone
+} from "../../../components/ui";
+import { describeApiError } from "../../../lib/api-error";
+import {
+  assetTypeLabel,
+  universeRoleLabel,
+  universeSourceLabel
+} from "../../../lib/labels";
 import { formatDateTime } from "../../../lib/format";
 import {
   fetchApi,
@@ -120,7 +133,7 @@ function CandidateTable({
                     {candidate.symbol}
                   </Link>
                   <span className="muted small discovery-asset-meta">
-                    {candidate.assetType} · {candidate.exchange}
+                    {assetTypeLabel(candidate.assetType)} · {candidate.exchange}
                     {candidate.sector ? ` · ${candidate.sector}` : ""}
                   </span>
                 </td>
@@ -189,13 +202,47 @@ function CandidateTable({
 export default async function DiscoveryPage() {
   const overview = await fetchApi<AssetDiscoveryOverview>("/discovery/overview?limit=120");
   const data = overview.data;
+  const errorCopy = describeApiError(
+    overview.errorKind,
+    overview.error ?? "",
+    "Die Discovery-Daten"
+  );
+
+  const proposals =
+    (data?.summary.proposedAdditionCount ?? 0) + (data?.summary.proposedRemovalCount ?? 0);
+  const introTone: PageVerdictTone = overview.error
+    ? "bad"
+    : !data?.config.enabled
+      ? "neutral"
+      : data.latestRun === null
+        ? "neutral"
+        : proposals > 0
+          ? "warn"
+          : "good";
+  const introVerdict = overview.error
+    ? "Auswahl nicht abrufbar."
+    : !data?.config.enabled
+      ? `Automatische Auswahl ist ausgeschaltet — ${data?.summary.activeCount ?? 0} Werte werden manuell beobachtet.`
+      : data.latestRun === null
+        ? "Automatische Auswahl ist eingeschaltet, aber noch nie gelaufen."
+        : proposals > 0
+          ? `${proposals} Änderungsvorschlag${proposals !== 1 ? "e" : ""} aus dem letzten Lauf.`
+          : `Keine Änderung vorgeschlagen — die ${data.summary.activeCount} beobachteten Werte bleiben unverändert.`;
+  const introNextStep = overview.error
+    ? undefined
+    : !data?.config.enabled
+      ? "Solange die Auswahl ausgeschaltet ist, ändert SignalPilot nichts von selbst."
+      : data.latestRun === null
+        ? "Der erste Lauf erzeugt Kandidaten, Scores und Vorschläge."
+        : proposals > 0
+          ? "Die Vorschläge unten ansehen — im Dry-Run wird nichts automatisch übernommen."
+          : "Nichts zu tun. Der nächste Lauf prüft erneut.";
 
   return (
     <>
       <PageHeader
         eyebrow="Beobachten"
         title="Markt entdecken"
-        subtitle="Dynamische Kandidatenauswahl mit nachvollziehbarem Score, Qualitätsgates und stabilen Universe-Regeln."
         actions={
           <>
             <Link className="primary-link secondary-link" href="/dashboard/data-quality">
@@ -208,8 +255,20 @@ export default async function DiscoveryPage() {
         }
       />
 
+      <PageIntro
+        purpose="Diese Seite schlägt vor, welche Werte SignalPilot dauerhaft beobachten sollte — anhand von Liquidität, Datenqualität und Auffälligkeit."
+        tone={introTone}
+        verdict={introVerdict}
+        nextStep={introNextStep}
+      />
+
       {overview.error ? (
-        <ErrorState title="Discovery-Daten nicht verfügbar" message={overview.error} />
+        <ErrorState
+          title={errorCopy.title}
+          message={errorCopy.message}
+          hint={errorCopy.hint}
+          action={errorCopy.retryable ? <RetryButton /> : null}
+        />
       ) : null}
 
       {data ? (
@@ -237,6 +296,20 @@ export default async function DiscoveryPage() {
               {data.config.dryRun ? "DRY-RUN" : "AKTIV"}
             </span>
           </section>
+
+          {/* "Noch kein Lauf" ist ein eigener Zustand — weder Fehler noch "deaktiviert". */}
+          {data.latestRun === null ? (
+            <div style={{ marginBottom: 16 }}>
+              <EmptyState
+                title="Noch kein Discovery-Lauf durchgeführt."
+                description={
+                  data.config.enabled
+                    ? "Das aktive Universe unten stammt aus Core- und manuellen Zuweisungen. Kandidaten, Scores und Vorschläge entstehen mit dem ersten Lauf."
+                    : "Asset Discovery ist derzeit deaktiviert. Das aktive Universe unten stammt aus Core- und manuellen Zuweisungen."
+                }
+              />
+            </div>
+          ) : null}
 
           <div className="grid metrics">
             <MetricCard
@@ -359,13 +432,13 @@ export default async function DiscoveryPage() {
                             {item.asset.symbol}
                           </Link>
                           <span className="muted small discovery-asset-meta">
-                            {item.asset.assetType} · {item.asset.exchange}
+                            {assetTypeLabel(item.asset.assetType)} · {item.asset.exchange}
                           </span>
                         </td>
                         <td>
-                          <span className="badge badge-info">{item.role}</span>
+                          <span className="badge badge-info">{universeRoleLabel(item.role)}</span>
                         </td>
-                        <td>{item.source}</td>
+                        <td>{universeSourceLabel(item.source)}</td>
                         <td>{item.score?.toFixed(1) ?? "—"}</td>
                         <td>{item.dataQuality?.toFixed(0) ?? "—"}</td>
                         <td>{item.activatedAt ? formatDateTime(item.activatedAt) : "—"}</td>

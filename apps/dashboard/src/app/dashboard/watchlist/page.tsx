@@ -11,6 +11,7 @@ import { WatchlistItemEditor } from "../../../components/watchlist-controls";
 import { PageHeader } from "../../../components/ui";
 import { buildQuery, fetchApi, type WatchlistItem } from "../../../lib/signalpilot-api";
 import { formatScore } from "../../../lib/format";
+import { signalTypeLabel } from "../../../lib/labels";
 
 const priorities = ["", "LOW", "MEDIUM", "HIGH"];
 const assetTypes = ["", "CRYPTO", "STOCK", "ETF"];
@@ -136,7 +137,7 @@ export default async function WatchlistPage({ searchParams }: WatchlistPageProps
                   {item.latestSignal ? (
                     <>
                       <Link href={`/dashboard/signals/${item.latestSignal.id}`}>
-                        {item.latestSignal.signalType}
+                        {signalTypeLabel(item.latestSignal.signalType)}
                       </Link>
                       <div className="watchlist-badges">
                         <StatusBadge value={item.latestSignal.status} />

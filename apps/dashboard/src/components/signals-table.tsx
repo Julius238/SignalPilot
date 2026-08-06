@@ -4,6 +4,7 @@ import { DirectionBadge, RiskBadge, StatusBadge } from "./badges";
 import { EmptyState } from "./empty-state";
 import { formatDateTime, formatScore } from "../lib/format";
 import type { SignalListItem } from "../lib/signalpilot-api";
+import { signalTypeLabel } from "../lib/labels";
 
 export function SignalsTable({ signals }: { signals: SignalListItem[] }) {
   if (signals.length === 0) {
@@ -37,7 +38,7 @@ export function SignalsTable({ signals }: { signals: SignalListItem[] }) {
               </td>
               <td>{signal.asset.assetType}</td>
               <td>{signal.timeframe}</td>
-              <td>{signal.signalType}</td>
+              <td>{signalTypeLabel(signal.signalType)}</td>
               <td>
                 <StatusBadge value={signal.status} />
               </td>

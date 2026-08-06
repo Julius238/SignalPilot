@@ -702,7 +702,9 @@ export async function postTradingOperation<T = unknown>(
       error:
         csrf.error === "Unauthorized"
           ? "Unauthorized"
-          : "Operationen sind derzeit nicht verfügbar (Feature-Flag oder CSRF-Ausgabe fehlgeschlagen)."
+          : "Operationen sind derzeit nicht verfügbar (Feature-Flag oder CSRF-Ausgabe fehlgeschlagen).",
+      // Die Ursache des CSRF-Aufrufs durchreichen, statt sie zu "request" zu verflachen.
+      errorKind: csrf.errorKind ?? "request"
     };
   }
 

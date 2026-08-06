@@ -9,6 +9,7 @@ import {
   type AlertState,
   type BotRun
 } from "../../../lib/signalpilot-api";
+import { signalTypeLabel } from "../../../lib/labels";
 
 function RunStatusBadge({ status }: { status: BotRun["status"] }) {
   const cls =
@@ -239,7 +240,7 @@ export default async function OperationsPage() {
                         : alert.channel}
                     </strong>
                     <span className="muted small">
-                      {alert.signal?.signalType ?? alert.channel} · {formatDateTime(alert.createdAt)}
+                      {alert.signal ? signalTypeLabel(alert.signal.signalType) : alert.channel} · {formatDateTime(alert.createdAt)}
                     </span>
                   </div>
                   <div className="right-meta">
@@ -285,7 +286,7 @@ export default async function OperationsPage() {
                       </Link>
                     </td>
                     <td>{state.timeframe}</td>
-                    <td>{state.signalType}</td>
+                    <td>{signalTypeLabel(state.signalType)}</td>
                     <td>
                       <span className={`badge status-${state.status.toLowerCase()}`}>
                         {state.status}

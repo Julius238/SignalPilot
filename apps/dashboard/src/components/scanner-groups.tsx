@@ -4,6 +4,7 @@ import { AlignmentBadge, DirectionBadge, RiskBadge, ScoreBadge, StatusBadge } fr
 import { EmptyState } from "./empty-state";
 import { formatDateTime } from "../lib/format";
 import type { MultiTimeframeSummary, ScannerGroupKey, SignalListItem } from "../lib/signalpilot-api";
+import { signalTypeLabel } from "../lib/labels";
 
 const groupTitles: Record<ScannerGroupKey, string> = {
   strongWatch: "Hohe Relevanz",
@@ -122,7 +123,7 @@ function SignalScannerRow({
           >
             {signal.asset.assetType} · {signal.timeframe}
           </Link>
-          <span className="scanner-asset-link">{signal.signalType}</span>
+          <span className="scanner-asset-link">{signalTypeLabel(signal.signalType)}</span>
         </div>
         <ScoreBadge
           value={signal.score}

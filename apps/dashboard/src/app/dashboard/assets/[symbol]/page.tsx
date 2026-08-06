@@ -19,6 +19,7 @@ import {
   type NewsItem,
   type SignalListItem
 } from "../../../../lib/signalpilot-api";
+import { signalTypeLabel } from "../../../../lib/labels";
 
 type AssetDetailPageProps = {
   params: Promise<{ symbol: string }>;
@@ -165,7 +166,7 @@ export default async function AssetDetailPage({ params }: AssetDetailPageProps) 
               <div className="list-row">
                 <div>
                   <strong style={{ display: "block", marginBottom: 4 }}>
-                    {latestSignal.signalType}
+                    {signalTypeLabel(latestSignal.signalType)}
                   </strong>
                   <span className="muted small">
                     {latestSignal.timeframe} · {formatDateTime(latestSignal.createdAt)}
@@ -313,7 +314,7 @@ export default async function AssetDetailPage({ params }: AssetDetailPageProps) 
                 time: data.candles?.at(-1)?.openTime ?? latestSignal.createdAt,
                 direction: latestSignal.direction,
                 status: latestSignal.status,
-                label: latestSignal.signalType
+                label: signalTypeLabel(latestSignal.signalType)
               }
             : undefined
         }
@@ -356,7 +357,7 @@ export default async function AssetDetailPage({ params }: AssetDetailPageProps) 
                     <tr key={sig.id}>
                       <td className="nowrap">{formatDateTime(sig.createdAt)}</td>
                       <td>{sig.timeframe}</td>
-                      <td>{sig.signalType}</td>
+                      <td>{signalTypeLabel(sig.signalType)}</td>
                       <td>
                         <StatusBadge value={sig.status} />
                       </td>

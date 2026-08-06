@@ -2,8 +2,17 @@ import Link from "next/link";
 
 import { StatusBadge } from "../../../components/badges";
 import { EmptyState, ErrorState } from "../../../components/empty-state";
-import { MetricCard, PageHeader, SectionCard } from "../../../components/ui";
+import { RetryButton } from "../../../components/retry-button";
+import {
+  MetricCard,
+  PageHeader,
+  PageIntro,
+  SectionCard,
+  TechnicalDetails
+} from "../../../components/ui";
+import { describeApiError } from "../../../lib/api-error";
 import { formatDateTime, formatScore } from "../../../lib/format";
+import { timeframeLabel } from "../../../lib/labels";
 import {
   buildQuery,
   fetchApi,
@@ -39,50 +48,83 @@ export default async function RulesPage({ searchParams }: RulesPageProps) {
   const hasFilter = !!(params.symbol || params.adjustedStatus || params.category);
 
   const avgDelta = summary.data?.avgDelta ?? 0;
+  const applicationList = applications.data ?? [];
+  const changed = applicationList.filter(
+    (row) => Math.abs(row.adjustedScore - row.originalScore) > 0.05
+  );
+  const unchangedCount = applicationList.length - changed.length;
+  const errorCopy = describeApiError(
+    summary.errorKind ?? applications.errorKind,
+    errors.join(" | "),
+    "Die Regelauswertung"
+  );
+
+  const tone = errors.length > 0 ? "bad" : changed.length > 0 ? "warn" : "good";
+  const verdict =
+    errors.length > 0
+      ? "Regelauswertung nicht abrufbar."
+      : applicationList.length === 0
+        ? "Noch keine Regelanwendungen aufgezeichnet."
+        : changed.length === 0
+          ? `Keine der ${applicationList.length} Bewertungen wurde durch eine Regel verändert.`
+          : `${changed.length} von ${applicationList.length} Bewertungen wurden durch Regeln angepasst.`;
+  const nextStep =
+    errors.length > 0
+      ? undefined
+      : applicationList.length === 0
+        ? "Regelanwendungen entstehen automatisch bei jeder Signalauswertung."
+        : changed.length === 0
+          ? "Nichts zu prüfen — die Basisbewertung galt unverändert."
+          : "Die angepassten Einträge stehen oben; die Spalte „Hauptgrund“ nennt die ausschlaggebende Regel.";
 
   return (
     <>
-      <PageHeader
-        eyebrow="Research"
-        title="Signalregeln"
-        subtitle="Welche Regeln eine automatische Basisbewertung verändert haben — mit Richtung und Stärke der Anpassung."
+      <PageHeader eyebrow="Research" title="Signalregeln" />
+
+      <PageIntro
+        purpose="Diese Seite macht nachvollziehbar, ob und warum zusätzliche Regeln eine automatische Bewertung nach oben oder unten korrigiert haben."
+        tone={tone}
+        verdict={verdict}
+        nextStep={nextStep}
       />
 
       {errors.length > 0 ? (
-        <ErrorState title="Regeln konnten nicht geladen werden" message={errors.join(" | ")} />
+        <ErrorState
+          title={errorCopy.title}
+          message={errorCopy.message}
+          hint={errorCopy.hint}
+          action={errorCopy.retryable ? <RetryButton /> : null}
+        />
       ) : null}
 
-      {/* Kennzahlen */}
-      <div className="grid metrics" style={{ marginBottom: 20 }}>
-        <MetricCard
-          label="Anwendungen gesamt"
-          value={summary.data?.totalApplications ?? 0}
-        />
-        <MetricCard
-          label="Durchschnittl. Delta"
-          value={
-            <span style={{ color: avgDelta > 0 ? "var(--good)" : avgDelta < 0 ? "var(--bad)" : undefined }}>
-              {avgDelta > 0 ? "+" : ""}{formatScore(avgDelta)}
-            </span>
-          }
-        />
-        <MetricCard
-          label="Aufwertungen"
-          value={
-            <span style={{ color: "var(--good)" }}>
-              {summary.data?.positiveAdjustmentCount ?? 0}
-            </span>
-          }
-        />
-        <MetricCard
-          label="Abwertungen"
-          value={
-            <span style={{ color: "var(--bad)" }}>
-              {summary.data?.negativeAdjustmentCount ?? 0}
-            </span>
-          }
-        />
-      </div>
+      {/* Kennzahlen — nur zeigen, wenn es tatsächlich Anpassungen gab. */}
+      {changed.length > 0 ? (
+        <div className="grid metrics" style={{ marginBottom: 20 }}>
+          <MetricCard
+            label="Angepasste Bewertungen"
+            value={changed.length}
+            sub={`von ${applicationList.length} geprüften`}
+            hint="Nur bei diesen Einträgen hat eine Regel den Basiswert verändert."
+          />
+          <MetricCard
+            label="Durchschnittliche Anpassung"
+            value={`${avgDelta > 0 ? "+" : ""}${formatScore(avgDelta)}`}
+            sub="Punkte auf der Skala 0–100"
+            hint="Positiv = die Regeln haben die Bewertung im Schnitt angehoben."
+            tone={avgDelta > 0 ? "good" : avgDelta < 0 ? "bad" : "quiet"}
+          />
+          <MetricCard
+            label="Aufwertungen"
+            value={summary.data?.positiveAdjustmentCount ?? 0}
+            tone="good"
+          />
+          <MetricCard
+            label="Abwertungen"
+            value={summary.data?.negativeAdjustmentCount ?? 0}
+            tone="bad"
+          />
+        </div>
+      ) : null}
 
       {/* Filter */}
       <form className="filter-bar" method="GET" style={{ marginBottom: 16 }}>
@@ -109,74 +151,103 @@ export default async function RulesPage({ searchParams }: RulesPageProps) {
         ) : null}
       </form>
 
-      {/* Tabelle */}
-      <SectionCard title="Regelanwendungen">
-        {!applications.data || applications.data.length === 0 ? (
-          <EmptyState title="Keine Regelanwendungen gefunden." />
-        ) : (
-          <>
-            <p className="muted small" style={{ marginBottom: 12 }}>
-              {applications.data.length} Einträge
-              {hasFilter ? " (gefiltert)" : ""}
-            </p>
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Symbol</th>
-                    <th>TF</th>
-                    <th>Original-Score</th>
-                    <th>Angepasst</th>
-                    <th>Delta</th>
-                    <th>Original-Status</th>
-                    <th>Angepasster Status</th>
-                    <th>Hauptgrund</th>
-                    <th>Erstellt</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {applications.data.map((row) => {
-                    const delta = row.adjustedScore - row.originalScore;
-                    return (
-                      <tr key={row.id}>
-                        <td>
-                          <Link href={`/dashboard/signals/${encodeURIComponent(row.signalId)}`}>
-                            {row.symbol}
-                          </Link>
-                        </td>
-                        <td>{row.timeframe}</td>
-                        <td>{formatScore(row.originalScore)}</td>
-                        <td>{formatScore(row.adjustedScore)}</td>
-                        <td
-                          style={{
-                            color:
-                              delta > 0
-                                ? "var(--good)"
-                                : delta < 0
-                                  ? "var(--bad)"
-                                  : undefined
-                          }}
-                        >
-                          {delta > 0 ? "+" : ""}
-                          {delta.toFixed(1)}
-                        </td>
-                        <td>
-                          <StatusBadge value={row.originalStatus} />
-                        </td>
-                        <td>
-                          <StatusBadge value={row.adjustedStatus} />
-                        </td>
-                        <td>{row.adjustments[0]?.reason ?? "—"}</td>
-                        <td className="nowrap">{formatDateTime(row.createdAt)}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </>
-        )}
-      </SectionCard>
+      {/* Nur die tatsächlich veränderten Bewertungen stehen vorne — unveränderte
+          Einträge füllten die Tabelle bisher mit lauter Nullzeilen. */}
+      {applicationList.length === 0 ? (
+        <EmptyState
+          title={
+            hasFilter
+              ? "Keine Regelanwendung passt zu diesem Filter."
+              : "Noch keine Regelanwendungen aufgezeichnet."
+          }
+          description={
+            hasFilter
+              ? "Filter zurücksetzen oder ein anderes Symbol wählen."
+              : "Sie entstehen automatisch bei jeder Signalauswertung."
+          }
+        />
+      ) : changed.length > 0 ? (
+        <SectionCard
+          title="Angepasste Bewertungen"
+          subtitle={hasFilter ? "Die Ansicht ist aktuell gefiltert." : undefined}
+        >
+          <RuleTable rows={changed} />
+        </SectionCard>
+      ) : (
+        <EmptyState
+          title="Nichts zu prüfen."
+          description="Regeln greifen erst, wenn Nachrichten, Termine, Marktumfeld oder Datenqualität für ein Signal deutlich vom Normalfall abweichen. Das war hier bei keinem Eintrag so."
+          tone="calm"
+        />
+      )}
+
+      {unchangedCount > 0 ? (
+        <TechnicalDetails summary="Unveränderte Bewertungen anzeigen" count={unchangedCount}>
+          <RuleTable
+            rows={applicationList.filter(
+              (row) => Math.abs(row.adjustedScore - row.originalScore) <= 0.05
+            )}
+          />
+        </TechnicalDetails>
+      ) : null}
     </>
+  );
+}
+
+function RuleTable({ rows }: { rows: SignalRuleApplication[] }) {
+  return (
+    <div className="table-wrap">
+      <table className="responsive-table">
+        <thead>
+          <tr>
+            <th>Symbol</th>
+            <th>Zeitebene</th>
+            <th>Vorher</th>
+            <th>Nachher</th>
+            <th>Änderung</th>
+            <th>Einstufung vorher</th>
+            <th>Einstufung nachher</th>
+            <th>Hauptgrund</th>
+            <th>Zeitpunkt</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => {
+            const delta = row.adjustedScore - row.originalScore;
+            return (
+              <tr key={row.id}>
+                <td data-label="Symbol">
+                  <Link href={`/dashboard/signals/${encodeURIComponent(row.signalId)}`}>
+                    {row.symbol}
+                  </Link>
+                </td>
+                <td data-label="Zeitebene">{timeframeLabel(row.timeframe)}</td>
+                <td data-label="Vorher">{formatScore(row.originalScore)}</td>
+                <td data-label="Nachher">{formatScore(row.adjustedScore)}</td>
+                <td
+                  data-label="Änderung"
+                  style={{
+                    color: delta > 0 ? "var(--good)" : delta < 0 ? "var(--bad)" : undefined
+                  }}
+                >
+                  {delta > 0 ? "+" : ""}
+                  {delta.toFixed(1)}
+                </td>
+                <td data-label="Einstufung vorher">
+                  <StatusBadge value={row.originalStatus} />
+                </td>
+                <td data-label="Einstufung nachher">
+                  <StatusBadge value={row.adjustedStatus} />
+                </td>
+                <td data-label="Hauptgrund">{row.adjustments[0]?.reason ?? "—"}</td>
+                <td data-label="Zeitpunkt" className="nowrap">
+                  {formatDateTime(row.createdAt)}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   );
 }
