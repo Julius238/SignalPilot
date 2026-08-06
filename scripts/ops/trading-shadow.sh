@@ -171,7 +171,7 @@ SELECT
   sv.\"id\" AS strategy_version_id, sv.\"version\", sv.\"status\" AS strategy_version_status,
   sv.\"engineVersion\", sv.\"codeVersion\", sv.\"specificationHash\",
   a.\"id\" AS assignment_id, x.\"symbol\", a.\"timeframe\",
-  a.\"assignmentConfigJson\"->>'direction' AS direction, a.\"enabled\"
+  a.\"assignmentConfigJson\"->>'\''direction'\'' AS direction, a.\"enabled\"
 FROM \"StrategyAssignment\" a
 JOIN \"Strategy\" s ON s.\"id\" = a.\"strategyId\"
 JOIN \"StrategyVersion\" sv ON sv.\"id\" = a.\"strategyVersionId\"
@@ -394,7 +394,10 @@ case "$command_name" in
     if [ "$current_status" = "SHADOW_ACTIVE" ]; then
       run_ops pause-session --session-id="$current_session_id" --actor="$1" --idempotency-key="$2-pause"
     fi
-    enabled_assignment_rows=$(query_scalar 'SELECT a."id" || '''|''' || a."version" || '''|''' || x."symbol" || '''|''' || (a."assignmentConfigJson"->>'''direction''') || '''|''' || s."key" FROM "StrategyAssignment" a JOIN "Portfolio" p ON p."id" = a."portfolioId" JOIN "Asset" x ON x."id" = a."assetId" JOIN "Strategy" s ON s."id" = a."strategyId" WHERE p."key" = '''SHADOW_V1''' AND a."enabled" = true ORDER BY x."symbol", s."key";')
+    # Einfache Anführungszeichen müssen im äußeren '...'-String als '\'' geschrieben
+    # werden. Die Form '''x''' schließt den String, hängt ein leeres Paar an und lässt
+    # x unquotiert — aus '''direction''' wurde so ->>direction (ungültiges SQL).
+    enabled_assignment_rows=$(query_scalar 'SELECT a."id" || '\''|'\'' || a."version" || '\''|'\'' || x."symbol" || '\''|'\'' || (a."assignmentConfigJson"->>'\''direction'\'') || '\''|'\'' || s."key" FROM "StrategyAssignment" a JOIN "Portfolio" p ON p."id" = a."portfolioId" JOIN "Asset" x ON x."id" = a."assetId" JOIN "Strategy" s ON s."id" = a."strategyId" WHERE p."key" = '\''SHADOW_V1'\'' AND a."enabled" = true ORDER BY x."symbol", s."key";')
     while IFS='|' read -r assignment_id current_version symbol direction strategy_key; do
       if [ -z "$assignment_id" ]; then continue; fi
       run_ops disable-assignment --assignment-id="$assignment_id" --actor="$1" --idempotency-key="$2-assignment-$assignment_id" --expected-version="$current_version" --confirmation="DISABLE_${symbol}_${direction}_${strategy_key}_V${current_version}"
