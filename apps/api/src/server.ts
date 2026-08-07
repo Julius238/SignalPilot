@@ -6,11 +6,13 @@ import Fastify from "fastify";
 
 import { validateAuthConfig } from "./auth/config.js";
 import { requireAdmin } from "./auth/helpers.js";
+import { resolveNexusReadConfig } from "./lib/nexusReadConfig.js";
 import { resolveTradingApiConfig } from "./lib/tradingApiConfig.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerAuditLogRoutes } from "./routes/audit-logs.js";
 import { registerDashboardRoutes } from "./routes/dashboard.js";
 import { registerHealthRoutes } from "./routes/health.js";
+import { registerNexusReadRoutes } from "./routes/integrations/nexusRead.js";
 import { registerTradingOperationsRoutes, registerTradingReadRoutes } from "./routes/trading/index.js";
 
 export async function buildServer() {
@@ -45,6 +47,27 @@ export async function buildServer() {
 
   await server.register(registerHealthRoutes);
   await server.register(registerAuthRoutes);
+
+  // Nexus read-only integration API. Registered as its own top-level scope, on
+  // purpose *outside* the admin-cookie scope below: `requireAdmin` lets every
+  // request through when `API_AUTH_ENABLED=false`, and a service-to-service
+  // integration must never inherit that. Its own bearer-token hook is the only
+  // gate, and it is fail closed — an unconfigured or malformed setup leaves the
+  // routes unregistered (404) rather than open.
+  const nexusReadConfig = resolveNexusReadConfig();
+  if (nexusReadConfig.ok && nexusReadConfig.config.enabled) {
+    await server.register(
+      async (scope) => registerNexusReadRoutes(scope, { config: nexusReadConfig.config }),
+      { prefix: "/integrations/nexus/v1" }
+    );
+    server.log.info("Nexus read API registered at /integrations/nexus/v1");
+  }
+  if (!nexusReadConfig.ok) {
+    server.log.warn(
+      { reasonCode: nexusReadConfig.reasonCode },
+      "Nexus read API configuration invalid; routes not registered"
+    );
+  }
 
   await server.register(async (protectedScope) => {
     protectedScope.addHook("onRequest", async (request, reply) => {
