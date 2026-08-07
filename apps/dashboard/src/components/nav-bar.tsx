@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 
 import { LogoutButton } from "./logout-button";
@@ -205,11 +205,64 @@ function isActive(pathname: string, href: string, exact?: boolean): boolean {
 export function NavBar() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
+  const toggleRef = useRef<HTMLButtonElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+
+  const close = useCallback(() => setOpen(false), []);
+
+  // Escape schließt das Menü, Tab bleibt darin gefangen. Ohne die Fokusfalle
+  // wandert der Fokus hinter das Overlay in Inhalte, die dort nicht bedienbar
+  // sein sollen — für Tastatur- und Screenreader-Nutzer wäre das Menü dann offen,
+  // die Bedienung aber unsichtbar woanders.
+  useEffect(() => {
+    if (!open) return;
+
+    const panel = panelRef.current;
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setOpen(false);
+        toggleRef.current?.focus();
+        return;
+      }
+
+      if (event.key !== "Tab" || !panel) return;
+
+      const focusable = panel.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      );
+      if (focusable.length === 0) return;
+
+      // Der Umschalter gehört zum Menü, steht im DOM aber davor.
+      const first = toggleRef.current ?? focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+
+      if (event.shiftKey && active === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener("keydown", onKeyDown);
+    // Der Hintergrund darf nicht mitscrollen, solange das Menü ihn verdeckt.
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [open]);
 
   return (
-    <aside className="side-nav">
+    <aside className={`side-nav${open ? " side-nav--open" : ""}`}>
       <div className="side-nav-top">
-        <Link className="brand" href="/dashboard" onClick={() => setOpen(false)}>
+        <Link className="brand" href="/dashboard" onClick={close}>
           <span className="brand-mark" aria-hidden="true">
             <span />
             <span />
@@ -221,7 +274,9 @@ export function NavBar() {
           </span>
         </Link>
         <button
+          ref={toggleRef}
           aria-expanded={open}
+          aria-controls="hauptnavigation"
           aria-label={open ? "Navigation schließen" : "Navigation öffnen"}
           className="nav-mobile-toggle"
           type="button"
@@ -231,7 +286,18 @@ export function NavBar() {
         </button>
       </div>
 
-      <div className={`side-nav-panel${open ? " side-nav-panel--open" : ""}`}>
+      {/* Eigener Abdunkler über dem Seiteninhalt: macht sichtbar, dass der
+          Hintergrund pausiert ist, und schließt das Menü bei Klick daneben.
+          `aria-hidden`, weil Escape und der Umschalter denselben Zweck erfüllen. */}
+      {open ? (
+        <div className="side-nav-scrim" aria-hidden="true" onClick={close} />
+      ) : null}
+
+      <div
+        id="hauptnavigation"
+        ref={panelRef}
+        className={`side-nav-panel${open ? " side-nav-panel--open" : ""}`}
+      >
         <nav className="nav-groups" aria-label="Hauptnavigation">
           {NAV_GROUPS.map((group) => (
             <div className="nav-group" key={group.label}>
@@ -245,7 +311,7 @@ export function NavBar() {
                       href={item.href}
                       aria-current={active ? "page" : undefined}
                       className={`nav-link${active ? " active" : ""}`}
-                      onClick={() => setOpen(false)}
+                      onClick={close}
                     >
                       <NavIcon name={item.icon} />
                       <span className="nav-link-copy">
@@ -261,7 +327,7 @@ export function NavBar() {
         </nav>
 
         <div className="side-nav-footer">
-          <Link href="/dashboard/operations" className="nav-health" onClick={() => setOpen(false)}>
+          <Link href="/dashboard/operations" className="nav-health" onClick={close}>
             <span className="nav-health-dot" aria-hidden="true" />
             <span>
               <strong>Systemübersicht</strong>

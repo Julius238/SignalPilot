@@ -3,19 +3,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { marketEventTypeLabels } from "./shared";
-import { formatDateTime } from "../../lib/format";
+import { formatDateTime, pluralize } from "../../lib/format";
 import {
-  SEVERITY_TIER_META,
   UNASSIGNED_REGION_KEY,
   UNASSIGNED_REGION_LABEL,
   confidenceNote,
   derivedSummary,
   eventAge,
   marketRelevance,
+  severityMeta,
   severitySortRank,
-  severityTier,
   storedSummary
 } from "../../lib/market-event-detail";
+import { severityScale, type SeverityMeta } from "../../lib/severity";
 import type { MarketEvent } from "../../lib/signalpilot-api";
 
 export type MapMarker = {
@@ -86,30 +86,31 @@ export function WorldMapExplorer({
   }, [events, selectedId]);
 
   const markerData = useMemo(() => {
-    const counts = new Map<string, { total: number; topRank: number }>();
+    const counts = new Map<string, { total: number; top: SeverityMeta }>();
     for (const event of events) {
       const key = regionOf(event);
-      const entry = counts.get(key) ?? { total: 0, topRank: 0 };
+      const meta = severityMeta(event.severity);
+      const entry = counts.get(key);
+      if (!entry) {
+        counts.set(key, { total: 1, top: meta });
+        continue;
+      }
       entry.total += 1;
-      entry.topRank = Math.max(entry.topRank, severitySortRank(event.severity));
-      counts.set(key, entry);
+      if (meta.rank > entry.top.rank) entry.top = meta;
     }
 
     return markers
       .map((marker) => {
         const entry = counts.get(marker.regionKey);
         if (!entry) return null;
-        const tier: keyof typeof SEVERITY_TIER_META =
-          entry.topRank >= 4 ? "critical" : entry.topRank >= 3 ? "important" : "info";
-        // Wichtigkeit bestimmt den Grundradius, Anzahl nur einen kleinen Zuschlag.
-        // Sonst würde eine einzelne kritische Meldung neben einem grossen
-        // Info-Cluster optisch untergehen.
-        const base = tier === "critical" ? 26 : tier === "important" ? 20 : 14;
+        // Wichtigkeit bestimmt den Grundradius (aus `lib/severity.ts`), die Anzahl
+        // nur einen kleinen Zuschlag. Sonst würde eine einzelne kritische Meldung
+        // neben einem großen Info-Cluster optisch untergehen.
         return {
           ...marker,
           count: entry.total,
-          tier,
-          radius: base + Math.min(10, Math.sqrt(entry.total) * 2.5)
+          meta: entry.top,
+          radius: entry.top.markerRadius + Math.min(10, Math.sqrt(entry.total) * 2.5)
         };
       })
       .filter((marker): marker is NonNullable<typeof marker> => marker !== null)
@@ -151,29 +152,46 @@ export function WorldMapExplorer({
           >
             {mapBase}
             {markerData.map((marker) => {
-              const meta = SEVERITY_TIER_META[marker.tier];
-              const isActive = selectedRegion === marker.regionKey;
-              const isFocused = focusedRegion === marker.regionKey;
+              const meta = marker.meta;
+              // Ausgewählt ist ein Marker, sobald seine Region die Liste filtert ODER
+              // die offene Meldung aus ihr stammt. Beides muss `aria-pressed` setzen,
+              // sonst erfährt ein Screenreader nichts von der Auswahl.
+              const isActive =
+                selectedRegion === marker.regionKey || focusedRegion === marker.regionKey;
               return (
                 <g
                   key={marker.regionKey}
-                  className={`map-marker${isActive || isFocused ? " map-marker--active" : ""}`}
+                  className={`map-marker${isActive ? " map-marker--active" : ""}`}
                   transform={`translate(${marker.x}, ${marker.y})`}
                   role="button"
                   tabIndex={0}
-                  aria-pressed={isFocused}
-                  aria-label={`${marker.label}: ${marker.count} ${
-                    marker.count === 1 ? "Meldung" : "Meldungen"
-                  }, höchste Einstufung ${meta.label}`}
+                  aria-pressed={isActive}
+                  aria-label={`${marker.label}: ${pluralize(
+                    marker.count,
+                    "Meldung",
+                    "Meldungen"
+                  )}, höchste Einstufung ${meta.label}`}
                   onClick={() => handleMarker(marker.regionKey)}
                   onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
+                    // SVG-Elemente mit role="button" lösen — anders als <button> —
+                    // nicht von selbst aus. Enter und Leertaste müssen von Hand
+                    // behandelt werden; "Spacebar" ist der Legacy-Name älterer Engines.
+                    if (
+                      event.key === "Enter" ||
+                      event.key === " " ||
+                      event.key === "Spacebar"
+                    ) {
                       event.preventDefault();
                       handleMarker(marker.regionKey);
                     }
                   }}
                 >
-                  {isActive || isFocused ? (
+                  {/* Immer im DOM, auch ohne Auswahl: Der Fokusring hing vorher
+                      am Auswahlring und fehlte damit genau dort, wo er gebraucht
+                      wird — beim noch nicht ausgewählten Marker. Sichtbar wird er
+                      allein über `:focus-visible`. */}
+                  <circle className="map-marker-focus" r={marker.radius + 11} />
+                  {isActive ? (
                     <circle className="map-marker-ring" r={marker.radius + 6} />
                   ) : null}
                   <circle
@@ -181,7 +199,7 @@ export function WorldMapExplorer({
                     fill={meta.color}
                     fillOpacity={0.24}
                     stroke={meta.color}
-                    strokeWidth={marker.tier === "info" ? 1.5 : 2.5}
+                    strokeWidth={meta.key === "INFO" ? 1.5 : 2.5}
                   />
                   <text className="world-map-count" dy="0.35em">
                     {marker.count}
@@ -194,15 +212,15 @@ export function WorldMapExplorer({
             })}
           </svg>
           <figcaption className="world-map-legend">
-            {(["critical", "important", "info"] as const)
-              .filter((tier) => markerData.some((marker) => marker.tier === tier))
-              .map((tier) => (
-                <span key={tier} className="world-map-legend-item">
+            {severityScale()
+              .filter((meta) => markerData.some((marker) => marker.meta.key === meta.key))
+              .map((meta) => (
+                <span key={meta.key} className="world-map-legend-item">
                   <span
                     className="world-map-legend-dot"
-                    style={{ backgroundColor: SEVERITY_TIER_META[tier].color }}
+                    style={{ backgroundColor: meta.color }}
                   />
-                  {SEVERITY_TIER_META[tier].symbol} {SEVERITY_TIER_META[tier].label}
+                  {meta.symbol} {meta.label}
                 </span>
               ))}
             <span className="world-map-legend-item muted">
@@ -226,9 +244,7 @@ export function WorldMapExplorer({
 
       <aside className="map-explorer-list" aria-label="Meldungen">
         <div className="map-explorer-list-head">
-          <strong>
-            {visibleEvents.length} {visibleEvents.length === 1 ? "Meldung" : "Meldungen"}
-          </strong>
+          <strong>{pluralize(visibleEvents.length, "Meldung", "Meldungen")}</strong>
           {focusedRegion ? (
             <button
               type="button"
@@ -247,14 +263,13 @@ export function WorldMapExplorer({
 
         <ul className="map-explorer-items">
           {visibleEvents.map((event) => {
-            const tier = severityTier(event.severity);
-            const meta = SEVERITY_TIER_META[tier];
+            const meta = severityMeta(event.severity);
             const isActive = event.id === selectedId;
             return (
               <li key={event.id}>
                 <button
                   type="button"
-                  className={`event-item event-item--${tier}${
+                  className={`event-item event-item--${meta.tone}${
                     isActive ? " event-item--active" : ""
                   }`}
                   aria-current={isActive ? "true" : undefined}
@@ -295,14 +310,13 @@ function EventDetail({
   now: Date;
   onClose: () => void;
 }) {
-  const tier = severityTier(event.severity);
-  const meta = SEVERITY_TIER_META[tier];
+  const meta = severityMeta(event.severity);
   const stored = storedSummary(event);
   const derived = stored ? null : derivedSummary(event, now);
   const relevance = marketRelevance(event);
 
   return (
-    <article className={`event-detail event-detail--${tier}`} aria-live="polite">
+    <article className={`event-detail event-detail--${meta.tone}`} aria-live="polite">
       <div className="event-detail-head">
         <span className="event-detail-severity" style={{ color: meta.color }}>
           {meta.symbol} {meta.label}

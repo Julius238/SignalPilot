@@ -18,7 +18,7 @@ describe("login page dev login", () => {
     assert.match(source, /username: formData\.get\("username"\)/);
     assert.match(source, /password: formData\.get\("password"\)/);
     assert.match(source, /redirectToDashboard\(\)/);
-    assert.match(source, /Invalid credentials\. Please try again\./);
+    assert.match(source, /Benutzername oder Passwort stimmt nicht/);
   });
 
   it("redirects authenticated sessions and only renders the dev button when enabled", async () => {
@@ -30,7 +30,32 @@ describe("login page dev login", () => {
     assert.match(source, /redirectToDashboard\(\)/);
     assert.match(source, /setDevLoginEnabled\(status\.devLoginEnabled === true\)/);
     assert.match(source, /devLoginEnabled \? \(/);
-    assert.match(source, /Continue in Dev Mode/);
+    assert.match(source, /Ohne Anmeldung fortfahren \(nur lokale Entwicklung\)/);
+  });
+
+  it("is written in German and marks the dev entry as the secondary path", async () => {
+    const source = await readFile(resolve(appDir, "src/app/login/page.tsx"), "utf8");
+
+    // Die Seite trug als einzige der Anwendung noch englische Oberflächentexte.
+    assert.match(source, /Zum Fortfahren bitte anmelden/);
+    assert.match(source, /Benutzername/);
+    assert.match(source, /Passwort/);
+    assert.match(source, /Anmelden/);
+    assert.doesNotMatch(source, /Sign in/);
+    assert.doesNotMatch(source, /Continue in Dev Mode/);
+    assert.doesNotMatch(source, /Unable to reach API/);
+    assert.doesNotMatch(source, /Dev login is not available/);
+
+    // Labels über den Feldern, gleiche Breite, Dev-Zugang als Textlink.
+    assert.match(source, /className="login-label"/);
+    assert.match(source, /htmlFor="login-username"/);
+    assert.match(source, /htmlFor="login-password"/);
+    assert.match(source, /className="dev-login-link"/);
+    assert.doesNotMatch(source, /className="dev-login-button"/);
+
+    const css = await readFile(resolve(appDir, "src/app/globals.css"), "utf8");
+    assert.match(css, /\.login-form input\s*\{[^}]*width:\s*100%/);
+    assert.match(css, /\.dev-login-link\s*\{/);
   });
 
   it("posts dev login with included credentials", async () => {

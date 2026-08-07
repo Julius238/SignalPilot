@@ -1,3 +1,12 @@
+import {
+  resolveSeverity,
+  severityColor as centralSeverityColor,
+  severityLabel as centralSeverityLabel,
+  severityRank as centralSeverityRank,
+  severitySymbol as centralSeveritySymbol,
+  severityTone as centralSeverityTone,
+  type SeverityTone as CentralSeverityTone
+} from "../../lib/severity";
 import type { MarketEvent, RadarEvent } from "../../lib/signalpilot-api";
 
 // Gemeinsamer Verständlichkeits-Layer für alle Command-Center-Sektionen.
@@ -7,34 +16,34 @@ import type { MarketEvent, RadarEvent } from "../../lib/signalpilot-api";
 
 export type Severity = RadarEvent["severity"];
 
-export type SeverityTone = "critical" | "important" | "watch" | "info";
+export type SeverityTone = CentralSeverityTone;
+
+// Die Wichtigkeits-Zuordnung liegt zentral in `lib/severity.ts`. Hier stehen nur
+// noch Weiterleitungen, damit Command Center und Weltlage dieselbe Meldung nicht
+// unterschiedlich benennen können.
 
 export function severityTone(severity: Severity | undefined): SeverityTone {
-  if (severity === "CRITICAL") return "critical";
-  if (severity === "IMPORTANT") return "important";
-  if (severity === "WATCH") return "watch";
-  return "info";
+  return centralSeverityTone(severity);
 }
 
 export function severityColor(severity: Severity | undefined): string | undefined {
-  if (severity === "CRITICAL") return "var(--sev-critical)";
-  if (severity === "IMPORTANT") return "var(--sev-important)";
-  if (severity === "WATCH") return "var(--sev-watch)";
-  return undefined;
+  // "Information" bleibt ohne eigene Einfärbung — der Standardtext genügt.
+  return resolveSeverity(severity).key === "INFO" ? undefined : centralSeverityColor(severity);
 }
 
 export function severityLabel(severity: Severity | undefined): string {
-  if (severity === "CRITICAL") return "Sofort ansehen";
-  if (severity === "IMPORTANT") return "Wichtig";
-  if (severity === "WATCH") return "Beobachten";
-  return "Information";
+  return centralSeverityLabel(severity);
+}
+
+// Das Symbol ist die zweite Codierung neben der Farbe. Es kam bisher nur auf der
+// Weltlage-Seite an; das Command Center zeichnete stattdessen einen runden Punkt
+// per CSS, wodurch dieselbe WATCH-Meldung dort "●" und hier "◆" trug.
+export function severitySymbol(severity: Severity | undefined): string {
+  return centralSeveritySymbol(severity);
 }
 
 export function severityRank(severity: Severity | undefined): number {
-  if (severity === "CRITICAL") return 4;
-  if (severity === "IMPORTANT") return 3;
-  if (severity === "WATCH") return 2;
-  return 1;
+  return centralSeverityRank(severity);
 }
 
 export function radarEventTypeLabel(

@@ -6,7 +6,7 @@ import type { FeatureCollection, Geometry } from "geojson";
 import worldAtlas from "world-atlas/countries-110m.json";
 
 import type { MarketEvent } from "../../lib/signalpilot-api";
-import { severityLabel } from "./shared";
+import { resolveSeverity, severityScale } from "../../lib/severity";
 
 // Server-gerenderte SVG-Weltkarte: zeigt, aus welchen Regionen die zuletzt
 // erkannten globalen Ereignisse stammen. Kein Client-JavaScript — die Karte
@@ -26,14 +26,10 @@ const regionAnchors: Record<string, [number, number]> = {
   "Naher Osten": [45, 28]
 };
 
-const severityColors: Record<MarketEvent["severity"], string> = {
-  CRITICAL: "var(--sev-critical)",
-  IMPORTANT: "var(--sev-important)",
-  WATCH: "var(--sev-watch)",
-  INFO: "var(--muted)"
-};
-
-const severityOrder: Array<MarketEvent["severity"]> = ["CRITICAL", "IMPORTANT", "WATCH", "INFO"];
+// Farbe, Symbol, Label und Rangfolge kommen ausschließlich aus `lib/severity.ts`.
+// Vorher standen hier eine eigene Farbtabelle (INFO war `--muted` statt
+// `--sev-info`) und eine eigene Rangfolge — dieselbe Meldung sah dadurch je nach
+// Seite anders aus.
 
 type RegionBucket = {
   region: string;
@@ -69,7 +65,7 @@ export function NewsWorldMap({ events, now }: { events: MarketEvent[]; now: Date
     const bucket = buckets.get(region) ?? { region, count: 0, maxSeverity: "INFO" as const };
     bucket.count += 1;
 
-    if (severityOrder.indexOf(event.severity) < severityOrder.indexOf(bucket.maxSeverity)) {
+    if (resolveSeverity(event.severity).rank > resolveSeverity(bucket.maxSeverity).rank) {
       bucket.maxSeverity = event.severity;
     }
 
@@ -90,8 +86,8 @@ export function NewsWorldMap({ events, now }: { events: MarketEvent[]; now: Date
       };
     });
 
-  const activeSeverities = severityOrder.filter((severity) =>
-    markers.some((marker) => marker.maxSeverity === severity)
+  const activeSeverities = severityScale().filter((meta) =>
+    markers.some((marker) => marker.maxSeverity === meta.key)
   );
 
   return (
@@ -106,35 +102,38 @@ export function NewsWorldMap({ events, now }: { events: MarketEvent[]; now: Date
         {countryPaths.map((d, index) => (
           <path key={index} d={d} className="world-map-country" />
         ))}
-        {markers.map((marker) => (
-          <g key={marker.region} transform={`translate(${marker.x}, ${marker.y})`}>
-            <title>
-              {`${marker.region}: ${marker.count} ${marker.count === 1 ? "Ereignis" : "Ereignisse"} · höchste Einstufung: ${severityLabel(marker.maxSeverity)}`}
-            </title>
-            <circle
-              r={marker.radius}
-              fill={severityColors[marker.maxSeverity]}
-              fillOpacity={0.22}
-              stroke={severityColors[marker.maxSeverity]}
-              strokeWidth={1.5}
-            />
-            <text className="world-map-count" dy="0.35em">
-              {marker.count}
-            </text>
-            <text className="world-map-region-label" y={marker.radius + 14}>
-              {marker.region}
-            </text>
-          </g>
-        ))}
+        {markers.map((marker) => {
+          const meta = resolveSeverity(marker.maxSeverity);
+          return (
+            <g key={marker.region} transform={`translate(${marker.x}, ${marker.y})`}>
+              <title>
+                {`${marker.region}: ${marker.count} ${marker.count === 1 ? "Ereignis" : "Ereignisse"} · höchste Einstufung: ${meta.label}`}
+              </title>
+              <circle
+                r={marker.radius}
+                fill={meta.color}
+                fillOpacity={0.22}
+                stroke={meta.color}
+                strokeWidth={1.5}
+              />
+              <text className="world-map-count" dy="0.35em">
+                {marker.count}
+              </text>
+              <text className="world-map-region-label" y={marker.radius + 14}>
+                {meta.symbol} {marker.region}
+              </text>
+            </g>
+          );
+        })}
       </svg>
       <figcaption className="world-map-legend">
-        {activeSeverities.map((severity) => (
-          <span key={severity} className="world-map-legend-item">
+        {activeSeverities.map((meta) => (
+          <span key={meta.key} className="world-map-legend-item">
             <span
               className="world-map-legend-dot"
-              style={{ backgroundColor: severityColors[severity] }}
+              style={{ backgroundColor: meta.color }}
             />
-            {severityLabel(severity)}
+            {meta.symbol} {meta.label}
           </span>
         ))}
         {unlocatedCount > 0 ? (

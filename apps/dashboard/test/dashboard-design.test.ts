@@ -19,15 +19,15 @@ describe("dashboard information architecture", () => {
   });
 
   it("uses the requested German priority language", async () => {
-    const source = await readFile(
-      resolve(appDir, "src/components/dashboard/shared.ts"),
-      "utf8"
-    );
+    // Die Stufen liegen jetzt zentral in lib/severity.ts, damit Command Center und
+    // Weltlage dieselbe Meldung nicht unterschiedlich benennen können.
+    // Vollständig geprüft in test/severity.test.ts.
+    const source = await readFile(resolve(appDir, "src/lib/severity.ts"), "utf8");
 
-    assert.match(source, /return "Sofort ansehen"/);
-    assert.match(source, /return "Wichtig"/);
-    assert.match(source, /return "Beobachten"/);
-    assert.match(source, /return "Information"/);
+    assert.match(source, /label: "Sofort ansehen"/);
+    assert.match(source, /label: "Wichtig"/);
+    assert.match(source, /label: "Beobachten"/);
+    assert.match(source, /label: "Information"/);
   });
 
   it("separates the market radar into human-readable lanes", async () => {
@@ -66,9 +66,10 @@ describe("dashboard comprehension and responsive states", () => {
     assert.match(source, /\.skeleton/);
     assert.match(loading, /Beobachtungen werden nach Relevanz geordnet/);
     // Die Weltlage-Seite unterscheidet jetzt zwei Leerzustände: keine Ereignisse im
-    // Zeitraum und keine Treffer für die gesetzten Filter. Details in
-    // test/market-event-detail.test.ts.
-    assert.match(news, /Keine erkannten Ereignisse in den letzten/);
+    // Zeitraum und keine Treffer für die gesetzten Filter. Der Zeitraum kommt aus
+    // `lastPeriodPhrase`, damit "in den letzten 7 Tagen" grammatisch stimmt —
+    // siehe test/format.test.ts.
+    assert.match(news, /Keine erkannten Ereignisse \$\{rangePhrase\}/);
     assert.match(news, /Keine Meldung passt zu diesen Filtern/);
   });
 

@@ -5,16 +5,16 @@ import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
-  SEVERITY_TIER_META,
   UNASSIGNED_REGION_KEY,
   confidenceNote,
   derivedSummary,
   eventAge,
   marketRelevance,
+  severityMeta,
   severitySortRank,
-  severityTier,
   storedSummary
 } from "../src/lib/market-event-detail";
+import { severityScale } from "../src/lib/severity";
 import { knownRegions, isMappableRegion, projectRegion } from "../src/lib/world-map-geo";
 import type { MarketEvent } from "../src/lib/signalpilot-api";
 
@@ -46,25 +46,24 @@ function event(overrides: Partial<MarketEvent> = {}): MarketEvent {
 }
 
 describe("severity priority", () => {
-  it("maps the stored severities onto three visible tiers", () => {
-    assert.equal(severityTier("CRITICAL"), "critical");
-    assert.equal(severityTier("IMPORTANT"), "important");
-    assert.equal(severityTier("WATCH"), "info");
-    assert.equal(severityTier("INFO"), "info");
+  it("keeps every stored severity as its own visible tier", () => {
+    // WATCH wurde früher mit INFO zusammengefasst — dieselbe Meldung hieß auf dem
+    // Command Center "Beobachten" und hier "Informativ".
+    assert.equal(severityMeta("CRITICAL").tone, "critical");
+    assert.equal(severityMeta("IMPORTANT").tone, "important");
+    assert.equal(severityMeta("WATCH").tone, "watch");
+    assert.equal(severityMeta("INFO").tone, "info");
   });
 
   it("codes importance beyond colour alone", () => {
-    for (const tier of ["critical", "important", "info"] as const) {
-      const meta = SEVERITY_TIER_META[tier];
+    for (const meta of severityScale()) {
       assert.ok(meta.label.length > 0, "Textlabel fehlt");
       assert.ok(meta.symbol.length > 0, "Symbol fehlt");
       assert.ok(meta.color.startsWith("var("), "Farbe fehlt");
     }
     // Symbole müssen unterscheidbar sein, sonst trägt nur die Farbe die Aussage.
-    const symbols = new Set(
-      (["critical", "important", "info"] as const).map((tier) => SEVERITY_TIER_META[tier].symbol)
-    );
-    assert.equal(symbols.size, 3);
+    const symbols = new Set(severityScale().map((meta) => meta.symbol));
+    assert.equal(symbols.size, severityScale().length);
   });
 
   it("ranks a lone critical event above a large pile of info events", () => {
@@ -230,7 +229,9 @@ describe("world map explorer wiring", () => {
     assert.match(code, /role="button"/);
     assert.match(code, /tabIndex=\{0\}/);
     assert.match(code, /onKeyDown/);
-    assert.match(code, /event\.key === "Enter" \|\| event\.key === " "/);
+    // Enter und Leertaste einzeln geprüft — Details in test/severity.test.ts.
+    assert.match(code, /event\.key === "Enter"/);
+    assert.match(code, /event\.key === " "/);
     assert.match(code, /aria-label=/);
   });
 

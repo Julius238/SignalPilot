@@ -87,9 +87,14 @@ export function formatUtcDateTime(value: string | null | undefined): string {
     return "—";
   }
 
+  // Vierstelliges Jahr wie überall sonst — "06.08.26" ist für Handelsdaten zu mehrdeutig.
   const formatted = new Intl.DateTimeFormat("de-DE", {
-    dateStyle: "short",
-    timeStyle: "medium",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
     timeZone: "UTC"
   }).format(date);
 

@@ -1,3 +1,4 @@
+import { resolveSeverity, severityRank, type SeverityMeta } from "./severity";
 import type { MarketEvent } from "./signalpilot-api";
 
 // Aufbereitung eines MarketEvent für die Detailansicht.
@@ -9,34 +10,18 @@ import type { MarketEvent } from "./signalpilot-api";
 export const UNASSIGNED_REGION_KEY = "__none__";
 export const UNASSIGNED_REGION_LABEL = "Ohne Regionszuordnung";
 
-export type SeverityTier = "critical" | "important" | "info";
-
 /**
- * Drei Stufen für die Anzeige. CRITICAL und IMPORTANT bleiben eigenständig,
- * WATCH und INFO werden zu "informativ" zusammengefasst.
+ * Wichtigkeit kommt aus `lib/severity.ts` — derselben Tabelle, aus der auch das
+ * Command Center liest. Früher fasste diese Datei WATCH und INFO zu "Informativ"
+ * zusammen; dieselbe Meldung hieß dadurch je nach Seite anders.
  */
-export function severityTier(severity: MarketEvent["severity"]): SeverityTier {
-  if (severity === "CRITICAL") return "critical";
-  if (severity === "IMPORTANT") return "important";
-  return "info";
+export function severityMeta(severity: string | null | undefined): SeverityMeta {
+  return resolveSeverity(severity);
 }
 
-export const SEVERITY_TIER_META: Record<
-  SeverityTier,
-  { label: string; symbol: string; rank: number; color: string }
-> = {
-  // Wichtigkeit wird mehrfach codiert: Farbe UND Symbol UND Text UND Reihenfolge.
-  critical: { label: "Kritisch", symbol: "▲", rank: 3, color: "var(--sev-critical)" },
-  important: { label: "Wichtig", symbol: "●", rank: 2, color: "var(--sev-important)" },
-  info: { label: "Informativ", symbol: "○", rank: 1, color: "var(--sev-watch)" }
-};
-
-/** Feinere Rangfolge innerhalb der drei Stufen, damit WATCH vor INFO steht. */
-export function severitySortRank(severity: MarketEvent["severity"]): number {
-  if (severity === "CRITICAL") return 4;
-  if (severity === "IMPORTANT") return 3;
-  if (severity === "WATCH") return 2;
-  return 1;
+/** Rangfolge für die Sortierung "wichtigste zuerst". */
+export function severitySortRank(severity: string | null | undefined): number {
+  return severityRank(severity);
 }
 
 function normalize(value: string): string {

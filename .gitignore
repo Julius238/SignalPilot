@@ -1,7 +1,9 @@
 .env
 .env.*
+# Vorlagen ohne Secrets gehören ins Repo — die echten .env-Dateien nie.
 !.env.example
 !.env.production.example
+!.env.local.example
 
 # Production backups — keep the directory, not the dumps
 backups/*.dump

@@ -161,12 +161,12 @@ describe("decimal and UTC formatting", () => {
 
   it("formats timestamps explicitly in UTC with an explicit UTC label", () => {
     const iso = "2026-08-02T13:45:00.000Z";
-    const expected = `${new Intl.DateTimeFormat("de-DE", {
-      dateStyle: "short",
-      timeStyle: "medium",
-      timeZone: "UTC"
-    }).format(new Date(iso))} UTC`;
-    assert.equal(formatUtcDateTime(iso), expected);
+    const formatted = formatUtcDateTime(iso);
+
+    assert.match(formatted, / UTC$/);
+    // Vierstelliges Jahr wie im übrigen Dashboard — nicht "02.08.26".
+    assert.match(formatted, /02\.08\.2026/);
+    assert.match(formatted, /13:45:00/);
     assert.equal(formatUtcDateTime(null), "—");
   });
 

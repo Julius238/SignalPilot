@@ -15,14 +15,13 @@ import {
   type PageVerdictTone
 } from "../../../components/ui";
 import { describeApiError } from "../../../lib/api-error";
-import { formatDateTime } from "../../../lib/format";
+import { formatDateTime, lastPeriodPhrase, pluralize } from "../../../lib/format";
 import {
-  SEVERITY_TIER_META,
   UNASSIGNED_REGION_KEY,
   UNASSIGNED_REGION_LABEL,
-  severityTier,
-  type SeverityTier
+  severityMeta
 } from "../../../lib/market-event-detail";
+import { severityScale, type SeverityTone } from "../../../lib/severity";
 import {
   MAP_HEIGHT,
   MAP_WIDTH,
@@ -51,15 +50,19 @@ const TIME_RANGES = [
 
 const DEFAULT_RANGE = "168";
 
-const SEVERITY_OPTIONS: Array<{ value: "" | SeverityTier; label: string }> = [
+// Die Wichtigkeitsstufen kommen aus `lib/severity.ts` — derselben Tabelle, aus der
+// Karte, Liste, Detail und Command Center lesen. Der Filterwert ist der
+// kleingeschriebene Ton ("watch"), das Label der zentrale Text ("Beobachten").
+const SEVERITY_OPTIONS: Array<{ value: "" | SeverityTone; label: string }> = [
   { value: "", label: "Alle Wichtigkeiten" },
-  { value: "critical", label: "Nur kritisch" },
-  { value: "important", label: "Ab wichtig" },
-  { value: "info", label: "Nur informativ" }
+  ...severityScale().map((meta) => ({
+    value: meta.tone,
+    label: `Nur „${meta.label}“`
+  }))
 ];
 
-function isSeverityTier(value: string | undefined): value is SeverityTier {
-  return value === "critical" || value === "important" || value === "info";
+function isSeverityTone(value: string | undefined): value is SeverityTone {
+  return SEVERITY_OPTIONS.some((option) => option.value !== "" && option.value === value);
 }
 
 // Der server-gerenderte Kartenhintergrund. Er wandert als `children` in die
@@ -81,7 +84,7 @@ export default async function NewsPage({ searchParams }: NewsPageProps) {
   const range = TIME_RANGES.some((option) => option.value === params.range)
     ? (params.range as string)
     : DEFAULT_RANGE;
-  const severityFilter = isSeverityTier(params.severity) ? params.severity : "";
+  const severityFilter = isSeverityTone(params.severity) ? params.severity : "";
   const categoryFilter = params.eventType ?? "";
   const regionFilter = params.region ?? "";
 
@@ -98,10 +101,10 @@ export default async function NewsPage({ searchParams }: NewsPageProps) {
   ]);
 
   const allEvents = eventResult.data ?? [];
-  // Die Wichtigkeitsstufe fasst WATCH und INFO zusammen; das lässt sich nicht auf
-  // den einwertigen `severity`-Parameter der API abbilden und passiert deshalb hier.
+  // Der `severity`-Parameter der API kennt nur exakte Backend-Werte; die Zuordnung
+  // auf die Anzeigestufe passiert deshalb hier über dieselbe zentrale Tabelle.
   const events = severityFilter
-    ? allEvents.filter((event) => severityTier(event.severity) === severityFilter)
+    ? allEvents.filter((event) => severityMeta(event.severity).tone === severityFilter)
     : allEvents;
 
   const renderedAt = new Date();
@@ -120,13 +123,16 @@ export default async function NewsPage({ searchParams }: NewsPageProps) {
       ...projectRegion(regionKey)
     }));
 
-  const criticalCount = events.filter((event) => severityTier(event.severity) === "critical").length;
+  const criticalCount = events.filter(
+    (event) => severityMeta(event.severity).tone === "critical"
+  ).length;
   const importantCount = events.filter(
-    (event) => severityTier(event.severity) === "important"
+    (event) => severityMeta(event.severity).tone === "important"
   ).length;
   const withoutRegion = events.filter((event) => event.region === null).length;
-  const rangeLabel =
-    TIME_RANGES.find((option) => option.value === range)?.label ?? "gewählter Zeitraum";
+  // Dativ-Phrase ("in den letzten 7 Tagen"), nicht das Select-Label ("7 Tage") —
+  // sonst entsteht "in den letzten 7 Tage".
+  const rangePhrase = lastPeriodPhrase(Number(range));
 
   const errorCopy = describeApiError(
     eventResult.errorKind,
@@ -146,12 +152,22 @@ export default async function NewsPage({ searchParams }: NewsPageProps) {
   const verdict = eventResult.error
     ? "Meldungen nicht abrufbar."
     : events.length === 0
-      ? `Keine erkannten Ereignisse in den letzten ${rangeLabel}.`
+      ? hasFilter
+        ? "Keine Meldung passt zu den gesetzten Filtern."
+        : `Keine erkannten Ereignisse ${rangePhrase}.`
       : criticalCount > 0
-        ? `${criticalCount} kritische ${criticalCount === 1 ? "Meldung" : "Meldungen"} in den letzten ${rangeLabel}.`
+        ? `${pluralize(criticalCount, "kritische Meldung", "kritische Meldungen")} ${rangePhrase}.`
         : importantCount > 0
-          ? `${importantCount} wichtige ${importantCount === 1 ? "Meldung" : "Meldungen"} unter ${events.length} erkannten Ereignissen.`
-          : `${events.length} Ereignisse erkannt, keines davon als wichtig eingestuft.`;
+          ? `${pluralize(
+              importantCount,
+              "wichtige Meldung",
+              "wichtige Meldungen"
+            )} unter ${pluralize(events.length, "erkannten Ereignis", "erkannten Ereignissen")}.`
+          : `${pluralize(
+              events.length,
+              "Ereignis erkannt",
+              "Ereignisse erkannt"
+            )}, keines davon als wichtig eingestuft.`;
   const nextStep = eventResult.error
     ? undefined
     : events.length === 0
@@ -264,7 +280,7 @@ export default async function NewsPage({ searchParams }: NewsPageProps) {
             title={
               hasFilter
                 ? "Keine Meldung passt zu diesen Filtern."
-                : `Keine erkannten Ereignisse in den letzten ${rangeLabel}.`
+                : `Keine erkannten Ereignisse ${rangePhrase}.`
             }
             description={
               hasFilter
@@ -291,7 +307,7 @@ export default async function NewsPage({ searchParams }: NewsPageProps) {
             />
           ) : newsItems.length === 0 ? (
             <EmptyState
-              title={`Keine Meldungen zu beobachteten Werten in den letzten ${rangeLabel}.`}
+              title={`Keine Meldungen zu beobachteten Werten ${rangePhrase}.`}
               description="Sie erscheinen hier, sobald der Nachrichtenabruf für Watchlist-Werte etwas findet."
             />
           ) : (
@@ -359,8 +375,8 @@ export default async function NewsPage({ searchParams }: NewsPageProps) {
         Meldung. Es sind automatische Vorbewertungen — keine bestätigten Marktwirkungen,
         keine Handlungsempfehlung.
         {" "}
-        {(["critical", "important", "info"] as const)
-          .map((tier) => `${SEVERITY_TIER_META[tier].symbol} ${SEVERITY_TIER_META[tier].label}`)
+        {severityScale()
+          .map((meta) => `${meta.symbol} ${meta.label}`)
           .join(" · ")}
       </p>
     </>

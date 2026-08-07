@@ -1,22 +1,41 @@
 import Link from "next/link";
 
-import { EmptyState } from "../empty-state";
+import { EmptyState, ErrorState } from "../empty-state";
+import { RetryButton } from "../retry-button";
 import { SectionCard } from "../ui";
 import { DirectionBadge, StatusBadge } from "../badges";
-import { formatDateTime, formatRelativeTime } from "../../lib/format";
+import { formatDateTime, formatRelativeTime, pluralize } from "../../lib/format";
+import {
+  describeStatus,
+  formatMetric,
+  isErrorStatus,
+  metricValue,
+  type DataStatus
+} from "../../lib/data-status";
 import type { Alert, RadarEvent, SignalListItem } from "../../lib/signalpilot-api";
 import {
   chartPatternEventTypes,
   radarEventExplanation,
   radarEventTypeLabel,
   severityLabel,
+  severitySymbol,
   severityTone
 } from "./shared";
 
 // Die Übersicht trennt Marktbewegungen von Chartmustern. So ist sofort
 // erkennbar, ob die Beobachtung aus dem Krypto-, Aktien- oder Chart-Radar kommt.
 
-export function RadarOverviewCard({ events, now }: { events: RadarEvent[]; now: Date }) {
+export function RadarOverviewCard({
+  events,
+  now,
+  status,
+  errorMessage
+}: {
+  events: RadarEvent[];
+  now: Date;
+  status: DataStatus;
+  errorMessage: string;
+}) {
   const patternEvents = events.filter((event) =>
     chartPatternEventTypes.includes(event.eventType)
   );
@@ -26,6 +45,7 @@ export function RadarOverviewCard({ events, now }: { events: RadarEvent[]; now: 
   const equityEvents = events.filter(
     (event) => event.assetType !== "CRYPTO" && !chartPatternEventTypes.includes(event.eventType)
   );
+  const errorCopy = describeStatus(status, errorMessage, "Die Radar-Beobachtungen");
 
   return (
     <SectionCard
@@ -38,26 +58,37 @@ export function RadarOverviewCard({ events, now }: { events: RadarEvent[]; now: 
         </Link>
       }
     >
-      <div className="radar-lanes">
-        <RadarLane
-          description="Schnelle Bewegungen und ungewöhnliche Marktaktivität."
-          events={cryptoEvents}
-          label="Krypto"
-          now={now}
+      {isErrorStatus(status) && errorCopy ? (
+        // Ohne Abruf gibt es kein "ruhig" — die drei Spuren würden sonst
+        // dreimal fälschlich Entwarnung geben.
+        <ErrorState
+          title={errorCopy.title}
+          message={errorCopy.message}
+          hint={errorCopy.hint}
+          action={errorCopy.retryable ? <RetryButton /> : null}
         />
-        <RadarLane
-          description="Auffälligkeiten bei Aktien und ETFs aus gespeicherten Marktdaten."
-          events={equityEvents}
-          label="Aktien & ETFs"
-          now={now}
-        />
-        <RadarLane
-          description="Kurszonen, Momentumwechsel und mehrere Faktoren zugleich."
-          events={patternEvents}
-          label="Chartmuster"
-          now={now}
-        />
-      </div>
+      ) : (
+        <div className="radar-lanes">
+          <RadarLane
+            description="Schnelle Bewegungen und ungewöhnliche Marktaktivität."
+            events={cryptoEvents}
+            label="Krypto"
+            now={now}
+          />
+          <RadarLane
+            description="Auffälligkeiten bei Aktien und ETFs aus gespeicherten Marktdaten."
+            events={equityEvents}
+            label="Aktien & ETFs"
+            now={now}
+          />
+          <RadarLane
+            description="Kurszonen, Momentumwechsel und mehrere Faktoren zugleich."
+            events={patternEvents}
+            label="Chartmuster"
+            now={now}
+          />
+        </div>
+      )}
     </SectionCard>
   );
 }
@@ -108,7 +139,12 @@ function RadarRow({ event, now }: { event: RadarEvent; now: Date }) {
           {event.symbol}
         </Link>
         <span className="radar-label">{radarEventTypeLabel(event.eventType)}</span>
-        <span className={`sev-chip sev-chip--${tone}`}>{severityLabel(event.severity)}</span>
+        <span className={`sev-chip sev-chip--${tone}`}>
+          <span className="sev-chip-symbol" aria-hidden="true">
+            {severitySymbol(event.severity)}
+          </span>
+          {severityLabel(event.severity)}
+        </span>
         <span className="radar-time" title={formatDateTime(event.createdAt)}>
           {formatRelativeTime(event.createdAt, now)}
         </span>
@@ -122,15 +158,27 @@ export function SignalsCompactCard({
   signals,
   watchlistCount,
   watchlistHighPriority,
-  alerts
+  alerts,
+  signalsStatus,
+  alertsStatus,
+  watchlistStatus,
+  errorMessage
 }: {
   signals: SignalListItem[];
   watchlistCount: number;
   watchlistHighPriority: number;
   alerts: Alert[];
+  signalsStatus: DataStatus;
+  alertsStatus: DataStatus;
+  watchlistStatus: DataStatus;
+  errorMessage: string;
 }) {
   const sentAlerts = alerts.filter((alert) => alert.status === "SENT").length;
   const failedAlerts = alerts.filter((alert) => alert.status === "FAILED").length;
+  const errorCopy = describeStatus(signalsStatus, errorMessage, "Die Signale");
+  const focusMetric = metricValue(signalsStatus, signals.length);
+  const sentMetric = metricValue(alertsStatus, sentAlerts);
+  const failedMetric = metricValue(alertsStatus, failedAlerts);
 
   return (
     <SectionCard
@@ -145,19 +193,26 @@ export function SignalsCompactCard({
     >
       <div className="signal-overview-stats">
         <div>
-          <strong>{signals.length}</strong>
+          <strong>{formatMetric(focusMetric)}</strong>
           <span>im Fokus</span>
         </div>
         <div>
-          <strong>{sentAlerts}</strong>
+          <strong>{formatMetric(sentMetric)}</strong>
           <span>zugestellt</span>
         </div>
-        <div className={failedAlerts > 0 ? "has-issue" : undefined}>
-          <strong>{failedAlerts}</strong>
+        <div className={failedMetric != null && failedMetric > 0 ? "has-issue" : undefined}>
+          <strong>{formatMetric(failedMetric)}</strong>
           <span>nicht zugestellt</span>
         </div>
       </div>
-      {signals.length === 0 ? (
+      {isErrorStatus(signalsStatus) && errorCopy ? (
+        <ErrorState
+          title={errorCopy.title}
+          message={errorCopy.message}
+          hint={errorCopy.hint}
+          action={errorCopy.retryable ? <RetryButton /> : null}
+        />
+      ) : signals.length === 0 ? (
         <EmptyState
           tone="calm"
           title="Kein Signal verlangt gerade Aufmerksamkeit."
@@ -191,8 +246,15 @@ export function SignalsCompactCard({
         </div>
       )}
       <p className="muted small" style={{ marginTop: 12 }}>
-        Persönlicher Fokus: {watchlistCount} Assets
-        {watchlistHighPriority > 0 ? ` · ${watchlistHighPriority} besonders wichtig` : ""} ·{" "}
+        {isErrorStatus(watchlistStatus) ? (
+          // "0 Assets" wäre falsch: Die Watchlist konnte gar nicht gelesen werden.
+          <>Persönlicher Fokus: derzeit nicht abrufbar · </>
+        ) : (
+          <>
+            Persönlicher Fokus: {pluralize(watchlistCount, "Asset", "Assets")}
+            {watchlistHighPriority > 0 ? ` · ${watchlistHighPriority} besonders wichtig` : ""} ·{" "}
+          </>
+        )}
         <Link href="/dashboard/watchlist" className="section-link">
           Watchlist verwalten
         </Link>

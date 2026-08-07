@@ -208,8 +208,10 @@ export default async function OperationsPage() {
               {runs.slice(0, 25).map((run) => (
                 <div className="list-row" key={run.id}>
                   <div>
+                    {/* Ohne den Trenner lief der Jobname direkt in den Zeitstempel:
+                        "Ereignis-Monitor06.08.2026, 13:29". */}
                     <strong>{jobLabel(run.jobName)}</strong>
-                    <span className="muted small">{formatDateTime(run.startedAt)}</span>
+                    <span className="muted small"> · {formatDateTime(run.startedAt)}</span>
                   </div>
                   <div className="right-meta">
                     <span className="muted small">{duration(run.startedAt, run.finishedAt)}</span>

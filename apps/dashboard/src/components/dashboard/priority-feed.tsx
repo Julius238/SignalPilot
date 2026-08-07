@@ -1,8 +1,10 @@
 import Link from "next/link";
 
-import { EmptyState } from "../empty-state";
+import { EmptyState, ErrorState } from "../empty-state";
+import { RetryButton } from "../retry-button";
 import { formatDateTime, formatRelativeTime } from "../../lib/format";
-import { severityLabel, severityTone, type Severity } from "./shared";
+import { describeStatus, isErrorStatus, type DataStatus } from "../../lib/data-status";
+import { severityLabel, severitySymbol, severityTone, type Severity } from "./shared";
 
 // "Wichtig jetzt": das Erste, was nach dem Lagebild gelesen wird.
 // Jede Karte beantwortet drei Fragen: Was ist passiert? Warum ist es
@@ -32,7 +34,23 @@ export type PriorityItem = {
   externalUrl?: string | null;
 };
 
-export function PriorityFeed({ items, now }: { items: PriorityItem[]; now: Date }) {
+export function PriorityFeed({
+  items,
+  now,
+  status,
+  errorMessage
+}: {
+  items: PriorityItem[];
+  now: Date;
+  /**
+   * Zustand der Quellen, aus denen sich diese Sektion speist. Bei einem Fehler
+   * darf hier nicht „Gerade ist nichts dringend." stehen — niemand hat nachgesehen.
+   */
+  status: DataStatus;
+  errorMessage: string;
+}) {
+  const errorCopy = describeStatus(status, errorMessage, "Die wichtigen Entwicklungen");
+
   return (
     <section className="cmd-section" aria-label="Wichtig jetzt" id="wichtig-jetzt">
       <div className="section-header">
@@ -42,7 +60,14 @@ export function PriorityFeed({ items, now }: { items: PriorityItem[]; now: Date 
           Was das System aktuell für relevant hält — und was es bedeuten könnte.
         </p>
       </div>
-      {items.length === 0 ? (
+      {isErrorStatus(status) && errorCopy ? (
+        <ErrorState
+          title={errorCopy.title}
+          message={errorCopy.message}
+          hint={errorCopy.hint}
+          action={errorCopy.retryable ? <RetryButton /> : null}
+        />
+      ) : items.length === 0 ? (
         <EmptyState
           tone="calm"
           title="Gerade ist nichts dringend."
@@ -67,7 +92,12 @@ function StoryCard({ item, now }: { item: PriorityItem; now: Date }) {
   return (
     <li className={`story-card story-card--${tone}`}>
       <div className="story-head">
-        <span className={`sev-chip sev-chip--${tone}`}>{severityLabel(item.severity)}</span>
+        <span className={`sev-chip sev-chip--${tone}`}>
+          <span className="sev-chip-symbol" aria-hidden="true">
+            {severitySymbol(item.severity)}
+          </span>
+          {severityLabel(item.severity)}
+        </span>
         <span className="story-kind">{kindLabels[item.kind]}</span>
         <span className="story-time" title={formatDateTime(item.time)}>
           {formatRelativeTime(item.time, now)}

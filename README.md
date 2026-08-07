@@ -12,9 +12,15 @@ The initial scope is market analysis infrastructure, dashboards, Telegram alerts
 ```bash
 pnpm install
 docker compose up -d
+cp apps/dashboard/.env.local.example apps/dashboard/.env.local
 pnpm build
 pnpm dev
 ```
+
+If `pnpm` is not on your PATH, prefix every command with `corepack` — e.g.
+`corepack pnpm install`, `corepack pnpm build`, `corepack pnpm dev`. Nothing else is
+needed; see [If `pnpm` is not on your PATH](#if-pnpm-is-not-on-your-path). The
+`apps/dashboard/.env.local` step is required — Next.js does not read the root `.env`.
 
 ## Environment
 
@@ -285,11 +291,30 @@ curl "http://localhost:3100/scanner/multi-timeframe?assetType=CRYPTO&limit=100"
 
 ## Dashboard
 
-Run the API and the Next.js dashboard:
+### 1. Dashboard environment
+
+**Next.js does not read the repository root `.env`** — it only reads env files inside
+`apps/dashboard`. Create the file once from the checked-in template:
+
+```bash
+cp apps/dashboard/.env.local.example apps/dashboard/.env.local
+```
+
+It contains no secrets; the dashboard only talks to the local API. Two variables matter:
+
+| Variable | Used by | Why it is required |
+|---|---|---|
+| `NEXT_PUBLIC_SIGNALPILOT_API_URL` | browser | Baked into the client bundle at build time. |
+| `SIGNALPILOT_API_INTERNAL_URL` | server components (RSC) | Node cannot resolve a relative URL. Without it every server-side fetch fails, and `getApiUrl()` throws a message pointing back at this template. |
+
+`NEXT_PUBLIC_SIGNALPILOT_API_URL` alone is **not** enough — the `rewrites()` rule in
+`next.config.ts` only covers browser requests, not server components.
+
+### 2. Run it
 
 ```bash
 pnpm --filter @signalpilot/api dev
-NEXT_PUBLIC_SIGNALPILOT_API_URL=http://localhost:3100 pnpm dashboard:dev
+pnpm dashboard:dev
 ```
 
 Open:
@@ -297,6 +322,33 @@ Open:
 ```bash
 http://localhost:3000/dashboard
 ```
+
+### If `pnpm` is not on your PATH
+
+This repository pins pnpm through corepack (`packageManager` in the root `package.json`).
+If `pnpm` is not installed globally, prefix every command with `corepack`:
+
+```bash
+corepack pnpm install
+corepack pnpm test
+corepack pnpm lint
+corepack pnpm build
+corepack pnpm dev
+corepack pnpm --filter @signalpilot/api dev
+```
+
+That is the complete start path. No `corepack enable`, no global install, and no temporary
+shim on the `PATH` are required.
+
+The root scripts fan out across the workspace and therefore have to call pnpm again
+(`pnpm -r ...`, `pnpm --filter ... ...`). Corepack runs pnpm directly without leaving a shim
+behind, so those nested calls used to abort with `sh: pnpm: command not found`. They now go
+through the repository's own [`scripts/pnpm`](scripts/pnpm) instead: it forwards to a global
+`pnpm` when one exists and falls back to `corepack pnpm` otherwise. The pnpm version still
+comes from `packageManager` — the shim never picks one.
+
+If you prefer a global `pnpm`, run `corepack enable` once. Both paths work; the commands are
+identical apart from the `corepack` prefix.
 
 Dashboard signal and asset detail pages render candlestick charts with TradingView Lightweight Charts.
 The scanner page at `/dashboard/scanner` groups current signals into Strong Watch, Watchlist,

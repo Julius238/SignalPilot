@@ -38,6 +38,11 @@
   --sev-info: #8da0aa;
   --sev-info-soft: rgba(138, 148, 166, 0.1);
 
+  /* Deckende Navigationsfläche. Bewusst ohne Alpha: Das mobile Menü liegt über
+     dem Seiteninhalt, und schon 1,5 % Restdurchsicht machten den Text darunter
+     lesbar. */
+  --nav-solid: #071019;
+
   /* ── Form ── */
   --radius-s: 10px;
   --radius-m: 16px;
@@ -2233,12 +2238,12 @@ details[open] > summary {
   white-space: nowrap;
 }
 
-.sev-chip::before {
-  background: currentColor;
-  border-radius: 50%;
-  content: "";
-  height: 6px;
-  width: 6px;
+/* Das Symbol kommt aus `lib/severity.ts` und steht als Text im Markup — ein
+   fester runder CSS-Punkt hätte jede Stufe gleich aussehen lassen und WATCH auf
+   dem Command Center anders als auf der Weltlage-Seite gezeichnet. */
+.sev-chip-symbol {
+  font-size: 11px;
+  line-height: 1;
 }
 
 .sev-chip--critical {
@@ -2787,9 +2792,13 @@ summary:focus-visible {
     row-gap: 4px;
   }
 
+  /* `flex-basis: 100%` plus Einzug ergibt zusammen mehr als die volle Breite —
+     die Zeile schob die Seite dadurch horizontal auf. Der Einzug wird deshalb
+     aus der Basis herausgerechnet. */
   .impact-entry-tone {
-    flex-basis: 100%;
+    flex-basis: calc(100% - 40px);
     margin-left: 40px;
+    min-width: 0;
     text-align: left;
   }
 }
@@ -4128,6 +4137,13 @@ body {
   border-radius: 9px;
 }
 
+/* Platz für das Chevron des Systems reservieren — sonst schnitt es lange
+   Optionen ab ("Ohne Regionszuordn⌄"). */
+.filter-bar select,
+.watchlist-form select {
+  padding-right: 30px;
+}
+
 .filter-bar input::placeholder {
   color: #5f747e;
 }
@@ -4228,6 +4244,57 @@ td a {
   min-height: 44px;
 }
 
+/* Label über dem Feld, beide Felder gleich breit. Vorher standen die Labels
+   links neben den Feldern und erzeugten unterschiedliche Feldbreiten. */
+.login-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.login-form .login-label {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.login-form input {
+  width: 100%;
+}
+
+.login-note {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 18px 0 0;
+}
+
+/* Der Entwickler-Zugang ist bewusst optisch abgewertet: ein Textlink, kein
+   zweiter Knopf neben dem echten Login. */
+.dev-login-link {
+  background: none;
+  border: 0;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  margin-top: 10px;
+  padding: 6px 0;
+  text-align: left;
+  text-decoration: underline;
+  width: 100%;
+}
+
+.dev-login-link:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.dev-login-link:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
 /* ── Responsive Hierarchie ───────────────────────────────────────────────── */
 @media (max-width: 1280px) {
   .app-shell {
@@ -4285,7 +4352,7 @@ td a {
   }
 
   .side-nav {
-    background: rgba(7, 16, 25, 0.94);
+    background: var(--nav-solid);
     border-bottom: 1px solid var(--line);
     border-right: 0;
     display: block;
@@ -4295,9 +4362,19 @@ td a {
     width: 100%;
   }
 
+  /* Bei geöffnetem Menü über den Abdunkler heben, damit Kopfzeile und Panel
+     bedienbar bleiben, während der Seiteninhalt darunter gesperrt ist. */
+  .side-nav--open {
+    z-index: 60;
+  }
+
   .side-nav-top {
     min-height: 64px;
     padding: 10px 16px;
+    /* Über dem Panel, damit der Schließen-Knopf immer erreichbar ist. */
+    position: relative;
+    z-index: 2;
+    background: var(--nav-solid);
   }
 
   .brand-mark {
@@ -4311,16 +4388,38 @@ td a {
     display: inline-flex;
   }
 
+  /* Der Abdunkler liegt zwischen Seiteninhalt und Menü: Er macht sichtbar, dass
+     der Hintergrund pausiert ist, fängt Klicks daneben ab und verhindert, dass
+     der Inhalt darunter noch bedient werden kann. */
+  .side-nav-scrim {
+    background: rgba(2, 7, 12, 0.62);
+    inset: 0;
+    position: fixed;
+    z-index: 1;
+  }
+
+  /* Vollständig blickdicht — mit Restdurchsicht (vorher 0.985) blieb der
+     Seitentext hinter dem Menü lesbar und störte die Orientierung.
+
+     Das Panel ist bewusst schmaler als der Viewport: Vorher lag es über die
+     volle Breite (`left: 0; right: 0`) und verdeckte bei 390 px den gesamten
+     Bereich unterhalb der Kopfzeile. Der Abdunkler war dadurch nirgends
+     erreichbar und "Klick außerhalb schließt" nicht ausführbar. Die
+     verbleibenden 64 px rechts sind die Außenfläche. */
   .side-nav-panel {
-    background: rgba(7, 16, 25, 0.985);
+    background: var(--nav-solid);
+    border-right: 1px solid var(--line);
     border-top: 1px solid var(--line);
     display: none;
     left: 0;
-    max-height: calc(100vh - 64px);
+    max-height: calc(100dvh - 64px);
     overflow-y: auto;
+    overscroll-behavior: contain;
     position: absolute;
-    right: 0;
+    right: auto;
     top: 64px;
+    width: min(420px, calc(100% - 64px));
+    z-index: 2;
   }
 
   .side-nav-panel--open {
@@ -4337,10 +4436,13 @@ td a {
     padding: 0;
   }
 
+  /* Einspaltig, weil das Panel jetzt schmaler ist als der Viewport. Zwei
+     Spalten in einer 420-px-Schublade schnitten lange Labels wie
+     "Unternehmenstermine" ab (`.nav-link` ist `white-space: nowrap`). */
   .side-nav .nav-group-items {
     display: grid;
     gap: 4px;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .side-nav .nav-link {
@@ -4525,8 +4627,9 @@ td a {
 
   .impact-entry-tone {
     background: transparent;
-    flex-basis: 100%;
+    flex-basis: calc(100% - 44px);
     margin-left: 44px;
+    min-width: 0;
     padding: 0;
   }
 
@@ -5292,19 +5395,36 @@ td a {
   fill-opacity: 0.42;
 }
 
+/* Eigener Fokusring statt der Browser-Outline: Eine SVG-`<g>`-Outline folgt in
+   Safari und Firefox nicht der Kreisform und war um die Marker herum kaum zu
+   sehen. */
 .map-marker:focus-visible {
   outline: none;
 }
 
-.map-marker:focus-visible .map-marker-ring,
+/* Der Fokusring wird für *jeden* Marker gerendert, auch für den noch nicht
+   ausgewählten — vorher hing er am Auswahlring, den es ohne Auswahl gar nicht
+   gab. Ein per Tab angesprungener Marker war dadurch unsichtbar fokussiert.
+   Sichtbar wird er nur bei `:focus-visible`. */
+.map-marker-focus {
+  fill: none;
+  stroke: none;
+}
+
+.map-marker:focus-visible .map-marker-focus {
+  stroke: var(--accent);
+  /* Zweite, farbunabhängige Codierung: gestrichelter Ring in eigenem Abstand.
+     Der ausgewählte Marker bleibt dadurch unterscheidbar — er trägt einen
+     durchgezogenen Ring direkt am Kreis, der Fokus einen gestrichelten
+     außerhalb davon. Beide zusammen sind ebenfalls eindeutig lesbar. */
+  stroke-dasharray: 5 4;
+  stroke-width: 3;
+}
+
 .map-marker--active .map-marker-ring {
   fill: none;
   stroke: var(--accent);
   stroke-width: 2;
-}
-
-.map-marker:focus-visible .map-marker-ring {
-  stroke-dasharray: 4 3;
 }
 
 /* ── Liste ───────────────────────────────────────────────────────────────── */
@@ -5585,4 +5705,49 @@ td a {
   .map-explorer-list {
     max-height: 460px;
   }
+}
+
+/* ── Datenalter ──────────────────────────────────────────────────────────────
+   Macht sichtbar, wie alt die Zahlen daneben sind. Ohne diese Zeile wirken
+   Beobachtungen von vor Monaten wie von heute. */
+.data-freshness {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 12px;
+  gap: 6px;
+  margin: 12px 0 0;
+}
+
+.data-freshness-dot {
+  background: var(--muted);
+  border-radius: 50%;
+  flex-shrink: 0;
+  height: 7px;
+  opacity: 0.7;
+  width: 7px;
+}
+
+.data-freshness--stale {
+  color: var(--warn);
+}
+
+.data-freshness--stale .data-freshness-dot {
+  background: var(--warn);
+  opacity: 1;
+}
+
+.data-freshness--error {
+  color: var(--bad);
+}
+
+.data-freshness--error .data-freshness-dot {
+  background: var(--bad);
+  opacity: 1;
+}
+
+.data-freshness-hint {
+  flex-basis: 100%;
+  padding-left: 13px;
 }

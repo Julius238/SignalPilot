@@ -1,0 +1,33 @@
+#!/bin/sh
+# Repo-lokaler pnpm-Aufruf für die Root-Skripte.
+#
+# Das Problem: Die Root-Skripte in package.json rufen intern wieder pnpm auf
+# (`pnpm -r ...`, `pnpm --filter ... ...`). Wer die Skripte über
+# `corepack pnpm test` startet, hat aber kein unpräfixiertes `pnpm` im PATH —
+# Corepack führt pnpm direkt aus, ohne einen Shim zu hinterlassen. Das Skript
+# brach deshalb mit `sh: pnpm: command not found` ab, obwohl der äußere Aufruf
+# funktionierte.
+#
+# Die Lösung ist bewusst klein und projektseitig: Die Root-Skripte rufen diesen
+# Shim über einen relativen Pfad auf (Skripte laufen im Repo-Wurzelverzeichnis).
+# Er verlangt keine globale Installation, enthält keinen absoluten Pfad und
+# bestimmt keine pnpm-Version — die kommt entweder aus dem vorhandenen pnpm oder
+# über Corepack aus dem Feld `packageManager` in package.json.
+#
+# Reihenfolge:
+#   1. vorhandenes pnpm im PATH — identisch zum bisherigen Verhalten, damit
+#      CI und die Docker-Builds (dort läuft `corepack enable`) unverändert laufen
+#   2. corepack — der Weg ohne globale Installation
+set -e
+
+if command -v pnpm >/dev/null 2>&1; then
+  exec pnpm "$@"
+fi
+
+if command -v corepack >/dev/null 2>&1; then
+  exec corepack pnpm "$@"
+fi
+
+echo "scripts/pnpm: weder 'pnpm' noch 'corepack' gefunden." >&2
+echo "Node ab 16.9 bringt Corepack mit; sonst pnpm installieren." >&2
+exit 127

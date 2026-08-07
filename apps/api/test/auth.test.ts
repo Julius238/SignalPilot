@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { dirname } from "node:path";
+import { dirname, resolve } from "node:path";
 import { afterEach, before, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -21,6 +21,10 @@ const TEST_PASSWORD = "correct-password-123";
 const TEST_SESSION_SECRET = "test-secret-must-be-long-enough-32chars";
 let TEST_PASSWORD_HASH: string;
 const apiDir = dirname(fileURLToPath(import.meta.url)) + "/..";
+// Nicht `pnpm` direkt: In Umgebungen, die pnpm nur über Corepack bereitstellen,
+// gibt es kein unpräfixiertes `pnpm` im PATH und der Aufruf bricht mit ENOENT ab.
+// `scripts/pnpm` ist der repo-eigene Shim, den auch die Root-Skripte benutzen.
+const pnpmShim = resolve(apiDir, "../../scripts/pnpm");
 
 before(async () => {
   TEST_PASSWORD_HASH = await bcrypt.hash(TEST_PASSWORD, 4);
@@ -516,7 +520,7 @@ describe("auth config validation", () => {
 
 describe("auth scripts", () => {
   it("auth:hash-password rejects ADMIN_PASSWORD when it looks like a bcrypt hash", () => {
-    const result = spawnSync("pnpm", ["exec", "tsx", "scripts/hash-password.ts"], {
+    const result = spawnSync(pnpmShim, ["exec", "tsx", "scripts/hash-password.ts"], {
       cwd: apiDir,
       env: {
         ...process.env,
@@ -534,7 +538,7 @@ describe("auth scripts", () => {
   });
 
   it("auth:hash-password prints ADMIN_PASSWORD_HASH for a cleartext password", () => {
-    const result = spawnSync("pnpm", ["exec", "tsx", "scripts/hash-password.ts"], {
+    const result = spawnSync(pnpmShim, ["exec", "tsx", "scripts/hash-password.ts"], {
       cwd: apiDir,
       env: {
         ...process.env,
@@ -551,7 +555,7 @@ describe("auth scripts", () => {
 
   it("auth:verify-password outputs true for the matching cleartext password", async () => {
     const hash = await bcrypt.hash("testpass123", 4);
-    const result = spawnSync("pnpm", ["exec", "tsx", "scripts/verify-password.ts"], {
+    const result = spawnSync(pnpmShim, ["exec", "tsx", "scripts/verify-password.ts"], {
       cwd: apiDir,
       env: {
         ...process.env,

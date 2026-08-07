@@ -78,14 +78,14 @@ export default function LoginPage() {
       });
 
       if (!response.ok) {
-        setError("Invalid credentials. Please try again.");
+        setError("Benutzername oder Passwort stimmt nicht. Bitte erneut versuchen.");
         setPending(false);
         return;
       }
 
       redirectToDashboard();
     } catch {
-      setError("Unable to reach API. Please check your connection.");
+      setError("Die SignalPilot-API ist nicht erreichbar. Bitte Verbindung prüfen.");
       setPending(false);
     }
   }
@@ -101,14 +101,14 @@ export default function LoginPage() {
       });
 
       if (!response.ok) {
-        setError("Dev login is not available.");
+        setError("Die Entwickler-Anmeldung ist nicht verfügbar.");
         setDevPending(false);
         return;
       }
 
       redirectToDashboard();
     } catch {
-      setError("Unable to reach API. Please check your connection.");
+      setError("Die SignalPilot-API ist nicht erreichbar. Bitte Verbindung prüfen.");
       setDevPending(false);
     }
   }
@@ -119,42 +119,56 @@ export default function LoginPage() {
     <div className="login-page">
       <div className="login-card">
         <h1>SignalPilot</h1>
-        <p className="login-subtitle">Sign in to continue</p>
+        <p className="login-subtitle">Zum Fortfahren bitte anmelden</p>
+        {/* Labels stehen über den Feldern und beide Felder haben dieselbe Breite —
+            vorher standen sie daneben und die Felder waren unterschiedlich breit. */}
         <form className="login-form" onSubmit={handleSubmit}>
-          <label>
-            Username
+          <label htmlFor="login-username">
+            <span className="login-label">Benutzername</span>
             <input
               autoComplete="username"
               autoFocus
               disabled={pending}
+              id="login-username"
               name="username"
               required
               type="text"
             />
           </label>
-          <label>
-            Password
+          <label htmlFor="login-password">
+            <span className="login-label">Passwort</span>
             <input
               autoComplete="current-password"
               disabled={pending}
+              id="login-password"
               name="password"
               required
               type="password"
             />
           </label>
-          {error ? <p className="form-message form-message-error">{error}</p> : null}
+          {error ? (
+            <p className="form-message form-message-error" role="alert">
+              {error}
+            </p>
+          ) : null}
           <button disabled={pending} type="submit">
-            {pending ? "Signing in…" : "Sign in"}
+            {pending ? "Anmeldung läuft…" : "Anmelden"}
           </button>
         </form>
+        <p className="login-note">
+          SignalPilot hat genau einen Zugang. Es gibt keine Registrierung und keine
+          Passwort-Zurücksetzung — bei Verlust wird das Passwort direkt am Server neu gesetzt.
+        </p>
         {devLoginEnabled ? (
+          // Bewusst als Textlink und nicht als Knopf: Der echte Login soll die
+          // einzige prominente Aktion bleiben.
           <button
-            className="dev-login-button"
+            className="dev-login-link"
             disabled={pending || devPending}
             onClick={handleDevLogin}
             type="button"
           >
-            {devPending ? "Continuing…" : "Continue in Dev Mode"}
+            {devPending ? "Wird geöffnet…" : "Ohne Anmeldung fortfahren (nur lokale Entwicklung)"}
           </button>
         ) : null}
       </div>

@@ -1,9 +1,19 @@
 import Link from "next/link";
 
+import { DataFreshness } from "../../components/data-freshness";
 import { EmptyState, ErrorState } from "../../components/empty-state";
 import { RetryButton } from "../../components/retry-button";
 import { PageHeader, SectionCard } from "../../components/ui";
 import { describeApiError } from "../../lib/api-error";
+import {
+  describeStatus,
+  isErrorStatus,
+  metricValue,
+  formatMetric,
+  resolveDataStatus,
+  statusOfList,
+  type DataStatus
+} from "../../lib/data-status";
 import { discoveryEmptyCopy, resolveDiscoveryStatus } from "../../lib/discovery-status";
 import { HeroBand, type HeroMetric } from "../../components/dashboard/hero-band";
 import { PriorityFeed, type PriorityItem } from "../../components/dashboard/priority-feed";
@@ -15,11 +25,11 @@ import {
   marketEventTypeLabels,
   radarEventExplanation,
   radarEventTypeLabel,
-  regimeSentence,
   severityRank,
   withinHours
 } from "../../components/dashboard/shared";
-import { formatDateTime } from "../../lib/format";
+import { formatDateTime, lastPeriodPhrase, pluralize } from "../../lib/format";
+import { buildPulse } from "../../lib/overview-pulse";
 import {
   fetchApi,
   type Alert,
@@ -143,58 +153,6 @@ function countBy<T>(items: T[], predicate: (item: T) => boolean): number {
   return items.reduce((total, item) => (predicate(item) ? total + 1 : total), 0);
 }
 
-// Baut den menschlichen Puls-Satz des Lagebilds aus den echten Zahlen —
-// funktioniert auch ohne Regime-Snapshot.
-function buildPulse({
-  criticalCount,
-  notableCount,
-  radarCount,
-  topCluster,
-  topRegion,
-  regime
-}: {
-  criticalCount: number;
-  notableCount: number;
-  radarCount: number;
-  topCluster: string | null;
-  topRegion: string | null;
-  regime: MarketRegimeSnapshot | null | undefined;
-}): { pulse: string; context: string | null } {
-  let pulse: string;
-  if (criticalCount > 0) {
-    pulse =
-      criticalCount === 1
-        ? "Erhöhte Aufmerksamkeit: 1 sehr wichtiges Ereignis in den letzten 48 Stunden."
-        : `Erhöhte Aufmerksamkeit: ${criticalCount} sehr wichtige Ereignisse in den letzten 48 Stunden.`;
-  } else if (notableCount > 0) {
-    pulse =
-      notableCount === 1
-        ? "Eine wichtige Entwicklung im Blick — kein akuter Alarm."
-        : `${notableCount} wichtige Entwicklungen im Blick — kein akuter Alarm.`;
-  } else {
-    pulse = "Ruhige Lage — aktuell nichts Dringendes.";
-  }
-
-  const parts: string[] = [];
-  if (topCluster) {
-    parts.push(
-      topRegion
-        ? `Die meisten Meldungen drehen sich um ${topCluster} — häufigste Region: ${topRegion}.`
-        : `Die meisten Meldungen drehen sich um ${topCluster}.`
-    );
-  }
-  parts.push(
-    radarCount > 0
-      ? radarCount === 1
-        ? "Das Markt-Radar meldet eine Beobachtung."
-        : `Das Markt-Radar meldet ${radarCount} Beobachtungen.`
-      : "Das Markt-Radar ist ruhig."
-  );
-  const regimePart = regimeSentence(regime?.overallRegime);
-  if (regimePart) parts.push(regimePart);
-
-  return { pulse, context: parts.length > 0 ? parts.join(" ") : null };
-}
 
 export default async function DashboardPage() {
   const [
@@ -244,6 +202,41 @@ export default async function DashboardPage() {
   const discoveryData = discovery.data;
   const scannerSummary = scanner.data?.summary;
 
+  // ── Datenzustand je Quelle ──
+  // Jede Sektion kennt ihren eigenen Zustand. Ein Fehler in einer Quelle darf
+  // weder die Nachbarsektion stumm schalten noch als "es gibt nichts" erscheinen.
+  const newest = (values: Array<string | undefined>): string | null =>
+    values.filter((value): value is string => Boolean(value)).sort().at(-1) ?? null;
+
+  const newestEventAt = newest(marketEventList.map((event) => event.detectedAt));
+  const newestRadarAt = newest(radarEventList.map((event) => event.createdAt));
+  const newestSignalAt = newest(signalList.map((signal) => signal.createdAt));
+
+  const eventsStatus = statusOfList(marketEvents, {
+    newestAt: newestEventAt,
+    staleAfterHours: impactWindowHours,
+    now: renderedAt
+  });
+  const radarStatus = statusOfList(radarEvents, {
+    newestAt: newestRadarAt,
+    staleAfterHours: 24,
+    now: renderedAt
+  });
+  const signalsStatus = statusOfList(signals, {
+    newestAt: newestSignalAt,
+    staleAfterHours: 24,
+    now: renderedAt
+  });
+  const watchlistStatus = statusOfList(watchlist, { now: renderedAt });
+  const alertsStatus = statusOfList(alerts, { now: renderedAt });
+  // Der Scanner liefert ein Objekt, keine Liste — "leer" gibt es dort nicht.
+  const scannerStatus: DataStatus = resolveDataStatus({
+    error: scanner.error,
+    errorKind: scanner.errorKind,
+    isEmpty: false,
+    now: renderedAt
+  });
+
   // ── Abgeleitete Sichten ──
   const radarLast24h = radarEventList.filter((event) =>
     withinHours(event.createdAt, 24, renderedAt)
@@ -282,7 +275,9 @@ export default async function DashboardPage() {
     radarCount: radarLast24h.length,
     topCluster: clusterChips[0]?.label ?? null,
     topRegion,
-    regime
+    regime,
+    eventsStatus,
+    radarStatus
   });
 
   // ── Wichtig jetzt: Ereignisse + Radar gemischt, nur ab "Im Blick" ──
@@ -372,39 +367,62 @@ export default async function DashboardPage() {
       : "Alle Systeme laufen";
 
   // ── Lagebild-Kennzahlen ──
-  const importantTotal = criticalCount + notableCount;
-  const activeSignals =
-    (scannerSummary?.strongWatchCount ?? 0) + (scannerSummary?.watchCount ?? 0);
+  // `metricValue` liefert bei einem gescheiterten Abruf `null`; `formatMetric`
+  // macht daraus "—". Eine "0" wäre hier eine Behauptung, die niemand geprüft hat.
+  const importantMetric = metricValue(
+    isErrorStatus(eventsStatus) ? eventsStatus : radarStatus,
+    criticalCount + notableCount
+  );
+  const radarMetric = metricValue(radarStatus, radarLast24h.length);
+  const activeSignalsMetric = metricValue(
+    scannerStatus,
+    (scannerSummary?.strongWatchCount ?? 0) + (scannerSummary?.watchCount ?? 0)
+  );
+  const alertsMetric = metricValue(scannerStatus, scannerSummary?.alertsSentToday ?? 0);
+
+  const unavailableSub = "Abruf fehlgeschlagen";
 
   const heroMetrics: HeroMetric[] = [
     {
       label: "Wichtige Entwicklungen",
-      value: importantTotal,
+      value: formatMetric(importantMetric),
       sub:
-        criticalCount > 0
-          ? `davon ${criticalCount} sehr wichtig`
-          : importantTotal > 0
-            ? "keine davon kritisch"
-            : "ruhige Lage",
+        importantMetric == null
+          ? unavailableSub
+          : criticalCount > 0
+            ? `davon ${criticalCount} sehr wichtig`
+            : importantMetric > 0
+              ? "keine davon kritisch"
+              : eventsStatus === "empty" && radarStatus === "empty"
+                ? "ruhige Lage"
+                : "nichts über der Schwelle",
       href: "#wichtig-jetzt",
       tone: criticalCount > 0 ? "var(--sev-critical)" : undefined
     },
     {
       label: "Radar-Beobachtungen",
-      value: radarLast24h.length,
-      sub: "Bewegungen & Chartbilder · 24 Std.",
+      value: formatMetric(radarMetric),
+      sub: radarMetric == null ? unavailableSub : "Bewegungen & Chartbilder · 24 Std.",
       href: "/dashboard/scanner"
     },
     {
       label: "Aktive Signale",
-      value: activeSignals,
-      sub: `${scannerSummary?.strongWatchCount ?? 0} mit starker Beobachtung`,
+      value: formatMetric(activeSignalsMetric),
+      sub:
+        activeSignalsMetric == null
+          ? unavailableSub
+          : `${scannerSummary?.strongWatchCount ?? 0} mit starker Beobachtung`,
       href: "/dashboard/signals"
     },
     {
       label: "Benachrichtigungen heute",
-      value: scannerSummary?.alertsSentToday ?? 0,
-      sub: failedAlerts > 0 ? `${failedAlerts} fehlgeschlagen` : "alle zugestellt",
+      value: formatMetric(alertsMetric),
+      sub:
+        alertsMetric == null
+          ? unavailableSub
+          : failedAlerts > 0
+            ? `${failedAlerts} fehlgeschlagen`
+            : "alle zugestellt",
       href: "/dashboard/logs",
       tone: failedAlerts > 0 ? "var(--bad)" : undefined
     }
@@ -460,6 +478,11 @@ export default async function DashboardPage() {
     relevantNews.error ?? "",
     "Die Nachrichten"
   );
+  const eventsErrorCopy = describeStatus(
+    eventsStatus,
+    marketEvents.error ?? "",
+    "Die globalen Ereignisse"
+  );
 
   return (
     <>
@@ -506,7 +529,12 @@ export default async function DashboardPage() {
       <HeroBand pulse={pulse} context={context} regime={regime} metrics={heroMetrics} />
 
       {/* ── 3 · Was ist wichtig — und was könnte es bedeuten? ── */}
-      <PriorityFeed items={priorityItems} now={renderedAt} />
+      <PriorityFeed
+        items={priorityItems}
+        now={renderedAt}
+        status={isErrorStatus(eventsStatus) ? eventsStatus : radarStatus}
+        errorMessage={marketEvents.error ?? radarEvents.error ?? ""}
+      />
 
       <SectionCard
         title="Heute neu im Blick"
@@ -579,21 +607,44 @@ export default async function DashboardPage() {
               ))}
             </div>
           ) : null}
-          {eventsLast48h.length === 0 ? (
+          {isErrorStatus(eventsStatus) && eventsErrorCopy ? (
+            // Vorher stand hier "Keine globalen Ereignisse in den letzten 48 Stunden."
+            // — auch dann, wenn schlicht niemand nachgesehen hatte.
+            <ErrorState
+              title={eventsErrorCopy.title}
+              message={eventsErrorCopy.message}
+              hint={eventsErrorCopy.hint}
+              action={eventsErrorCopy.retryable ? <RetryButton /> : null}
+            />
+          ) : eventsLast48h.length === 0 ? (
             <EmptyState
-              title="Keine globalen Ereignisse in den letzten 48 Stunden."
+              title={`Keine globalen Ereignisse ${lastPeriodPhrase(impactWindowHours)}.`}
               description="Die Karte füllt sich, sobald der Ereignis-Monitor neue Meldungen erkennt und einordnet."
             />
           ) : (
             <NewsWorldMap events={eventsLast48h} now={renderedAt} />
           )}
+          <DataFreshness
+            label="Weltgeschehen"
+            newestAt={newestEventAt}
+            status={eventsStatus}
+            now={renderedAt}
+            staleHint={`Die jüngste Meldung liegt länger als ${impactWindowHours} Stunden zurück.`}
+          />
         </SectionCard>
 
         <SectionCard
           title="Was betroffen sein könnte"
           subtitle="Bereiche, die in den aktuellen Meldungen als möglicher Rücken- oder Gegenwind auftauchen."
         >
-          {impactMap.length === 0 ? (
+          {isErrorStatus(eventsStatus) && eventsErrorCopy ? (
+            <ErrorState
+              title={eventsErrorCopy.title}
+              message={eventsErrorCopy.message}
+              hint={eventsErrorCopy.hint}
+              action={eventsErrorCopy.retryable ? <RetryButton /> : null}
+            />
+          ) : impactMap.length === 0 ? (
             <EmptyState
               title="Noch keine Zuordnungen im Zeitfenster."
               description="Sie entstehen automatisch, wenn erkannte Ereignisse per Regelwerk auf Anlagebereiche wirken könnten."
@@ -695,14 +746,35 @@ export default async function DashboardPage() {
 
       {/* ── 6 · Radar & Signale kompakt ── */}
       <div className="overview-lower-grid">
-        <RadarOverviewCard events={radarCompact} now={renderedAt} />
+        <RadarOverviewCard
+          events={radarCompact}
+          now={renderedAt}
+          status={radarStatus}
+          errorMessage={radarEvents.error ?? ""}
+        />
         <SignalsCompactCard
           alerts={alertList}
           signals={topSignals}
           watchlistCount={watchlistItems.length}
           watchlistHighPriority={highPriorityWatchlist}
+          signalsStatus={signalsStatus}
+          alertsStatus={alertsStatus}
+          watchlistStatus={watchlistStatus}
+          errorMessage={signals.error ?? ""}
         />
       </div>
+
+      <DataFreshness
+        label="Signale"
+        newestAt={newestSignalAt}
+        status={signalsStatus}
+        now={renderedAt}
+        staleHint={`Die jüngste Beobachtung ist älter als 24 Stunden — ${pluralize(
+          signalList.length,
+          "gespeichertes Signal",
+          "gespeicherte Signale"
+        )} insgesamt.`}
+      />
 
       <p className="research-footnote">
         SignalPilot beobachtet Märkte und Ereignisse zu Research-Zwecken. Alle Einstufungen sind
