@@ -5,8 +5,14 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import Fastify, { type FastifyInstance } from "fastify";
 import rateLimit from "@fastify/rate-limit";
 
-import { resolveNexusReadConfig, sha256Hex } from "../src/lib/nexusReadConfig.js";
 import {
+  NEXUS_READ_REQUIRED_SCOPE,
+  type NexusReadConfig,
+  resolveNexusReadConfig,
+  sha256Hex
+} from "../src/lib/nexusReadConfig.js";
+import {
+  authenticateNexusRequest,
   NEXUS_READ_CONTRACT_VERSION,
   registerNexusReadRoutes,
   setNexusReadDatabaseForTests
@@ -19,9 +25,35 @@ import {
 const SERVICE_TOKEN = "nexus-test-service-token-2f8c41d9a6b7";
 const TOKEN_DIGEST = createHash("sha256").update(SERVICE_TOKEN, "utf8").digest("hex");
 
+/** A second, still-valid token used only in rotation-window tests. */
+const PREVIOUS_SERVICE_TOKEN = "nexus-test-previous-service-token-9b3e01aa";
+const PREVIOUS_TOKEN_DIGEST = createHash("sha256")
+  .update(PREVIOUS_SERVICE_TOKEN, "utf8")
+  .digest("hex");
+
 /** Canary values: they must never appear in a response body. */
 const CANARY_DATABASE_URL = "postgresql://sp:canary-db-pw-8813@localhost:5432/signalpilot";
 const CANARY_SESSION_SECRET = "canary-session-secret-must-never-be-returned-4417";
+
+function buildToken(overrides: Partial<{ digest: string; scope: string; expiresAt: Date | null }> = {}) {
+  return {
+    digest: overrides.digest ?? TOKEN_DIGEST,
+    scope: overrides.scope ?? NEXUS_READ_REQUIRED_SCOPE,
+    expiresAt: overrides.expiresAt ?? null
+  };
+}
+
+function buildConfig(overrides: Partial<NexusReadConfig> = {}): NexusReadConfig {
+  return {
+    enabled: true,
+    currentToken: buildToken(),
+    previousToken: null,
+    windowHours: 24,
+    staleAfterSeconds: 3600,
+    rateLimitMax: 60,
+    ...overrides
+  };
+}
 
 interface QueryCall {
   readonly model: string;
@@ -89,7 +121,10 @@ function buildDatabaseStub(options: StubOptions = {}) {
   return { stub, calls };
 }
 
-async function createServer(options: StubOptions = {}) {
+async function createServer(
+  options: StubOptions = {},
+  envOverrides: Readonly<Record<string, string | undefined>> = {}
+) {
   const { stub, calls } = buildDatabaseStub(options);
   setNexusReadDatabaseForTests(stub as never);
 
@@ -98,9 +133,11 @@ async function createServer(options: StubOptions = {}) {
 
   const resolved = resolveNexusReadConfig({
     NEXUS_READ_API_ENABLED: "true",
-    NEXUS_READ_TOKEN_SHA256: TOKEN_DIGEST
+    NEXUS_READ_TOKEN_SHA256: TOKEN_DIGEST,
+    NEXUS_READ_TOKEN_SCOPE: NEXUS_READ_REQUIRED_SCOPE,
+    ...envOverrides
   });
-  assert.equal(resolved.ok, true);
+  assert.equal(resolved.ok, true, !resolved.ok ? resolved.message : undefined);
   if (!resolved.ok) throw new Error("unreachable");
 
   await server.register(async (scope) => registerNexusReadRoutes(scope, { config: resolved.config }), {
@@ -111,11 +148,11 @@ async function createServer(options: StubOptions = {}) {
   return { server, calls };
 }
 
-function authorized(url: string) {
+function authorized(url: string, token: string = SERVICE_TOKEN) {
   return {
     method: "GET" as const,
     url,
-    headers: { authorization: `Bearer ${SERVICE_TOKEN}` }
+    headers: { authorization: `Bearer ${token}` }
   };
 }
 
@@ -255,6 +292,42 @@ describe("Nexus read API — status endpoint", () => {
     assert.equal(response.statusCode, 401);
   });
 
+  // Rotation: current und previous Token sind während des Überlappungsfensters
+  // beide gültig, damit SignalPilot und Nexus nicht synchron neu starten müssen.
+  it("accepts the previous token while a rotation window is active", async () => {
+    const inOneHour = new Date(Date.now() + 3_600_000).toISOString();
+    const { server } = await createServer(
+      {},
+      {
+        NEXUS_READ_TOKEN_PREVIOUS_SHA256: PREVIOUS_TOKEN_DIGEST,
+        NEXUS_READ_TOKEN_PREVIOUS_SCOPE: NEXUS_READ_REQUIRED_SCOPE,
+        NEXUS_READ_TOKEN_PREVIOUS_EXPIRES_AT: inOneHour
+      }
+    );
+
+    const currentResponse = await server.inject(authorized("/integrations/nexus/v1/status"));
+    assert.equal(currentResponse.statusCode, 200);
+
+    const previousResponse = await server.inject(
+      authorized("/integrations/nexus/v1/status", PREVIOUS_SERVICE_TOKEN)
+    );
+    assert.equal(previousResponse.statusCode, 200);
+  });
+
+  it("refuses to even register a previous token that has no expiry", async () => {
+    const server: FastifyInstance = Fastify({ logger: false });
+    await assert.rejects(async () => {
+      await server.register(async (scope) =>
+        registerNexusReadRoutes(scope, {
+          config: buildConfig({
+            previousToken: buildToken({ digest: PREVIOUS_TOKEN_DIGEST, expiresAt: null })
+          })
+        })
+      );
+      await server.ready();
+    });
+  });
+
   // 2. + 8. Der Endpunkt ist read-only; keine Mutation ist erreichbar.
   it("declares GET handlers only", async () => {
     const { server } = await createServer();
@@ -337,7 +410,15 @@ describe("Nexus read API — status endpoint", () => {
   // 5. Keine Secrets in der Antwort.
   it("returns no secret, connection string or raw environment value", async () => {
     process.env.NEXUS_READ_TOKEN_SHA256 = TOKEN_DIGEST;
-    const { server } = await createServer();
+    const inOneHour = new Date(Date.now() + 3_600_000).toISOString();
+    const { server } = await createServer(
+      {},
+      {
+        NEXUS_READ_TOKEN_PREVIOUS_SHA256: PREVIOUS_TOKEN_DIGEST,
+        NEXUS_READ_TOKEN_PREVIOUS_SCOPE: NEXUS_READ_REQUIRED_SCOPE,
+        NEXUS_READ_TOKEN_PREVIOUS_EXPIRES_AT: inOneHour
+      }
+    );
 
     const raw = (await server.inject(authorized("/integrations/nexus/v1/status?components=extended")))
       .body;
@@ -347,6 +428,8 @@ describe("Nexus read API — status endpoint", () => {
     assert.ok(!raw.includes("canary-db-pw-8813"));
     assert.ok(!raw.includes(SERVICE_TOKEN));
     assert.ok(!raw.includes(TOKEN_DIGEST));
+    assert.ok(!raw.includes(PREVIOUS_SERVICE_TOKEN));
+    assert.ok(!raw.includes(PREVIOUS_TOKEN_DIGEST));
     assert.ok(!raw.includes("postgresql://"));
     assert.ok(!/password/i.test(raw));
     assert.ok(!/secret/i.test(raw));
@@ -499,10 +582,151 @@ describe("Nexus read API — configuration gate", () => {
       const result = resolveNexusReadConfig({
         NEXUS_READ_API_ENABLED: "true",
         NEXUS_READ_TOKEN_SHA256: TOKEN_DIGEST,
+        NEXUS_READ_TOKEN_SCOPE: NEXUS_READ_REQUIRED_SCOPE,
         ...env
       });
       assert.equal(result.ok, false, `accepted ${JSON.stringify(env)}`);
     }
+  });
+
+  // Scope: "fail closed bei fehlendem oder falschem Scope".
+  it("refuses to enable without a configured scope", () => {
+    const result = resolveNexusReadConfig({
+      NEXUS_READ_API_ENABLED: "true",
+      NEXUS_READ_TOKEN_SHA256: TOKEN_DIGEST
+    });
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.reasonCode, "TOKEN_SCOPE_INVALID");
+  });
+
+  it("refuses a scope other than nexus:read", () => {
+    for (const scope of ["", "nexus:write", "admin"]) {
+      const result = resolveNexusReadConfig({
+        NEXUS_READ_API_ENABLED: "true",
+        NEXUS_READ_TOKEN_SHA256: TOKEN_DIGEST,
+        NEXUS_READ_TOKEN_SCOPE: scope
+      });
+      assert.equal(result.ok, false, `accepted scope ${JSON.stringify(scope)}`);
+      if (!result.ok) assert.equal(result.reasonCode, "TOKEN_SCOPE_INVALID");
+    }
+  });
+
+  it("accepts a well-formed current token with no expiry and with a future expiry", () => {
+    const noExpiry = resolveNexusReadConfig({
+      NEXUS_READ_API_ENABLED: "true",
+      NEXUS_READ_TOKEN_SHA256: TOKEN_DIGEST,
+      NEXUS_READ_TOKEN_SCOPE: NEXUS_READ_REQUIRED_SCOPE
+    });
+    assert.equal(noExpiry.ok, true);
+    if (noExpiry.ok) assert.equal(noExpiry.config.currentToken.expiresAt, null);
+
+    const futureExpiry = new Date(Date.now() + 3_600_000).toISOString();
+    const withExpiry = resolveNexusReadConfig({
+      NEXUS_READ_API_ENABLED: "true",
+      NEXUS_READ_TOKEN_SHA256: TOKEN_DIGEST,
+      NEXUS_READ_TOKEN_SCOPE: NEXUS_READ_REQUIRED_SCOPE,
+      NEXUS_READ_TOKEN_EXPIRES_AT: futureExpiry
+    });
+    assert.equal(withExpiry.ok, true);
+    if (withExpiry.ok) {
+      assert.equal(withExpiry.config.currentToken.expiresAt?.toISOString(), futureExpiry);
+    }
+  });
+
+  it("refuses a malformed or already-past current-token expiry", () => {
+    const malformed = resolveNexusReadConfig({
+      NEXUS_READ_API_ENABLED: "true",
+      NEXUS_READ_TOKEN_SHA256: TOKEN_DIGEST,
+      NEXUS_READ_TOKEN_SCOPE: NEXUS_READ_REQUIRED_SCOPE,
+      NEXUS_READ_TOKEN_EXPIRES_AT: "not-a-date"
+    });
+    assert.equal(malformed.ok, false);
+    if (!malformed.ok) assert.equal(malformed.reasonCode, "TOKEN_EXPIRES_AT_INVALID");
+
+    const alreadyPast = resolveNexusReadConfig({
+      NEXUS_READ_API_ENABLED: "true",
+      NEXUS_READ_TOKEN_SHA256: TOKEN_DIGEST,
+      NEXUS_READ_TOKEN_SCOPE: NEXUS_READ_REQUIRED_SCOPE,
+      NEXUS_READ_TOKEN_EXPIRES_AT: new Date(Date.now() - 3_600_000).toISOString()
+    });
+    assert.equal(alreadyPast.ok, false);
+    if (!alreadyPast.ok) assert.equal(alreadyPast.reasonCode, "TOKEN_ALREADY_EXPIRED");
+  });
+
+  // Rotation: previous Token muss vollständig konfiguriert sein — Scope,
+  // Ablauf und nicht die Session-Secret-Wiederverwendung.
+  describe("previous-token rotation window", () => {
+    const futureExpiry = () => new Date(Date.now() + 3_600_000).toISOString();
+
+    it("accepts a well-formed previous token during a rotation window", () => {
+      const result = resolveNexusReadConfig({
+        NEXUS_READ_API_ENABLED: "true",
+        NEXUS_READ_TOKEN_SHA256: TOKEN_DIGEST,
+        NEXUS_READ_TOKEN_SCOPE: NEXUS_READ_REQUIRED_SCOPE,
+        NEXUS_READ_TOKEN_PREVIOUS_SHA256: PREVIOUS_TOKEN_DIGEST,
+        NEXUS_READ_TOKEN_PREVIOUS_SCOPE: NEXUS_READ_REQUIRED_SCOPE,
+        NEXUS_READ_TOKEN_PREVIOUS_EXPIRES_AT: futureExpiry()
+      });
+      assert.equal(result.ok, true);
+      if (result.ok) {
+        assert.equal(result.config.previousToken?.digest, PREVIOUS_TOKEN_DIGEST);
+        assert.equal(result.config.previousToken?.scope, NEXUS_READ_REQUIRED_SCOPE);
+      }
+    });
+
+    it("refuses a previous token with a missing or wrong scope", () => {
+      for (const scope of [undefined, "", "nexus:write"]) {
+        const result = resolveNexusReadConfig({
+          NEXUS_READ_API_ENABLED: "true",
+          NEXUS_READ_TOKEN_SHA256: TOKEN_DIGEST,
+          NEXUS_READ_TOKEN_SCOPE: NEXUS_READ_REQUIRED_SCOPE,
+          NEXUS_READ_TOKEN_PREVIOUS_SHA256: PREVIOUS_TOKEN_DIGEST,
+          NEXUS_READ_TOKEN_PREVIOUS_SCOPE: scope,
+          NEXUS_READ_TOKEN_PREVIOUS_EXPIRES_AT: futureExpiry()
+        });
+        assert.equal(result.ok, false, `accepted previous scope ${String(scope)}`);
+        if (!result.ok) assert.equal(result.reasonCode, "PREVIOUS_TOKEN_SCOPE_INVALID");
+      }
+    });
+
+    it("refuses a previous token without an expiry", () => {
+      const result = resolveNexusReadConfig({
+        NEXUS_READ_API_ENABLED: "true",
+        NEXUS_READ_TOKEN_SHA256: TOKEN_DIGEST,
+        NEXUS_READ_TOKEN_SCOPE: NEXUS_READ_REQUIRED_SCOPE,
+        NEXUS_READ_TOKEN_PREVIOUS_SHA256: PREVIOUS_TOKEN_DIGEST,
+        NEXUS_READ_TOKEN_PREVIOUS_SCOPE: NEXUS_READ_REQUIRED_SCOPE
+      });
+      assert.equal(result.ok, false);
+      if (!result.ok) assert.equal(result.reasonCode, "PREVIOUS_TOKEN_EXPIRES_AT_REQUIRED");
+    });
+
+    it("refuses a previous token whose rotation window has already ended", () => {
+      const result = resolveNexusReadConfig({
+        NEXUS_READ_API_ENABLED: "true",
+        NEXUS_READ_TOKEN_SHA256: TOKEN_DIGEST,
+        NEXUS_READ_TOKEN_SCOPE: NEXUS_READ_REQUIRED_SCOPE,
+        NEXUS_READ_TOKEN_PREVIOUS_SHA256: PREVIOUS_TOKEN_DIGEST,
+        NEXUS_READ_TOKEN_PREVIOUS_SCOPE: NEXUS_READ_REQUIRED_SCOPE,
+        NEXUS_READ_TOKEN_PREVIOUS_EXPIRES_AT: new Date(Date.now() - 1000).toISOString()
+      });
+      assert.equal(result.ok, false);
+      if (!result.ok) assert.equal(result.reasonCode, "PREVIOUS_TOKEN_ALREADY_EXPIRED");
+    });
+
+    it("refuses a previous token that is the admin session secret", () => {
+      const result = resolveNexusReadConfig({
+        NEXUS_READ_API_ENABLED: "true",
+        NEXUS_READ_TOKEN_SHA256: TOKEN_DIGEST,
+        NEXUS_READ_TOKEN_SCOPE: NEXUS_READ_REQUIRED_SCOPE,
+        AUTH_SESSION_SECRET: CANARY_SESSION_SECRET,
+        NEXUS_READ_TOKEN_PREVIOUS_SHA256: sha256Hex(CANARY_SESSION_SECRET),
+        NEXUS_READ_TOKEN_PREVIOUS_SCOPE: NEXUS_READ_REQUIRED_SCOPE,
+        NEXUS_READ_TOKEN_PREVIOUS_EXPIRES_AT: futureExpiry()
+      });
+      assert.equal(result.ok, false);
+      if (!result.ok) assert.equal(result.reasonCode, "PREVIOUS_TOKEN_REUSES_SESSION_SECRET");
+    });
   });
 
   it("refuses to register the router without a configured token", async () => {
@@ -510,16 +734,119 @@ describe("Nexus read API — configuration gate", () => {
     await assert.rejects(async () => {
       await server.register(async (scope) =>
         registerNexusReadRoutes(scope, {
-          config: {
-            enabled: false,
-            tokenDigest: "",
-            windowHours: 24,
-            staleAfterSeconds: 3600,
-            rateLimitMax: 60
-          }
+          config: buildConfig({ enabled: false, currentToken: buildToken({ digest: "" }) })
         })
       );
       await server.ready();
+    });
+  });
+
+  it("refuses to register the router with a token that has the wrong scope", async () => {
+    const server: FastifyInstance = Fastify({ logger: false });
+    await assert.rejects(async () => {
+      await server.register(async (scope) =>
+        registerNexusReadRoutes(scope, {
+          config: buildConfig({ currentToken: buildToken({ scope: "nexus:write" }) })
+        })
+      );
+      await server.ready();
+    });
+  });
+
+  it("refuses to register the router with an already-expired current token", async () => {
+    const server: FastifyInstance = Fastify({ logger: false });
+    await assert.rejects(async () => {
+      await server.register(async (scope) =>
+        registerNexusReadRoutes(scope, {
+          config: buildConfig({
+            currentToken: buildToken({ expiresAt: new Date(Date.now() - 1000) })
+          })
+        })
+      );
+      await server.ready();
+    });
+  });
+});
+
+describe("Nexus read API — auth decision (authenticateNexusRequest)", () => {
+  const now = new Date("2026-08-07T12:00:00.000Z");
+  const soon = new Date(now.getTime() + 3_600_000);
+  const past = new Date(now.getTime() - 3_600_000);
+
+  it("accepts a matching, unexpired, correctly scoped current token", () => {
+    const config = buildConfig();
+    const decision = authenticateNexusRequest(SERVICE_TOKEN, config, now);
+    assert.deepEqual(decision, { ok: true, tokenId: "current" });
+  });
+
+  it("rejects a missing or non-matching token as unauthenticated", () => {
+    const config = buildConfig();
+    assert.deepEqual(authenticateNexusRequest(null, config, now), {
+      ok: false,
+      status: 401,
+      reasonCode: "unauthenticated"
+    });
+    assert.deepEqual(authenticateNexusRequest("wrong-token", config, now), {
+      ok: false,
+      status: 401,
+      reasonCode: "unauthenticated"
+    });
+  });
+
+  it("rejects an expired current token even though the digest matches", () => {
+    const config = buildConfig({ currentToken: buildToken({ expiresAt: past }) });
+    assert.deepEqual(authenticateNexusRequest(SERVICE_TOKEN, config, now), {
+      ok: false,
+      status: 401,
+      reasonCode: "token_expired"
+    });
+  });
+
+  it("rejects a digest-matching token whose configured scope is wrong (defense in depth)", () => {
+    const config = buildConfig({ currentToken: buildToken({ scope: "nexus:write" }) });
+    assert.deepEqual(authenticateNexusRequest(SERVICE_TOKEN, config, now), {
+      ok: false,
+      status: 403,
+      reasonCode: "insufficient_scope"
+    });
+  });
+
+  it("accepts the previous token while its rotation window is still open", () => {
+    const config = buildConfig({
+      previousToken: buildToken({ digest: PREVIOUS_TOKEN_DIGEST, expiresAt: soon })
+    });
+    const decision = authenticateNexusRequest(PREVIOUS_SERVICE_TOKEN, config, now);
+    assert.deepEqual(decision, { ok: true, tokenId: "previous" });
+  });
+
+  it("rejects the previous token once its rotation window has ended", () => {
+    const config = buildConfig({
+      previousToken: buildToken({ digest: PREVIOUS_TOKEN_DIGEST, expiresAt: past })
+    });
+    assert.deepEqual(authenticateNexusRequest(PREVIOUS_SERVICE_TOKEN, config, now), {
+      ok: false,
+      status: 401,
+      reasonCode: "token_expired"
+    });
+  });
+
+  it("rejects the previous token's wrong scope even within its window", () => {
+    const config = buildConfig({
+      previousToken: buildToken({ digest: PREVIOUS_TOKEN_DIGEST, scope: "nexus:write", expiresAt: soon })
+    });
+    assert.deepEqual(authenticateNexusRequest(PREVIOUS_SERVICE_TOKEN, config, now), {
+      ok: false,
+      status: 403,
+      reasonCode: "insufficient_scope"
+    });
+  });
+
+  it("rejects the previous token's value when no previous token is configured", () => {
+    const config = buildConfig({ previousToken: null });
+    assert.deepEqual(authenticateNexusRequest(PREVIOUS_SERVICE_TOKEN, config, now), {
+      ok: false,
+      status: 401,
+      reasonCode: "unauthenticated"
     });
   });
 });

@@ -38,7 +38,12 @@ import { BotRunStatus, prisma } from "@signalpilot/database";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
 import { getPublicEnvironment } from "../../auth/config.js";
-import { type NexusReadConfig, sha256Hex } from "../../lib/nexusReadConfig.js";
+import {
+  NEXUS_READ_REQUIRED_SCOPE,
+  type NexusReadConfig,
+  type NexusServiceToken,
+  sha256Hex
+} from "../../lib/nexusReadConfig.js";
 
 export const NEXUS_READ_CONTRACT_VERSION = "nexus-signalpilot-read/v1";
 export const NEXUS_READ_SCHEMA_VERSION = "signalpilot-nexus-read-status-1";
@@ -88,6 +93,57 @@ function extractBearer(header: string | undefined): string | null {
   if (!match) return null;
   const token = match[1].trim();
   return token.length > 0 ? token : null;
+}
+
+export type NexusAuthDecision =
+  | { readonly ok: true; readonly tokenId: "current" | "previous" }
+  | { readonly ok: false; readonly status: 401 | 403; readonly reasonCode: string };
+
+/**
+ * The complete auth decision for one request: token match, expiry and scope,
+ * tried against `currentToken` and then `previousToken` (present only during a
+ * rotation window). A pure function so every branch — including one that would
+ * require deliberately misconfiguring the live router — is unit-testable in
+ * isolation.
+ *
+ * Both "no token" and "wrong token" collapse to the same 401 `unauthenticated`:
+ * distinguishing them would tell a prober whether a guessed token was the right
+ * shape. An expired token collapses into the same code for the same reason —
+ * only the internal log `reasonCode` tells them apart. A scope mismatch is
+ * different: it can only ever be reached by someone who already holds a
+ * digest-matching token, so a distinct 403 `insufficient_scope` carries no
+ * oracle risk and matches the documented error contract.
+ */
+export function authenticateNexusRequest(
+  presentedToken: string | null,
+  config: NexusReadConfig,
+  now: Date
+): NexusAuthDecision {
+  if (!presentedToken) return { ok: false, status: 401, reasonCode: "unauthenticated" };
+
+  const evaluate = (
+    tokenRecord: NexusServiceToken,
+    tokenId: "current" | "previous"
+  ): NexusAuthDecision | null => {
+    if (!tokenMatches(presentedToken, tokenRecord.digest)) return null;
+    if (tokenRecord.expiresAt !== null && now.getTime() > tokenRecord.expiresAt.getTime()) {
+      return { ok: false, status: 401, reasonCode: "token_expired" };
+    }
+    if (tokenRecord.scope !== NEXUS_READ_REQUIRED_SCOPE) {
+      return { ok: false, status: 403, reasonCode: "insufficient_scope" };
+    }
+    return { ok: true, tokenId };
+  };
+
+  const currentResult = evaluate(config.currentToken, "current");
+  if (currentResult) return currentResult;
+
+  if (config.previousToken) {
+    const previousResult = evaluate(config.previousToken, "previous");
+    if (previousResult) return previousResult;
+  }
+
+  return { ok: false, status: 401, reasonCode: "unauthenticated" };
 }
 
 /** `TRADING_MODE`, normalised without importing a trading actuator. */
@@ -148,9 +204,31 @@ export async function registerNexusReadRoutes(
   const { config } = options;
 
   // Fail closed at registration: this router must never be mounted without a
-  // usable service credential, whatever the caller sends.
-  if (!config.enabled || config.tokenDigest.length !== 64) {
-    throw new Error("Refusing to register the Nexus read API without a configured service token.");
+  // usable, correctly scoped, unexpired service credential, whatever the
+  // caller sends. Re-validated here even though `resolveNexusReadConfig`
+  // already enforces it, in case a caller constructs a `NexusReadConfig`
+  // directly instead of going through the env-driven resolver.
+  const tokenIsUsable = (token: NexusServiceToken | null, required: boolean): boolean => {
+    if (token === null) return !required;
+    return (
+      token.digest.length === 64 &&
+      token.scope === NEXUS_READ_REQUIRED_SCOPE &&
+      (token.expiresAt === null || token.expiresAt.getTime() > Date.now())
+    );
+  };
+  if (
+    !config.enabled ||
+    !tokenIsUsable(config.currentToken, true) ||
+    (config.previousToken !== null && !tokenIsUsable(config.previousToken, false))
+  ) {
+    throw new Error(
+      "Refusing to register the Nexus read API without a valid, correctly scoped, unexpired service token."
+    );
+  }
+  // A previous token without an expiry is not a rotation window, it is a
+  // second permanent token — the registration must refuse that too.
+  if (config.previousToken !== null && config.previousToken.expiresAt === null) {
+    throw new Error("Refusing to register the Nexus read API with a previous token that never expires.");
   }
 
   server.addHook("onRequest", async (request: FastifyRequest, reply: FastifyReply) => {
@@ -158,18 +236,23 @@ export async function registerNexusReadRoutes(
     reply.header("x-request-id", id);
     // Independent of `API_AUTH_ENABLED` and of the admin cookie by design.
     const token = extractBearer(request.headers.authorization);
-    if (!token || !tokenMatches(token, config.tokenDigest)) {
-      // One code for "absent" and "wrong": distinguishing them would tell a
-      // prober whether a guessed token was the right shape.
+    const decision = authenticateNexusRequest(token, config, new Date());
+    if (!decision.ok) {
       server.log.warn(
-        { requestId: id, route: request.url.split("?")[0], reasonCode: "unauthenticated" },
+        { requestId: id, route: request.url.split("?")[0], reasonCode: decision.reasonCode },
         "Nexus read API request rejected"
       );
       await reply
-        .code(401)
+        .code(decision.status)
         .header("www-authenticate", "Bearer")
         .send(
-          errorBody("unauthenticated", "A valid Nexus service token is required.", id)
+          errorBody(
+            decision.status === 403 ? "insufficient_scope" : "unauthenticated",
+            decision.status === 403
+              ? "The presented token does not carry the required scope."
+              : "A valid Nexus service token is required.",
+            id
+          )
         );
     }
   });
