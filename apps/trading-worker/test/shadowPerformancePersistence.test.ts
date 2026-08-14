@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { Prisma } from "@signalpilot/database";
+import { buildAuditEventKey } from "@signalpilot/trading-domain";
 import { computeShadowPerformance } from "@signalpilot/performance-intelligence/shadow";
 
 import {
@@ -446,6 +447,135 @@ describe("persistShadowPerformance", () => {
         JSON.stringify(tables.get(name)!.rows),
         snapshot,
         `${name} was modified`
+      );
+    }
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// Audit idempotency key (Phase 2C.2c, Blocker 2)
+//
+// `shadow:performance-refresh` wrote its StrategyPerformance rows and then died
+// with IDEMPOTENCY_KEY_PART_INVALID in the audit step. Two distinct defects in
+// one line, both in the caller, neither in the validator:
+//
+//   1. the composed part was 139 characters, past `keyPart`'s 128-character
+//      bound (uuid 36 + cuid 25 + window 11 + sha256 64 + three separators);
+//   2. it began with `correlationId`, a fresh UUID per invocation — so the
+//      "re-running over unchanged data is a no-op" the code promised could
+//      never hold: every run produced a different key.
+//
+// The business tuple below is what actually identifies the event, mirroring
+// how `buildStrategyPerformanceSnapshotKey` identifies the rows.
+// ───────────────────────────────────────────────────────────────────────────
+
+const PORTFOLIO_ID = "cmssq3g6s000106dvosc5cz6f"; // cuid, 25 chars
+const INPUT_HASH = "a".repeat(64); // sha-256 hex
+const CORRELATION_ID = "0fd75c99-ef42-4674-9227-a7d353269639"; // uuid, 36 chars
+
+/** Exactly the composition the job uses. */
+function performanceAuditIdempotencyKey(
+  portfolioId: string,
+  window: string,
+  inputHash: string
+): string {
+  return `${portfolioId}:${window}:${inputHash}`;
+}
+
+describe("performance refresh audit idempotency key", () => {
+  it("stays inside the 128-character key-part bound", () => {
+    for (const window of ["DAILY", "ROLLING_30D", "ALL_TIME"]) {
+      const key = performanceAuditIdempotencyKey(
+        PORTFOLIO_ID,
+        window,
+        INPUT_HASH
+      );
+      assert.ok(
+        key.length <= 128,
+        `key part for ${window} is ${key.length} characters`
+      );
+      assert.match(key, /^[A-Za-z0-9._:+-]{1,128}$/);
+    }
+  });
+
+  it("is accepted by the domain key builder", () => {
+    const key = buildAuditEventKey({
+      eventType: "SHADOW_PERFORMANCE_REFRESHED",
+      aggregateType: "Portfolio",
+      aggregateId: PORTFOLIO_ID,
+      idempotencyKey: performanceAuditIdempotencyKey(
+        PORTFOLIO_ID,
+        "ROLLING_30D",
+        INPUT_HASH
+      )
+    });
+    assert.ok(key.includes("trading-audit"));
+    assert.ok(key.includes(PORTFOLIO_ID));
+  });
+
+  it("reproduces the pre-fix failure when the correlation id is included", () => {
+    // The exact shape the job used to build. Kept as a regression witness so
+    // the length defect cannot quietly return.
+    const legacyKey = `${CORRELATION_ID}:${PORTFOLIO_ID}:ROLLING_30D:${INPUT_HASH}`;
+    assert.equal(legacyKey.length, 139);
+    assert.throws(
+      () =>
+        buildAuditEventKey({
+          eventType: "SHADOW_PERFORMANCE_REFRESHED",
+          aggregateType: "Portfolio",
+          aggregateId: PORTFOLIO_ID,
+          idempotencyKey: legacyKey
+        }),
+      /IDEMPOTENCY_KEY_PART_INVALID|unsupported character or is too long/
+    );
+  });
+
+  it("is stable across invocations for the same business input", () => {
+    // The property the old key destroyed: two runs over unchanged data must
+    // produce the same audit key, whatever their correlation ids were.
+    const first = performanceAuditIdempotencyKey(
+      PORTFOLIO_ID,
+      "DAILY",
+      INPUT_HASH
+    );
+    const second = performanceAuditIdempotencyKey(
+      PORTFOLIO_ID,
+      "DAILY",
+      INPUT_HASH
+    );
+    assert.equal(first, second);
+  });
+
+  it("separates a genuinely different input, window or portfolio", () => {
+    const base = performanceAuditIdempotencyKey(
+      PORTFOLIO_ID,
+      "DAILY",
+      INPUT_HASH
+    );
+    assert.notEqual(
+      base,
+      performanceAuditIdempotencyKey(PORTFOLIO_ID, "ALL_TIME", INPUT_HASH)
+    );
+    assert.notEqual(
+      base,
+      performanceAuditIdempotencyKey(PORTFOLIO_ID, "DAILY", "b".repeat(64))
+    );
+    assert.notEqual(
+      base,
+      performanceAuditIdempotencyKey("cmother00000000000000000", "DAILY", INPUT_HASH)
+    );
+  });
+
+  it("still refuses a genuinely invalid key part", () => {
+    // The fix must not make the validator toothless.
+    for (const bad of ["", "has space", "has/slash", "x".repeat(129)]) {
+      assert.throws(() =>
+        buildAuditEventKey({
+          eventType: "SHADOW_PERFORMANCE_REFRESHED",
+          aggregateType: "Portfolio",
+          aggregateId: PORTFOLIO_ID,
+          idempotencyKey: bad
+        })
       );
     }
   });

@@ -45,6 +45,9 @@ import {
 } from "./indicators-v1.js";
 import { StrategyCheckStage, StrategyEvaluationOutcome, StrategyReasonCode } from "./reason-codes.js";
 import {
+  CRYPTO_MTF_BREAKOUT_LONG_V1_ENGINE_VERSION,
+  CRYPTO_MTF_BREAKOUT_LONG_V1_KEY,
+  CRYPTO_MTF_BREAKOUT_LONG_V1_SPECIFICATION_HASH,
   CRYPTO_MTF_BREAKOUT_V1_ENGINE_VERSION,
   CRYPTO_MTF_BREAKOUT_V1_KEY,
   CRYPTO_MTF_BREAKOUT_V1_PARAMETERS,
@@ -54,6 +57,7 @@ import {
   createCheckLog,
   parseDecimalString,
   validateStrategyInput,
+  type ExpectedStrategyIdentityV1,
   type ParsedSeriesV1,
   type StrategyCheckLog,
   type ValidatedSnapshotV1
@@ -257,11 +261,59 @@ function buildEvidence(validated: ValidatedSnapshotV1): readonly StrategyEvidenc
 // Result assembly
 // ───────────────────────────────────────────────────────────────────────────
 
+/**
+ * The two identities this one evaluator serves (ADR 0011).
+ *
+ * The long *rules* are deliberately a single implementation, but the identity
+ * is not: `specificationHash` is what says which rule set decided a candidate,
+ * and the two hashes differ because the key itself goes into the parameters
+ * that are hashed. The legacy entry stays resolvable so historical candidates
+ * remain reproducible against the exact hash they were decided with; new
+ * assignments carry the current key.
+ */
+const LONG_IDENTITIES: ReadonlyMap<string, ExpectedStrategyIdentityV1> = new Map<
+  string,
+  ExpectedStrategyIdentityV1
+>([
+  [
+    CRYPTO_MTF_BREAKOUT_V1_KEY,
+    Object.freeze({
+      key: CRYPTO_MTF_BREAKOUT_V1_KEY,
+      engineVersion: CRYPTO_MTF_BREAKOUT_V1_ENGINE_VERSION,
+      specificationHash: CRYPTO_MTF_BREAKOUT_V1_SPECIFICATION_HASH
+    })
+  ],
+  [
+    CRYPTO_MTF_BREAKOUT_LONG_V1_KEY,
+    Object.freeze({
+      key: CRYPTO_MTF_BREAKOUT_LONG_V1_KEY,
+      engineVersion: CRYPTO_MTF_BREAKOUT_LONG_V1_ENGINE_VERSION,
+      specificationHash: CRYPTO_MTF_BREAKOUT_LONG_V1_SPECIFICATION_HASH
+    })
+  ]
+]);
+
+/**
+ * Which identity this evaluation runs as, taken from the snapshot's own key.
+ *
+ * `null` for anything else — an unknown key must never fall back to the legacy
+ * identity, which is exactly the bug this resolver exists to prevent: the
+ * shared evaluator used to validate and stamp the legacy identity
+ * unconditionally, so a snapshot carrying the current LONG key could never
+ * pass `STRATEGY_KEY_MISMATCH` and, had it passed, would have been stamped
+ * with the wrong specification hash.
+ */
+function resolveLongIdentity(snapshot: StrategyInputSnapshotV1): ExpectedStrategyIdentityV1 | null {
+  const key = snapshot?.strategy?.strategyKey;
+  return typeof key === "string" ? (LONG_IDENTITIES.get(key) ?? null) : null;
+}
+
 function sortedUnique(codes: readonly StrategyReasonCode[]): readonly StrategyReasonCode[] {
   return Object.freeze([...new Set(codes)].sort());
 }
 
 function refuse(
+  identity: ExpectedStrategyIdentityV1,
   outcome: typeof StrategyEvaluationOutcome.NO_CANDIDATE | typeof StrategyEvaluationOutcome.INVALID_INPUT,
   checks: readonly StrategyCheckV1[],
   failures: readonly StrategyReasonCode[],
@@ -271,18 +323,18 @@ function refuse(
   const reasonCodes = sortedUnique(failures);
   const core = {
     outcome,
-    strategyKey: CRYPTO_MTF_BREAKOUT_V1_KEY,
-    engineVersion: CRYPTO_MTF_BREAKOUT_V1_ENGINE_VERSION,
-    specificationHash: CRYPTO_MTF_BREAKOUT_V1_SPECIFICATION_HASH,
+    strategyKey: identity.key,
+    engineVersion: identity.engineVersion,
+    specificationHash: identity.specificationHash,
     inputHash,
     reasonCodes,
     checks,
     candidate: null
   };
   const base = {
-    strategyKey: CRYPTO_MTF_BREAKOUT_V1_KEY,
-    engineVersion: CRYPTO_MTF_BREAKOUT_V1_ENGINE_VERSION,
-    specificationHash: CRYPTO_MTF_BREAKOUT_V1_SPECIFICATION_HASH,
+    strategyKey: identity.key,
+    engineVersion: identity.engineVersion,
+    specificationHash: identity.specificationHash,
     inputHash,
     outputHash: buildOutputHash(core),
     evaluatedAt,
@@ -483,11 +535,41 @@ export function evaluateCryptoMtfBreakoutV1(
   snapshot: StrategyInputSnapshotV1
 ): StrategyEvaluationResultV1 {
   const inputHash = buildInputHash(snapshot);
-  const validation = validateStrategyInput(snapshot);
   const evaluatedAt = typeof snapshot?.asOf === "string" ? snapshot.asOf : "1970-01-01T00:00:00.000Z";
+
+  // Which of the two long identities this run *is*, decided by the snapshot
+  // rather than by a default. Everything below — validation, refusal, the
+  // candidate draft and the accepted result — uses this one value, so a run
+  // can never mix a current key with a legacy specification hash.
+  const identity = resolveLongIdentity(snapshot);
+  if (identity === null) {
+    // Not a long identity this evaluator serves. Refused against the legacy
+    // identity purely so the result has *an* identity to carry; the outcome is
+    // a hard `STRATEGY_KEY_MISMATCH` either way, and no unknown key is ever
+    // silently evaluated as legacy.
+    const unknown = createCheckLog();
+    unknown.fail(
+      "STRATEGY_KEY",
+      StrategyCheckStage.PRE_VALIDATION,
+      StrategyReasonCode.STRATEGY_KEY_MISMATCH,
+      String(snapshot?.strategy?.strategyKey),
+      [...LONG_IDENTITIES.keys()].join(",")
+    );
+    return refuse(
+      LONG_IDENTITIES.get(CRYPTO_MTF_BREAKOUT_V1_KEY) as ExpectedStrategyIdentityV1,
+      StrategyEvaluationOutcome.INVALID_INPUT,
+      unknown.checks,
+      unknown.failures,
+      inputHash,
+      evaluatedAt
+    );
+  }
+
+  const validation = validateStrategyInput(snapshot, identity);
 
   if (!validation.ok) {
     return refuse(
+      identity,
       StrategyEvaluationOutcome.INVALID_INPUT,
       validation.checks,
       validation.failures,
@@ -726,7 +808,14 @@ export function evaluateCryptoMtfBreakoutV1(
     trend.day.sma50 === null ||
     trend.day.sma200 === null
   ) {
-    return refuse(StrategyEvaluationOutcome.NO_CANDIDATE, checks, log.failures, inputHash, evaluatedAt);
+    return refuse(
+      identity,
+      StrategyEvaluationOutcome.NO_CANDIDATE,
+      checks,
+      log.failures,
+      inputHash,
+      evaluatedAt
+    );
   }
 
   // ── Candidate draft ──────────────────────────────────────────────────────
@@ -763,7 +852,7 @@ export function evaluateCryptoMtfBreakoutV1(
       assetId: validated.snapshot.asset.id,
       anchorCandleId: anchor.id
     }),
-    strategyKey: CRYPTO_MTF_BREAKOUT_V1_KEY,
+    strategyKey: identity.key,
     strategyVersionId: validated.snapshot.strategy.strategyVersionId,
     strategyAssignmentId: validated.snapshot.assignment.id,
     portfolioId: validated.snapshot.assignment.portfolioId,
@@ -793,16 +882,16 @@ export function evaluateCryptoMtfBreakoutV1(
     indicators,
     evidence: buildEvidence(validated),
     reasonCodes,
-    engineVersion: CRYPTO_MTF_BREAKOUT_V1_ENGINE_VERSION,
-    specificationHash: CRYPTO_MTF_BREAKOUT_V1_SPECIFICATION_HASH,
+    engineVersion: identity.engineVersion,
+    specificationHash: identity.specificationHash,
     inputHash
   } as const;
 
   const core = {
     outcome: StrategyEvaluationOutcome.CANDIDATE,
-    strategyKey: CRYPTO_MTF_BREAKOUT_V1_KEY,
-    engineVersion: CRYPTO_MTF_BREAKOUT_V1_ENGINE_VERSION,
-    specificationHash: CRYPTO_MTF_BREAKOUT_V1_SPECIFICATION_HASH,
+    strategyKey: identity.key,
+    engineVersion: identity.engineVersion,
+    specificationHash: identity.specificationHash,
     inputHash,
     reasonCodes,
     checks,
@@ -817,9 +906,9 @@ export function evaluateCryptoMtfBreakoutV1(
 
   return {
     outcome: StrategyEvaluationOutcome.CANDIDATE,
-    strategyKey: CRYPTO_MTF_BREAKOUT_V1_KEY,
-    engineVersion: CRYPTO_MTF_BREAKOUT_V1_ENGINE_VERSION,
-    specificationHash: CRYPTO_MTF_BREAKOUT_V1_SPECIFICATION_HASH,
+    strategyKey: identity.key,
+    engineVersion: identity.engineVersion,
+    specificationHash: identity.specificationHash,
     inputHash,
     outputHash,
     evaluatedAt,

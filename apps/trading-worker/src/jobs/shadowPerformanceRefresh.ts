@@ -172,7 +172,20 @@ export async function runShadowPerformanceRefresh(
 
       // One audit event per portfolio and window, keyed on the engine's own
       // input hash: re-running over unchanged data is a no-op here too.
-      const idempotencyKey = `${correlationId}:${portfolio.id}:${window}:${summary.inputHash}`;
+      //
+      // `correlationId` is deliberately NOT part of this key. It is invocation
+      // identity — a fresh UUID per run — so including it defeated the very
+      // no-op this comment promises: every run produced a different key and
+      // therefore a new audit row. It also pushed the composed part to 139
+      // characters, past the 128-character bound in `keyPart`, which is how
+      // the job came to fail with `IDEMPOTENCY_KEY_PART_INVALID` after the
+      // performance rows were already written.
+      //
+      // What identifies this event is the business tuple below, the same
+      // philosophy `buildStrategyPerformanceSnapshotKey` already uses for the
+      // rows themselves. The correlation id stays on the row's own
+      // `correlationId`/`causationId` columns, so traceability is unaffected.
+      const idempotencyKey = `${portfolio.id}:${window}:${summary.inputHash}`;
       await database.tradingAuditEvent.upsert({
         where: {
           eventKey: buildAuditEventKey({
