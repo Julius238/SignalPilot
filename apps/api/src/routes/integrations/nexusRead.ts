@@ -42,6 +42,7 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
 
 import {
+  AssetType,
   BotRunStatus,
   PortfolioStatus,
   RiskAssessmentStatus,
@@ -109,6 +110,12 @@ type NexusReadDatabase = Pick<
   | "tradingSession"
   | "riskEvent"
   | "tradingAlertOutbox"
+  // Phase T3a market read. Three additions, all read-only projections and all
+  // named here rather than reached through `prisma` directly — the point of
+  // this type is that widening the module's data surface is a visible edit.
+  | "marketRegimeSnapshot"
+  | "asset"
+  | "candle"
 >;
 
 let database: NexusReadDatabase = prisma;
@@ -2137,6 +2144,176 @@ export async function registerNexusReadRoutes(
         return reply
           .code(503)
           .send(errorBody("source_unavailable", "The issue read is not available.", id));
+      }
+    }
+  );
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Phase T3a: market. The one read that answers "how does the market look
+  // right now" rather than "what is our system doing".
+  //
+  // Deliberately a *projection*, not an analysis. Every field below is either
+  // a column of the newest `MarketRegimeSnapshot` — produced by the existing
+  // `calculate:market-regime` job, which owns the definition — or the close of
+  // the newest stored candle for one symbol. Nothing is computed here: no
+  // percentage change, no trend word, no "bullish", no aggregate across
+  // symbols. Re-deriving a regime in a read endpoint would give the same
+  // question two sources of truth, which is exactly what the performance read
+  // avoids by importing the metric engine instead of restating it.
+  //
+  // `reportJson` is *not* exposed. It is unbounded internal state and would
+  // reach a model context as free text.
+  // ─────────────────────────────────────────────────────────────────────────
+
+  //: How many symbols may be reported. Server-decided; the caller has no say,
+  //: so this endpoint takes no parameters at all.
+  const MARKET_SYMBOL_LIMIT = 8;
+  //: The timeframe whose newest candle is quoted. One timeframe, fixed here,
+  //: so "the last close" cannot silently mean different things per symbol.
+  const MARKET_TIMEFRAME = "1h";
+  //: Length of that timeframe. A candle closing at T is the newest *completed*
+  //: one until the next closes at T+1h, so its age has to be measured from
+  //: when a successor could exist — not from its own close. Compared against
+  //: the bare `staleAfterSeconds` (one hour) every quote flipped to VERALTET
+  //: within minutes of the hour turning, and the first acceptance run reported
+  //: eight current prices as stale.
+  const MARKET_TIMEFRAME_MS = 3_600_000;
+
+  server.get(
+    "/market",
+    { config: { rateLimit: { max: config.rateLimitMax, timeWindow: "1 minute" } } },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const id = requestId(request);
+      const query = (request.query ?? {}) as Record<string, unknown>;
+      if (rejectUnknownParameters(query, [], reply, id)) return;
+
+      const observedAt = new Date();
+
+      try {
+        const [snapshot, assets] = await Promise.all([
+          database.marketRegimeSnapshot.findFirst({
+            orderBy: { generatedAt: "desc" },
+            select: {
+              generatedAt: true,
+              equityRegime: true,
+              cryptoRegime: true,
+              overallRegime: true,
+              riskMode: true,
+              confidence: true,
+              summary: true,
+              riskNote: true
+            }
+          }),
+          database.asset.findMany({
+            where: { assetType: AssetType.CRYPTO, isActive: true },
+            orderBy: { symbol: "asc" },
+            take: MARKET_SYMBOL_LIMIT,
+            select: { id: true, symbol: true }
+          })
+        ]);
+
+        // One bounded lookup per symbol. `take: 1` on an indexed
+        // (assetId, timeframe, openTime) ordering — no history is transferred
+        // and no series is returned, because a series is an analysis and this
+        // endpoint does not do analysis.
+        const quotes = await Promise.all(
+          assets.map(async (asset: { id: string; symbol: string }) => {
+            const candle = await database.candle.findFirst({
+              where: { assetId: asset.id, timeframe: MARKET_TIMEFRAME },
+              orderBy: { openTime: "desc" },
+              select: { close: true, closeTime: true }
+            });
+            const lastCloseAt = candle === null ? null : isoOrNull(candle.closeTime);
+            return {
+              symbol: sanitiseText(asset.symbol, 16),
+              timeframe: MARKET_TIMEFRAME,
+              // `null` where no candle is stored. An absent price is absent,
+              // never zero and never carried over from another symbol.
+              lastClose: candle === null ? null : decimalOrNull(candle.close),
+              lastCloseAt,
+              // Per symbol, against the same threshold as the envelope. A
+              // delisted pair keeps its last stored close for ever, and one
+              // dead symbol must neither be presented as current nor drag the
+              // eight live ones into "stale" with it — which is exactly what a
+              // single envelope-wide oldest-wins rule did on the first run
+              // (MATICUSDT, last candle 2024-09-10).
+              stale:
+                lastCloseAt === null ||
+                observedAt.getTime() - new Date(lastCloseAt).getTime() >
+                  MARKET_TIMEFRAME_MS + config.staleAfterSeconds * 1000
+            };
+          })
+        );
+
+        const regime =
+          snapshot === null
+            ? null
+            : {
+                generatedAt: isoOrNull(snapshot.generatedAt),
+                equityRegime: sanitiseText(snapshot.equityRegime, 24),
+                cryptoRegime: sanitiseText(snapshot.cryptoRegime, 24),
+                overallRegime: sanitiseText(snapshot.overallRegime, 24),
+                riskMode: sanitiseText(snapshot.riskMode, 24),
+                // 0-100 as the job writes it. Not rescaled, not rounded into a
+                // word like "hoch" — that mapping is a judgement this endpoint
+                // does not own.
+                confidence: Number.isFinite(snapshot.confidence) ? snapshot.confidence : null,
+                summary: sanitiseText(snapshot.summary, MAX_TEXT_LENGTH),
+                riskNote: sanitiseText(snapshot.riskNote, MAX_TEXT_LENGTH)
+              };
+
+        // The envelope timestamp is the regime snapshot's, because the regime
+        // *is* this endpoint's market statement; the quotes are supporting
+        // detail and each carries its own age above. Falling back to the
+        // newest quote keeps the envelope meaningful when no snapshot exists
+        // at all.
+        const quoteTimestamps = quotes
+          .map((quote: { lastCloseAt: string | null }) => quote.lastCloseAt)
+          .filter((value: string | null): value is string => value !== null);
+        const newestQuoteAt =
+          quoteTimestamps.length === 0
+            ? null
+            : quoteTimestamps.reduce((newest: string, value: string) =>
+                value > newest ? value : newest
+              );
+        const sourceUpdatedAt = regime?.generatedAt ?? newestQuoteAt;
+
+        server.log.info(
+          {
+            requestId: id,
+            route: "/integrations/nexus/v1/market",
+            regimeAvailable: regime !== null,
+            symbols: quotes.length
+          },
+          "Nexus read API market served"
+        );
+
+        return reply.code(200).send(
+          envelope(id, observedAt, sourceUpdatedAt, {
+            ...deploymentFlags(),
+            // What this read consulted, so an empty answer is a statement
+            // about exactly these and nothing wider.
+            checkedSources: ["market_regime_snapshot", "candle"],
+            coverage: "latest_regime_snapshot_and_last_stored_close",
+            regimeAvailable: regime !== null,
+            regime,
+            quoteTimeframe: MARKET_TIMEFRAME,
+            returned: quotes.length,
+            // Counted server-side so a reader never has to derive "how much of
+            // this is current" from the rows.
+            freshQuoteCount: quotes.filter((quote: { stale: boolean }) => !quote.stale).length,
+            staleQuoteCount: quotes.filter((quote: { stale: boolean }) => quote.stale).length,
+            quotes
+          })
+        );
+      } catch {
+        server.log.warn(
+          { requestId: id, reasonCode: "market_read_failed" },
+          "Nexus read API could not read market state"
+        );
+        return reply
+          .code(503)
+          .send(errorBody("source_unavailable", "The market read is not available.", id));
       }
     }
   );
