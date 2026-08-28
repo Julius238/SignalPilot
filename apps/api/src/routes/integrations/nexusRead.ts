@@ -2152,22 +2152,34 @@ export async function registerNexusReadRoutes(
   // Phase T3a: market. The one read that answers "how does the market look
   // right now" rather than "what is our system doing".
   //
-  // Deliberately a *projection*, not an analysis. Every field below is either
-  // a column of the newest `MarketRegimeSnapshot` — produced by the existing
-  // `calculate:market-regime` job, which owns the definition — or the close of
-  // the newest stored candle for one symbol. Nothing is computed here: no
-  // percentage change, no trend word, no "bullish", no aggregate across
-  // symbols. Re-deriving a regime in a read endpoint would give the same
+  // Still a projection rather than an analysis, with one deliberate addition:
+  // the `intelligence` block ranks the universe by percentage change over
+  // three fixed windows. That is arithmetic over two stored closes, not a
+  // second opinion about the market — no trend word, no "bullish", no score,
+  // and above all no regime, which stays the `calculate:market-regime` job's
+  // to define. Re-deriving a *regime* in a read endpoint would give the same
   // question two sources of truth, which is exactly what the performance read
   // avoids by importing the metric engine instead of restating it.
+  //
+  // The ranking lives here and not in Nexus because the alternative is sending
+  // a model every candle in the universe and asking it to sort — which is both
+  // the larger payload and the less trustworthy sort.
   //
   // `reportJson` is *not* exposed. It is unbounded internal state and would
   // reach a model context as free text.
   // ─────────────────────────────────────────────────────────────────────────
 
-  //: How many symbols may be reported. Server-decided; the caller has no say,
-  //: so this endpoint takes no parameters at all.
-  const MARKET_SYMBOL_LIMIT = 8;
+  //: The market read reports the *whole* active crypto universe. It used to
+  //: take the alphabetically first eight, which is why "welche Coins waren
+  //: auffällig?" could never mention SOL or XRP — they sort last — while the
+  //: delisted MATICUSDT was always present because M sorts early. A ranking
+  //: over an alphabetical prefix is not a ranking, so there is no limit here
+  //: any more; what bounds the payload is the movers selection below, not an
+  //: arbitrary slice of the universe.
+  //:
+  //: The caller still has no say in any of it: this endpoint takes no
+  //: parameters at all, and every window, tolerance and list length is fixed
+  //: server-side.
   //: The timeframe whose newest candle is quoted. One timeframe, fixed here,
   //: so "the last close" cannot silently mean different things per symbol.
   const MARKET_TIMEFRAME = "1h";
@@ -2178,6 +2190,25 @@ export async function registerNexusReadRoutes(
   //: within minutes of the hour turning, and the first acceptance run reported
   //: eight current prices as stale.
   const MARKET_TIMEFRAME_MS = 3_600_000;
+  //: The windows "the last few days" actually means. Fixed here so "drei Tage"
+  //: is the same three days on every call and in every answer.
+  const MARKET_WINDOWS = [
+    { window: "24h", hours: 24 },
+    { window: "72h", hours: 72 },
+    { window: "7d", hours: 168 }
+  ] as const;
+  //: How far a reference candle may sit from the exact window start before the
+  //: change is reported as unavailable instead of approximated. Ingestion can
+  //: miss an hour — the host sleeps — and silently measuring 71h or 73h while
+  //: calling it "72h" is the kind of small lie this whole read exists to avoid.
+  const MARKET_WINDOW_TOLERANCE_MS = 2 * 3_600_000;
+  //: Movers per direction per window. The point is "what stands out", and a
+  //: list long enough to include everything stands out for nothing — it is
+  //: also what keeps the payload small enough to speak on a phone.
+  const MARKET_MOVERS_PER_LIST = 3;
+  //: How far back candles are loaded for the change computation. The longest
+  //: window plus one day of slack for the tolerance search.
+  const MARKET_HISTORY_MS = (168 + 24) * 3_600_000;
 
   server.get(
     "/market",
@@ -2207,7 +2238,6 @@ export async function registerNexusReadRoutes(
           database.asset.findMany({
             where: { assetType: AssetType.CRYPTO, isActive: true },
             orderBy: { symbol: "asc" },
-            take: MARKET_SYMBOL_LIMIT,
             select: { id: true, symbol: true }
           })
         ]);
@@ -2245,6 +2275,145 @@ export async function registerNexusReadRoutes(
           })
         );
 
+        // ── market intelligence ────────────────────────────────────────────
+        //
+        // "Welche Coins waren die letzten Tage auffällig?" cannot be answered
+        // from a list of last closes, and it must not be answered by handing a
+        // model every candle and hoping. So the selection happens here, where
+        // the data is: SignalPilot ranks its own universe and sends the short
+        // answer, not the raw series.
+        //
+        // Still a projection over stored candles — a percentage change between
+        // two closes this endpoint already reports individually. No indicator
+        // is modelled, no trend is named, no regime is re-derived, and nothing
+        // here is scored: "auffällig" means "moved most in a fixed window",
+        // stated as the number it is.
+        const historySince = new Date(observedAt.getTime() - MARKET_HISTORY_MS);
+        const history = await database.candle.findMany({
+          where: {
+            assetId: { in: assets.map((asset: { id: string }) => asset.id) },
+            timeframe: MARKET_TIMEFRAME,
+            openTime: { gte: historySince }
+          },
+          orderBy: { openTime: "asc" },
+          select: { assetId: true, closeTime: true, close: true }
+        });
+
+        const seriesByAsset = new Map<string, { at: number; close: number }[]>();
+        for (const row of history) {
+          const close = Number(row.close);
+          const at = row.closeTime === null ? Number.NaN : new Date(row.closeTime).getTime();
+          if (!Number.isFinite(close) || close <= 0 || !Number.isFinite(at)) continue;
+          const series = seriesByAsset.get(row.assetId);
+          if (series === undefined) seriesByAsset.set(row.assetId, [{ at, close }]);
+          else series.push({ at, close });
+        }
+
+        // The close nearest the window start, or null when the nearest one is
+        // further away than the tolerance allows.
+        const referenceAt = (series: { at: number; close: number }[], target: number) => {
+          let best: { at: number; close: number } | null = null;
+          for (const point of series) {
+            if (best === null || Math.abs(point.at - target) < Math.abs(best.at - target)) {
+              best = point;
+            }
+          }
+          return best !== null && Math.abs(best.at - target) <= MARKET_WINDOW_TOLERANCE_MS
+            ? best
+            : null;
+        };
+
+        type Move = {
+          symbol: string;
+          changePercent: number;
+          lastClose: string | null;
+          referenceClose: string | null;
+          referenceAt: string | null;
+        };
+
+        const excluded: { symbol: string; reason: string; lastCloseAt: string | null }[] = [];
+        const movesByWindow = new Map<string, Move[]>(
+          MARKET_WINDOWS.map((entry) => [entry.window, [] as Move[]])
+        );
+
+        assets.forEach((asset: { id: string; symbol: string }, index: number) => {
+          const quote = quotes[index];
+          // A pair whose newest stored close is old is not a mover, it is a
+          // dead row. MATICUSDT last traded 2024-09-10 and would otherwise
+          // appear as the week's biggest loser for ever. It is reported as
+          // excluded rather than dropped, so its absence is a statement.
+          if (quote === undefined || quote.stale || quote.lastCloseAt === null) {
+            excluded.push({
+              symbol: sanitiseText(asset.symbol, 16) ?? asset.symbol,
+              reason: "no_current_candle",
+              lastCloseAt: quote?.lastCloseAt ?? null
+            });
+            return;
+          }
+          const series = seriesByAsset.get(asset.id) ?? [];
+          const latest = series.length === 0 ? null : series[series.length - 1];
+          if (latest === null) {
+            excluded.push({
+              symbol: sanitiseText(asset.symbol, 16) ?? asset.symbol,
+              reason: "no_history_in_window",
+              lastCloseAt: quote.lastCloseAt
+            });
+            return;
+          }
+          for (const entry of MARKET_WINDOWS) {
+            const reference = referenceAt(series, latest.at - entry.hours * 3_600_000);
+            // No reference close inside the tolerance means the change over
+            // this window is unknown. Unknown is reported by omission from
+            // the ranking, never as zero and never as an estimate.
+            if (reference === null) continue;
+            movesByWindow.get(entry.window)?.push({
+              symbol: sanitiseText(asset.symbol, 16) ?? asset.symbol,
+              changePercent:
+                Math.round(((latest.close - reference.close) / reference.close) * 10_000) / 100,
+              lastClose: decimalOrNull(latest.close),
+              referenceClose: decimalOrNull(reference.close),
+              referenceAt: new Date(reference.at).toISOString()
+            });
+          }
+        });
+
+        // Flat on purpose. Nested "windows -> gainers -> {symbol}" put the
+        // symbol seven levels below the response root, and Nexus' redaction
+        // pass replaces anything deeper than six with "[max depth]" — the
+        // first live read came back with every mover reading "[max depth]".
+        // One flat list of moves, each carrying its own window and direction,
+        // keeps every field within reach and is simpler to render besides.
+        const movers = MARKET_WINDOWS.flatMap((entry) => {
+          const moves = movesByWindow.get(entry.window) ?? [];
+          const ranked = [...moves].sort((a, b) => b.changePercent - a.changePercent);
+          return [
+            ...ranked
+              .filter((move) => move.changePercent > 0)
+              .slice(0, MARKET_MOVERS_PER_LIST)
+              .map((move) => ({ window: entry.window, direction: "up", ...move })),
+            ...ranked
+              .filter((move) => move.changePercent < 0)
+              .reverse()
+              .slice(0, MARKET_MOVERS_PER_LIST)
+              .map((move) => ({ window: entry.window, direction: "down", ...move }))
+          ];
+        });
+
+        const intelligence = {
+          universeSize: assets.length,
+          rankedSymbolCount: assets.length - excluded.length,
+          excluded,
+          windows: MARKET_WINDOWS.map((entry) => ({
+            window: entry.window,
+            hours: entry.hours,
+            // How many symbols this particular window could actually be
+            // computed for — not the universe size, which would overstate the
+            // basis whenever history was missing.
+            measuredSymbolCount: (movesByWindow.get(entry.window) ?? []).length
+          })),
+          movers
+        };
+
         const regime =
           snapshot === null
             ? null
@@ -2262,11 +2431,19 @@ export async function registerNexusReadRoutes(
                 riskNote: sanitiseText(snapshot.riskNote, MAX_TEXT_LENGTH)
               };
 
-        // The envelope timestamp is the regime snapshot's, because the regime
-        // *is* this endpoint's market statement; the quotes are supporting
-        // detail and each carries its own age above. Falling back to the
-        // newest quote keeps the envelope meaningful when no snapshot exists
-        // at all.
+        // The envelope timestamp is the newer of the regime snapshot and the
+        // newest stored close.
+        //
+        // It used to be the regime's alone, on the reasoning that the regime
+        // *is* this endpoint's market statement. That stopped being true when
+        // the `intelligence` block was added: this read now also states how
+        // prices moved, and that statement is exactly as fresh as the candles
+        // behind it. The regime is written only when the classification job
+        // runs, which is not hourly — so a reading whose prices were minutes
+        // old was being announced as stale, and the first live briefing opened
+        // by calling entirely current 24h moves outdated. A reading is as
+        // fresh as its freshest component; each component still carries its
+        // own timestamp, so nothing is hidden by saying so.
         const quoteTimestamps = quotes
           .map((quote: { lastCloseAt: string | null }) => quote.lastCloseAt)
           .filter((value: string | null): value is string => value !== null);
@@ -2276,7 +2453,11 @@ export async function registerNexusReadRoutes(
             : quoteTimestamps.reduce((newest: string, value: string) =>
                 value > newest ? value : newest
               );
-        const sourceUpdatedAt = regime?.generatedAt ?? newestQuoteAt;
+        const regimeAt = regime?.generatedAt ?? null;
+        const sourceUpdatedAt =
+          regimeAt === null || (newestQuoteAt !== null && newestQuoteAt > regimeAt)
+            ? newestQuoteAt
+            : regimeAt;
 
         server.log.info(
           {
@@ -2303,7 +2484,11 @@ export async function registerNexusReadRoutes(
             // this is current" from the rows.
             freshQuoteCount: quotes.filter((quote: { stale: boolean }) => !quote.stale).length,
             staleQuoteCount: quotes.filter((quote: { stale: boolean }) => quote.stale).length,
-            quotes
+            quotes,
+            // The ranked view of the same universe. Kept beside the quotes
+            // rather than replacing them: a targeted "wie steht Bitcoin?" is
+            // answered from a quote, a general "was ist los?" from this.
+            intelligence
           })
         );
       } catch {
