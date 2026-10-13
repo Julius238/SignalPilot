@@ -61,6 +61,27 @@ describe("evaluateCircuitBreaker — consecutive job failures", () => {
     assert.equal(result.reasonCode, CircuitBreakerTripReason.CONSECUTIVE_JOB_FAILURES);
   });
 
+  it("counts runs the job function records under its own JOB_NAME", async () => {
+    // The scheduler evaluates `trading:candidate-scan`, but the job writes its
+    // BotRun rows as `shadowGenerateCandidates` — those failures must trip too.
+    const { database, tables, portfolio } = seed();
+    for (let i = 0; i < 3; i += 1) {
+      botRun(tables, {
+        jobName: "shadowGenerateCandidates",
+        status: "FAILED",
+        startedAt: new Date(ASOF.getTime() - i * 1000)
+      });
+    }
+    const result = await evaluateCircuitBreaker(database as never, {
+      jobKey: "trading:candidate-scan",
+      portfolioId: portfolio.id,
+      scope: CircuitBreakerScope.ENTRY,
+      asOf: ASOF
+    });
+    assert.equal(result.state, CircuitBreakerState.OPEN);
+    assert.equal(result.reasonCode, CircuitBreakerTripReason.CONSECUTIVE_JOB_FAILURES);
+  });
+
   it("does not trip when a success breaks the failure streak", async () => {
     const { database, tables, portfolio } = seed();
     botRun(tables, { status: "FAILED", startedAt: new Date(ASOF.getTime() - 3000) });

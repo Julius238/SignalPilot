@@ -107,6 +107,17 @@ const THRESHOLD_FOR_TRIP_REASON: Readonly<Partial<Record<CircuitBreakerTripReaso
     [CircuitBreakerTripReason.PORTFOLIO_OR_LEDGER_DEVIATION]: "portfolioDeviationEventThreshold"
   });
 
+/** `BotRun.jobName` each scheduled job's function writes (its `JOB_NAME`). */
+export const SCHEDULED_JOB_RUN_NAMES: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  "trading:day-start": ["shadowStartTradingDay"],
+  "trading:candidate-scan": ["shadowGenerateCandidates"],
+  "trading:risk-decide": ["shadowAssessRisk"],
+  "trading:order-create": ["shadowCreateOrders"],
+  "trading:simulate-fill": ["shadowProcessFills"],
+  "trading:monitor-positions": ["shadowMonitorPositions"],
+  "trading:reconcile": ["shadowReconcilePortfolio"]
+});
+
 export interface EvaluateCircuitBreakerInput {
   readonly jobKey: string;
   readonly portfolioId: string;
@@ -166,8 +177,12 @@ export async function evaluateCircuitBreaker(
 ): Promise<CircuitBreakerResult> {
   const thresholds = input.thresholds ?? DEFAULT_CIRCUIT_BREAKER_THRESHOLDS;
 
+  // Job functions record their runs under their own JOB_NAME; only the
+  // scheduler's last-resort error row uses the job key. Count both, or
+  // ordinary FAILED runs would never trip the breaker.
+  const runNames = [input.jobKey, ...(SCHEDULED_JOB_RUN_NAMES[input.jobKey] ?? [])];
   const recentRuns = await database.botRun.findMany({
-    where: { jobName: input.jobKey },
+    where: { jobName: { in: runNames } },
     orderBy: { startedAt: "desc" },
     take: thresholds.lookbackRuns
   });

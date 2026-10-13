@@ -18,6 +18,9 @@ Read-only:
   status
   eligibility
 
+Research (reads candles, writes only ShadowReplayRun results, no trading state):
+  replay
+
 Setup (never activates portfolio, assignment, kill switch or session):
   bootstrap
 
@@ -318,6 +321,10 @@ case "$command_name" in
   eligibility)
     require_exact_args 0 "$@"
     run_trading_node dist/jobs/shadowEligibilityReport.js
+    ;;
+  replay)
+    require_exact_args 0 "$@"
+    run_trading_node dist/jobs/shadowReplay.js
     ;;
   bootstrap)
     require_exact_args 0 "$@"
