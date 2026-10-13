@@ -118,6 +118,16 @@ describe("shadow replay", () => {
     assert.equal(result.invariantViolations, 0);
   });
 
+  it("reports near misses and forward returns against the all-hours baseline", () => {
+    const result = runShadowReplay(data, config());
+    const { nearMiss } = result.metrics;
+    assert.equal(nearMiss.baseline.samples, result.funnel.cycles);
+    assert.equal(nearMiss.candidates.samples, result.funnel.candidates);
+    const nearMissTotal = nearMiss.blockers.reduce((sum, group) => sum + group.samples, 0);
+    assert.ok(nearMissTotal <= result.funnel.noCandidate);
+    for (const group of nearMiss.blockers) assert.ok(group.samples > 0 && group.blocker.length > 0);
+  });
+
   it("labels training and test periods when a split is configured", () => {
     const split = new Date(START + 235 * DAY).toISOString();
     const result = runShadowReplay(data, config({ trainTestSplitAt: split }), { evaluate: everyThirdMorning });

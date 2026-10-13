@@ -80,6 +80,8 @@ import type {
   ReplayCandle,
   ReplayConfig,
   ReplayEquityPoint,
+  ForwardReturnStats,
+  NearMissAnalysis,
   ReplayFunnel,
   ReplayMarketData,
   ReplayPeriodMetrics,
@@ -247,6 +249,9 @@ export function runShadowReplay(market: ReplayMarketData, config: ReplayConfig, 
   };
 
   const hourlyEquity: Array<{ at: number; equity: string }> = [];
+  const cycleAnchors: number[] = [];
+  const candidateAnchors: number[] = [];
+  const nearMissAnchors = new Map<string, number[]>();
   const dailyEquity: ReplayEquityPoint[] = [];
 
   // ── Research caches ──────────────────────────────────────────────────────
@@ -293,6 +298,7 @@ export function runShadowReplay(market: ReplayMarketData, config: ReplayConfig, 
     firstAnchorMs ??= anchor.closeTime;
     lastAnchorMs = anchor.closeTime;
     funnel.cycles += 1;
+    cycleAnchors.push(index);
     let ledgerChanged = false;
 
     // 1. Entry fills on this candle.
@@ -605,9 +611,16 @@ export function runShadowReplay(market: ReplayMarketData, config: ReplayConfig, 
     if (evaluation.outcome === "NO_CANDIDATE") {
       funnel.noCandidate += 1;
       bump(funnel.strategyReasons, evaluation.primaryReasonCode);
+      const blockers = evaluation.checks.filter((check) => !check.passed && check.stage !== "PRE_VALIDATION");
+      if (blockers.length === 1) {
+        const list = nearMissAnchors.get(blockers[0].reasonCode) ?? [];
+        list.push(index);
+        nearMissAnchors.set(blockers[0].reasonCode, list);
+      }
       continue;
     }
     funnel.candidates += 1;
+    candidateAnchors.push(index);
     const candidate = evaluation.candidate;
 
     // 5. Risk decision and order.
@@ -746,7 +759,8 @@ export function runShadowReplay(market: ReplayMarketData, config: ReplayConfig, 
     test:
       splitMs === null
         ? null
-        : periodMetrics("Test (Out-of-Sample)", trades.filter((trade) => trade.period === "TEST"), hourlyEquity, startingCash, splitMs, null)
+        : periodMetrics("Test (Out-of-Sample)", trades.filter((trade) => trade.period === "TEST"), hourlyEquity, startingCash, splitMs, null),
+    nearMiss: nearMissAnalysis(hourly, cycleAnchors, candidateAnchors, nearMissAnchors)
   };
 
   if (market.synthetic) notes.unshift("SYNTHETISCHE TESTDATEN — keine Aussage über reale Strategieperformance.");
@@ -976,6 +990,44 @@ function periodMetrics(
       metrics?.averageHoldMinutes.value === null || metrics?.averageHoldMinutes.value === undefined
         ? null
         : (Number(metrics.averageHoldMinutes.value) / 60).toFixed(2)
+  };
+}
+
+function forwardStats(hourly: readonly ReplayCandle[], anchors: readonly number[]): ForwardReturnStats {
+  const r24: number[] = [];
+  const r72: number[] = [];
+  for (const index of anchors) {
+    const entry = Number(hourly[index + 1]?.open);
+    if (!Number.isFinite(entry) || entry <= 0) continue;
+    const at24 = hourly[index + 24];
+    const at72 = hourly[index + 72];
+    if (at24 !== undefined) r24.push(Number(at24.close) / entry - 1);
+    if (at72 !== undefined) r72.push(Number(at72.close) / entry - 1);
+  }
+  const mean = (values: number[]) => (values.length === 0 ? null : ((values.reduce((a, b) => a + b, 0) / values.length) * 100).toFixed(4));
+  const positive = (values: number[]) =>
+    values.length === 0 ? null : ((values.filter((value) => value > 0).length / values.length) * 100).toFixed(2);
+  return {
+    samples: anchors.length,
+    avgReturn24hPct: mean(r24),
+    avgReturn72hPct: mean(r72),
+    positive24hPct: positive(r24),
+    positive72hPct: positive(r72)
+  };
+}
+
+function nearMissAnalysis(
+  hourly: readonly ReplayCandle[],
+  cycles: readonly number[],
+  candidates: readonly number[],
+  nearMisses: ReadonlyMap<string, readonly number[]>
+): NearMissAnalysis {
+  return {
+    baseline: forwardStats(hourly, cycles),
+    candidates: forwardStats(hourly, candidates),
+    blockers: [...nearMisses.entries()]
+      .map(([blocker, anchors]) => ({ blocker, ...forwardStats(hourly, anchors) }))
+      .sort((left, right) => right.samples - left.samples || left.blocker.localeCompare(right.blocker))
   };
 }
 

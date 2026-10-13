@@ -153,6 +153,26 @@ export interface ReplayFunnel {
   readonly failedRiskRules: Readonly<Record<string, number>>;
 }
 
+/** Forward returns from the next candle open (no costs) — research statistics. */
+export interface ForwardReturnStats {
+  readonly samples: number;
+  readonly avgReturn24hPct: string | null;
+  readonly avgReturn72hPct: string | null;
+  readonly positive24hPct: string | null;
+  readonly positive72hPct: string | null;
+}
+
+/**
+ * Near-miss study: hours in which the strategy failed exactly one entry or
+ * price-plan condition, grouped by that condition, compared with actual
+ * candidates and with the unconditional baseline of all hours.
+ */
+export interface NearMissAnalysis {
+  readonly baseline: ForwardReturnStats;
+  readonly candidates: ForwardReturnStats;
+  readonly blockers: readonly ({ readonly blocker: string } & ForwardReturnStats)[];
+}
+
 export interface ReplayResult {
   readonly engineVersion: string;
   readonly config: ReplayConfig;
@@ -170,6 +190,7 @@ export interface ReplayResult {
     readonly overall: ReplayPeriodMetrics;
     readonly training: ReplayPeriodMetrics | null;
     readonly test: ReplayPeriodMetrics | null;
+    readonly nearMiss: NearMissAnalysis;
   };
   /** Canonical hash of trades, funnel and final state — equal across identical runs. */
   readonly outputHash: string;

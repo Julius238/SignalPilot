@@ -19,10 +19,24 @@ export type ReplayPeriodMetrics = {
   averageHoldHours: string | null;
 };
 
+export type ForwardReturnStats = {
+  samples: number;
+  avgReturn24hPct: string | null;
+  avgReturn72hPct: string | null;
+  positive24hPct: string | null;
+  positive72hPct: string | null;
+};
+
 export type ReplayMetrics = {
   overall: ReplayPeriodMetrics;
   training: ReplayPeriodMetrics | null;
   test: ReplayPeriodMetrics | null;
+  /** Ab Replay-Engine mit Beinahe-Treffer-Analyse; ältere Läufe haben es nicht. */
+  nearMiss?: {
+    baseline: ForwardReturnStats;
+    candidates: ForwardReturnStats;
+    blockers: (ForwardReturnStats & { blocker: string })[];
+  };
 };
 
 export type ReplayRunSummary = {

@@ -13,6 +13,7 @@ import {
   formatPct,
   formatRatio,
   formatSignedPct,
+  type ForwardReturnStats,
   type ReplayPeriodMetrics,
   type ReplayRunDetail
 } from "../../../../lib/replay-api";
@@ -188,6 +189,8 @@ export default async function ReplayDetailPage({ params }: ReplayDetailPageProps
         </SectionCard>
       </div>
 
+      {run.metricsJson.nearMiss ? <NearMissSection nearMiss={run.metricsJson.nearMiss} /> : null}
+
       <SectionCard title={tradeCount > 0 ? `Simulierte Trades (${tradeCount}${tradeCount > TRADE_LIMIT ? `, neueste ${TRADE_LIMIT}` : ""})` : "Simulierte Trades"}>
         {trades.length === 0 ? (
           <EmptyState title="Keine Trades in diesem Lauf." />
@@ -244,5 +247,49 @@ export default async function ReplayDetailPage({ params }: ReplayDetailPageProps
         <DebugJsonBlock label="Konfiguration" data={{ ...run.configJson, engineVersion: run.engineVersion, codeVersion: run.codeVersion, outputHash: run.outputHash, durationMs: run.durationMs }} />
       </SectionCard>
     </>
+  );
+}
+
+function ForwardRow({ label, stats, emphasis }: { label: string; stats: ForwardReturnStats; emphasis?: boolean }) {
+  return (
+    <tr>
+      <td data-label="Gruppe">{emphasis ? <strong>{label}</strong> : <span className="mono small">{label}</span>}</td>
+      <td data-label="Stunden">{stats.samples.toLocaleString("de-DE")}</td>
+      <td data-label="Ø 24 h">{formatSignedPct(stats.avgReturn24hPct, 3)}</td>
+      <td data-label="Ø 72 h">{formatSignedPct(stats.avgReturn72hPct, 3)}</td>
+      <td data-label="Positiv 24 h">{formatPct(stats.positive24hPct, 1)}</td>
+      <td data-label="Positiv 72 h">{formatPct(stats.positive72hPct, 1)}</td>
+    </tr>
+  );
+}
+
+function NearMissSection({ nearMiss }: { nearMiss: NonNullable<ReplayRunDetail["metricsJson"]["nearMiss"]> }) {
+  return (
+    <SectionCard
+      title="Beinahe-Treffer: Welche Regel blockiert — und was danach geschah"
+      subtitle="Stunden, in denen genau eine Einstiegs- oder Preisplan-Bedingung fehlte. Kursentwicklung ab der nächsten Eröffnung, ohne Kosten — liegt eine Gruppe deutlich über der Basis, verhindert die Regel womöglich gute Setups."
+    >
+      <div className="table-wrap">
+        <table className="responsive-table">
+          <thead>
+            <tr>
+              <th>Gruppe</th>
+              <th>Stunden</th>
+              <th>Ø 24 h</th>
+              <th>Ø 72 h</th>
+              <th>Positiv 24 h</th>
+              <th>Positiv 72 h</th>
+            </tr>
+          </thead>
+          <tbody>
+            <ForwardRow label="Basis: alle Stunden" stats={nearMiss.baseline} emphasis />
+            <ForwardRow label="Echte Kandidaten" stats={nearMiss.candidates} emphasis />
+            {nearMiss.blockers.slice(0, 15).map((group) => (
+              <ForwardRow key={group.blocker} label={group.blocker} stats={group} />
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </SectionCard>
   );
 }
