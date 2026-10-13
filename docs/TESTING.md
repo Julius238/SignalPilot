@@ -95,6 +95,9 @@ manuell. Ein Job auf `ubuntu-24.04` mit Node 22 und einem PostgreSQL-16-Service-
 6. `pnpm lint`
 7. `pnpm ops:test:scripts` (auf dem Runner mit shellcheck, Schwelle `warning`)
 8. `pnpm -r --no-bail --if-present test`
+9. Zusammenfassung pro Paket (`scripts/ci/test-summary.sh`): Tabelle mit Tests, bestanden,
+   fehlgeschlagen und übersprungen — im Log und als Job Summary auf der Run-Seite. Der
+   Schritt schlägt fehl, wenn ein Test fehlschlug oder keine Ergebnisse gefunden wurden.
 
 Die Pipeline verwendet keine Secrets, hat nur Leserechte am Repository und startet weder
 Worker, Scheduler noch Trading-Prozesse.
