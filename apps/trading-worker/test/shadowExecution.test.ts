@@ -17,6 +17,8 @@ import { reconcilePortfolio } from "../src/lib/shadowReconciliation.js";
 import { startTradingDay } from "../src/lib/shadowTradingDay.js";
 import { requestManualRiskClose } from "../src/lib/manualRiskClose.js";
 
+import { buildCandidateKey } from "@signalpilot/trading-domain";
+
 import { createFakeExecutionDatabase } from "./support/shadowExecutionFixtures.js";
 
 const CODE_VERSION = "test-code-version";
@@ -210,7 +212,14 @@ function seedWorld(
 
   const candidate = tables.get("tradeCandidate")!.create({
     data: {
-      candidateKey: "candidate-1",
+      // A real composite key, exactly as the strategy engine builds it: it
+      // contains "|" and must never be used as a single idempotency key part.
+      candidateKey: buildCandidateKey({
+        strategyAssignmentId: "assignment-1",
+        strategyVersionId: "strategy-version-1",
+        assetId,
+        anchorCandleId: "candle-c0"
+      }),
       strategyAssignmentId: "assignment-1",
       strategyVersionId: "strategy-version-1",
       portfolioId: portfolio.id,

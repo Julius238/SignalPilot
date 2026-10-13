@@ -397,17 +397,20 @@ export async function createShadowOrderForCandidate(
   }
 
   const state = portfolioState(portfolio);
+  // Pre-check only; the booked entry is keyed by the created order below. The
+  // candidate's database id is a single key part — its composite
+  // `candidateKey` ("candidate.v1|…") is not and would be refused.
   const reserveEntryKeyPlaceholder = buildLedgerEntryKey({
     portfolioId: portfolio.id,
     type: "RESERVE",
     causeType: "ShadowOrder",
-    causeId: candidate.candidateKey
+    causeId: candidate.id
   });
   const reserve = computeReserveEntry({
     state,
     entryKey: reserveEntryKeyPlaceholder,
     reservedQuoteAmount: sizing.reservedQuoteAmount,
-    shadowOrderId: candidate.candidateKey,
+    shadowOrderId: candidate.id,
     occurredAt: input.asOf.toISOString()
   });
   if (!reserve.ok) {
