@@ -196,13 +196,18 @@ describe("runScheduledJob — lease integration (real PostgreSQL)", () => {
         heartbeatIntervalMs: 5_000,
         checkEntryWorkflow: false,
         run: async () => {
+          // The job function opens its own BotRun first, then fails.
+          await prisma.botRun.create({ data: { jobName: jobKey, status: BotRunStatus.RUNNING } });
           throw new Error("simulated database failure");
         }
       })
     );
 
-    const botRun = await prisma.botRun.findFirst({ where: { jobName: jobKey } });
-    assert.ok(botRun !== null);
+    const runs = await prisma.botRun.findMany({ where: { jobName: jobKey } });
+    assert.equal(runs.length, 2);
+    assert.ok(runs.every((run) => run.status === BotRunStatus.FAILED && run.finishedAt !== null), "no run may stay RUNNING");
+    const botRun = runs.find((run) => (run.metadataJson as { uncaught?: boolean } | null)?.uncaught === true);
+    assert.ok(botRun !== undefined);
     assert.equal(botRun?.status, BotRunStatus.FAILED);
     assert.equal((botRun?.metadataJson as { errorClass?: string } | null)?.errorClass, "DATABASE_ERROR");
 

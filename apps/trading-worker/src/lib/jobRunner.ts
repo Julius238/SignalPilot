@@ -29,6 +29,7 @@ import { BotRunStatus, Prisma, type PrismaClient } from "@signalpilot/database";
 
 import {
   CircuitBreakerScope,
+  SCHEDULED_JOB_RUN_NAMES,
   evaluateCircuitBreaker,
   type CircuitBreakerThresholds
 } from "./circuitBreaker.js";
@@ -115,10 +116,11 @@ export async function runScheduledJob<T>(options: RunScheduledJobOptions<T>): Pr
       now: () => asOf
     },
     async () => {
+      const attemptStartedAt = new Date();
       try {
         return await options.run();
       } catch (error) {
-        await recordUncaughtJobError(database, jobKey, error);
+        await recordUncaughtJobError(database, jobKey, error, attemptStartedAt);
         throw error;
       }
     }
@@ -135,9 +137,24 @@ export async function runScheduledJob<T>(options: RunScheduledJobOptions<T>): Pr
   return { ran: true, result: leased.result };
 }
 
-async function recordUncaughtJobError(database: PrismaClient, jobKey: string, error: unknown): Promise<void> {
+async function recordUncaughtJobError(
+  database: PrismaClient,
+  jobKey: string,
+  error: unknown,
+  attemptStartedAt: Date
+): Promise<void> {
   const message = error instanceof Error ? error.message : "Unknown scheduled job error";
   const correlationId = randomUUID();
+  // The job function's own BotRun of this attempt never reached its finish
+  // step; left RUNNING it would show a job "still running" forever.
+  await database.botRun.updateMany({
+    where: {
+      jobName: { in: [jobKey, ...(SCHEDULED_JOB_RUN_NAMES[jobKey] ?? [])] },
+      status: BotRunStatus.RUNNING,
+      startedAt: { gte: attemptStartedAt }
+    },
+    data: { status: BotRunStatus.FAILED, finishedAt: new Date() }
+  });
   const botRun = await database.botRun.create({
     data: {
       jobName: jobKey,
