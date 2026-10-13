@@ -140,12 +140,6 @@ export default async function PositionsPage({ searchParams }: PageProps) {
                       <td data-label="Status">
                         <PositionStatusBadge value={position.status} />
                       </td>
-                      <td data-label="Collateral">
-                        {formatDecimalAmount(position.reservedCollateral)}
-                      </td>
-                      <td data-label="Exit-Grund" className="muted small">
-                        {position.exitReason ?? "—"}
-                      </td>
                       <td data-label="Offene Menge">
                         {formatDecimalAmount(position.openQuantity, {
                           maximumFractionDigits: 6
@@ -168,6 +162,12 @@ export default async function PositionsPage({ searchParams }: PageProps) {
                         >
                           {formatSignedDecimal(position.realizedPnl)}
                         </span>
+                      </td>
+                      <td data-label="Collateral">
+                        {formatDecimalAmount(position.reservedCollateral)}
+                      </td>
+                      <td data-label="Exit-Grund" className="muted small">
+                        {position.exitReason ?? "—"}
                       </td>
                       <td data-label="Eröffnet" className="nowrap">
                         {formatUtcDateTime(position.openedAt)}

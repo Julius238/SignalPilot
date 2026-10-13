@@ -80,7 +80,8 @@
     "ops:prod:prisma-smoke": "bash scripts/ops/prisma-smoke.sh",
     "ops:prod:trading": "bash scripts/ops/trading-shadow.sh",
     "ops:test:scripts": "bash scripts/ops/test-ops-scripts.sh",
-    "trading-worker:shadow-replay": "scripts/pnpm --filter @signalpilot/trading-worker shadow:replay"
+    "trading-worker:shadow-replay": "scripts/pnpm --filter @signalpilot/trading-worker shadow:replay",
+    "worker:dev-synthetic-feed": "scripts/pnpm --filter @signalpilot/worker dev:synthetic-feed"
   },
   "devDependencies": {
     "@eslint/js": "^9.18.0",

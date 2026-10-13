@@ -12,9 +12,13 @@ import {
 } from "../../../components/trading/trading-status";
 import { TradingDisabled } from "../../../components/trading/trading-disabled";
 import {
+  fetchPerformanceSegments,
   fetchRiskEvents,
+  fetchStrategyAssignments,
   fetchTradingOverview,
   fetchWorkerStatus,
+  type PerformanceSegment,
+  type StrategyAssignment,
   type TradingOverview,
   type WorkerStatus
 } from "../../../lib/trading-api";
@@ -44,10 +48,12 @@ export default async function TradingOverviewPage() {
     return <TradingDisabled />;
   }
 
-  const [overviewResult, workerResult, criticalRiskEventsResult] = await Promise.all([
+  const [overviewResult, workerResult, criticalRiskEventsResult, assignmentsResult, performanceResult] = await Promise.all([
     fetchTradingOverview(),
     fetchWorkerStatus(),
-    fetchRiskEvents({ severity: "CRITICAL", acknowledged: "false", limit: 10 })
+    fetchRiskEvents({ severity: "CRITICAL", acknowledged: "false", limit: 10 }),
+    fetchStrategyAssignments({ enabled: "true", limit: 20 }),
+    fetchPerformanceSegments({ window: "ALL_TIME", segmentType: "OVERALL", limit: 1 })
   ]);
 
   const overview = overviewResult.data;
@@ -134,6 +140,12 @@ export default async function TradingOverviewPage() {
             <MetricCard label="Offene Orders" value={overview.openOrderCount} />
             <MetricCard label="Trades heute" value={overview.tradesToday} />
           </div>
+
+          <StrategyAndPerformance
+            assignments={assignmentsResult.data ?? []}
+            assignmentsError={assignmentsResult.error}
+            performance={performanceResult.data?.[0] ?? null}
+          />
 
           <div className="grid two" style={{ marginTop: 16 }}>
             <SectionCard
@@ -353,6 +365,69 @@ function StatusRow({
           </span>
         </div>
       </div>
+    </div>
+  );
+}
+
+function StrategyAndPerformance({
+  assignments,
+  assignmentsError,
+  performance
+}: {
+  assignments: StrategyAssignment[];
+  assignmentsError: string | null;
+  performance: PerformanceSegment | null;
+}) {
+  return (
+    <div className="grid two" style={{ marginTop: 16 }}>
+      <SectionCard title="Aktive Strategie" subtitle="Freigeschaltete Strategie-Zuweisungen">
+        {assignmentsError ? (
+          <ErrorState title="Zuweisungen konnten nicht geladen werden" message={assignmentsError} />
+        ) : assignments.length === 0 ? (
+          <EmptyState
+            title="Keine Strategie aktiv."
+            description="Eine Zuweisung wird unter Operations freigeschaltet; ohne sie erzeugt der Bot keine Kandidaten."
+          />
+        ) : (
+          <ul className="stack-list compact">
+            {assignments.map((assignment) => (
+              <li className="list-row" key={assignment.id}>
+                <span>
+                  <strong>{assignment.symbol}</strong> · {assignment.direction ?? "—"} · {assignment.strategyKey} v
+                  {assignment.strategyVersion}
+                  <span className="muted small"> ({assignment.timeframe}, Engine {assignment.strategyEngineVersion})</span>
+                </span>
+                <span className="right-meta muted small">
+                  seit {assignment.validFrom ? formatUtcDateTime(assignment.validFrom) : "—"}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </SectionCard>
+      <SectionCard title="Performance (gesamt)" subtitle="Abgeschlossene Shadow-Trades, letzte Performance-Berechnung">
+        {performance === null ? (
+          <EmptyState
+            title="Noch keine Performance berechnet."
+            description="Kennzahlen entstehen nach geschlossenen Trades und dem Lauf von shadow-performance-refresh."
+          />
+        ) : (
+          <div className="grid metrics">
+            <MetricCard label="Geschlossene Trades" value={performance.closedTrades} sub={`${performance.wins} Gewinne · ${performance.losses} Verluste`} />
+            <MetricCard
+              label="Trefferquote"
+              value={performance.winRatePct === null ? UNKNOWN_LABEL : `${formatDecimalAmount(performance.winRatePct)} %`}
+            />
+            <MetricCard label="Profit Factor" value={formatDecimalAmount(performance.profitFactor)} />
+            <MetricCard label="Max. Drawdown" value={`${formatDecimalAmount(performance.maxDrawdownPct)} %`} />
+            <MetricCard
+              label="Netto-P&L"
+              value={<span style={{ color: toneColor(decimalTone(performance.netPnl)) }}>{formatSignedDecimal(performance.netPnl)}</span>}
+              sub={`Stand ${formatUtcDateTime(performance.asOf)}`}
+            />
+          </div>
+        )}
+      </SectionCard>
     </div>
   );
 }

@@ -137,7 +137,7 @@ describe("pnpm-Startweg ohne globales pnpm", () => {
         writeFileSync(file, `#!/bin/sh\necho "${label} $*"\n`);
         chmodSync(file, 0o755);
       }
-      return spawnSync(shim, args, { cwd: repoRoot, encoding: "utf8", env: { PATH: binDir }, timeout: 10_000 });
+      return spawnSync(shim, args, { cwd: repoRoot, encoding: "utf8", env: { PATH: binDir } as Record<string, string> as NodeJS.ProcessEnv, timeout: 10_000 });
     } finally {
       rmSync(binDir, { recursive: true, force: true });
     }
@@ -185,7 +185,7 @@ describe("pnpm-Startweg ohne globales pnpm", () => {
       symlinkSync(process.execPath, join(binDir, "node"));
       symlinkSync(corepack, join(binDir, "corepack"));
 
-      const env: NodeJS.ProcessEnv = {
+      const env: Record<string, string> = {
         PATH: binDir,
         HOME: process.env.HOME ?? "",
         COREPACK_ENABLE_DOWNLOAD_PROMPT: "0",
@@ -193,10 +193,16 @@ describe("pnpm-Startweg ohne globales pnpm", () => {
         COREPACK_ENABLE_NETWORK: "0"
       };
       for (const key of ["COREPACK_HOME", "XDG_CACHE_HOME"]) {
-        if (process.env[key]) env[key] = process.env[key];
+        const value = process.env[key];
+        if (value) env[key] = value;
       }
 
-      const result = spawnSync(shim, ["--version"], { cwd: repoRoot, encoding: "utf8", env, timeout: 60_000 });
+      const result = spawnSync(shim, ["--version"], {
+        cwd: repoRoot,
+        encoding: "utf8",
+        env: env as NodeJS.ProcessEnv,
+        timeout: 60_000
+      });
 
       if (result.status !== 0 && /Network access disabled/.test(result.stderr)) {
         skipOutsideCi(

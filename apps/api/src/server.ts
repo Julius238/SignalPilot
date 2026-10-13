@@ -11,6 +11,7 @@ import { registerAuthRoutes } from "./routes/auth.js";
 import { registerAuditLogRoutes } from "./routes/audit-logs.js";
 import { registerDashboardRoutes } from "./routes/dashboard.js";
 import { registerHealthRoutes } from "./routes/health.js";
+import { registerReplayRoutes } from "./routes/replays.js";
 import { registerTradingOperationsRoutes, registerTradingReadRoutes } from "./routes/trading/index.js";
 
 export async function buildServer() {
@@ -55,6 +56,7 @@ export async function buildServer() {
 
     await protectedScope.register(registerDashboardRoutes);
     await protectedScope.register(registerAuditLogRoutes);
+    await protectedScope.register(registerReplayRoutes);
 
     // Trading API (docs/trading P6): fail-closed and off by default. A
     // malformed flag value is treated the same as "disabled" here — it

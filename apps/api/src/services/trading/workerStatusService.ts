@@ -21,16 +21,21 @@ import { getPrimaryPortfolio } from "./portfolioService.js";
  * the scheduler module itself (which would register cron jobs as a
  * side-effect of import).
  */
-const JOB_SCHEDULE: readonly { readonly jobKey: string; readonly cronExpression: string; readonly scope: CircuitBreakerScope }[] =
-  [
-    { jobKey: "trading:day-start", cronExpression: "5 0 * * *", scope: CircuitBreakerScope.ENTRY },
-    { jobKey: "trading:candidate-scan", cronExpression: "5 * * * *", scope: CircuitBreakerScope.ENTRY },
-    { jobKey: "trading:risk-decide", cronExpression: "* * * * *", scope: CircuitBreakerScope.ENTRY },
-    { jobKey: "trading:order-create", cronExpression: "* * * * *", scope: CircuitBreakerScope.ENTRY },
-    { jobKey: "trading:simulate-fill", cronExpression: "*/2 * * * *", scope: CircuitBreakerScope.ENTRY },
-    { jobKey: "trading:monitor-positions", cronExpression: "*/2 * * * *", scope: CircuitBreakerScope.MONITORING },
-    { jobKey: "trading:reconcile", cronExpression: "*/5 * * * *", scope: CircuitBreakerScope.MONITORING }
-  ];
+const JOB_SCHEDULE: readonly {
+  readonly jobKey: string;
+  /** `BotRun.jobName` the job function itself records (its `JOB_NAME`). */
+  readonly jobName: string;
+  readonly cronExpression: string;
+  readonly scope: CircuitBreakerScope;
+}[] = [
+  { jobKey: "trading:day-start", jobName: "shadowStartTradingDay", cronExpression: "5 0 * * *", scope: CircuitBreakerScope.ENTRY },
+  { jobKey: "trading:candidate-scan", jobName: "shadowGenerateCandidates", cronExpression: "5 * * * *", scope: CircuitBreakerScope.ENTRY },
+  { jobKey: "trading:risk-decide", jobName: "shadowAssessRisk", cronExpression: "* * * * *", scope: CircuitBreakerScope.ENTRY },
+  { jobKey: "trading:order-create", jobName: "shadowCreateOrders", cronExpression: "* * * * *", scope: CircuitBreakerScope.ENTRY },
+  { jobKey: "trading:simulate-fill", jobName: "shadowProcessFills", cronExpression: "*/2 * * * *", scope: CircuitBreakerScope.ENTRY },
+  { jobKey: "trading:monitor-positions", jobName: "shadowMonitorPositions", cronExpression: "*/2 * * * *", scope: CircuitBreakerScope.MONITORING },
+  { jobKey: "trading:reconcile", jobName: "shadowReconcilePortfolio", cronExpression: "*/5 * * * *", scope: CircuitBreakerScope.MONITORING }
+];
 
 function matchesCronField(field: string, value: number): boolean {
   if (field === "*") return true;
@@ -75,7 +80,13 @@ export async function getWorkerStatus(database: PrismaClient = prisma) {
   const jobs = await Promise.all(
     JOB_SCHEDULE.map(async (job) => {
       const [lastRuns, cursor, breaker] = await Promise.all([
-        database.botRun.findMany({ where: { jobName: job.jobKey }, orderBy: { startedAt: "desc" }, take: 5 }),
+        // Job functions record their own `JOB_NAME`; only the scheduler's
+        // last-resort error row uses the job key — read both.
+        database.botRun.findMany({
+          where: { jobName: { in: [job.jobKey, job.jobName] } },
+          orderBy: { startedAt: "desc" },
+          take: 5
+        }),
         database.tradingJobCursor.findUnique({ where: { jobKey_scopeKey: { jobKey: job.jobKey, scopeKey: "GLOBAL" } } }),
         evaluateCircuitBreaker(database, {
           jobKey: job.jobKey,

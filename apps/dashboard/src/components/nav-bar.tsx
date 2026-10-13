@@ -142,6 +142,12 @@ const NAV_GROUPS: Array<{ label: string; items: NavItem[] }> = [
         icon: "lab"
       },
       {
+        href: "/dashboard/replays",
+        label: "Shadow-Replay",
+        description: "Strategie historisch durchspielen",
+        icon: "backtest"
+      },
+      {
         href: "/dashboard/rules",
         label: "Signalregeln",
         description: "Bewertungen nachvollziehen",

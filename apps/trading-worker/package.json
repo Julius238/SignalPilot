@@ -113,8 +113,7 @@
     "shadow:alert-outbox": "tsx src/jobs/shadowAlertOutbox.ts",
     "shadow:retention": "tsx src/jobs/shadowRetention.ts",
     "shadow:eligibility": "tsx src/jobs/shadowEligibilityReport.ts",
-    "shadow:replay": "tsx src/jobs/shadowReplay.ts",
-    "dev:seed-synthetic-market": "tsx src/dev/seedSyntheticMarket.ts"
+    "shadow:replay": "tsx src/jobs/shadowReplay.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",
