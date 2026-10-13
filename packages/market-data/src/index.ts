@@ -55,3 +55,10 @@ export type {
   DiscoveryProviderResult,
   DiscoveryProviderUsage
 } from "./discovery.js";
+export {
+  candleSnapshotFileName,
+  decodeCandleSnapshot,
+  encodeCandleSnapshot,
+  readCandleSnapshot,
+  writeCandleSnapshot
+} from "./snapshot.js";

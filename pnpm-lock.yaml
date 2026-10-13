@@ -160,6 +160,9 @@ importers:
       '@signalpilot/database':
         specifier: workspace:*
         version: link:../../packages/database
+      '@signalpilot/market-data':
+        specifier: workspace:*
+        version: link:../../packages/market-data
       '@signalpilot/multi-timeframe':
         specifier: workspace:*
         version: link:../../packages/multi-timeframe
@@ -172,6 +175,9 @@ importers:
       '@signalpilot/risk-engine':
         specifier: workspace:*
         version: link:../../packages/risk-engine
+      '@signalpilot/shadow-replay':
+        specifier: workspace:*
+        version: link:../../packages/shadow-replay
       '@signalpilot/strategy-engine':
         specifier: workspace:*
         version: link:../../packages/strategy-engine
@@ -455,6 +461,46 @@ importers:
       '@signalpilot/shared':
         specifier: workspace:*
         version: link:../shared
+    devDependencies:
+      tsx:
+        specifier: ^4.19.2
+        version: 4.21.0
+
+  packages/shadow-replay:
+    dependencies:
+      '@signalpilot/indicators':
+        specifier: workspace:*
+        version: link:../indicators
+      '@signalpilot/market-regime':
+        specifier: workspace:*
+        version: link:../market-regime
+      '@signalpilot/multi-timeframe':
+        specifier: workspace:*
+        version: link:../multi-timeframe
+      '@signalpilot/performance-intelligence':
+        specifier: workspace:*
+        version: link:../performance-intelligence
+      '@signalpilot/portfolio':
+        specifier: workspace:*
+        version: link:../portfolio
+      '@signalpilot/risk-engine':
+        specifier: workspace:*
+        version: link:../risk-engine
+      '@signalpilot/scoring-engine':
+        specifier: workspace:*
+        version: link:../scoring-engine
+      '@signalpilot/signal-rules':
+        specifier: workspace:*
+        version: link:../signal-rules
+      '@signalpilot/strategy-engine':
+        specifier: workspace:*
+        version: link:../strategy-engine
+      '@signalpilot/trading-domain':
+        specifier: workspace:*
+        version: link:../trading-domain
+      '@signalpilot/trading-simulation':
+        specifier: workspace:*
+        version: link:../trading-simulation
     devDependencies:
       tsx:
         specifier: ^4.19.2

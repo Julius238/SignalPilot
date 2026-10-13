@@ -581,6 +581,42 @@ model BacktestRun {
   @@index([startedAt])
 }
 
+/// Historical shadow replay (packages/shadow-replay): one run of the unchanged
+/// strategy/risk/simulation engines over stored candles. Research output only —
+/// never read by the trading worker.
+model ShadowReplayRun {
+  id              String   @id @default(cuid())
+  label           String
+  symbol          String
+  strategyKey     String
+  mode            String
+  regimePolicy    String
+  costProfile     String
+  dataOrigin      String
+  isSynthetic     Boolean
+  engineVersion   String
+  codeVersion     String
+  firstAnchorAt   DateTime?
+  lastAnchorAt    DateTime?
+  cycles          Int
+  candidates      Int
+  closedTrades    Int
+  startingCash    Decimal  @db.Decimal(30, 12)
+  finalEquity     Decimal  @db.Decimal(30, 12)
+  outputHash      String
+  durationMs      Int
+  configJson      Json
+  funnelJson      Json
+  metricsJson     Json
+  tradesJson      Json
+  equityCurveJson Json
+  notesJson       Json
+  createdAt       DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([symbol, mode])
+}
+
 model StrategyConfig {
   id          String                   @id @default(cuid())
   name        String
