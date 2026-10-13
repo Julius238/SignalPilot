@@ -641,11 +641,37 @@ async function loadDailyCounters(
       closedAt: { not: null }
     },
     orderBy: { closedAt: "desc" },
-    select: { realizedPnl: true }
+    select: { realizedPnl: true, closedAt: true }
   });
+
+  // A reached streak engages the kill switch "until a review" (R-021). The
+  // operator's release is that review, so the streak restarts counting after
+  // the latest release — otherwise it could never drop below the limit again,
+  // because no new trade can win while entries are blocked.
+  const sessions = await database.tradingSession.findMany({
+    where: { portfolioId },
+    select: { id: true }
+  });
+  const lastRelease = await database.tradingAuditEvent.findFirst({
+    where: {
+      eventType: "SESSION_KILL_SWITCH_RELEASED",
+      tradingSessionId: { in: sessions.map((session) => session.id) },
+      occurredAt: { lte: asOf }
+    },
+    orderBy: { occurredAt: "desc" },
+    select: { occurredAt: true }
+  });
+  const streakStart = lastRelease?.occurredAt ?? null;
 
   let consecutiveLosses = 0;
   for (const position of closedPositions) {
+    if (
+      streakStart !== null &&
+      position.closedAt !== null &&
+      position.closedAt.getTime() <= streakStart.getTime()
+    ) {
+      break;
+    }
     // Sign only, compared as a decimal so no float ever decides the streak.
     const pnl = new Prisma.Decimal(decimalString(position.realizedPnl));
     if (pnl.greaterThan(0)) break;

@@ -261,6 +261,51 @@ describe("shadow candidate persistence", () => {
     assert.equal(writes.riskEvents[0].type, "IDEMPOTENCY_OR_VERSION_CONFLICT");
   });
 
+  it("treats a later scan of the same anchor candle as already decided, not as a conflict", async () => {
+    const { database, writes } = createFakeDatabase([buildFakeWorld()]);
+    const first = await assembleStrategyInput(database as never, {
+      symbol: "BTCUSDT",
+      asOf: AS_OF,
+      codeVersion: "v"
+    });
+    assert.equal(first.ok, true);
+    if (!first.ok) return;
+    const created = await persistStrategyEvaluation(database as never, {
+      evaluation: evaluateStrategy(first.snapshot),
+      snapshot: first.snapshot,
+      correlationId: "scheduled-scan",
+      codeVersion: "v",
+      occurredAt: AS_OF
+    });
+    assert.equal(created.outcome, PersistOutcome.CREATED);
+
+    // A manual re-run nine minutes later: same anchor candle, later asOf.
+    const later = new Date(AS_OF.getTime() + 9 * 60_000);
+    const second = await assembleStrategyInput(database as never, {
+      symbol: "BTCUSDT",
+      asOf: later,
+      codeVersion: "v"
+    });
+    assert.equal(second.ok, true);
+    if (!second.ok) return;
+    const evaluation = evaluateStrategy(second.snapshot);
+    assert.equal(evaluation.outcome, "CANDIDATE");
+    assert.notEqual(evaluation.inputHash, created.inputHash);
+
+    const rescan = await persistStrategyEvaluation(database as never, {
+      evaluation,
+      snapshot: second.snapshot,
+      correlationId: "manual-rescan",
+      codeVersion: "v",
+      occurredAt: later
+    });
+    assert.equal(rescan.outcome, PersistOutcome.ALREADY_DECIDED);
+    assert.equal(rescan.reasonCode, StrategyReasonCode.CANDIDATE_ANCHOR_ALREADY_DECIDED);
+    assert.equal(rescan.tradeCandidateId, created.tradeCandidateId);
+    assert.equal(writes.tradeCandidates.length, 1);
+    assert.equal(writes.riskEvents.length, 0, "a re-scan must not trip the circuit breaker");
+  });
+
   it("records a refusal as an append-only audit event without a candidate", async () => {
     const { database, writes } = createFakeDatabase([
       buildFakeWorld({ cryptoRegime: "RISK_OFF" })

@@ -421,6 +421,62 @@ describe("shadowAssessRisk job", () => {
   });
 });
 
+describe("R-021 loss streak lifecycle", () => {
+  const hoursBefore = (hours: number) => new Date(AS_OF.getTime() - hours * 3_600_000);
+  const losses = (...hours: number[]) =>
+    hours.map((hour) => ({ realizedPnl: "-12.500000000000", closedAt: hoursBefore(hour) }));
+
+  it("counts only losses closed after the latest operator release of the kill switch", async () => {
+    const { database } = setup({
+      closedPositions: [...losses(30, 20, 10), ...losses(2)],
+      killSwitchReleasedAt: [hoursBefore(5)]
+    });
+    const assembled = await assembleRiskInput(database as never, {
+      tradeCandidateId: "trade-candidate-1",
+      asOf: AS_OF,
+      codeVersion: "test-code-version",
+      capability: CAPABILITY
+    });
+    assert.equal(assembled.ok, true);
+    if (!assembled.ok) return;
+    assert.equal(assembled.snapshot.dailyCounters.consecutiveLosses, 1);
+    assert.equal(assembled.snapshot.dailyCounters.closedTradeSequence, 4);
+  });
+
+  it("a win still resets the streak", async () => {
+    const { database } = setup({
+      closedPositions: [...losses(30, 20), { realizedPnl: "40.000000000000", closedAt: hoursBefore(15) }, ...losses(2)]
+    });
+    const assembled = await assembleRiskInput(database as never, {
+      tradeCandidateId: "trade-candidate-1",
+      asOf: AS_OF,
+      codeVersion: "test-code-version",
+      capability: CAPABILITY
+    });
+    assert.equal(assembled.ok && assembled.snapshot.dailyCounters.consecutiveLosses, 1);
+  });
+
+  it("a reached streak rejects the candidate and engages the session kill switch", async () => {
+    const { database, writes } = setup({ closedPositions: losses(30, 20, 10) });
+    const summary = await runShadowAssessRisk(database as never, {
+      asOf: AS_OF,
+      env: RISK_ENABLED_ENV,
+      correlationId: "correlation-streak"
+    });
+    assert.equal(summary.rejected, 1);
+    assert.ok(
+      writes.riskRuleResults.some(
+        (row) => row.ruleCode === "R-021-LOSS-STREAK" && row.outcome === "FAIL"
+      )
+    );
+    const engaged = writes.auditEvents.filter(
+      (row) => row.eventType === "SESSION_KILL_SWITCH_ENGAGED"
+    );
+    assert.equal(engaged.length, 1);
+    assert.equal(engaged[0]!.actorType, "SYSTEM");
+  });
+});
+
 describe("shadowBootstrap", () => {
   it("creates a disabled, fully specified shadow setup", async () => {
     const { database, writes } = setup({

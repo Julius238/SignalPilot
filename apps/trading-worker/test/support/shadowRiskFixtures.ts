@@ -34,6 +34,10 @@ export interface RiskWorldOptions {
   readonly candidateStatus?: string;
   readonly withDecision?: boolean;
   readonly candlePlanComplete?: boolean;
+  /** Closed shadow positions (newest first is not required; sorted on read). */
+  readonly closedPositions?: readonly { readonly realizedPnl: string; readonly closedAt: Date }[];
+  /** Operator kill-switch releases already on record for session-1. */
+  readonly killSwitchReleasedAt?: readonly Date[];
 }
 
 export function buildRiskWorld(options: RiskWorldOptions = {}) {
@@ -126,6 +130,16 @@ export function buildRiskWorld(options: RiskWorldOptions = {}) {
         version: 1
       }
     ],
+    closedPositions: (options.closedPositions ?? []).map((position) => ({
+      realizedPnl: decimal(position.realizedPnl),
+      closedAt: position.closedAt
+    })),
+    releaseEvents: (options.killSwitchReleasedAt ?? []).map((occurredAt, index) => ({
+      eventKey: `release-${index}`,
+      eventType: "SESSION_KILL_SWITCH_RELEASED",
+      tradingSessionId: "session-1",
+      occurredAt
+    })),
     sessions: [
       {
         id: "session-1",
@@ -366,6 +380,28 @@ export function createFakeRiskDatabase(world: RiskWorld) {
     },
     tradingSession: {
       findFirst: async () => world.sessions[0] ?? null,
+      findMany: async ({ where }: { where: { portfolioId: string } }) =>
+        world.sessions
+          .filter((session) => session.portfolioId === where.portfolioId)
+          .map((session) => ({ id: session.id })),
+      updateMany: async ({
+        where,
+        data
+      }: {
+        where: { id: string; version: number; killSwitchEngaged: boolean };
+        data: Record<string, unknown>;
+      }) => {
+        const session = world.sessions.find(
+          (row) =>
+            row.id === where.id &&
+            row.version === where.version &&
+            row.killSwitchEngaged === where.killSwitchEngaged
+        ) as Record<string, unknown> | undefined;
+        if (session === undefined) return { count: 0 };
+        const { version: _increment, ...rest } = data;
+        Object.assign(session, rest, { version: (session.version as number) + 1 });
+        return { count: 1 };
+      },
       findUnique: async ({ where }: { where: { sessionKey: string } }) =>
         world.sessions.find(
           (session) => session.sessionKey === where.sessionKey
@@ -411,7 +447,16 @@ export function createFakeRiskDatabase(world: RiskWorld) {
         return data;
       }
     },
-    shadowPosition: { findMany: async () => [] },
+    shadowPosition: {
+      // Only the loss-streak query asks for closed positions (`closedAt` set);
+      // the open-exposure queries see an empty book.
+      findMany: async ({ where }: { where?: { closedAt?: unknown } } = {}) =>
+        where?.closedAt === undefined
+          ? []
+          : [...world.closedPositions].sort(
+          (left, right) => right.closedAt.getTime() - left.closedAt.getTime()
+        )
+    },
     shadowOrder: { findMany: async () => [] },
     instrumentExecutionProfile: {
       findFirst: async () =>
@@ -488,6 +533,20 @@ export function createFakeRiskDatabase(world: RiskWorld) {
       }
     },
     tradingAuditEvent: {
+      findFirst: async ({
+        where
+      }: {
+        where: { eventType: string; tradingSessionId: { in: string[] }; occurredAt: { lte: Date } };
+      }) =>
+        [...world.releaseEvents, ...writes.auditEvents]
+          .filter(
+            (row) =>
+              row.eventType === where.eventType &&
+              where.tradingSessionId.in.includes(row.tradingSessionId as string) &&
+              (row.occurredAt as Date).getTime() <= where.occurredAt.lte.getTime()
+          )
+          .sort((left, right) => (right.occurredAt as Date).getTime() - (left.occurredAt as Date).getTime())
+          .map((row) => ({ occurredAt: row.occurredAt as Date }))[0] ?? null,
       create: async ({ data }: { data: Record<string, unknown> }) => {
         writes.auditEvents.push(data);
         return data;

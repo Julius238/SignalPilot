@@ -42,6 +42,7 @@ import { assembleRiskInput } from "../lib/riskInputAssembler.js";
 import {
   RiskPersistOutcome,
   SHADOW_RISK_JOB_KEY,
+  applyRiskDirective,
   persistRiskAssessment
 } from "../lib/shadowRiskPersistence.js";
 import {
@@ -293,6 +294,30 @@ export async function runShadowAssessRisk(
         codeVersion,
         occurredAt: asOf
       });
+
+      if (
+        persisted.outcome === RiskPersistOutcome.RECORDED &&
+        persisted.riskAssessmentId !== null
+      ) {
+        const directive = await applyRiskDirective(database, {
+          portfolioId: assembled.snapshot.candidate.portfolioId,
+          directive: evaluation.directive,
+          reasonCode: evaluation.primaryReasonCode,
+          riskAssessmentId: persisted.riskAssessmentId,
+          correlationId,
+          codeVersion,
+          asOf
+        });
+        if (directive.engaged) {
+          await writeBotLog(database, "error", `${JOB_NAME} engaged the kill switch`, {
+            botRunId: botRun.id,
+            correlationId,
+            tradeCandidateId: id,
+            tradingSessionId: directive.sessionId,
+            reasonCode: evaluation.primaryReasonCode
+          });
+        }
+      }
 
       if (persisted.outcome === RiskPersistOutcome.CONFLICT) conflicts += 1;
       else if (persisted.outcome === RiskPersistOutcome.IDEMPOTENT_REPLAY)

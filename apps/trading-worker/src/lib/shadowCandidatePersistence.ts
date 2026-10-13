@@ -58,6 +58,8 @@ export const ShadowCandidateAuditEvent = {
 export const PersistOutcome = {
   CREATED: "CREATED",
   IDEMPOTENT_REPLAY: "IDEMPOTENT_REPLAY",
+  /** Same anchor candle, later decision time: the first decision stands. */
+  ALREADY_DECIDED: "ALREADY_DECIDED",
   CONFLICT: "CONFLICT",
   REJECTION_RECORDED: "REJECTION_RECORDED"
 } as const;
@@ -105,13 +107,33 @@ async function persistCandidate(
 ): Promise<PersistStrategyEvaluationResult> {
   const existing = await database.tradeCandidate.findUnique({
     where: { candidateKey: candidate.candidateKey },
-    select: { id: true, inputHash: true }
+    select: { id: true, inputHash: true, decisionTime: true }
   });
 
   const verdict = classifyReplay(
     existing?.inputHash ?? null,
     candidate.inputHash
   );
+
+  // One decision per anchor candle. A later scan of the same anchor (manual
+  // re-run, scheduler catch-up) necessarily has a different `asOf` and so a
+  // different input hash; that is not tampering, the earlier decision simply
+  // stands. Only a different input at the SAME decision time is a conflict.
+  if (
+    verdict === ReplayVerdict.CONFLICT &&
+    existing !== null &&
+    existing.decisionTime !== null &&
+    existing.decisionTime.getTime() !== Date.parse(candidate.decisionTime)
+  ) {
+    return {
+      outcome: PersistOutcome.ALREADY_DECIDED,
+      candidateKey: candidate.candidateKey,
+      tradeCandidateId: existing.id,
+      reasonCode: StrategyReasonCode.CANDIDATE_ANCHOR_ALREADY_DECIDED,
+      inputHash: candidate.inputHash,
+      outputHash: candidate.outputHash
+    };
+  }
 
   if (verdict === ReplayVerdict.IDEMPOTENT_REPLAY) {
     return {

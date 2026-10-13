@@ -264,7 +264,10 @@ export async function runShadowGenerateCandidates(
         });
 
         if (persisted.outcome === PersistOutcome.CREATED) created += 1;
-        else if (persisted.outcome === PersistOutcome.IDEMPOTENT_REPLAY)
+        else if (
+          persisted.outcome === PersistOutcome.IDEMPOTENT_REPLAY ||
+          persisted.outcome === PersistOutcome.ALREADY_DECIDED
+        )
           idempotentReplays += 1;
         else if (persisted.outcome === PersistOutcome.CONFLICT) conflicts += 1;
         else rejections += 1;

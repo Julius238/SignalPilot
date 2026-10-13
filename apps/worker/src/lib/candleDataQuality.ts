@@ -74,9 +74,21 @@ export async function recordProviderOutcome(
   const at = input.at ?? new Date();
   const count = Math.max(1, Math.floor(input.count ?? 1));
   const counters = counterUpdate(input.kind, count);
+  // The error counters mean "since the last successful fetch": strategy and
+  // risk treat any non-zero value as unhealthy data, so a lifetime total would
+  // let one transient provider error block the asset forever. A success
+  // therefore clears them (the history stays in BotRun/BotLog).
   const successData =
     input.kind === "SUCCESS"
-      ? { lastSuccessfulFetchAt: at, lastErrorKind: null, lastErrorAt: null }
+      ? {
+          lastSuccessfulFetchAt: at,
+          lastErrorKind: null,
+          lastErrorAt: null,
+          providerErrorCount: 0,
+          rateLimitCount: 0,
+          entitlementErrorCount: 0,
+          noDataCount: 0
+        }
       : {};
   const errorData =
     input.kind !== "SUCCESS" && input.kind !== "NO_DATA"

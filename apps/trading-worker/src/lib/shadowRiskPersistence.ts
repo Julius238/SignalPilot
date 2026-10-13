@@ -411,3 +411,72 @@ function auditData(args: {
     occurredAt: input.occurredAt
   };
 }
+
+export interface ApplyRiskDirectiveInput {
+  readonly portfolioId: string;
+  readonly directive: string | null;
+  readonly reasonCode: string;
+  readonly riskAssessmentId: string;
+  readonly correlationId: string;
+  readonly codeVersion: string;
+  readonly asOf: Date;
+}
+
+/**
+ * Executes the risk engine's `ENGAGE_KILL_SWITCH` directive (e.g. R-021 loss
+ * streak): the portfolio's open session gets its kill switch engaged by the
+ * system, audited. New entries then stop until an operator reviews and
+ * releases it — the release is also where the loss streak restarts counting.
+ * Idempotent: an already engaged switch is left untouched.
+ */
+export async function applyRiskDirective(
+  database: PrismaClient,
+  input: ApplyRiskDirectiveInput
+): Promise<{ readonly engaged: boolean; readonly sessionId: string | null }> {
+  if (input.directive !== "ENGAGE_KILL_SWITCH") return { engaged: false, sessionId: null };
+  const session = await database.tradingSession.findFirst({
+    where: { portfolioId: input.portfolioId, status: { not: "CLOSED" } },
+    orderBy: { createdAt: "desc" }
+  });
+  if (session === null || session.killSwitchEngaged) {
+    return { engaged: false, sessionId: session?.id ?? null };
+  }
+  const idempotencyKey = `${session.id}-risk-directive-${input.riskAssessmentId}`;
+  const engaged = await database.$transaction(async (tx) => {
+    const updated = await tx.tradingSession.updateMany({
+      where: { id: session.id, version: session.version, killSwitchEngaged: false },
+      data: {
+        killSwitchEngaged: true,
+        killReasonCode: input.reasonCode,
+        killedAt: input.asOf,
+        lastChangedBy: SHADOW_RISK_JOB_KEY,
+        version: { increment: 1 }
+      }
+    });
+    if (updated.count === 0) return false;
+    await tx.tradingAuditEvent.create({
+      data: {
+        eventKey: buildAuditEventKey({
+          eventType: "SESSION_KILL_SWITCH_ENGAGED",
+          aggregateType: "TradingSession",
+          aggregateId: session.id,
+          idempotencyKey
+        }),
+        eventType: "SESSION_KILL_SWITCH_ENGAGED",
+        aggregateType: "TradingSession",
+        aggregateId: session.id,
+        actorType: TradingActorType.SYSTEM,
+        actorId: SHADOW_RISK_JOB_KEY,
+        correlationId: input.correlationId,
+        causationId: input.riskAssessmentId,
+        idempotencyKey,
+        reasonCode: input.reasonCode,
+        tradingSessionId: session.id,
+        codeVersion: input.codeVersion,
+        occurredAt: input.asOf
+      }
+    });
+    return true;
+  });
+  return { engaged, sessionId: session.id };
+}

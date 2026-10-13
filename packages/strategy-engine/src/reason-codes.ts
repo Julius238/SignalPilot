@@ -171,7 +171,9 @@ export const StrategyReasonCode = {
   // ── Persistence-side outcomes (worker) ──────────────────────────────────
   CANDIDATE_CREATED: "CANDIDATE_CREATED",
   CANDIDATE_IDEMPOTENT_REPLAY: "CANDIDATE_IDEMPOTENT_REPLAY",
-  CANDIDATE_INPUT_HASH_CONFLICT: "CANDIDATE_INPUT_HASH_CONFLICT"
+  CANDIDATE_INPUT_HASH_CONFLICT: "CANDIDATE_INPUT_HASH_CONFLICT",
+  /** A later scan of an anchor candle that already has its candidate. */
+  CANDIDATE_ANCHOR_ALREADY_DECIDED: "CANDIDATE_ANCHOR_ALREADY_DECIDED"
 } as const;
 export type StrategyReasonCode =
   (typeof StrategyReasonCode)[keyof typeof StrategyReasonCode];
