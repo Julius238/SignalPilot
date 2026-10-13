@@ -55,6 +55,8 @@ export default async function ReplaysPage() {
         />
       ) : null}
 
+      {list.length > 1 ? <VariantComparison runs={real.length > 0 ? real : list} synthetic={real.length === 0} /> : null}
+
       <SectionCard title={list.length > 0 ? `${list.length} Läufe` : undefined}>
         {list.length === 0 ? (
           <EmptyState
@@ -111,5 +113,67 @@ export default async function ReplaysPage() {
         )}
       </SectionCard>
     </>
+  );
+}
+
+/**
+ * Strategy variants and cost profiles side by side. Sorted by the TRAINING
+ * result only: the test columns are the out-of-sample check, never the
+ * selection criterion.
+ */
+function VariantComparison({ runs, synthetic }: { runs: readonly ReplayRunSummary[]; synthetic: boolean }) {
+  const rows = runs
+    .filter((run) => run.metricsJson.training && run.metricsJson.test)
+    .sort(
+      (left, right) =>
+        Number(right.metricsJson.training?.returnPct ?? -Infinity) - Number(left.metricsJson.training?.returnPct ?? -Infinity)
+    );
+  if (rows.length === 0) return null;
+  return (
+    <SectionCard
+      title="Varianten- und Kostenvergleich"
+      subtitle={`Sortiert nach dem Trainingszeitraum; der Testzeitraum (Out-of-Sample) dient nur zur Kontrolle.${
+        synthetic ? " Achtung: synthetische Testdaten." : ""
+      }`}
+    >
+      <div className="table-wrap">
+        <table className="responsive-table">
+          <thead>
+            <tr>
+              <th>Lauf</th>
+              <th>Training: Trades</th>
+              <th>Training: Rendite</th>
+              <th>Training: PF</th>
+              <th>Test: Trades</th>
+              <th>Test: Rendite</th>
+              <th>Test: PF</th>
+              <th>Test: Max. DD</th>
+              <th>Test: Buy &amp; Hold</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((run) => {
+              const training = run.metricsJson.training!;
+              const test = run.metricsJson.test!;
+              return (
+                <tr key={run.id}>
+                  <td data-label="Lauf">
+                    <Link href={`/dashboard/replays/${encodeURIComponent(run.id)}`}>{run.label}</Link>
+                  </td>
+                  <td data-label="Training: Trades">{training.closedTrades}</td>
+                  <td data-label="Training: Rendite">{formatSignedPct(training.returnPct)}</td>
+                  <td data-label="Training: PF">{formatRatio(training.profitFactor)}</td>
+                  <td data-label="Test: Trades">{test.closedTrades}</td>
+                  <td data-label="Test: Rendite">{formatSignedPct(test.returnPct)}</td>
+                  <td data-label="Test: PF">{formatRatio(test.profitFactor)}</td>
+                  <td data-label="Test: Max. DD">{formatPct(test.maxDrawdownPct)}</td>
+                  <td data-label="Test: Buy & Hold">{formatSignedPct(test.buyAndHoldReturnPct ?? null)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </SectionCard>
   );
 }
