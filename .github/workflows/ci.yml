@@ -61,6 +61,9 @@ jobs:
         uses: actions/setup-node@v5
         with:
           node-version: 22
+          # Sonst sucht setup-node wegen `packageManager` schon hier nach pnpm,
+          # das erst im nächsten Schritt über Corepack bereitsteht.
+          package-manager-cache: false
 
       # pnpm kommt über Corepack aus `packageManager` (pnpm@9.15.0). Das füllt
       # zugleich den Corepack-Cache, den der Offline-Test des Shims
