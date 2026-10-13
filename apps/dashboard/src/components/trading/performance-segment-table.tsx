@@ -95,9 +95,15 @@ export function PerformanceSegmentTable({
                   <td>{formatDecimalAmount(segment.grossPnl)}</td>
                   <td>{formatDecimalAmount(segment.fees)}</td>
                   <td>{formatDecimalAmount(segment.simulatedExecutionCost)}</td>
-                  <td>{formatDecimalAmount(segment.profitFactor)}</td>
-                  <td>{formatDecimalAmount(segment.expectancy)}</td>
-                  <td>{formatDecimalAmount(segment.averageR)}</td>
+                  <td>
+                    <NullableCell value={segment.profitFactor} reasonKey="profitFactor" segment={segment} />
+                  </td>
+                  <td>
+                    <NullableCell value={segment.expectancy} reasonKey="expectancy" segment={segment} />
+                  </td>
+                  <td>
+                    <NullableCell value={segment.averageR} reasonKey="averageR" segment={segment} />
+                  </td>
                   <td>
                     <NullableCell value={segment.cumulativeR} reasonKey="cumulativeR" segment={segment} />
                   </td>

@@ -36,6 +36,7 @@ import {
   toPositionListItem
 } from "../../schemas/trading/execution.js";
 import {
+  metricOrNull,
   toAlertOutboxEntry,
   toPerformanceSegment
 } from "../../schemas/trading/performance.js";
@@ -431,9 +432,9 @@ export async function registerTradingReadRoutes(server: FastifyInstance) {
       grossPnl: String(row.grossPnl),
       netPnl: String(row.netPnl),
       fees: String(row.fees),
-      averageR: String(row.averageR),
-      profitFactor: String(row.profitFactor),
-      maxDrawdownPct: String(row.maxDrawdownPct)
+      averageR: metricOrNull(row.metricsJson, "averageR", row.averageR),
+      profitFactor: metricOrNull(row.metricsJson, "profitFactor", row.profitFactor),
+      maxDrawdownPct: metricOrNull(row.metricsJson, "maxDrawdownPct", row.maxDrawdownPct)
     }));
   });
 

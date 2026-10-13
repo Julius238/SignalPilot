@@ -91,7 +91,17 @@ function extractNullReasons(metricsJson: unknown): Record<string, string> {
   return reasons;
 }
 
+/**
+ * Some metric columns are NOT NULL in the schema and hold 0 when the engine
+ * could not compute the metric (e.g. profit factor without any losing trade);
+ * the reason lives in `metricsJson`. On the wire such a metric is `null`.
+ */
+export function metricOrNull(metricsJson: unknown, key: string, value: unknown): string | null {
+  return extractNullReasons(metricsJson)[key] === undefined ? decimalString(value) : null;
+}
+
 export function toPerformanceSegment(row: StrategyPerformanceSegmentRow) {
+  const nullable = (key: string, value: unknown) => metricOrNull(row.metricsJson, key, value);
   return {
     id: row.id,
     snapshotKey: row.snapshotKey,
@@ -120,10 +130,10 @@ export function toPerformanceSegment(row: StrategyPerformanceSegmentRow) {
 
     averageWin: decimalOrNull(row.averageWin),
     averageLoss: decimalOrNull(row.averageLoss),
-    profitFactor: decimalString(row.profitFactor),
-    expectancy: decimalString(row.expectancy),
+    profitFactor: nullable("profitFactor", row.profitFactor),
+    expectancy: nullable("expectancy", row.expectancy),
 
-    averageR: decimalString(row.averageR),
+    averageR: nullable("averageR", row.averageR),
     cumulativeR: decimalOrNull(row.cumulativeR),
     tradesWithPlannedRisk: row.tradesWithPlannedRisk,
 
@@ -131,7 +141,7 @@ export function toPerformanceSegment(row: StrategyPerformanceSegmentRow) {
     maxLossStreak: row.maxLossStreak,
 
     maxDrawdownAmount: decimalOrNull(row.maxDrawdownAmount),
-    maxDrawdownPct: decimalString(row.maxDrawdownPct),
+    maxDrawdownPct: nullable("maxDrawdownPct", row.maxDrawdownPct),
     recoveryFactor: decimalOrNull(row.recoveryFactor),
 
     averageHoldMinutes: decimalString(row.averageHoldMinutes),

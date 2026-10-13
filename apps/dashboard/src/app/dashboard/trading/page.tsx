@@ -418,8 +418,21 @@ function StrategyAndPerformance({
               label="Trefferquote"
               value={performance.winRatePct === null ? UNKNOWN_LABEL : `${formatDecimalAmount(performance.winRatePct)} %`}
             />
-            <MetricCard label="Profit Factor" value={formatDecimalAmount(performance.profitFactor)} />
-            <MetricCard label="Max. Drawdown" value={`${formatDecimalAmount(performance.maxDrawdownPct)} %`} />
+            <MetricCard
+              label="Profit Factor"
+              value={formatDecimalAmount(performance.profitFactor)}
+              sub={
+                performance.profitFactor === null
+                  ? performance.nullReasons.profitFactor === "NO_GROSS_LOSS"
+                    ? "Noch kein Verlusttrade"
+                    : "Nicht berechenbar"
+                  : undefined
+              }
+            />
+            <MetricCard
+              label="Max. Drawdown"
+              value={performance.maxDrawdownPct === null ? UNKNOWN_LABEL : `${formatDecimalAmount(performance.maxDrawdownPct)} %`}
+            />
             <MetricCard
               label="Netto-P&L"
               value={<span style={{ color: toneColor(decimalTone(performance.netPnl)) }}>{formatSignedDecimal(performance.netPnl)}</span>}

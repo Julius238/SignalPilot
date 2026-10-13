@@ -414,9 +414,10 @@ export type StrategyPerformance = {
   grossPnl: string;
   netPnl: string;
   fees: string;
-  averageR: string;
-  profitFactor: string;
-  maxDrawdownPct: string;
+  /** Null when not computable (e.g. profit factor without losses). */
+  averageR: string | null;
+  profitFactor: string | null;
+  maxDrawdownPct: string | null;
 };
 
 export type TradingSession = {
@@ -855,10 +856,11 @@ export type PerformanceSegment = {
 
   averageWin: string | null;
   averageLoss: string | null;
-  profitFactor: string;
-  expectancy: string;
+  /** Null when not computable; the reason is in `nullReasons`. */
+  profitFactor: string | null;
+  expectancy: string | null;
 
-  averageR: string;
+  averageR: string | null;
   cumulativeR: string | null;
   tradesWithPlannedRisk: number;
 
@@ -866,7 +868,7 @@ export type PerformanceSegment = {
   maxLossStreak: number;
 
   maxDrawdownAmount: string | null;
-  maxDrawdownPct: string;
+  maxDrawdownPct: string | null;
   recoveryFactor: string | null;
 
   averageHoldMinutes: string;

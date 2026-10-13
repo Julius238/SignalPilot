@@ -143,6 +143,11 @@ describe("decimal and UTC formatting", () => {
   it("never silently treats missing decimals as zero", () => {
     assert.equal(formatDecimalAmount(null), "—");
     assert.equal(formatDecimalAmount(undefined), "—");
+    // Only a maximum given (e.g. exposure minutes): must not throw a RangeError.
+    assert.equal(
+      formatDecimalAmount("120.4", { maximumFractionDigits: 0 }),
+      new Intl.NumberFormat("de-DE", { maximumFractionDigits: 0 }).format(120.4)
+    );
     assert.equal(formatUnknownableDecimal(null), UNKNOWN_LABEL);
   });
 

@@ -19,7 +19,10 @@ export function formatDecimalAmount(
     return "—";
   }
 
-  const { minimumFractionDigits = 2, maximumFractionDigits = 2 } = options ?? {};
+  const { maximumFractionDigits = 2 } = options ?? {};
+  // A caller passing only `maximumFractionDigits: 0` must not inherit the
+  // default minimum of 2 — Intl throws a RangeError when minimum > maximum.
+  const minimumFractionDigits = Math.min(options?.minimumFractionDigits ?? 2, maximumFractionDigits);
 
   return new Intl.NumberFormat("de-DE", { minimumFractionDigits, maximumFractionDigits }).format(
     parsed

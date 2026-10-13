@@ -127,3 +127,13 @@ describe("GET /trading/market-data-origin", () => {
     await server.close();
   });
 });
+
+describe("performance metrics on the wire", () => {
+  it("sends a non-computable metric as null instead of the stored placeholder 0", async () => {
+    const { metricOrNull } = await import("../src/schemas/trading/performance.js");
+    const metricsJson = { profitFactor: { value: null, reason: "NO_GROSS_LOSS" }, averageR: { value: "2.05" } };
+    assert.equal(metricOrNull(metricsJson, "profitFactor", "0.000000000000"), null);
+    assert.equal(metricOrNull(metricsJson, "averageR", "2.050000000000"), "2.050000000000");
+    assert.equal(metricOrNull(null, "profitFactor", "1.5"), "1.5");
+  });
+});
