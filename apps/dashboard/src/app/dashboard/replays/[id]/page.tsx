@@ -47,6 +47,8 @@ function PeriodRow({ period }: { period: ReplayPeriodMetrics | null }) {
       <td data-label="Ø R">{formatRatio(period.averageR)}</td>
       <td data-label="Rendite">{formatSignedPct(period.returnPct)}</td>
       <td data-label="Max. Drawdown">{formatPct(period.maxDrawdownPct)}</td>
+      <td data-label="Buy & Hold">{formatSignedPct(period.buyAndHoldReturnPct ?? null)}</td>
+      <td data-label="Im Markt">{formatPct(period.exposurePct ?? null, 1)}</td>
       <td data-label="Netto-P&L">{formatAmount(period.netPnl)} USDT</td>
     </tr>
   );
@@ -115,6 +117,13 @@ export default async function ReplayDetailPage({ params }: ReplayDetailPageProps
         <MetricCard label="Max. Drawdown" value={formatPct(overall.maxDrawdownPct)} hint="Größter Rückgang der stündlich bewerteten Equity vom bisherigen Höchststand." />
         <MetricCard label="Ø R je Trade" value={formatRatio(overall.averageR)} hint="Nettoergebnis je Trade in Vielfachen des geplanten Risikos." />
         <MetricCard label="Sharpe (annualisiert)" value={formatRatio(overall.sharpeRatio)} />
+        <MetricCard
+          label="Buy & Hold"
+          value={formatSignedPct(overall.buyAndHoldReturnPct ?? null)}
+          sub={`Max. Drawdown ${formatPct(overall.buyAndHoldMaxDrawdownPct ?? null)}`}
+          hint="Dasselbe Symbol über denselben Zeitraum gehalten, mit denselben Kosten für Kauf und Verkauf."
+        />
+        <MetricCard label="Zeit im Markt" value={formatPct(overall.exposurePct ?? null, 1)} hint="Anteil der Stunden mit offener Position." />
       </div>
 
       <SectionCard title="Training und Test" subtitle="Training = In-Sample-Zeitraum, Test = Out-of-Sample. Parameter dürfen nur auf dem Training angepasst werden.">
@@ -129,6 +138,8 @@ export default async function ReplayDetailPage({ params }: ReplayDetailPageProps
                 <th>Ø R</th>
                 <th>Rendite</th>
                 <th>Max. Drawdown</th>
+                <th>Buy &amp; Hold</th>
+                <th>Im Markt</th>
                 <th>Netto-P&amp;L</th>
               </tr>
             </thead>

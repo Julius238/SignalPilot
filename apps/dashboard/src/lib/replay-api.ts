@@ -17,6 +17,10 @@ export type ReplayPeriodMetrics = {
   maxDrawdownPct: string | null;
   sharpeRatio: string | null;
   averageHoldHours: string | null;
+  /** Missing on runs stored before the benchmark existed. */
+  buyAndHoldReturnPct?: string | null;
+  buyAndHoldMaxDrawdownPct?: string | null;
+  exposurePct?: string | null;
 };
 
 export type ForwardReturnStats = {

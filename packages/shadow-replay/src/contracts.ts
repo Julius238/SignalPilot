@@ -82,6 +82,8 @@ export interface ReplayConfig {
   readonly codeVersion: string;
   /** Minutes after the candle close at which the candidate scan runs (live: 5). */
   readonly scanDelayMinutes?: number;
+  /** Research variant key from `STRATEGY_VARIANTS` (default BASELINE). */
+  readonly variant?: string;
 }
 
 export interface ReplayTrade {
@@ -131,6 +133,11 @@ export interface ReplayPeriodMetrics {
   readonly maxDrawdownPct: string | null;
   readonly sharpeRatio: string | null;
   readonly averageHoldHours: string | null;
+  /** Buy-and-hold of the same symbol over the same window, one round trip of costs. */
+  readonly buyAndHoldReturnPct: string | null;
+  readonly buyAndHoldMaxDrawdownPct: string | null;
+  /** Share of the window with an open position (0–100). */
+  readonly exposurePct: string | null;
 }
 
 export interface ReplayFunnel {

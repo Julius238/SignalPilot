@@ -73,6 +73,8 @@ const PARAMS = CRYPTO_MTF_BREAKOUT_V1_PARAMETERS;
  */
 export interface BreakoutIdentityV1 extends ExpectedStrategyIdentityV1 {
   readonly tickAlignedPricePlan: boolean;
+  /** Research-only rule variant (see `BreakoutResearchOverrides`). */
+  readonly research?: BreakoutResearchOverrides;
 }
 
 export const LEGACY_BREAKOUT_IDENTITY: BreakoutIdentityV1 = Object.freeze({
@@ -89,18 +91,77 @@ export const LONG_V1_BREAKOUT_IDENTITY: BreakoutIdentityV1 = Object.freeze({
 const ENTRY = StrategyCheckStage.ENTRY;
 const PRICE_PLAN = StrategyCheckStage.PRICE_PLAN;
 
-const RSI_MINIMUM = DecimalValue.fromString(PARAMS.rsiMinimum);
-const RSI_MAXIMUM = DecimalValue.fromString(PARAMS.rsiMaximum);
-const RELATIVE_VOLUME_MINIMUM = DecimalValue.fromString(PARAMS.relativeVolumeMinimum);
-const ATR_RATIO_MINIMUM = DecimalValue.fromString(PARAMS.atrToCloseMinimum);
-const ATR_RATIO_MAXIMUM = DecimalValue.fromString(PARAMS.atrToCloseMaximum);
-const MTF_MINIMUM_ALIGNMENT = DecimalValue.fromString(PARAMS.multiTimeframeMinimumAlignmentScore);
-const STOP_ATR_MULTIPLE = DecimalValue.fromString(PARAMS.stopAtrMultiple);
-const STOP_FLOOR_PCT = DecimalValue.fromString(PARAMS.stopDistanceFloorPct);
-const STOP_CAP_PCT = DecimalValue.fromString(PARAMS.stopDistanceCapPct);
-const TAKE_PROFIT_R_MULTIPLE = DecimalValue.fromString(PARAMS.takeProfitRMultiple);
-const MINIMUM_REWARD_RISK = DecimalValue.fromString(PARAMS.minimumRewardRisk);
-const ENTRY_GAP_ATR_MULTIPLE = DecimalValue.fromString(PARAMS.entryGapAtrMultiple);
+/**
+ * RESEARCH ONLY: rule overrides for historical replays (strategy variants).
+ * An identity carrying overrides is never registered, never seeded as a
+ * StrategyVersion and therefore never executable by the live pipeline.
+ */
+export interface BreakoutResearchOverrides {
+  readonly rsiMinimum?: string;
+  readonly rsiMaximum?: string;
+  readonly relativeVolumeMinimum?: string;
+  readonly atrToCloseMinimum?: string;
+  readonly atrToCloseMaximum?: string;
+  readonly multiTimeframeMinimumAlignmentScore?: string;
+  readonly stopAtrMultiple?: string;
+  readonly stopDistanceFloorPct?: string;
+  readonly stopDistanceCapPct?: string;
+  readonly takeProfitRMultiple?: string;
+  readonly minimumRewardRisk?: string;
+  readonly regimeMinimumConfidence?: number;
+  readonly breakoutLookback?: number;
+  readonly maxHoldHours?: number;
+  /** Skip the 1h signal-engine confirmation (price rules only). */
+  readonly skipOneHourSignal?: boolean;
+  /** Skip the 4h/1d signal-engine confirmations and the MTF alignment (SMA trend filters stay). */
+  readonly skipHigherTimeframeSignals?: boolean;
+  /** Skip the market-regime requirement. */
+  readonly skipRegime?: boolean;
+}
+
+interface BreakoutRules {
+  readonly params: typeof PARAMS;
+  readonly skipOneHourSignal: boolean;
+  readonly skipHigherTimeframeSignals: boolean;
+  readonly skipRegime: boolean;
+  readonly rsiMinimum: DecimalValue;
+  readonly rsiMaximum: DecimalValue;
+  readonly relativeVolumeMinimum: DecimalValue;
+  readonly atrRatioMinimum: DecimalValue;
+  readonly atrRatioMaximum: DecimalValue;
+  readonly mtfMinimumAlignment: DecimalValue;
+  readonly stopAtrMultiple: DecimalValue;
+  readonly stopFloorPct: DecimalValue;
+  readonly stopCapPct: DecimalValue;
+  readonly takeProfitRMultiple: DecimalValue;
+  readonly minimumRewardRisk: DecimalValue;
+  readonly entryGapAtrMultiple: DecimalValue;
+}
+
+function compileRules(overrides: BreakoutResearchOverrides = {}): BreakoutRules {
+  const { skipOneHourSignal, skipHigherTimeframeSignals, skipRegime, ...values } = overrides;
+  const params = { ...PARAMS, ...values } as typeof PARAMS;
+  return {
+    params,
+    skipOneHourSignal: skipOneHourSignal === true,
+    skipHigherTimeframeSignals: skipHigherTimeframeSignals === true,
+    skipRegime: skipRegime === true,
+    rsiMinimum: DecimalValue.fromString(params.rsiMinimum),
+    rsiMaximum: DecimalValue.fromString(params.rsiMaximum),
+    relativeVolumeMinimum: DecimalValue.fromString(params.relativeVolumeMinimum),
+    atrRatioMinimum: DecimalValue.fromString(params.atrToCloseMinimum),
+    atrRatioMaximum: DecimalValue.fromString(params.atrToCloseMaximum),
+    mtfMinimumAlignment: DecimalValue.fromString(params.multiTimeframeMinimumAlignmentScore),
+    stopAtrMultiple: DecimalValue.fromString(params.stopAtrMultiple),
+    stopFloorPct: DecimalValue.fromString(params.stopDistanceFloorPct),
+    stopCapPct: DecimalValue.fromString(params.stopDistanceCapPct),
+    takeProfitRMultiple: DecimalValue.fromString(params.takeProfitRMultiple),
+    minimumRewardRisk: DecimalValue.fromString(params.minimumRewardRisk),
+    entryGapAtrMultiple: DecimalValue.fromString(params.entryGapAtrMultiple)
+  };
+}
+
+const SPECIFIED_RULES = compileRules();
 
 /** Indicator bundle of one timeframe, computed from the pinned formulas. */
 interface TimeframeIndicators {
@@ -110,13 +171,13 @@ interface TimeframeIndicators {
   readonly sma200: DecimalValue | null;
 }
 
-function timeframeIndicators(series: ParsedSeriesV1): TimeframeIndicators {
+function timeframeIndicators(series: ParsedSeriesV1, rules: BreakoutRules): TimeframeIndicators {
   const closes = series.candles.map((candle) => candle.close);
   return {
     close: series.anchor.close,
-    sma20: simpleMovingAverage(closes, PARAMS.smaFastPeriod),
-    sma50: simpleMovingAverage(closes, PARAMS.smaMediumPeriod),
-    sma200: simpleMovingAverage(closes, PARAMS.smaSlowPeriod)
+    sma20: simpleMovingAverage(closes, rules.params.smaFastPeriod),
+    sma50: simpleMovingAverage(closes, rules.params.smaMediumPeriod),
+    sma200: simpleMovingAverage(closes, rules.params.smaSlowPeriod)
   };
 }
 
@@ -328,14 +389,14 @@ function refuse(
 // Entry conditions
 // ───────────────────────────────────────────────────────────────────────────
 
-function evaluateTrend(log: StrategyCheckLog, validated: ValidatedSnapshotV1): {
+function evaluateTrend(log: StrategyCheckLog, validated: ValidatedSnapshotV1, rules: BreakoutRules): {
   readonly one: TimeframeIndicators;
   readonly four: TimeframeIndicators;
   readonly day: TimeframeIndicators;
 } {
-  const one = timeframeIndicators(validated.series["1h"]);
-  const four = timeframeIndicators(validated.series["4h"]);
-  const day = timeframeIndicators(validated.series["1d"]);
+  const one = timeframeIndicators(validated.series["1h"], rules);
+  const four = timeframeIndicators(validated.series["4h"], rules);
+  const day = timeframeIndicators(validated.series["1d"], rules);
 
   // close(C0) > SMA20 > SMA50 > SMA200 on 1h (docs/trading/05).
   if (one.sma20 === null || one.sma50 === null || one.sma200 === null) {
@@ -364,35 +425,37 @@ function evaluateTrend(log: StrategyCheckLog, validated: ValidatedSnapshotV1): {
   return { one, four, day };
 }
 
-function evaluateSignals(log: StrategyCheckLog, validated: ValidatedSnapshotV1): void {
+function evaluateSignals(log: StrategyCheckLog, validated: ValidatedSnapshotV1, rules: BreakoutRules): void {
   const signal1h = validated.signals["1h"];
   const status1h = effectiveStatus(signal1h);
 
-  if (signal1h.direction !== PARAMS.signalDirection1h) {
+  if (rules.skipOneHourSignal) {
+    // Research variant: no 1h signal-engine confirmation, price rules only.
+  } else if (signal1h.direction !== rules.params.signalDirection1h) {
     log.fail(
       "SIGNAL_1H",
       ENTRY,
       StrategyReasonCode.SIGNAL_1H_DIRECTION_NOT_BULLISH,
       signal1h.direction,
-      PARAMS.signalDirection1h
+      rules.params.signalDirection1h
     );
-  } else if (!PARAMS.signalAllowedStatuses1h.includes(status1h as never)) {
+  } else if (!rules.params.signalAllowedStatuses1h.includes(status1h as never)) {
     log.fail(
       "SIGNAL_1H",
       ENTRY,
       StrategyReasonCode.SIGNAL_1H_STATUS_NOT_ALLOWED,
       status1h,
-      PARAMS.signalAllowedStatuses1h.join(",")
+      rules.params.signalAllowedStatuses1h.join(",")
     );
-  } else if (signal1h.adjustedScore < PARAMS.signalMinimumAdjustedScore1h) {
+  } else if (signal1h.adjustedScore < rules.params.signalMinimumAdjustedScore1h) {
     log.fail(
       "SIGNAL_1H",
       ENTRY,
       StrategyReasonCode.SIGNAL_1H_SCORE_BELOW_MINIMUM,
       String(signal1h.adjustedScore),
-      String(PARAMS.signalMinimumAdjustedScore1h)
+      String(rules.params.signalMinimumAdjustedScore1h)
     );
-  } else if (PARAMS.signalForbiddenRiskLevels.includes(signal1h.riskLevel as never)) {
+  } else if (rules.params.signalForbiddenRiskLevels.includes(signal1h.riskLevel as never)) {
     log.fail("SIGNAL_1H", ENTRY, StrategyReasonCode.SIGNAL_1H_RISK_LEVEL_TOO_HIGH, signal1h.riskLevel, "LOW,MEDIUM");
   } else {
     log.pass("SIGNAL_1H", ENTRY, StrategyReasonCode.SIGNAL_1H_CONFIRMED, String(signal1h.adjustedScore));
@@ -403,18 +466,18 @@ function evaluateSignals(log: StrategyCheckLog, validated: ValidatedSnapshotV1):
     ["1d", "HIGHER_TIMEFRAME_1D", StrategyReasonCode.HIGHER_TIMEFRAME_1D_CONFIRMED, StrategyReasonCode.HIGHER_TIMEFRAME_1D_CONFLICT]
   ];
 
-  for (const [timeframe, checkId, passCode, failCode] of higher) {
+  for (const [timeframe, checkId, passCode, failCode] of rules.skipHigherTimeframeSignals ? [] : higher) {
     const signal = validated.signals[timeframe];
     const status = effectiveStatus(signal);
-    if (signal.direction !== PARAMS.higherTimeframeDirection) {
-      log.fail(checkId, ENTRY, failCode, signal.direction, PARAMS.higherTimeframeDirection);
+    if (signal.direction !== rules.params.higherTimeframeDirection) {
+      log.fail(checkId, ENTRY, failCode, signal.direction, rules.params.higherTimeframeDirection);
       continue;
     }
-    if (PARAMS.higherTimeframeForbiddenStatuses.includes(status as never)) {
-      log.fail(checkId, ENTRY, failCode, status, `NOT ${PARAMS.higherTimeframeForbiddenStatuses.join("/")}`);
+    if (rules.params.higherTimeframeForbiddenStatuses.includes(status as never)) {
+      log.fail(checkId, ENTRY, failCode, status, `NOT ${rules.params.higherTimeframeForbiddenStatuses.join("/")}`);
       continue;
     }
-    if (PARAMS.signalForbiddenRiskLevels.includes(signal.riskLevel as never)) {
+    if (rules.params.signalForbiddenRiskLevels.includes(signal.riskLevel as never)) {
       log.fail(checkId, ENTRY, failCode, signal.riskLevel, "LOW,MEDIUM");
       continue;
     }
@@ -422,26 +485,28 @@ function evaluateSignals(log: StrategyCheckLog, validated: ValidatedSnapshotV1):
   }
 }
 
-function evaluateContext(log: StrategyCheckLog, validated: ValidatedSnapshotV1): void {
+function evaluateContext(log: StrategyCheckLog, validated: ValidatedSnapshotV1, rules: BreakoutRules): void {
   const mtf = validated.multiTimeframe;
   const alignmentScore = parseDecimalString(mtf.alignmentScore);
-  if (mtf.alignment !== PARAMS.multiTimeframeRequiredAlignment) {
+  if (rules.skipHigherTimeframeSignals) {
+    // Research variant: no multi-timeframe signal alignment (SMA trend filters still apply).
+  } else if (mtf.alignment !== rules.params.multiTimeframeRequiredAlignment) {
     log.fail(
       "MTF_ALIGNMENT",
       ENTRY,
       StrategyReasonCode.MTF_NOT_BULLISH_ALIGNED,
       mtf.alignment,
-      PARAMS.multiTimeframeRequiredAlignment
+      rules.params.multiTimeframeRequiredAlignment
     );
   } else if (alignmentScore === null) {
     log.fail("MTF_ALIGNMENT", ENTRY, StrategyReasonCode.MTF_MISSING, "alignmentScore");
-  } else if (alignmentScore.lt(MTF_MINIMUM_ALIGNMENT)) {
+  } else if (alignmentScore.lt(rules.mtfMinimumAlignment)) {
     log.fail(
       "MTF_ALIGNMENT",
       ENTRY,
       StrategyReasonCode.MTF_ALIGNMENT_SCORE_BELOW_MINIMUM,
       alignmentScore.toString(),
-      MTF_MINIMUM_ALIGNMENT.toString()
+      rules.mtfMinimumAlignment.toString()
     );
   } else {
     log.pass(
@@ -449,34 +514,36 @@ function evaluateContext(log: StrategyCheckLog, validated: ValidatedSnapshotV1):
       ENTRY,
       StrategyReasonCode.MTF_BULLISH_ALIGNED,
       alignmentScore.toString(),
-      MTF_MINIMUM_ALIGNMENT.toString()
+      rules.mtfMinimumAlignment.toString()
     );
   }
 
   const regime = validated.marketRegime;
-  if (regime.cryptoRegime !== PARAMS.regimeRequiredCryptoRegime) {
+  if (rules.skipRegime) {
+    // Research variant: no market-regime requirement.
+  } else if (regime.cryptoRegime !== rules.params.regimeRequiredCryptoRegime) {
     log.fail(
       "REGIME",
       ENTRY,
       StrategyReasonCode.REGIME_NOT_RISK_ON,
       regime.cryptoRegime,
-      PARAMS.regimeRequiredCryptoRegime
+      rules.params.regimeRequiredCryptoRegime
     );
-  } else if (PARAMS.regimeForbiddenRiskModes.includes(regime.riskMode as never)) {
+  } else if (rules.params.regimeForbiddenRiskModes.includes(regime.riskMode as never)) {
     log.fail(
       "REGIME",
       ENTRY,
       StrategyReasonCode.REGIME_RISK_MODE_BLOCKED,
       regime.riskMode,
-      `NOT ${PARAMS.regimeForbiddenRiskModes.join("/")}`
+      `NOT ${rules.params.regimeForbiddenRiskModes.join("/")}`
     );
-  } else if (regime.confidence < PARAMS.regimeMinimumConfidence) {
+  } else if (regime.confidence < rules.params.regimeMinimumConfidence) {
     log.fail(
       "REGIME",
       ENTRY,
       StrategyReasonCode.REGIME_CONFIDENCE_BELOW_MINIMUM,
       String(regime.confidence),
-      String(PARAMS.regimeMinimumConfidence)
+      String(rules.params.regimeMinimumConfidence)
     );
   } else {
     log.pass("REGIME", ENTRY, StrategyReasonCode.REGIME_RISK_ON, String(regime.confidence));
@@ -487,7 +554,7 @@ function evaluateContext(log: StrategyCheckLog, validated: ValidatedSnapshotV1):
   const blocking = validated.contextEvents.filter(
     (event) =>
       event.directionalBias === "BEARISH" &&
-      PARAMS.blockingContextSeverities.includes(event.severity as never)
+      rules.params.blockingContextSeverities.includes(event.severity as never)
   );
   if (blocking.length > 0) {
     log.fail(
@@ -527,14 +594,15 @@ export function evaluateCryptoMtfBreakoutV1(
 
   const validated = validation.validated;
   const log = createCheckLog();
+  const rules = identity.research === undefined ? SPECIFIED_RULES : compileRules(identity.research);
 
   // ── Trend, breakout, momentum, volume, volatility ────────────────────────
-  const trend = evaluateTrend(log, validated);
+  const trend = evaluateTrend(log, validated, rules);
   const series1h = validated.series["1h"];
   const anchor = series1h.anchor;
   const closes1h = series1h.candles.map((candle) => candle.close);
 
-  const priorHigh = priorPeriodHigh(series1h.candles, PARAMS.breakoutLookback);
+  const priorHigh = priorPeriodHigh(series1h.candles, rules.params.breakoutLookback);
   if (priorHigh === null) {
     log.fail("BREAKOUT_PRIOR_HIGH", ENTRY, StrategyReasonCode.BREAKOUT_REFERENCE_UNAVAILABLE);
   } else if (anchor.close.gt(priorHigh)) {
@@ -555,32 +623,32 @@ export function evaluateCryptoMtfBreakoutV1(
     );
   }
 
-  const rsi = relativeStrengthIndex(closes1h, PARAMS.rsiPeriod);
+  const rsi = relativeStrengthIndex(closes1h, rules.params.rsiPeriod);
   if (rsi === null) {
     log.fail("RSI_1H", ENTRY, StrategyReasonCode.RSI_UNAVAILABLE);
-  } else if (rsi.gte(RSI_MINIMUM) && rsi.lte(RSI_MAXIMUM)) {
-    log.pass("RSI_1H", ENTRY, StrategyReasonCode.RSI_IN_RANGE, rsi.toString(), `${PARAMS.rsiMinimum}..${PARAMS.rsiMaximum}`);
+  } else if (rsi.gte(rules.rsiMinimum) && rsi.lte(rules.rsiMaximum)) {
+    log.pass("RSI_1H", ENTRY, StrategyReasonCode.RSI_IN_RANGE, rsi.toString(), `${rules.params.rsiMinimum}..${rules.params.rsiMaximum}`);
   } else {
     log.fail(
       "RSI_1H",
       ENTRY,
       StrategyReasonCode.RSI_OUT_OF_RANGE,
       rsi.toString(),
-      `${PARAMS.rsiMinimum}..${PARAMS.rsiMaximum}`
+      `${rules.params.rsiMinimum}..${rules.params.rsiMaximum}`
     );
   }
 
-  const averageVolume = priorAverageVolume(series1h.candles, PARAMS.volumeLookback);
+  const averageVolume = priorAverageVolume(series1h.candles, rules.params.volumeLookback);
   const relative = averageVolume === null ? null : relativeVolume(anchor.volume, averageVolume);
   if (relative === null) {
     log.fail("RELATIVE_VOLUME_1H", ENTRY, StrategyReasonCode.RELATIVE_VOLUME_UNAVAILABLE);
-  } else if (relative.gte(RELATIVE_VOLUME_MINIMUM)) {
+  } else if (relative.gte(rules.relativeVolumeMinimum)) {
     log.pass(
       "RELATIVE_VOLUME_1H",
       ENTRY,
       StrategyReasonCode.RELATIVE_VOLUME_CONFIRMED,
       relative.toString(),
-      PARAMS.relativeVolumeMinimum
+      rules.params.relativeVolumeMinimum
     );
   } else {
     log.fail(
@@ -588,21 +656,21 @@ export function evaluateCryptoMtfBreakoutV1(
       ENTRY,
       StrategyReasonCode.RELATIVE_VOLUME_BELOW_MINIMUM,
       relative.toString(),
-      PARAMS.relativeVolumeMinimum
+      rules.params.relativeVolumeMinimum
     );
   }
 
-  const atr = averageTrueRange(series1h.candles, PARAMS.atrPeriod);
+  const atr = averageTrueRange(series1h.candles, rules.params.atrPeriod);
   const atrRatio = atrToCloseRatio(atr, anchor.close);
   if (atr === null || atrRatio === null || !atr.isPositive()) {
     log.fail("ATR_1H", ENTRY, StrategyReasonCode.ATR_UNAVAILABLE);
-  } else if (atrRatio.gte(ATR_RATIO_MINIMUM) && atrRatio.lte(ATR_RATIO_MAXIMUM)) {
+  } else if (atrRatio.gte(rules.atrRatioMinimum) && atrRatio.lte(rules.atrRatioMaximum)) {
     log.pass(
       "ATR_1H",
       ENTRY,
       StrategyReasonCode.ATR_RATIO_IN_RANGE,
       atrRatio.toString(),
-      `${PARAMS.atrToCloseMinimum}..${PARAMS.atrToCloseMaximum}`
+      `${rules.params.atrToCloseMinimum}..${rules.params.atrToCloseMaximum}`
     );
   } else {
     log.fail(
@@ -610,16 +678,16 @@ export function evaluateCryptoMtfBreakoutV1(
       ENTRY,
       StrategyReasonCode.ATR_RATIO_OUT_OF_RANGE,
       atrRatio.toString(),
-      `${PARAMS.atrToCloseMinimum}..${PARAMS.atrToCloseMaximum}`
+      `${rules.params.atrToCloseMinimum}..${rules.params.atrToCloseMaximum}`
     );
   }
 
-  evaluateSignals(log, validated);
-  evaluateContext(log, validated);
+  evaluateSignals(log, validated, rules);
+  evaluateContext(log, validated, rules);
 
   // ── Candidate validity window (docs/trading/05, "Candidate-Gültigkeit") ──
   const earliestFillAtMs = anchor.closeTimeMs;
-  const expiresAtMs = earliestFillAtMs + PARAMS.candidateTtlMs;
+  const expiresAtMs = earliestFillAtMs + rules.params.candidateTtlMs;
   if (expiresAtMs <= validated.asOfMs) {
     log.fail(
       "CANDIDATE_VALIDITY",
@@ -667,8 +735,8 @@ export function evaluateCryptoMtfBreakoutV1(
   }
 
   if (atr !== null && atr.isPositive()) {
-    const atrDistance = STOP_ATR_MULTIPLE.mul(atr, RoundingMode.CEIL);
-    const floorDistance = STOP_FLOOR_PCT.mul(referenceEntry, RoundingMode.CEIL);
+    const atrDistance = rules.stopAtrMultiple.mul(atr, RoundingMode.CEIL);
+    const floorDistance = rules.stopFloorPct.mul(referenceEntry, RoundingMode.CEIL);
     stopDistance = DecimalValue.max(atrDistance, floorDistance);
     if (tick !== null) {
       // Snap the stop first, so the cap, the target and the reward/risk all
@@ -695,13 +763,13 @@ export function evaluateCryptoMtfBreakoutV1(
       );
     }
 
-    if (stopDistancePct.gt(STOP_CAP_PCT)) {
+    if (stopDistancePct.gt(rules.stopCapPct)) {
       log.fail(
         "STOP_DISTANCE_CAP",
         PRICE_PLAN,
         StrategyReasonCode.STOP_DISTANCE_ABOVE_MAXIMUM,
         stopDistancePct.toString(),
-        STOP_CAP_PCT.toString()
+        rules.stopCapPct.toString()
       );
     } else {
       log.pass(
@@ -709,7 +777,7 @@ export function evaluateCryptoMtfBreakoutV1(
         PRICE_PLAN,
         StrategyReasonCode.PRICE_PLAN_VALID,
         stopDistancePct.toString(),
-        STOP_CAP_PCT.toString()
+        rules.stopCapPct.toString()
       );
     }
 
@@ -725,19 +793,19 @@ export function evaluateCryptoMtfBreakoutV1(
     } else {
       log.pass("STOP_PRICE", PRICE_PLAN, StrategyReasonCode.PRICE_PLAN_VALID, stopPrice.toString());
 
-      takeProfitPrice = referenceEntry.add(TAKE_PROFIT_R_MULTIPLE.mul(stopDistance, RoundingMode.FLOOR));
+      takeProfitPrice = referenceEntry.add(rules.takeProfitRMultiple.mul(stopDistance, RoundingMode.FLOOR));
       if (tick !== null) takeProfitPrice = alignTakeProfitToTick("LONG", takeProfitPrice, tick);
       plannedRewardRisk = takeProfitPrice
         .sub(referenceEntry)
         .div(referenceEntry.sub(stopPrice), RoundingMode.FLOOR);
 
-      if (plannedRewardRisk.lt(MINIMUM_REWARD_RISK)) {
+      if (plannedRewardRisk.lt(rules.minimumRewardRisk)) {
         log.fail(
           "REWARD_RISK",
           PRICE_PLAN,
           StrategyReasonCode.REWARD_RISK_BELOW_MINIMUM,
           plannedRewardRisk.toString(),
-          MINIMUM_REWARD_RISK.toString()
+          rules.minimumRewardRisk.toString()
         );
       } else {
         log.pass(
@@ -745,12 +813,12 @@ export function evaluateCryptoMtfBreakoutV1(
           PRICE_PLAN,
           StrategyReasonCode.REWARD_RISK_CONFIRMED,
           plannedRewardRisk.toString(),
-          MINIMUM_REWARD_RISK.toString()
+          rules.minimumRewardRisk.toString()
         );
       }
     }
 
-    maximumEntryGap = ENTRY_GAP_ATR_MULTIPLE.mul(atr, RoundingMode.FLOOR);
+    maximumEntryGap = rules.entryGapAtrMultiple.mul(atr, RoundingMode.FLOOR);
   }
 
   const checks: readonly StrategyCheckV1[] = Object.freeze([...validation.checks, ...log.checks]);
@@ -838,9 +906,9 @@ export function evaluateCryptoMtfBreakoutV1(
     stopDistance: stopDistance.toString(),
     stopDistancePct: stopDistancePct.toString(),
     takeProfitPrice: takeProfitPrice.toString(),
-    minimumRewardRisk: MINIMUM_REWARD_RISK.toString(),
+    minimumRewardRisk: rules.minimumRewardRisk.toString(),
     plannedRewardRisk: plannedRewardRisk.toString(),
-    maxHoldHours: PARAMS.maxHoldHours,
+    maxHoldHours: rules.params.maxHoldHours,
     indicators,
     evidence: buildEvidence(validated),
     reasonCodes,

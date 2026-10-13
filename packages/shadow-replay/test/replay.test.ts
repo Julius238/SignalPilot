@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { generateSyntheticSeries, runShadowReplay, type ReplayConfig, type ReplayMarketData } from "../src/index.js";
+import { generateBreakoutScenario, generateSyntheticSeries, runShadowReplay, type ReplayConfig, type ReplayMarketData } from "../src/index.js";
 import { forcedCandidates } from "./support/forced-candidates.js";
 
 // Every market in this file is synthetic: the tests prove the replay
@@ -136,5 +136,51 @@ describe("shadow replay", () => {
     for (const trade of result.trades) {
       assert.equal(trade.period, Date.parse(trade.anchorAt) >= Date.parse(split) ? "TEST" : "TRAINING");
     }
+  });
+});
+
+describe("shadow replay — research variants", () => {
+  const START_V = Date.UTC(2025, 0, 1);
+  const scenario = (symbol: string, startPrice: number, assetType: "CRYPTO" | "ETF", seed: number) =>
+    generateBreakoutScenario({
+      symbol,
+      assetType,
+      startMs: START_V,
+      startPrice,
+      seed,
+      events: [{ breakoutAtMs: START_V + 230 * 86_400_000 + 8 * 3_600_000, outcome: "WIN" }]
+    });
+  const data: ReplayMarketData = {
+    origin: "SYNTHETIC",
+    synthetic: true,
+    series: [
+      scenario("BTCUSDT", 60000, "CRYPTO", 1),
+      scenario("ETHUSDT", 3000, "CRYPTO", 2),
+      scenario("SPY", 560, "ETF", 3),
+      scenario("QQQ", 480, "ETF", 4),
+      scenario("IWM", 220, "ETF", 5)
+    ]
+  };
+  const base = config({
+    mode: "SPEC",
+    regimePolicy: "AS_SPECIFIED",
+    from: new Date(START_V + 228 * 86_400_000).toISOString()
+  });
+
+  it("finds the regular candidate of the textbook scenario and benchmarks it against buy-and-hold", () => {
+    const result = runShadowReplay(data, base);
+    assert.equal(result.funnel.candidates, 1);
+    assert.equal(result.funnel.riskApproved, 1);
+    assert.equal(result.trades[0]!.exitReason, "TAKE_PROFIT");
+    assert.ok(result.metrics.overall.buyAndHoldReturnPct !== null);
+    assert.ok(Number(result.metrics.overall.exposurePct) > 0);
+  });
+
+  it("applies a variant's overrides only inside the replay and labels the run", () => {
+    const relaxed = runShadowReplay(data, { ...base, variant: "PRICE_ONLY" });
+    const baseline = runShadowReplay(data, base);
+    assert.ok(relaxed.funnel.candidates >= baseline.funnel.candidates);
+    assert.ok(relaxed.notes.some((note) => note.includes("Forschungsvariante PRICE_ONLY")));
+    assert.throws(() => runShadowReplay(data, { ...base, variant: "NOT_A_VARIANT" }), /Unknown strategy variant/);
   });
 });

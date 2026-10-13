@@ -56,8 +56,11 @@ import {
 } from "@signalpilot/risk-engine";
 import {
   INDICATORS_V1_VERSION,
+  LEGACY_BREAKOUT_IDENTITY,
+  LONG_V1_BREAKOUT_IDENTITY,
   STRATEGY_INPUT_SNAPSHOT_VERSION,
   STRATEGY_TIMEFRAMES,
+  evaluateCryptoMtfBreakoutV1,
   evaluateStrategy,
   getStrategy,
   type SnapshotCandleV1,
@@ -65,6 +68,8 @@ import {
   type StrategyInputSnapshotV1,
   type TradeCandidateDraftV1
 } from "@signalpilot/strategy-engine";
+
+import { STRATEGY_VARIANTS } from "./variants.js";
 import { DecimalValue, RoundingMode, buildSpecificationHash, canonicalHash } from "@signalpilot/trading-domain";
 import {
   checkEntryGap,
@@ -185,6 +190,7 @@ export function runShadowReplay(market: ReplayMarketData, config: ReplayConfig, 
   const scanDelayMs = (config.scanDelayMinutes ?? 5) * 60 * 1000;
 
   const profile = buildProfile(config);
+  const evaluate = hooks.evaluate ?? variantEvaluator(config);
   const simProfile: ExecutionProfileSnapshotV1 = {
     id: profile.id,
     tickSize: profile.tickSize,
@@ -248,7 +254,7 @@ export function runShadowReplay(market: ReplayMarketData, config: ReplayConfig, 
     bucket[key] = (bucket[key] ?? 0) + 1;
   };
 
-  const hourlyEquity: Array<{ at: number; equity: string }> = [];
+  const hourlyEquity: Array<{ at: number; equity: string; close: number; exposed: boolean }> = [];
   const cycleAnchors: number[] = [];
   const candidateAnchors: number[] = [];
   const nearMissAnchors = new Map<string, number[]>();
@@ -517,7 +523,7 @@ export function runShadowReplay(market: ReplayMarketData, config: ReplayConfig, 
     if (valuation === null) throw new Error("Portfolio valuation failed.");
     equity = valuation.equity;
     highWaterMark = valuation.highWaterMark;
-    hourlyEquity.push({ at: anchor.closeTime, equity });
+    hourlyEquity.push({ at: anchor.closeTime, equity, close: Number(anchor.close), exposed: positions.length > 0 });
 
     const day = utcDay(asOfMs);
     if (startOfDay === null || startOfDay.day !== day) {
@@ -598,7 +604,7 @@ export function runShadowReplay(market: ReplayMarketData, config: ReplayConfig, 
       regime: currentRegime,
       profile
     });
-    const evaluation = (hooks.evaluate ?? evaluateStrategy)(snapshot);
+    const evaluation = evaluate(snapshot);
     hooks.onEvaluation?.(iso(anchor.closeTime), evaluation);
     for (const check of evaluation.checks) {
       if (!check.passed) bump(funnel.failedStrategyChecks, check.reasonCode);
@@ -751,19 +757,23 @@ export function runShadowReplay(market: ReplayMarketData, config: ReplayConfig, 
   const trades = closed.map((entry) => entry.trade);
   const funnelResult: ReplayFunnel = funnel;
   const metrics = {
-    overall: periodMetrics("Gesamtzeitraum", trades, hourlyEquity, startingCash, null, null),
+    overall: periodMetrics("Gesamtzeitraum", trades, hourlyEquity, startingCash, null, null, profile),
     training:
       splitMs === null
         ? null
-        : periodMetrics("Training (In-Sample)", trades.filter((trade) => trade.period === "TRAINING"), hourlyEquity, startingCash, null, splitMs),
+        : periodMetrics("Training (In-Sample)", trades.filter((trade) => trade.period === "TRAINING"), hourlyEquity, startingCash, null, splitMs, profile),
     test:
       splitMs === null
         ? null
-        : periodMetrics("Test (Out-of-Sample)", trades.filter((trade) => trade.period === "TEST"), hourlyEquity, startingCash, splitMs, null),
+        : periodMetrics("Test (Out-of-Sample)", trades.filter((trade) => trade.period === "TEST"), hourlyEquity, startingCash, splitMs, null, profile),
     nearMiss: nearMissAnalysis(hourly, cycleAnchors, candidateAnchors, nearMissAnchors)
   };
 
   if (market.synthetic) notes.unshift("SYNTHETISCHE TESTDATEN — keine Aussage über reale Strategieperformance.");
+  if ((config.variant ?? "BASELINE") !== "BASELINE") {
+    const variant = STRATEGY_VARIANTS[config.variant!]!;
+    notes.push(`Forschungsvariante ${variant.key} (${variant.label}): ${variant.rationale} Nicht live ausführbar.`);
+  }
   if (config.mode === "SIGNAL_EDGE") {
     notes.push("Forschungsmodus SIGNAL_EDGE: Risk-Engine-Regeln nicht angewendet; Sizing, Fill- und Exitmodell wie produktiv; eine Position je Symbol.");
   }
@@ -927,10 +937,11 @@ function closeTrade(position: OpenPosition, trigger: string, closedAtMs: number,
 function periodMetrics(
   label: string,
   trades: readonly ReplayTrade[],
-  hourlyEquity: readonly { at: number; equity: string }[],
+  hourlyEquity: readonly { at: number; equity: string; close: number; exposed: boolean }[],
   startingCash: string,
   fromMs: number | null,
-  toMs: number | null
+  toMs: number | null,
+  costs: { readonly feeBps: number; readonly fullSpreadBps: number; readonly slippageBps: number }
 ): ReplayPeriodMetrics {
   const curve = hourlyEquity.filter(
     (point) => (fromMs === null || point.at >= fromMs) && (toMs === null || point.at < toMs)
@@ -967,6 +978,26 @@ function periodMetrics(
     peak = Math.max(peak, value);
     if (peak > 0) maxDrawdown = Math.max(maxDrawdown, (peak - value) / peak);
   }
+  // Benchmark: buy at the first anchor close, sell at the last, paying the
+  // same fee, half spread and slippage on both legs as the strategy does.
+  const oneLegCost = (costs.feeBps + costs.fullSpreadBps / 2 + costs.slippageBps) / 10_000;
+  const firstClose = curve[0]?.close;
+  const lastClose = curve.at(-1)?.close;
+  let buyAndHoldReturnPct: string | null = null;
+  let buyAndHoldMaxDrawdownPct: string | null = null;
+  if (firstClose !== undefined && lastClose !== undefined && firstClose > 0) {
+    buyAndHoldReturnPct = (((lastClose * (1 - oneLegCost)) / (firstClose * (1 + oneLegCost)) - 1) * 100).toFixed(4);
+    let closePeak = Number.NEGATIVE_INFINITY;
+    let closeDrawdown = 0;
+    for (const point of curve) {
+      closePeak = Math.max(closePeak, point.close);
+      closeDrawdown = Math.max(closeDrawdown, (closePeak - point.close) / closePeak);
+    }
+    buyAndHoldMaxDrawdownPct = (closeDrawdown * 100).toFixed(4);
+  }
+  const exposurePct =
+    curve.length === 0 ? null : ((curve.filter((point) => point.exposed).length / curve.length) * 100).toFixed(2);
+
   const end = curve.at(-1)?.equity ?? base;
   const returnPct = Number(base) > 0 ? (((Number(end) - Number(base)) / Number(base)) * 100).toFixed(4) : null;
 
@@ -989,7 +1020,10 @@ function periodMetrics(
     averageHoldHours:
       metrics?.averageHoldMinutes.value === null || metrics?.averageHoldMinutes.value === undefined
         ? null
-        : (Number(metrics.averageHoldMinutes.value) / 60).toFixed(2)
+        : (Number(metrics.averageHoldMinutes.value) / 60).toFixed(2),
+    buyAndHoldReturnPct,
+    buyAndHoldMaxDrawdownPct,
+    exposurePct
   };
 }
 
@@ -1494,4 +1528,20 @@ function buildRiskSnapshot(input: {
       codeVersion: input.config.codeVersion
     }
   };
+}
+
+function variantEvaluator(config: ReplayConfig): (snapshot: StrategyInputSnapshotV1) => StrategyEvaluationResultV1 {
+  const key = config.variant ?? "BASELINE";
+  const variant = STRATEGY_VARIANTS[key];
+  if (variant === undefined) throw new Error(`Unknown strategy variant ${key}.`);
+  if (key === "BASELINE") return evaluateStrategy;
+  const identity =
+    config.strategyKey === LONG_V1_BREAKOUT_IDENTITY.key
+      ? LONG_V1_BREAKOUT_IDENTITY
+      : config.strategyKey === LEGACY_BREAKOUT_IDENTITY.key
+        ? LEGACY_BREAKOUT_IDENTITY
+        : null;
+  if (identity === null) throw new Error(`Variants exist only for the long breakout strategy, not ${config.strategyKey}.`);
+  const research = { ...identity, research: variant.overrides };
+  return (snapshot) => evaluateCryptoMtfBreakoutV1(snapshot, research);
 }
