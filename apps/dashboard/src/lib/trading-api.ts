@@ -1103,3 +1103,20 @@ export function fetchAuditDrilldown(params: {
 export function fetchEligibilityReport() {
   return fetchApi<EligibilityReport>("/trading/eligibility");
 }
+
+// Stündliche Strategie-Auswertungen inkl. "kein Kandidat" (aus Audit-Events).
+export type StrategyEvaluation = {
+  id: string;
+  occurredAt: string;
+  symbol: string | null;
+  outcome: "CANDIDATE" | "NO_CANDIDATE" | "INVALID_INPUT";
+  primaryReasonCode: string;
+  tradeCandidateId: string | null;
+  checksPassed: number;
+  checksTotal: number;
+  failedChecks: { checkId: string; reasonCode: string; actual: string | null; limit: string | null }[];
+};
+
+export function fetchStrategyEvaluations(params: PaginationParams) {
+  return fetchApi<StrategyEvaluation[]>(`/trading/strategy-evaluations${buildQuery(params)}`);
+}

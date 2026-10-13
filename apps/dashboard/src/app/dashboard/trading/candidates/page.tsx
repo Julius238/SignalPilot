@@ -7,7 +7,9 @@ import { CandidateStatusBadge } from "../../../../components/trading/trading-sta
 import { TradingDisabled } from "../../../../components/trading/trading-disabled";
 import { TradingPagination } from "../../../../components/trading/trading-pagination";
 import {
+  fetchStrategyEvaluations,
   fetchTradeCandidates,
+  type StrategyEvaluation,
   type TradeCandidateStatus
 } from "../../../../lib/trading-api";
 import {
@@ -17,6 +19,13 @@ import {
 import { TRADING_DASHBOARD_ENABLED } from "../../../../lib/trading-flag";
 
 const LIMIT = 50;
+const EVALUATION_LIMIT = 12;
+
+const OUTCOME_LABELS: Record<StrategyEvaluation["outcome"], string> = {
+  CANDIDATE: "Kandidat",
+  NO_CANDIDATE: "Kein Kandidat",
+  INVALID_INPUT: "Eingaben ungültig"
+};
 
 const STATUS_OPTIONS: Array<{ value: string; label: string }> = [
   { value: "", label: "Alle Status" },
@@ -47,6 +56,8 @@ export default async function TradeCandidatesPage({ searchParams }: PageProps) {
 
   const params = await searchParams;
   const offset = Math.max(0, Number(params.offset) || 0);
+  const evaluationsResult = await fetchStrategyEvaluations({ limit: EVALUATION_LIMIT });
+  const evaluations = evaluationsResult.data ?? [];
   const result = await fetchTradeCandidates({
     status: params.status || undefined,
     assetId: params.assetId || undefined,
@@ -71,6 +82,66 @@ export default async function TradeCandidatesPage({ searchParams }: PageProps) {
         title="Trade Candidates"
         subtitle="Status, Entry/Stop/TP, CRV und Ablehnungsgründe je Kandidat"
       />
+
+      <SectionCard
+        title="Stündliche Strategie-Auswertungen"
+        subtitle="Jede Auswertung des Bots — auch ohne Kandidat — mit den Bedingungen, die nicht erfüllt waren"
+      >
+        {evaluationsResult.error ? (
+          <ErrorState title="Auswertungen konnten nicht geladen werden" message={evaluationsResult.error} />
+        ) : evaluations.length === 0 ? (
+          <EmptyState
+            title="Noch keine Strategie-Auswertung."
+            description="Der Kandidaten-Job läuft stündlich um :05 UTC, sobald eine Strategie-Zuweisung aktiv ist."
+          />
+        ) : (
+          <div className="table-wrap">
+            <table className="responsive-table">
+              <thead>
+                <tr>
+                  <th>Zeit</th>
+                  <th>Symbol</th>
+                  <th>Ergebnis</th>
+                  <th>Erfüllt</th>
+                  <th>Nicht erfüllt (Ist / Grenze)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {evaluations.map((evaluation) => (
+                  <tr key={evaluation.id}>
+                    <td data-label="Zeit" className="nowrap">{formatUtcDateTime(evaluation.occurredAt)}</td>
+                    <td data-label="Symbol">{evaluation.symbol ?? "—"}</td>
+                    <td data-label="Ergebnis">
+                      {evaluation.tradeCandidateId ? (
+                        <Link href={`/dashboard/trading/candidates/${evaluation.tradeCandidateId}`}>
+                          {OUTCOME_LABELS[evaluation.outcome]}
+                        </Link>
+                      ) : (
+                        OUTCOME_LABELS[evaluation.outcome]
+                      )}
+                    </td>
+                    <td data-label="Erfüllt" className="nowrap">
+                      {evaluation.checksPassed} / {evaluation.checksTotal}
+                    </td>
+                    <td data-label="Nicht erfüllt (Ist / Grenze)" className="small">
+                      {evaluation.failedChecks.length === 0
+                        ? "—"
+                        : evaluation.failedChecks.map((check) => (
+                            <div key={`${check.checkId}-${check.reasonCode}`}>
+                              <span className="mono">{check.reasonCode}</span>
+                              {check.actual !== null || check.limit !== null ? (
+                                <span className="muted"> {check.actual ?? "—"} / {check.limit ?? "—"}</span>
+                              ) : null}
+                            </div>
+                          ))}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </SectionCard>
 
       {result.error ? (
         <ErrorState

@@ -85,6 +85,7 @@ import {
   listRiskEvents,
   listSessions
 } from "../../services/trading/sessionService.js";
+import { listStrategyEvaluations } from "../../services/trading/strategyEvaluationService.js";
 import { getWorkerStatus } from "../../services/trading/workerStatusService.js";
 import { requireTradingOperator } from "./operatorAuth.js";
 import {
@@ -521,6 +522,14 @@ export async function registerTradingReadRoutes(server: FastifyInstance) {
   });
 
   server.get("/trading/worker-status", async () => getWorkerStatus(database));
+
+  server.get("/trading/strategy-evaluations", async (request, reply) => {
+    const query = asQueryRecord(request.query);
+    const limit = parseLimit(query.limit, DEFAULT_LIMIT, MAX_LIMIT, reply);
+    const offset = parseOffset(query.offset, reply);
+    if (reply.sent || limit === undefined || offset === undefined) return reply;
+    return listStrategyEvaluations(database, { limit, offset });
+  });
 
   // ── P8: segmented performance ────────────────────────────────────────────
 
