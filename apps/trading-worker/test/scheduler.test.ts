@@ -34,6 +34,7 @@ function buildConfig(overrides: Partial<TradingWorkerConfig["jobFlags"]> = {}): 
       fillJobEnabled: false,
       positionMonitorJobEnabled: false,
       reconciliationJobEnabled: false,
+      performanceScheduleEnabled: false,
       ...overrides
     },
     ownerId: "test-owner"
@@ -68,6 +69,12 @@ describe("startTradingWorkerScheduler", () => {
       })
     );
     assert.equal(tasks.length, 7);
+    tasks.forEach((task) => task.stop());
+  });
+
+  it("adds the reporting-only performance refresh when its schedule flag is on", () => {
+    const tasks = startTradingWorkerScheduler(buildConfig({ performanceScheduleEnabled: true }));
+    assert.equal(tasks.length, 1);
     tasks.forEach((task) => task.stop());
   });
 });

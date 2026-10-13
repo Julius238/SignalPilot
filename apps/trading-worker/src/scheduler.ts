@@ -31,6 +31,7 @@ import { runShadowCreateOrders } from "./jobs/shadowCreateOrders.js";
 import { runShadowGenerateCandidates } from "./jobs/shadowGenerateCandidates.js";
 import { runShadowMonitorPositions } from "./jobs/shadowMonitorPositions.js";
 import { runShadowProcessFills } from "./jobs/shadowProcessFills.js";
+import { runShadowPerformanceRefresh } from "./jobs/shadowPerformanceRefresh.js";
 import { runShadowReconcilePortfolio } from "./jobs/shadowReconcilePortfolio.js";
 import { runShadowStartTradingDay } from "./jobs/shadowStartTradingDay.js";
 
@@ -113,6 +114,18 @@ const JOB_DEFINITIONS: readonly ScheduledJobDefinition[] = [
     checkEntryWorkflow: false,
     enabled: (config) => config.jobFlags.reconciliationJobEnabled,
     run: (database, asOf) => runShadowReconcilePortfolio(database, { asOf })
+  },
+  {
+    // Reporting only: its own job key (so its own lease and breaker), MONITORING
+    // scope and no entry-workflow check — it can neither take an entry-side
+    // lease nor block trading. The job still requires its own
+    // TRADING_PERFORMANCE_JOB_ENABLED gate on every run.
+    jobKey: "trading:performance-refresh",
+    cronExpression: "15 * * * *",
+    scope: CircuitBreakerScope.MONITORING,
+    checkEntryWorkflow: false,
+    enabled: (config) => config.jobFlags.performanceScheduleEnabled,
+    run: (database, asOf) => runShadowPerformanceRefresh(database, { asOf })
   }
 ];
 
