@@ -10,6 +10,7 @@ import {
   refreshShadowPerformance,
   resolveWindowBounds
 } from "../src/lib/shadowPerformancePersistence.js";
+import { runShadowPerformanceRefresh } from "../src/jobs/shadowPerformanceRefresh.js";
 import { createFakeExecutionDatabase } from "./support/shadowExecutionFixtures.js";
 
 const ASOF = new Date("2026-08-10T12:00:00.000Z");
@@ -448,5 +449,29 @@ describe("persistShadowPerformance", () => {
         `${name} was modified`
       );
     }
+  });
+});
+
+describe("runShadowPerformanceRefresh job", () => {
+  const ENV = {
+    ENABLE_LIVE_TRADING: "false",
+    TRADING_MODE: "SHADOW",
+    TRADING_SHADOW_ENABLED: "true",
+    TRADING_PERFORMANCE_JOB_ENABLED: "true",
+    TRADING_CODE_VERSION: "test-build"
+  } as const;
+
+  it("runs with its default (UUID) correlation id and re-runs on unchanged data without a new audit event", async () => {
+    const { database, tables } = seed();
+    const first = await runShadowPerformanceRefresh(database as never, { asOf: ASOF, env: ENV });
+    assert.equal(first.status, "SUCCESS", JSON.stringify(first).slice(0, 300));
+    const audits = () =>
+      tables.get("tradingAuditEvent")!.rows.filter((row) => row.eventType === "SHADOW_PERFORMANCE_REFRESHED").length;
+    const afterFirst = audits();
+    assert.ok(afterFirst > 0);
+
+    const second = await runShadowPerformanceRefresh(database as never, { asOf: ASOF, env: ENV });
+    assert.equal(second.status, "SUCCESS");
+    assert.equal(audits(), afterFirst);
   });
 });

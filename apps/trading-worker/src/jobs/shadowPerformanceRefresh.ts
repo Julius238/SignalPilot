@@ -30,7 +30,7 @@ import {
   prisma,
   type PrismaClient
 } from "@signalpilot/database";
-import { buildAuditEventKey } from "@signalpilot/trading-domain";
+import { buildAuditEventKey, buildPayloadHash } from "@signalpilot/trading-domain";
 import { config } from "dotenv";
 import pino from "pino";
 
@@ -172,7 +172,13 @@ export async function runShadowPerformanceRefresh(
 
       // One audit event per portfolio and window, keyed on the engine's own
       // input hash: re-running over unchanged data is a no-op here too.
-      const idempotencyKey = `${correlationId}:${portfolio.id}:${window}:${summary.inputHash}`;
+      // Hashed: the readable composite exceeded the 128-character key-part
+      // limit, and a per-run correlation id would make every re-run a new event.
+      const idempotencyKey = buildPayloadHash({
+        portfolioId: portfolio.id,
+        window,
+        inputHash: summary.inputHash
+      });
       await database.tradingAuditEvent.upsert({
         where: {
           eventKey: buildAuditEventKey({

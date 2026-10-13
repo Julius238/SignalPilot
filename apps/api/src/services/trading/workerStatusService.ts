@@ -34,7 +34,7 @@ const JOB_SCHEDULE: readonly {
   { jobKey: "trading:order-create", jobName: "shadowCreateOrders", cronExpression: "* * * * *", scope: CircuitBreakerScope.ENTRY },
   { jobKey: "trading:simulate-fill", jobName: "shadowProcessFills", cronExpression: "*/2 * * * *", scope: CircuitBreakerScope.ENTRY },
   { jobKey: "trading:monitor-positions", jobName: "shadowMonitorPositions", cronExpression: "*/2 * * * *", scope: CircuitBreakerScope.MONITORING },
-  { jobKey: "trading:reconcile", jobName: "shadowReconcilePortfolio", cronExpression: "*/5 * * * *", scope: CircuitBreakerScope.MONITORING },
+  { jobKey: "trading:reconcile", jobName: "shadowReconcilePortfolio", cronExpression: "*/4 * * * *", scope: CircuitBreakerScope.MONITORING },
   { jobKey: "trading:performance-refresh", jobName: "shadowPerformanceRefresh", cronExpression: "15 * * * *", scope: CircuitBreakerScope.MONITORING }
 ];
 

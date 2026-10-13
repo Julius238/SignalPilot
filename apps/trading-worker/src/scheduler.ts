@@ -109,7 +109,10 @@ const JOB_DEFINITIONS: readonly ScheduledJobDefinition[] = [
   },
   {
     jobKey: "trading:reconcile",
-    cronExpression: "*/5 * * * *",
+    // Every 4 minutes, strictly inside the entry-workflow guard's 5-minute
+    // reconciliation ceiling. At "*/5" the entry jobs firing on the same
+    // minute saw a reconcile exactly 5 min + a few ms old and were skipped.
+    cronExpression: "*/4 * * * *",
     scope: CircuitBreakerScope.MONITORING,
     checkEntryWorkflow: false,
     enabled: (config) => config.jobFlags.reconciliationJobEnabled,
