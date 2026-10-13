@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { chmodSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
-import { describe, it } from "node:test";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { describe, it, type TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { getApiUrl, normalizeApiUrl } from "../src/lib/api-url";
@@ -124,28 +126,102 @@ describe("pnpm-Startweg ohne globales pnpm", () => {
     assert.doesNotMatch(source, /pnpm@\d/);
   });
 
-  it("löst pnpm auch ohne pnpm im PATH über corepack auf", () => {
-    // Ein PATH ohne pnpm, aber mit node/corepack — genau die Umgebung, in der
-    // die Root-Skripte vorher mit `sh: pnpm: command not found` abbrachen.
-    const nodeBin = dirname(process.execPath);
-    const path = [nodeBin, "/usr/bin", "/bin"].join(":");
+  // Die drei Zweige des Shims werden mit Stub-Programmen in einem sonst leeren
+  // PATH geprüft: kein Netzwerk, kein echtes pnpm, auf jeder Maschine gleich.
+  // Der Shim selbst braucht nur /bin/sh aus seiner Shebang-Zeile.
+  function runShimWith(stubs: Record<string, string>, args: string[]) {
+    const binDir = mkdtempSync(join(tmpdir(), "signalpilot-shim-"));
+    try {
+      for (const [name, label] of Object.entries(stubs)) {
+        const file = join(binDir, name);
+        writeFileSync(file, `#!/bin/sh\necho "${label} $*"\n`);
+        chmodSync(file, 0o755);
+      }
+      return spawnSync(shim, args, { cwd: repoRoot, encoding: "utf8", env: { PATH: binDir }, timeout: 10_000 });
+    } finally {
+      rmSync(binDir, { recursive: true, force: true });
+    }
+  }
 
-    const probe = spawnSync("sh", ["-c", "command -v pnpm"], { env: { PATH: path }, encoding: "utf8" });
-    if (probe.status === 0) {
-      // Auf dieser Maschine liegt pnpm global neben node — dann greift Zweig 1.
-      assert.ok(probe.stdout.trim().length > 0);
+  it("bevorzugt ein vorhandenes pnpm im PATH", () => {
+    const result = runShimWith({ pnpm: "pnpm-stub", corepack: "corepack-stub" }, ["--version"]);
+
+    assert.equal(result.status, 0, `scripts/pnpm scheiterte: ${result.stderr}`);
+    assert.equal(result.stdout.trim(), "pnpm-stub --version");
+  });
+
+  it("leitet ohne pnpm im PATH alle Argumente an corepack weiter", () => {
+    const result = runShimWith({ corepack: "corepack-stub" }, ["-r", "--filter", "./packages/**", "build"]);
+
+    assert.equal(result.status, 0, `scripts/pnpm scheiterte: ${result.stderr}`);
+    assert.equal(result.stdout.trim(), "corepack-stub pnpm -r --filter ./packages/** build");
+  });
+
+  it("bricht ohne pnpm und corepack verständlich mit Exit 127 ab", () => {
+    const result = runShimWith({}, ["--version"]);
+
+    assert.equal(result.status, 127);
+    assert.match(result.stderr, /weder 'pnpm' noch 'corepack' gefunden/);
+  });
+
+  it("löst pnpm auch ohne pnpm im PATH über corepack auf — offline aus dem Cache", async (t) => {
+    // Im PATH liegen nur node und corepack — genau die Umgebung, in der die
+    // Root-Skripte vorher mit `sh: pnpm: command not found` abbrachen. Ein
+    // globales pnpm neben node bleibt bewusst unsichtbar: es lädt für
+    // `packageManager` sonst selbst eine passende pnpm-Version aus dem Netz
+    // nach und hing so in einer Sandbox ohne Proxy-Variablen unbegrenzt.
+    const pkg = JSON.parse(await readFile(resolve(repoRoot, "package.json"), "utf8")) as {
+      packageManager: string;
+    };
+    const expectedVersion = pkg.packageManager.replace(/^pnpm@/, "").replace(/\+.*$/, "");
+    const corepack = spawnSync("sh", ["-c", "command -v corepack"], { encoding: "utf8" }).stdout.trim();
+    if (!corepack) {
+      skipOutsideCi(t, "corepack ist nicht installiert");
+      return;
     }
 
-    const result = spawnSync(shim, ["--version"], {
-      cwd: repoRoot,
-      encoding: "utf8",
-      env: { PATH: path, HOME: process.env.HOME ?? "", COREPACK_ENABLE_DOWNLOAD_PROMPT: "0" }
-    });
+    const binDir = mkdtempSync(join(tmpdir(), "signalpilot-corepack-"));
+    try {
+      symlinkSync(process.execPath, join(binDir, "node"));
+      symlinkSync(corepack, join(binDir, "corepack"));
 
-    assert.equal(result.status, 0, `scripts/pnpm --version scheiterte: ${result.stderr}`);
-    assert.match(result.stdout.trim(), /^\d+\.\d+\.\d+/);
+      const env: NodeJS.ProcessEnv = {
+        PATH: binDir,
+        HOME: process.env.HOME ?? "",
+        COREPACK_ENABLE_DOWNLOAD_PROMPT: "0",
+        // Kein Download: pnpm muss aus dem lokalen Corepack-Cache kommen.
+        COREPACK_ENABLE_NETWORK: "0"
+      };
+      for (const key of ["COREPACK_HOME", "XDG_CACHE_HOME"]) {
+        if (process.env[key]) env[key] = process.env[key];
+      }
+
+      const result = spawnSync(shim, ["--version"], { cwd: repoRoot, encoding: "utf8", env, timeout: 60_000 });
+
+      if (result.status !== 0 && /Network access disabled/.test(result.stderr)) {
+        skipOutsideCi(
+          t,
+          `pnpm@${expectedVersion} liegt nicht im Corepack-Cache — einmal \`corepack pnpm install\` ausführen`
+        );
+        return;
+      }
+
+      assert.equal(result.error, undefined, `scripts/pnpm --version brach ab: ${result.error?.message}`);
+      assert.equal(result.status, 0, `scripts/pnpm --version scheiterte: ${result.stderr}`);
+      assert.equal(result.stdout.trim(), expectedVersion);
+    } finally {
+      rmSync(binDir, { recursive: true, force: true });
+    }
   });
 });
+
+// Lokal ist ein fehlender Corepack-Cache eine Voraussetzung, kein Fehler des
+// Shims — die Stub-Tests oben decken dessen Logik weiterhin ab. In CI muss der
+// echte Weg laufen, deshalb wird dort aus dem Überspringen ein Fehlschlag.
+function skipOutsideCi(t: TestContext, reason: string): void {
+  if (process.env.CI) assert.fail(reason);
+  t.skip(reason);
+}
 
 describe("getApiUrl", () => {
   it("meldet eine fehlende Serveradresse verständlich statt sie durchzureichen", () => {

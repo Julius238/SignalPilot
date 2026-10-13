@@ -22,6 +22,13 @@ If `pnpm` is not on your PATH, prefix every command with `corepack` — e.g.
 needed; see [If `pnpm` is not on your PATH](#if-pnpm-is-not-on-your-path). The
 `apps/dashboard/.env.local` step is required — Next.js does not read the root `.env`.
 
+## Tests & CI
+
+Build before testing — workspace packages export their `dist/` output. Sixteen trading-worker
+tests need a PostgreSQL test database; `docker-compose.test.yml` provides a throwaway one.
+GitHub Actions (`.github/workflows/ci.yml`) runs install, Prisma generate, migrations, build,
+lint and all tests on every push. Details: [docs/TESTING.md](docs/TESTING.md).
+
 ## Environment
 
 Copy `.env.example` to `.env` and fill values locally. Do not commit secrets.

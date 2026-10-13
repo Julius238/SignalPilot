@@ -1,0 +1,29 @@
+# Isolierte, flüchtige PostgreSQL-Instanz ausschließlich für Tests.
+#
+# Getrennt von docker-compose.yml (Entwicklung) und docker-compose.prod.yml:
+# eigener Container, eigener Port nur auf 127.0.0.1, Daten nur im RAM (tmpfs).
+# Nach `down` ist alles weg. Kein Passwort nötig — die Instanz ist nur lokal
+# erreichbar und enthält ausschließlich Testdaten.
+#
+#   docker compose -f docker-compose.test.yml up -d --wait
+#   export DATABASE_URL="postgresql://postgres@127.0.0.1:55432/signalpilot_test?schema=public"
+#   corepack pnpm db:migrate:deploy
+#   docker compose -f docker-compose.test.yml down
+#
+# Details: docs/TESTING.md
+services:
+  postgres-test:
+    image: postgres:16-alpine
+    container_name: signalpilot-postgres-test
+    environment:
+      POSTGRES_DB: signalpilot_test
+      POSTGRES_HOST_AUTH_METHOD: trust
+    ports:
+      - "127.0.0.1:55432:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d signalpilot_test"]
+      interval: 2s
+      timeout: 5s
+      retries: 30

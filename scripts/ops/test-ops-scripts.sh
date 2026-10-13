@@ -149,7 +149,9 @@ if ! grep -qF "assignmentConfigJson\"->>'\\''direction'\\''" scripts/ops/trading
 fi
 
 if command -v shellcheck >/dev/null 2>&1; then
-  shellcheck -x scripts/ops/*.sh
+  # Warnungen und Fehler brechen ab; reine Hinweise (z. B. SC2016 für bewusst
+  # einfach zitierte SQL-/JS-Snippets) nicht.
+  shellcheck -x --severity=warning scripts/ops/*.sh
 else
   echo "shellcheck not installed; bash -n and command-surface checks passed."
 fi

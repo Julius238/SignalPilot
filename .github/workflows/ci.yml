@@ -1,0 +1,94 @@
+# Build, Lint und alle Workspace-Tests bei jedem Push und Pull Request.
+#
+# Sicherheitsgrenzen:
+# - Keine Secrets, keine Zugangsdaten. Die Test-Datenbank ist ein flüchtiger
+#   Service-Container ohne Passwort, nur vom Runner aus erreichbar.
+# - Es startet kein Worker, kein Scheduler und kein Trading-Prozess; nur
+#   Build-Skripte und Tests laufen. Kein Deployment, keine produktive Datenbank.
+# - Leserechte am Repository genügen.
+#
+# Ablauf und lokale Entsprechung: docs/TESTING.md
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build, Lint & Test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        # Gleiche Major-Version wie docker-compose.prod.yml.
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: signalpilot_test
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d signalpilot_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      DATABASE_URL: postgresql://postgres@localhost:5432/signalpilot_test?schema=public
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+      NEXT_TELEMETRY_DISABLED: "1"
+      # Dashboard-Build wie im Produktions-Image; das Trading-Dashboard bleibt aus.
+      NEXT_PUBLIC_SIGNALPILOT_API_URL: /api
+      SIGNALPILOT_API_INTERNAL_URL: http://127.0.0.1:3100
+      NEXT_PUBLIC_TRADING_DASHBOARD_ENABLED: "false"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Node.js 22
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      # pnpm kommt über Corepack aus `packageManager` (pnpm@9.15.0). Das füllt
+      # zugleich den Corepack-Cache, den der Offline-Test des Shims
+      # (apps/dashboard/test/local-setup.test.ts) voraussetzt.
+      - name: pnpm via Corepack
+        run: |
+          corepack enable
+          pnpm --version
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm db:generate
+
+      - name: Apply migrations to the test database
+        run: pnpm db:migrate:deploy
+
+      # Pakete, dann Apps. Die API-Tests importieren den gebauten Trading-Worker.
+      - name: Build
+        run: pnpm build
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Operations script checks
+        run: pnpm ops:test:scripts
+
+      # --no-bail: alle Pakete laufen, auch wenn eines fehlschlägt.
+      - name: Test
+        run: pnpm -r --no-bail --if-present test
