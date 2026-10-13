@@ -28,6 +28,7 @@ One-time jobs:
   job day-start|candidate|risk|order|fill|monitor|reconcile|performance|alerts
 
 Explicit state changes:
+  calibrate-execution-profile CALIBRATE_EXECUTION_PROFILE   # new cost-profile version, see job header
   enable-assignment <assignment-id> <expected-version> <actor> <idempotency-key> <exact-confirmation>
   disable-assignment <assignment-id> <expected-version> <actor> <idempotency-key> <exact-confirmation>
   enable-btc-assignment <actor> <idempotency-key> ENABLE_BTCUSDT_ASSIGNMENT
@@ -87,7 +88,7 @@ session_id() {
 }
 
 btc_assignment_id() {
-  require_scalar "BTCUSDT StrategyAssignment" 'SELECT a."id" FROM "StrategyAssignment" a JOIN "Portfolio" p ON p."id" = a."portfolioId" JOIN "Asset" x ON x."id" = a."assetId" JOIN "Strategy" s ON s."id" = a."strategyId" WHERE p."key" = '\''SHADOW_V1'\'' AND x."symbol" = '\''BTCUSDT'\'' AND s."key" = '\''CRYPTO_MTF_BREAKOUT_V1'\'' ORDER BY a."createdAt" ASC LIMIT 1;'
+  require_scalar "BTCUSDT StrategyAssignment" 'SELECT a."id" FROM "StrategyAssignment" a JOIN "Portfolio" p ON p."id" = a."portfolioId" JOIN "Asset" x ON x."id" = a."assetId" JOIN "Strategy" s ON s."id" = a."strategyId" WHERE p."key" = '\''SHADOW_V1'\'' AND x."symbol" = '\''BTCUSDT'\'' AND s."key" = '\''CRYPTO_MTF_BREAKOUT_LONG_V1'\'' ORDER BY a."createdAt" ASC LIMIT 1;'
 }
 
 assignment_version() {
@@ -326,6 +327,11 @@ case "$command_name" in
     require_exact_args 0 "$@"
     run_trading_node dist/jobs/shadowReplay.js
     ;;
+  calibrate-execution-profile)
+    require_exact_args 1 "$@"
+    require_confirmation "$1" CALIBRATE_EXECUTION_PROFILE
+    run_trading_node dist/jobs/shadowExecutionProfileCalibrate.js --confirm=CALIBRATE_EXECUTION_PROFILE
+    ;;
   bootstrap)
     require_exact_args 0 "$@"
     run_trading_node dist/jobs/shadowBootstrap.js
@@ -338,16 +344,16 @@ case "$command_name" in
   enable-btc-assignment)
     require_exact_args 3 "$@"
     require_confirmation "$3" ENABLE_BTCUSDT_ASSIGNMENT
-    legacy_assignment_id=$(btc_assignment_id)
-    legacy_assignment_version=$(assignment_version "$legacy_assignment_id")
-    run_ops enable-btc-assignment --assignment-id="$legacy_assignment_id" --actor="$1" --idempotency-key="$2" --expected-version="$legacy_assignment_version" --confirmation="ENABLE_BTCUSDT_LONG_CRYPTO_MTF_BREAKOUT_V1_V${legacy_assignment_version}"
+    btc_long_assignment_id=$(btc_assignment_id)
+    btc_long_assignment_version=$(assignment_version "$btc_long_assignment_id")
+    run_ops enable-btc-assignment --assignment-id="$btc_long_assignment_id" --actor="$1" --idempotency-key="$2" --expected-version="$btc_long_assignment_version" --confirmation="ENABLE_BTCUSDT_LONG_CRYPTO_MTF_BREAKOUT_LONG_V1_V${btc_long_assignment_version}"
     ;;
   disable-btc-assignment)
     require_exact_args 3 "$@"
     require_confirmation "$3" DISABLE_BTCUSDT_ASSIGNMENT
-    legacy_assignment_id=$(btc_assignment_id)
-    legacy_assignment_version=$(assignment_version "$legacy_assignment_id")
-    run_ops disable-btc-assignment --assignment-id="$legacy_assignment_id" --actor="$1" --idempotency-key="$2" --expected-version="$legacy_assignment_version" --confirmation="DISABLE_BTCUSDT_LONG_CRYPTO_MTF_BREAKOUT_V1_V${legacy_assignment_version}"
+    btc_long_assignment_id=$(btc_assignment_id)
+    btc_long_assignment_version=$(assignment_version "$btc_long_assignment_id")
+    run_ops disable-btc-assignment --assignment-id="$btc_long_assignment_id" --actor="$1" --idempotency-key="$2" --expected-version="$btc_long_assignment_version" --confirmation="DISABLE_BTCUSDT_LONG_CRYPTO_MTF_BREAKOUT_LONG_V1_V${btc_long_assignment_version}"
     ;;
   enable-assignment)
     require_exact_args 5 "$@"

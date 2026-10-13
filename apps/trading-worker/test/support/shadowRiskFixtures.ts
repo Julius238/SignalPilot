@@ -398,7 +398,7 @@ export function createFakeRiskDatabase(world: RiskWorld) {
             row.killSwitchEngaged === where.killSwitchEngaged
         ) as Record<string, unknown> | undefined;
         if (session === undefined) return { count: 0 };
-        const { version: _increment, ...rest } = data;
+        const rest = Object.fromEntries(Object.entries(data).filter(([field]) => field !== "version"));
         Object.assign(session, rest, { version: (session.version as number) + 1 });
         return { count: 1 };
       },

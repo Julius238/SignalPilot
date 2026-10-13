@@ -8,6 +8,7 @@
 
 import type { ReplayCandle, ReplaySeries } from "./contracts.js";
 
+const DAY_MS = 86_400_000;
 const HOUR_MS = 60 * 60 * 1000;
 
 /** Mulberry32 — small, fast, deterministic. */
@@ -115,64 +116,137 @@ export function aggregate(hourly: readonly ReplayCandle[], hours: number): Repla
   return result;
 }
 
+export interface BreakoutScenarioEvent {
+  /** Open time (UTC, on the hour, 04:00–23:00) of the breakout candle. */
+  readonly breakoutAtMs: number;
+  readonly outcome: "WIN" | "LOSS";
+}
+
 export interface BreakoutScenarioOptions {
   readonly symbol: string;
   readonly assetType?: "CRYPTO" | "ETF";
+  /** UTC midnight, so scenario days coincide with exchange daily candles. */
   readonly startMs: number;
-  readonly days: number;
+  /** Generate candles opening before this instant (default: through the last event + 2 days). */
+  readonly endMs?: number;
   readonly startPrice: number;
-  /** Day indexes on which a volume-confirmed breakout fires (08:00–09:00 UTC), and how it resolves. */
-  readonly events: readonly { readonly day: number; readonly outcome: "WIN" | "LOSS" }[];
+  readonly events: readonly BreakoutScenarioEvent[];
   readonly seed?: number;
+  /** Mean hourly true range as a fraction of price (default 1.3 %). */
+  readonly hourlyRange?: number;
 }
 
+type Phase =
+  | "PRIOR_DAY_ADVANCE"
+  | "PRIOR_DAY_SIDEWAYS"
+  | "SIDEWAYS"
+  | "PUSH"
+  | "BREAKOUT"
+  | "FOLLOW_THROUGH_WIN"
+  | "FOLLOW_THROUGH_LOSS";
+
 /**
- * Deterministic test scenario: an uptrend with regular pullbacks and, on each
- * event day, the textbook setup the long breakout rules require — a
- * high-volume morning the day before (daily volume), a high-volume 04–08h
- * block (4h volume) and a high-volume breakout hour 08–09h — followed by a
- * move to the target (`WIN`) or through the stop (`LOSS`). Synthetic; for
- * exercising the pipeline only.
+ * Deterministic "textbook" scenario for exercising the full pipeline: a steady
+ * uptrend with a 3-day swing, wide hourly ranges and, for every event,
+ * exactly the setup the long breakout rules describe —
+ *   prior UTC day:   high-volume advance in the morning, sideways afterwards
+ *                    (daily candle closes near its 20-day high on high volume);
+ *   last 4h block:   high-volume push (4h candle near its 20-period high);
+ *   breakout candle: volume-confirmed close above the prior 20 hourly highs,
+ *                    RSI kept moderate by the sideways phases;
+ * followed by a move to the target (`WIN`) or through the stop (`LOSS`).
+ *
+ * SYNTHETIC — it proves that the pipeline acts correctly when the market does
+ * present the setup; it says nothing about how often real markets do.
  */
 export function generateBreakoutScenario(options: BreakoutScenarioOptions): ReplaySeries {
+  if (options.startMs % DAY_MS !== 0) throw new Error("startMs must be UTC midnight.");
   const random = seededRandom(options.seed ?? 1);
-  const hours = options.days * 24;
-  const eventByDay = new Map(options.events.map((event) => [event.day, event.outcome] as const));
+  const range = options.hourlyRange ?? 0.013;
+  const lastEvent = Math.max(options.startMs, ...options.events.map((event) => event.breakoutAtMs));
+  const endMs = options.endMs ?? lastEvent + 2 * DAY_MS;
+  const hours = Math.floor((endMs - options.startMs) / HOUR_MS);
+
+  const phases = new Map<number, { phase: Phase; index: number }>();
+  /** Hours around an event where the swing is muted so the setup does not depend on its phase. */
+  const calm = new Set<number>();
+  for (const event of options.events) {
+    const b = Math.round((event.breakoutAtMs - options.startMs) / HOUR_MS);
+    if ((b % 24) < 4) throw new Error("Breakout hour must be 04:00–23:00 UTC.");
+    const pushStart = 4 * (Math.floor((b + 1) / 4) - 1);
+    const dayStart = Math.floor(b / 24) * 24;
+    const priorDayStart = dayStart - 24;
+    for (let hour = priorDayStart - 48; hour < b + 12; hour += 1) calm.add(hour);
+    for (let hour = priorDayStart; hour < b + 12; hour += 1) {
+      const phase: Phase =
+        hour < priorDayStart + 12
+          ? "PRIOR_DAY_ADVANCE"
+          : hour < dayStart
+            ? "PRIOR_DAY_SIDEWAYS"
+            : hour < pushStart
+              ? "SIDEWAYS"
+              : hour < b
+                ? "PUSH"
+                : hour === b
+                  ? "BREAKOUT"
+                  : event.outcome === "WIN"
+                    ? "FOLLOW_THROUGH_WIN"
+                    : "FOLLOW_THROUGH_LOSS";
+      phases.set(hour, { phase, index: hour - (phase === "PUSH" ? pushStart : priorDayStart) });
+    }
+  }
+
   const hourly: ReplayCandle[] = [];
-  let offset = 0;
-  let ramp: { perHour: number; hoursLeft: number } | null = null;
+  let logPrice = Math.log(options.startPrice);
   let previousClose = options.startPrice;
 
   for (let hour = 0; hour < hours; hour += 1) {
-    const day = Math.floor(hour / 24);
-    const hourOfDay = hour % 24;
-    const eventToday = eventByDay.get(day);
-
+    const alternating = hour % 2 === 0 ? 1 : -1;
+    // Base: +0.02 %/h drift, a 3-day swing (so 4h/daily candles also close
+    // lower at times and their RSI stays realistic) and alternating hourly moves.
+    const swing = calm.has(hour) ? 0 : 0.02 * ((2 * Math.PI) / 72) * Math.cos((2 * Math.PI * hour) / 72);
+    let move = 0.0002 + swing + alternating * 0.0018 + (random() - 0.5) * 0.0012;
     let volumeFactor = 1;
-    if (eventByDay.has(day + 1) && hourOfDay < 10) volumeFactor = 4; // daily volume the day before
-    if (eventToday !== undefined && hourOfDay >= 4 && hourOfDay < 8) volumeFactor = 2.5; // 4h block
-    if (eventToday !== undefined && hourOfDay === 8) {
-      volumeFactor = 3; // breakout hour
-      offset += 0.014;
-      ramp = { perHour: eventToday === "WIN" ? 0.0016 : -0.0028, hoursLeft: 30 };
-    } else if (ramp !== null) {
-      offset += ramp.perHour;
-      ramp.hoursLeft -= 1;
-      if (ramp.hoursLeft === 0) ramp = null;
+
+    const scripted = phases.get(hour);
+    switch (scripted?.phase) {
+      case "PRIOR_DAY_ADVANCE":
+        move = 0.0016 + (random() - 0.5) * 0.0006;
+        volumeFactor = 1.8;
+        break;
+      case "PRIOR_DAY_SIDEWAYS":
+        move = alternating * 0.0022 + 0.0001;
+        volumeFactor = 1.8;
+        break;
+      case "SIDEWAYS":
+        move = alternating * 0.0022 + 0.0001;
+        break;
+      case "PUSH":
+        move = scripted.index % 2 === 0 ? 0.0034 : -0.0012;
+        volumeFactor = 2.2;
+        break;
+      case "BREAKOUT":
+        move = 0.008;
+        volumeFactor = 3.3;
+        break;
+      case "FOLLOW_THROUGH_WIN":
+        move = 0.011;
+        volumeFactor = 1.4;
+        break;
+      case "FOLLOW_THROUGH_LOSS":
+        move = -0.0065;
+        volumeFactor = 1.4;
+        break;
+      default:
+        break;
     }
 
-    // Uptrend (+0.24 %/day) with a 3-day swing and an 11-hour wiggle.
-    const logPrice =
-      Math.log(options.startPrice) +
-      0.0001 * hour +
-      0.02 * Math.sin((2 * Math.PI * hour) / 71) +
-      0.006 * Math.sin((2 * Math.PI * hour) / 11) +
-      offset +
-      (random() - 0.5) * 0.002;
+    logPrice += move;
     const open = previousClose;
     const close = Math.exp(logPrice);
-    const high = Math.max(open, close) * (1 + 0.002 + random() * 0.002);
-    const low = Math.min(open, close) * (1 - 0.002 - random() * 0.002);
+    const wick = range / 2 - Math.abs(Math.log(close / open)) / 2;
+    const high = Math.max(open, close) * (1 + Math.max(0.0005, wick * (0.8 + random() * 0.4)));
+    const low = Math.min(open, close) * (1 - Math.max(0.0005, wick * (0.8 + random() * 0.4)));
     const volume = 1000 * (0.9 + random() * 0.2) * volumeFactor;
     const openTime = options.startMs + hour * HOUR_MS;
     hourly.push({

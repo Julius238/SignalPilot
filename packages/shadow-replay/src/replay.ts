@@ -1297,7 +1297,9 @@ function buildRiskSnapshot(input: {
       futuresTradingEnabled: false
     },
     candidate: {
-      id: candidate.candidateKey,
+      // A database id in production; it becomes part of the risk assessment
+      // key, so it must be a single key part (the composite candidate key is not).
+      id: `replay-candidate-${candidate.anchorCandleId}`,
       candidateKey: candidate.candidateKey,
       status: "CREATED",
       direction: candidate.direction,
