@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { CRYPTO_MTF_BREAKOUT_V1_SPECIFICATION_HASH } from "@signalpilot/strategy-engine";
+import {
+  CRYPTO_MTF_BREAKOUT_LONG_V1_KEY,
+  CRYPTO_MTF_BREAKOUT_LONG_V1_SPECIFICATION_HASH,
+  CRYPTO_MTF_BREAKOUT_V1_PARAMETERS,
+  CRYPTO_MTF_BREAKOUT_V1_SPECIFICATION_HASH
+} from "@signalpilot/strategy-engine";
+import { buildSpecificationHash } from "@signalpilot/trading-domain";
 
 import { runShadowStrategySetup } from "../src/jobs/shadowStrategySetup.js";
 import { createFakeExecutionDatabase } from "./support/shadowExecutionFixtures.js";
@@ -80,6 +86,57 @@ describe("runShadowStrategySetup", () => {
     assert.equal(tables.get("strategyVersion")!.rows.length, 3);
     assert.equal(tables.get("strategyAssignment")!.rows.length, 5);
     assert.equal(tables.get("tradingAuditEvent")!.rows.length, 5);
+  });
+
+  it("supersedes a changed specification with a new immutable version and re-pins disabled assignments", async () => {
+    const { database, tables } = seedPrerequisites();
+    const first = await runShadowStrategySetup(database as never, { asOf: AS_OF, env: ENV });
+    assert.equal(first.blocked, false);
+
+    // Simulate a database set up by an earlier build, whose LONG version still
+    // carried the 1.0.0 (untick-aligned) specification.
+    const strategyRow = tables
+      .get("strategy")!
+      .rows.find((row) => row.key === CRYPTO_MTF_BREAKOUT_LONG_V1_KEY)!;
+    const oldParameters = { ...CRYPTO_MTF_BREAKOUT_V1_PARAMETERS, key: CRYPTO_MTF_BREAKOUT_LONG_V1_KEY };
+    const versionRow = tables
+      .get("strategyVersion")!
+      .rows.find((row) => row.strategyId === strategyRow.id)!;
+    versionRow.engineVersion = "crypto-mtf-breakout-v1/1.0.0";
+    versionRow.parametersJson = oldParameters;
+    versionRow.specificationHash = buildSpecificationHash(oldParameters);
+
+    const second = await runShadowStrategySetup(database as never, {
+      asOf: new Date(AS_OF.getTime() + 1_000),
+      env: ENV
+    });
+    assert.equal(second.blocked, false, String(second.blockReasonCode));
+    const longVersions = tables
+      .get("strategyVersion")!
+      .rows.filter((row) => row.strategyId === strategyRow.id)
+      .sort((a, b) => Number(a.version) - Number(b.version));
+    assert.deepEqual(
+      longVersions.map((row) => [row.version, row.status]),
+      [
+        [1, "RETIRED"],
+        [2, "ACTIVE"]
+      ]
+    );
+    assert.equal(longVersions[1]!.specificationHash, CRYPTO_MTF_BREAKOUT_LONG_V1_SPECIFICATION_HASH);
+    const longAssignments = tables
+      .get("strategyAssignment")!
+      .rows.filter((row) => row.strategyId === strategyRow.id);
+    assert.equal(longAssignments.length, 2);
+    for (const row of longAssignments) {
+      assert.equal(row.strategyVersionId, longVersions[1]!.id);
+      assert.equal(row.enabled, false);
+    }
+    assert.equal(
+      tables
+        .get("tradingAuditEvent")!
+        .rows.filter((row) => row.eventType === "SHADOW_STRATEGY_ASSIGNMENT_REPINNED").length,
+      2
+    );
   });
 
   it("fails closed without the dedicated bootstrap flag", async () => {

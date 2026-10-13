@@ -157,6 +157,10 @@ export const StrategyReasonCode = {
   REWARD_RISK_BELOW_MINIMUM: "REWARD_RISK_BELOW_MINIMUM",
   REWARD_RISK_CONFIRMED: "REWARD_RISK_CONFIRMED",
   PRICE_PLAN_VALID: "PRICE_PLAN_VALID",
+  /** Stop and take profit were snapped to the instrument tick (conservatively). */
+  PRICE_PLAN_TICK_ALIGNED: "PRICE_PLAN_TICK_ALIGNED",
+  /** The execution profile carries no usable tick size to align prices to. */
+  PRICE_TICK_SIZE_INVALID: "PRICE_TICK_SIZE_INVALID",
   /** Direction-aware ordering guard refused the plan (trading-domain). */
   PRICE_PLAN_ORDER_INVALID: "PRICE_PLAN_ORDER_INVALID",
 

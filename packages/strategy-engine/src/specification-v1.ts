@@ -175,19 +175,33 @@ export const CRYPTO_MTF_BREAKOUT_V1_SPECIFICATION_HASH = buildSpecificationHash(
 // ───────────────────────────────────────────────────────────────────────────
 
 /**
- * Identical to `CRYPTO_MTF_BREAKOUT_V1_PARAMETERS` in every rule; only `key`
- * differs. The long strategy stays factually unchanged (ADR 0011): same
- * breakout lookback, same volume, RSI, ATR and confirmation thresholds, same
- * RISK_ON requirement, same 2.5R gross target and same 2.0R strategy-level
- * floor.
+ * Price-plan tick policy: stop and take profit are snapped to the instrument's
+ * tick size in the conservative direction — the stop moves away from the entry
+ * (more risk per unit, so a smaller position), the target moves towards it
+ * (less reward). Without it a computed stop almost never sits on the tick grid
+ * and the risk engine refuses the plan (R-007 "Stop price is not tick
+ * conformant"), so no candidate could ever be executed.
+ */
+export const PRICE_TICK_POLICY_VERSION = "price-tick-policy-v1/1.0.0";
+
+/** 1.1.0 = 1.0.0 rules + tick-aligned price plan + own identity on every result. */
+export const CRYPTO_MTF_BREAKOUT_LONG_V1_ENGINE_VERSION =
+  "crypto-mtf-breakout-v1/1.1.0";
+
+/**
+ * Identical to `CRYPTO_MTF_BREAKOUT_V1_PARAMETERS` in every entry rule (ADR
+ * 0011): same breakout lookback, same volume, RSI, ATR and confirmation
+ * thresholds, same RISK_ON requirement, same 2.5R gross target and same 2.0R
+ * strategy-level floor. It differs in `key`, `engineVersion` and the
+ * tick-aligned price plan (`priceTickPolicyVersion`); the legacy identity keeps
+ * its unaligned plan so historical decisions stay reproducible.
  */
 export const CRYPTO_MTF_BREAKOUT_LONG_V1_PARAMETERS = Object.freeze({
   ...CRYPTO_MTF_BREAKOUT_V1_PARAMETERS,
-  key: CRYPTO_MTF_BREAKOUT_LONG_V1_KEY
+  key: CRYPTO_MTF_BREAKOUT_LONG_V1_KEY,
+  engineVersion: CRYPTO_MTF_BREAKOUT_LONG_V1_ENGINE_VERSION,
+  priceTickPolicyVersion: PRICE_TICK_POLICY_VERSION
 } as const);
-
-export const CRYPTO_MTF_BREAKOUT_LONG_V1_ENGINE_VERSION =
-  CRYPTO_MTF_BREAKOUT_V1_ENGINE_VERSION;
 
 export const CRYPTO_MTF_BREAKOUT_LONG_V1_SPECIFICATION_HASH =
   buildSpecificationHash(CRYPTO_MTF_BREAKOUT_LONG_V1_PARAMETERS);
@@ -199,8 +213,9 @@ export const CRYPTO_MTF_BREAKOUT_LONG_V1_SPECIFICATION_HASH =
 export const CRYPTO_MTF_BREAKDOWN_SHORT_V1_KEY =
   "CRYPTO_MTF_BREAKDOWN_SHORT_V1";
 
+/** 1.1.0 = 1.0.0 rules + tick-aligned price plan (`PRICE_TICK_POLICY_VERSION`). */
 export const CRYPTO_MTF_BREAKDOWN_SHORT_V1_ENGINE_VERSION =
-  "crypto-mtf-breakdown-short-v1/1.0.0";
+  "crypto-mtf-breakdown-short-v1/1.1.0";
 
 export const BREAKDOWN_POLICY_VERSION = "breakdown-policy-v1/1.0.0";
 
@@ -224,6 +239,7 @@ export const CRYPTO_MTF_BREAKDOWN_SHORT_V1_PARAMETERS = Object.freeze({
   indicatorVersion: INDICATORS_V1_VERSION,
   breakdownPolicyVersion: BREAKDOWN_POLICY_VERSION,
   freshnessPolicyVersion: FRESHNESS_POLICY_VERSION,
+  priceTickPolicyVersion: PRICE_TICK_POLICY_VERSION,
 
   // ── Scope ────────────────────────────────────────────────────────────────
   market: "CRYPTO_SPOT",

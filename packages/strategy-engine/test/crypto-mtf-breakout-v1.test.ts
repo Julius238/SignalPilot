@@ -502,19 +502,21 @@ describe("strategy registry", () => {
     // Renaming changes the identity, so the hash MUST differ — otherwise the
     // rename would have silently rewritten history.
     assert.notEqual(legacy.specificationHash, current.specificationHash);
-    // ...but every actual rule is unchanged: same evaluator, and the parameter
-    // sets differ in `key` only.
-    assert.equal(legacy.evaluate, current.evaluate);
-    const { key: legacyKey, ...legacyRest } = legacy.parameters as Record<
-      string,
-      unknown
-    >;
-    const { key: currentKey, ...currentRest } = current.parameters as Record<
-      string,
-      unknown
-    >;
+    // Every entry rule is unchanged: the parameter sets differ only in the
+    // identity fields and the tick-aligned price plan of the current version.
+    const { key: legacyKey, engineVersion: legacyEngine, ...legacyRest } =
+      legacy.parameters as Record<string, unknown>;
+    const {
+      key: currentKey,
+      engineVersion: currentEngine,
+      priceTickPolicyVersion,
+      ...currentRest
+    } = current.parameters as Record<string, unknown>;
     assert.equal(legacyKey, "CRYPTO_MTF_BREAKOUT_V1");
     assert.equal(currentKey, "CRYPTO_MTF_BREAKOUT_LONG_V1");
+    assert.equal(legacyEngine, "crypto-mtf-breakout-v1/1.0.0");
+    assert.equal(currentEngine, "crypto-mtf-breakout-v1/1.1.0");
+    assert.equal(priceTickPolicyVersion, "price-tick-policy-v1/1.0.0");
     assert.deepEqual(legacyRest, currentRest);
   });
 

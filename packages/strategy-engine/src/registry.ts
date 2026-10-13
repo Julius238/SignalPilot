@@ -19,7 +19,7 @@ import type {
   StrategyInputSnapshotV1
 } from "./contracts.js";
 import { evaluateCryptoMtfBreakdownShortV1 } from "./crypto-mtf-breakdown-short-v1.js";
-import { evaluateCryptoMtfBreakoutV1 } from "./crypto-mtf-breakout-v1.js";
+import { LONG_V1_BREAKOUT_IDENTITY, evaluateCryptoMtfBreakoutV1 } from "./crypto-mtf-breakout-v1.js";
 import {
   StrategyCheckStage,
   StrategyEvaluationOutcome,
@@ -45,8 +45,8 @@ import {
  * evaluable and reproducible against the exact hash they were decided with
  * (ADR 0011). New assignments must use `CRYPTO_MTF_BREAKOUT_LONG_V1`.
  *
- * Same `evaluate` function as the LONG entry below — only the identity
- * differs, so the long rules stay factually one implementation.
+ * Same entry rules as the LONG entry below (one implementation); the LONG
+ * identity additionally snaps its price plan to the tick grid.
  */
 export const CRYPTO_MTF_BREAKOUT_V1: StrategyDefinitionV1 = Object.freeze({
   key: CRYPTO_MTF_BREAKOUT_V1_KEY,
@@ -56,13 +56,20 @@ export const CRYPTO_MTF_BREAKOUT_V1: StrategyDefinitionV1 = Object.freeze({
   evaluate: evaluateCryptoMtfBreakoutV1
 });
 
-/** Current long identity (ADR 0011). */
+/** Same entry rules, evaluated under — and stamped with — the LONG identity. */
+export function evaluateCryptoMtfBreakoutLongV1(
+  snapshot: StrategyInputSnapshotV1
+): StrategyEvaluationResultV1 {
+  return evaluateCryptoMtfBreakoutV1(snapshot, LONG_V1_BREAKOUT_IDENTITY);
+}
+
+/** Current long identity (ADR 0011), with the tick-aligned price plan. */
 export const CRYPTO_MTF_BREAKOUT_LONG_V1: StrategyDefinitionV1 = Object.freeze({
   key: CRYPTO_MTF_BREAKOUT_LONG_V1_KEY,
   engineVersion: CRYPTO_MTF_BREAKOUT_LONG_V1_ENGINE_VERSION,
   specificationHash: CRYPTO_MTF_BREAKOUT_LONG_V1_SPECIFICATION_HASH,
   parameters: CRYPTO_MTF_BREAKOUT_LONG_V1_PARAMETERS,
-  evaluate: evaluateCryptoMtfBreakoutV1
+  evaluate: evaluateCryptoMtfBreakoutLongV1
 });
 
 /**

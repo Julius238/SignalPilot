@@ -275,15 +275,27 @@ export async function runShadowStrategySetup(
       );
     }
 
-    const existingVersion = await database.strategyVersion.findFirst({
-      where: { strategyId: strategy.id, version: SHADOW_STRATEGY_VERSION }
+    // Versions are immutable: a changed specification (new engine version or
+    // parameters) gets its own next version number instead of rewriting the
+    // row that historical candidates were decided with.
+    const versions = await database.strategyVersion.findMany({
+      where: { strategyId: strategy.id },
+      orderBy: { version: "asc" }
     });
+    const existingVersion =
+      versions.find(
+        (version) => version.specificationHash === definition.specificationHash
+      ) ?? null;
+    const nextVersionNumber =
+      versions.length === 0
+        ? SHADOW_STRATEGY_VERSION
+        : Math.max(...versions.map((version) => version.version)) + 1;
     const strategyVersion =
       existingVersion ??
       (await database.strategyVersion.create({
         data: {
           strategyId: strategy.id,
-          version: SHADOW_STRATEGY_VERSION,
+          version: nextVersionNumber,
           status: StrategyVersionStatus.ACTIVE,
           engineVersion: definition.engineVersion,
           codeVersion,
@@ -307,9 +319,16 @@ export async function runShadowStrategySetup(
     ) {
       return blocked(
         "STRATEGY_VERSION_CONFLICT",
-        `${definition.key} v${SHADOW_STRATEGY_VERSION} does not match its immutable engine, parameters, build or hash.`
+        `${definition.key} v${strategyVersion.version} does not match its immutable engine, parameters, build or hash.`
       );
     }
+    const supersededVersionIds = versions
+      .filter(
+        (version) =>
+          version.id !== strategyVersion.id &&
+          version.status === StrategyVersionStatus.ACTIVE
+      )
+      .map((version) => version.id);
 
     const assignments: ShadowStrategySetupEntry["assignments"][number][] = [];
     for (const symbol of definition.assignmentSymbols) {
@@ -357,16 +376,77 @@ export async function runShadowStrategySetup(
         }));
       if (existingAssignments.length === 0) createdCount += 1;
       else existingCount += 1;
-      if (
-        assignment.strategyVersionId !== strategyVersion.id ||
-        assignment.enabled
-      ) {
+      if (assignment.enabled) {
         return blocked(
-          assignment.enabled
-            ? "ASSIGNMENT_ALREADY_ENABLED"
-            : "ASSIGNMENT_VERSION_CONFLICT",
-          `${definition.key}/${symbol} must reference the pinned version and remain disabled.`
+          "ASSIGNMENT_ALREADY_ENABLED",
+          `${definition.key}/${symbol} must remain disabled during setup.`
         );
+      }
+      if (assignment.strategyVersionId !== strategyVersion.id) {
+        // A disabled assignment of a superseded version is re-pinned to the
+        // current one (optimistic on its row version, audited). It stays
+        // disabled; enabling remains an explicit operator step.
+        const repinned = await database.strategyAssignment.updateMany({
+          where: {
+            id: assignment.id,
+            version: assignment.version,
+            enabled: false,
+            strategyVersionId: assignment.strategyVersionId
+          },
+          data: {
+            strategyVersionId: strategyVersion.id,
+            version: { increment: 1 }
+          }
+        });
+        if (repinned.count !== 1) {
+          return blocked(
+            "ASSIGNMENT_VERSION_CONFLICT",
+            `${definition.key}/${symbol} changed concurrently; re-run the setup.`
+          );
+        }
+        const repinKey = buildSpecificationHash({
+          strategyAssignmentId: assignment.id,
+          fromStrategyVersionId: assignment.strategyVersionId,
+          toStrategyVersionId: strategyVersion.id
+        });
+        await database.tradingAuditEvent.upsert({
+          where: {
+            eventKey: buildAuditEventKey({
+              eventType: "SHADOW_STRATEGY_ASSIGNMENT_REPINNED",
+              aggregateType: "StrategyAssignment",
+              aggregateId: assignment.id,
+              idempotencyKey: repinKey
+            })
+          },
+          update: {},
+          create: {
+            eventKey: buildAuditEventKey({
+              eventType: "SHADOW_STRATEGY_ASSIGNMENT_REPINNED",
+              aggregateType: "StrategyAssignment",
+              aggregateId: assignment.id,
+              idempotencyKey: repinKey
+            }),
+            eventType: "SHADOW_STRATEGY_ASSIGNMENT_REPINNED",
+            aggregateType: "StrategyAssignment",
+            aggregateId: assignment.id,
+            actorType: TradingActorType.ADMIN,
+            actorId,
+            correlationId,
+            causationId: correlationId,
+            idempotencyKey: repinKey,
+            reasonCode: "STRATEGY_VERSION_SUPERSEDED",
+            beforeState: asJson({ strategyVersionId: assignment.strategyVersionId }),
+            afterState: asJson({
+              strategyVersionId: strategyVersion.id,
+              version: strategyVersion.version,
+              specificationHash: strategyVersion.specificationHash,
+              assignmentEnabled: false
+            }),
+            engineVersion: definition.engineVersion,
+            codeVersion,
+            occurredAt: asOf
+          }
+        });
       }
 
       const idempotencyKey = buildSpecificationHash({
@@ -414,6 +494,16 @@ export async function runShadowStrategySetup(
         symbol,
         strategyAssignmentId: assignment.id,
         enabled: false
+      });
+    }
+    for (const versionId of supersededVersionIds) {
+      const stillReferenced = await database.strategyAssignment.count({
+        where: { strategyVersionId: versionId }
+      });
+      if (stillReferenced > 0) continue;
+      await database.strategyVersion.updateMany({
+        where: { id: versionId, status: StrategyVersionStatus.ACTIVE },
+        data: { status: StrategyVersionStatus.RETIRED, effectiveTo: asOf }
       });
     }
     entries.push({

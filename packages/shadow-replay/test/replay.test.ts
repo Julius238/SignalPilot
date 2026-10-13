@@ -23,7 +23,7 @@ function market(days: number): ReplayMarketData {
 function config(overrides: Partial<ReplayConfig> = {}): ReplayConfig {
   return {
     symbol: "BTCUSDT",
-    strategyKey: "CRYPTO_MTF_BREAKOUT_V1",
+    strategyKey: "CRYPTO_MTF_BREAKOUT_LONG_V1",
     mode: "SIGNAL_EDGE",
     regimePolicy: "CRYPTO_ONLY",
     startingCash: "10000",

@@ -44,22 +44,48 @@ import {
   simpleMovingAverage
 } from "./indicators-v1.js";
 import { StrategyCheckStage, StrategyEvaluationOutcome, StrategyReasonCode } from "./reason-codes.js";
+import { alignStopToTick, alignTakeProfitToTick, usableTickSize } from "./price-plan.js";
 import {
-  CRYPTO_MTF_BREAKOUT_V1_ENGINE_VERSION,
-  CRYPTO_MTF_BREAKOUT_V1_KEY,
-  CRYPTO_MTF_BREAKOUT_V1_PARAMETERS,
-  CRYPTO_MTF_BREAKOUT_V1_SPECIFICATION_HASH
+  CRYPTO_MTF_BREAKOUT_LONG_V1_ENGINE_VERSION,
+  CRYPTO_MTF_BREAKOUT_LONG_V1_KEY,
+  CRYPTO_MTF_BREAKOUT_LONG_V1_SPECIFICATION_HASH,
+  CRYPTO_MTF_BREAKOUT_V1_PARAMETERS
 } from "./specification-v1.js";
 import {
+  LEGACY_LONG_IDENTITY,
   createCheckLog,
   parseDecimalString,
   validateStrategyInput,
+  type ExpectedStrategyIdentityV1,
   type ParsedSeriesV1,
   type StrategyCheckLog,
   type ValidatedSnapshotV1
 } from "./validate-input.js";
 
 const PARAMS = CRYPTO_MTF_BREAKOUT_V1_PARAMETERS;
+
+/**
+ * Identity a long evaluation runs under. The entry rules are one
+ * implementation; the identity decides which strategy version a snapshot must
+ * declare, which identity every result carries, and whether the price plan is
+ * snapped to the tick grid (only the current LONG identity does that — the
+ * legacy identity stays byte-identical for historical replays).
+ */
+export interface BreakoutIdentityV1 extends ExpectedStrategyIdentityV1 {
+  readonly tickAlignedPricePlan: boolean;
+}
+
+export const LEGACY_BREAKOUT_IDENTITY: BreakoutIdentityV1 = Object.freeze({
+  ...LEGACY_LONG_IDENTITY,
+  tickAlignedPricePlan: false
+});
+
+export const LONG_V1_BREAKOUT_IDENTITY: BreakoutIdentityV1 = Object.freeze({
+  key: CRYPTO_MTF_BREAKOUT_LONG_V1_KEY,
+  engineVersion: CRYPTO_MTF_BREAKOUT_LONG_V1_ENGINE_VERSION,
+  specificationHash: CRYPTO_MTF_BREAKOUT_LONG_V1_SPECIFICATION_HASH,
+  tickAlignedPricePlan: true
+});
 const ENTRY = StrategyCheckStage.ENTRY;
 const PRICE_PLAN = StrategyCheckStage.PRICE_PLAN;
 
@@ -262,6 +288,7 @@ function sortedUnique(codes: readonly StrategyReasonCode[]): readonly StrategyRe
 }
 
 function refuse(
+  identity: BreakoutIdentityV1,
   outcome: typeof StrategyEvaluationOutcome.NO_CANDIDATE | typeof StrategyEvaluationOutcome.INVALID_INPUT,
   checks: readonly StrategyCheckV1[],
   failures: readonly StrategyReasonCode[],
@@ -271,18 +298,18 @@ function refuse(
   const reasonCodes = sortedUnique(failures);
   const core = {
     outcome,
-    strategyKey: CRYPTO_MTF_BREAKOUT_V1_KEY,
-    engineVersion: CRYPTO_MTF_BREAKOUT_V1_ENGINE_VERSION,
-    specificationHash: CRYPTO_MTF_BREAKOUT_V1_SPECIFICATION_HASH,
+    strategyKey: identity.key,
+    engineVersion: identity.engineVersion,
+    specificationHash: identity.specificationHash,
     inputHash,
     reasonCodes,
     checks,
     candidate: null
   };
   const base = {
-    strategyKey: CRYPTO_MTF_BREAKOUT_V1_KEY,
-    engineVersion: CRYPTO_MTF_BREAKOUT_V1_ENGINE_VERSION,
-    specificationHash: CRYPTO_MTF_BREAKOUT_V1_SPECIFICATION_HASH,
+    strategyKey: identity.key,
+    engineVersion: identity.engineVersion,
+    specificationHash: identity.specificationHash,
     inputHash,
     outputHash: buildOutputHash(core),
     evaluatedAt,
@@ -480,14 +507,16 @@ function evaluateContext(log: StrategyCheckLog, validated: ValidatedSnapshotV1):
 // ───────────────────────────────────────────────────────────────────────────
 
 export function evaluateCryptoMtfBreakoutV1(
-  snapshot: StrategyInputSnapshotV1
+  snapshot: StrategyInputSnapshotV1,
+  identity: BreakoutIdentityV1 = LEGACY_BREAKOUT_IDENTITY
 ): StrategyEvaluationResultV1 {
   const inputHash = buildInputHash(snapshot);
-  const validation = validateStrategyInput(snapshot);
+  const validation = validateStrategyInput(snapshot, identity);
   const evaluatedAt = typeof snapshot?.asOf === "string" ? snapshot.asOf : "1970-01-01T00:00:00.000Z";
 
   if (!validation.ok) {
     return refuse(
+      identity,
       StrategyEvaluationOutcome.INVALID_INPUT,
       validation.checks,
       validation.failures,
@@ -621,10 +650,31 @@ export function evaluateCryptoMtfBreakoutV1(
   let plannedRewardRisk: DecimalValue | null = null;
   let maximumEntryGap: DecimalValue | null = null;
 
+  let tick: DecimalValue | null = null;
+  if (identity.tickAlignedPricePlan) {
+    tick = usableTickSize(validated.executionProfile.tickSize);
+    if (tick === null) {
+      log.fail(
+        "PRICE_TICK_ALIGNMENT",
+        PRICE_PLAN,
+        StrategyReasonCode.PRICE_TICK_SIZE_INVALID,
+        String(validated.executionProfile.tickSize),
+        "> 0"
+      );
+    } else {
+      log.pass("PRICE_TICK_ALIGNMENT", PRICE_PLAN, StrategyReasonCode.PRICE_PLAN_TICK_ALIGNED, tick.toString());
+    }
+  }
+
   if (atr !== null && atr.isPositive()) {
     const atrDistance = STOP_ATR_MULTIPLE.mul(atr, RoundingMode.CEIL);
     const floorDistance = STOP_FLOOR_PCT.mul(referenceEntry, RoundingMode.CEIL);
     stopDistance = DecimalValue.max(atrDistance, floorDistance);
+    if (tick !== null) {
+      // Snap the stop first, so the cap, the target and the reward/risk all
+      // use the distance that would actually be traded.
+      stopDistance = referenceEntry.sub(alignStopToTick("LONG", referenceEntry.sub(stopDistance), tick));
+    }
     stopDistancePct = stopDistance.div(referenceEntry, RoundingMode.CEIL);
 
     if (atrDistance.gte(floorDistance)) {
@@ -676,6 +726,7 @@ export function evaluateCryptoMtfBreakoutV1(
       log.pass("STOP_PRICE", PRICE_PLAN, StrategyReasonCode.PRICE_PLAN_VALID, stopPrice.toString());
 
       takeProfitPrice = referenceEntry.add(TAKE_PROFIT_R_MULTIPLE.mul(stopDistance, RoundingMode.FLOOR));
+      if (tick !== null) takeProfitPrice = alignTakeProfitToTick("LONG", takeProfitPrice, tick);
       plannedRewardRisk = takeProfitPrice
         .sub(referenceEntry)
         .div(referenceEntry.sub(stopPrice), RoundingMode.FLOOR);
@@ -726,7 +777,7 @@ export function evaluateCryptoMtfBreakoutV1(
     trend.day.sma50 === null ||
     trend.day.sma200 === null
   ) {
-    return refuse(StrategyEvaluationOutcome.NO_CANDIDATE, checks, log.failures, inputHash, evaluatedAt);
+    return refuse(identity, StrategyEvaluationOutcome.NO_CANDIDATE, checks, log.failures, inputHash, evaluatedAt);
   }
 
   // ── Candidate draft ──────────────────────────────────────────────────────
@@ -763,7 +814,7 @@ export function evaluateCryptoMtfBreakoutV1(
       assetId: validated.snapshot.asset.id,
       anchorCandleId: anchor.id
     }),
-    strategyKey: CRYPTO_MTF_BREAKOUT_V1_KEY,
+    strategyKey: identity.key,
     strategyVersionId: validated.snapshot.strategy.strategyVersionId,
     strategyAssignmentId: validated.snapshot.assignment.id,
     portfolioId: validated.snapshot.assignment.portfolioId,
@@ -793,16 +844,16 @@ export function evaluateCryptoMtfBreakoutV1(
     indicators,
     evidence: buildEvidence(validated),
     reasonCodes,
-    engineVersion: CRYPTO_MTF_BREAKOUT_V1_ENGINE_VERSION,
-    specificationHash: CRYPTO_MTF_BREAKOUT_V1_SPECIFICATION_HASH,
+    engineVersion: identity.engineVersion,
+    specificationHash: identity.specificationHash,
     inputHash
   } as const;
 
   const core = {
     outcome: StrategyEvaluationOutcome.CANDIDATE,
-    strategyKey: CRYPTO_MTF_BREAKOUT_V1_KEY,
-    engineVersion: CRYPTO_MTF_BREAKOUT_V1_ENGINE_VERSION,
-    specificationHash: CRYPTO_MTF_BREAKOUT_V1_SPECIFICATION_HASH,
+    strategyKey: identity.key,
+    engineVersion: identity.engineVersion,
+    specificationHash: identity.specificationHash,
     inputHash,
     reasonCodes,
     checks,
@@ -817,9 +868,9 @@ export function evaluateCryptoMtfBreakoutV1(
 
   return {
     outcome: StrategyEvaluationOutcome.CANDIDATE,
-    strategyKey: CRYPTO_MTF_BREAKOUT_V1_KEY,
-    engineVersion: CRYPTO_MTF_BREAKOUT_V1_ENGINE_VERSION,
-    specificationHash: CRYPTO_MTF_BREAKOUT_V1_SPECIFICATION_HASH,
+    strategyKey: identity.key,
+    engineVersion: identity.engineVersion,
+    specificationHash: identity.specificationHash,
     inputHash,
     outputHash,
     evaluatedAt,

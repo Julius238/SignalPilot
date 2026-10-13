@@ -207,6 +207,24 @@ describe("CRYPTO_MTF_BREAKDOWN_SHORT_V1 — evaluation", () => {
     );
   });
 
+  it("snaps stop up and take profit up to the tick grid", () => {
+    for (const tickSize of ["0.010000000000", "1.000000000000", "5.000000000000"]) {
+      const snapshot = buildBearishSnapshot();
+      snapshot.executionProfile = { ...snapshot.executionProfile!, tickSize };
+      const result = evaluateCryptoMtfBreakdownShortV1(snapshot);
+      assert.ok(result.candidate, JSON.stringify(reasons(result)));
+      const tick = d(tickSize);
+      const entry = d(result.candidate.referenceEntryPrice);
+      const stop = d(result.candidate.stopPrice);
+      const takeProfit = d(result.candidate.takeProfitPrice);
+      assert.ok(stop.isMultipleOf(tick), result.candidate.stopPrice);
+      assert.ok(takeProfit.isMultipleOf(tick), result.candidate.takeProfitPrice);
+      assert.equal(stop.sub(entry).toString(), d(result.candidate.stopDistance).toString());
+      const fullTarget = entry.sub(d("2.5").mul(stop.sub(entry)));
+      assert.ok(takeProfit.gte(fullTarget) && takeProfit.sub(fullTarget).lt(tick));
+    }
+  });
+
   it("targets 2.5R gross and never plans below the 2.0R strategy floor", () => {
     const result = evaluateCryptoMtfBreakdownShortV1(buildBearishSnapshot());
     assert.ok(result.candidate);

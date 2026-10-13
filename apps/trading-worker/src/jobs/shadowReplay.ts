@@ -10,6 +10,7 @@
  *
  * Environment (all optional):
  *   REPLAY_SYMBOL=BTCUSDT
+ *   REPLAY_STRATEGY=CRYPTO_MTF_BREAKOUT_LONG_V1   # the identity the live pipeline runs
  *   REPLAY_MODES=SPEC,SIGNAL_EDGE
  *   REPLAY_COST_PROFILES=BOOTSTRAP,REALISTIC
  *   REPLAY_REGIME_POLICY=AUTO          # AUTO | AS_SPECIFIED | CRYPTO_ONLY
@@ -24,6 +25,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { prisma, type PrismaClient } from "@signalpilot/database";
+import { CRYPTO_MTF_BREAKOUT_LONG_V1_KEY } from "@signalpilot/strategy-engine";
 import { candleSnapshotFileName, readCandleSnapshot } from "@signalpilot/market-data";
 import {
   runShadowReplay,
@@ -66,6 +68,7 @@ const TIMEFRAMES: readonly ReplayTimeframe[] = ["1h", "4h", "1d"];
 
 export interface ShadowReplayJobOptions {
   readonly symbol?: string;
+  readonly strategyKey?: string;
   readonly modes?: readonly ReplayMode[];
   readonly costProfiles?: readonly string[];
   readonly regimePolicy?: RegimePolicy | "AUTO";
@@ -122,7 +125,7 @@ export async function runShadowReplayJob(
     for (const mode of options.modes ?? ["SPEC", "SIGNAL_EDGE"]) {
       const replayConfig: ReplayConfig = {
         symbol,
-        strategyKey: "CRYPTO_MTF_BREAKOUT_V1",
+        strategyKey: options.strategyKey ?? CRYPTO_MTF_BREAKOUT_LONG_V1_KEY,
         mode,
         regimePolicy,
         startingCash: "10000",
@@ -274,6 +277,7 @@ function listEnv(name: string): string[] | undefined {
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
   runShadowReplayJob(prisma, {
     symbol: process.env.REPLAY_SYMBOL,
+    strategyKey: process.env.REPLAY_STRATEGY,
     modes: listEnv("REPLAY_MODES") as ReplayMode[] | undefined,
     costProfiles: listEnv("REPLAY_COST_PROFILES"),
     regimePolicy: (process.env.REPLAY_REGIME_POLICY as RegimePolicy | "AUTO" | undefined) ?? "AUTO",

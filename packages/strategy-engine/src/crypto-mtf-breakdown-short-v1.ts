@@ -54,6 +54,7 @@ import {
   StrategyEvaluationOutcome,
   StrategyReasonCode
 } from "./reason-codes.js";
+import { alignStopToTick, alignTakeProfitToTick, usableTickSize } from "./price-plan.js";
 import {
   CRYPTO_MTF_BREAKDOWN_SHORT_V1_ENGINE_VERSION,
   CRYPTO_MTF_BREAKDOWN_SHORT_V1_KEY,
@@ -638,10 +639,27 @@ export function evaluateCryptoMtfBreakdownShortV1(
   let plannedRewardRisk: DecimalValue | null = null;
   let maximumEntryGap: DecimalValue | null = null;
 
+  const tick = usableTickSize(validated.executionProfile.tickSize);
+  if (tick === null) {
+    log.fail(
+      "PRICE_TICK_ALIGNMENT",
+      PRICE_PLAN,
+      StrategyReasonCode.PRICE_TICK_SIZE_INVALID,
+      String(validated.executionProfile.tickSize),
+      "> 0"
+    );
+  } else {
+    log.pass("PRICE_TICK_ALIGNMENT", PRICE_PLAN, StrategyReasonCode.PRICE_PLAN_TICK_ALIGNED, tick.toString());
+  }
+
   if (atr !== null && atr.isPositive()) {
     const atrDistance = STOP_ATR_MULTIPLE.mul(atr, RoundingMode.CEIL);
     const floorDistance = STOP_FLOOR_PCT.mul(referenceEntry, RoundingMode.CEIL);
     stopDistance = DecimalValue.max(atrDistance, floorDistance);
+    if (tick !== null) {
+      // Snap the stop (upwards, away from the entry) before the cap check.
+      stopDistance = alignStopToTick("SHORT", referenceEntry.add(stopDistance), tick).sub(referenceEntry);
+    }
     stopDistancePct = stopDistance.div(referenceEntry, RoundingMode.CEIL);
 
     if (atrDistance.gte(floorDistance)) {
@@ -686,6 +704,7 @@ export function evaluateCryptoMtfBreakdownShortV1(
     takeProfitPrice = referenceEntry.sub(
       TAKE_PROFIT_R_MULTIPLE.mul(stopDistance, RoundingMode.FLOOR)
     );
+    if (tick !== null) takeProfitPrice = alignTakeProfitToTick("SHORT", takeProfitPrice, tick);
 
     const shortStop = stopPrice;
     if (!takeProfitPrice.isPositive()) {
