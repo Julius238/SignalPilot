@@ -192,7 +192,10 @@ export function generateBreakoutScenario(options: BreakoutScenarioOptions): Repl
                   : event.outcome === "WIN"
                     ? "FOLLOW_THROUGH_WIN"
                     : "FOLLOW_THROUGH_LOSS";
-      phases.set(hour, { phase, index: hour - (phase === "PUSH" ? pushStart : priorDayStart) });
+      phases.set(hour, {
+        phase,
+        index: hour - (phase === "PUSH" ? pushStart : phase.startsWith("FOLLOW_THROUGH") ? b + 1 : priorDayStart)
+      });
     }
   }
 
@@ -229,12 +232,14 @@ export function generateBreakoutScenario(options: BreakoutScenarioOptions): Repl
         move = 0.008;
         volumeFactor = 3.3;
         break;
+      // Three decisive hours, then sideways: the target (or the stop) is
+      // reached within ~3 candles after the entry fill.
       case "FOLLOW_THROUGH_WIN":
-        move = 0.011;
+        move = scripted.index < 3 ? 0.018 : alternating * 0.0022;
         volumeFactor = 1.4;
         break;
       case "FOLLOW_THROUGH_LOSS":
-        move = -0.0065;
+        move = scripted.index < 3 ? -0.012 : alternating * 0.0022;
         volumeFactor = 1.4;
         break;
       default:
