@@ -72,3 +72,35 @@ export async function listStrategyEvaluations(
     };
   });
 }
+
+export interface MarketDataOriginDto {
+  readonly symbol: string;
+  readonly source: string | null;
+  readonly synthetic: boolean;
+  readonly latestCloseTime: string | null;
+}
+
+const TRADED_SYMBOLS = ["BTCUSDT", "ETHUSDT"] as const;
+
+/**
+ * Where the candles the strategy decides on come from. The dev feed writes
+ * `source = "SYNTHETIC"`; the dashboard must then say so on every trading page,
+ * so simulated signals are never mistaken for decisions on real market data.
+ */
+export async function getMarketDataOrigin(database: PrismaClient): Promise<MarketDataOriginDto[]> {
+  return Promise.all(
+    TRADED_SYMBOLS.map(async (symbol) => {
+      const candle = await database.candle.findFirst({
+        where: { symbol, timeframe: "1h" },
+        orderBy: { closeTime: "desc" },
+        select: { source: true, closeTime: true }
+      });
+      return {
+        symbol,
+        source: candle?.source ?? null,
+        synthetic: candle?.source === "SYNTHETIC",
+        latestCloseTime: candle?.closeTime.toISOString() ?? null
+      };
+    })
+  );
+}

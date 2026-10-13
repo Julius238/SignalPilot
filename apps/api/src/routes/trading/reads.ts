@@ -85,7 +85,7 @@ import {
   listRiskEvents,
   listSessions
 } from "../../services/trading/sessionService.js";
-import { listStrategyEvaluations } from "../../services/trading/strategyEvaluationService.js";
+import { getMarketDataOrigin, listStrategyEvaluations } from "../../services/trading/strategyEvaluationService.js";
 import { getWorkerStatus } from "../../services/trading/workerStatusService.js";
 import { requireTradingOperator } from "./operatorAuth.js";
 import {
@@ -522,6 +522,8 @@ export async function registerTradingReadRoutes(server: FastifyInstance) {
   });
 
   server.get("/trading/worker-status", async () => getWorkerStatus(database));
+
+  server.get("/trading/market-data-origin", async () => getMarketDataOrigin(database));
 
   server.get("/trading/strategy-evaluations", async (request, reply) => {
     const query = asQueryRecord(request.query);

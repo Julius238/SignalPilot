@@ -4751,6 +4751,15 @@ td a {
   font-size: 13px;
 }
 
+.data-origin-banner {
+  background: linear-gradient(90deg, rgba(239, 106, 106, 0.18), rgba(239, 106, 106, 0.04));
+  border-color: rgba(239, 106, 106, 0.5);
+}
+
+.data-origin-banner strong {
+  color: var(--danger, #ef6a6a);
+}
+
 .trading-subnav {
   display: flex;
   flex-wrap: wrap;

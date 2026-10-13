@@ -104,3 +104,26 @@ describe("GET /trading/strategy-evaluations", () => {
     await server.close();
   });
 });
+
+describe("GET /trading/market-data-origin", () => {
+  it("flags synthetic candles per traded symbol", async () => {
+    const db = {
+      candle: {
+        findFirst: async (args: { where: { symbol: string } }) =>
+          args.where.symbol === "BTCUSDT"
+            ? { source: "SYNTHETIC", closeTime: new Date("2026-10-13T08:59:59.999Z") }
+            : { source: "BINANCE", closeTime: new Date("2026-10-13T08:59:59.999Z") }
+      }
+    };
+    setTradingReadsDatabaseForTests(db as never);
+    const server = Fastify({ logger: false });
+    await server.register(registerTradingReadRoutes);
+    const response = await server.inject({ method: "GET", url: "/trading/market-data-origin" });
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(response.json(), [
+      { symbol: "BTCUSDT", source: "SYNTHETIC", synthetic: true, latestCloseTime: "2026-10-13T08:59:59.999Z" },
+      { symbol: "ETHUSDT", source: "BINANCE", synthetic: false, latestCloseTime: "2026-10-13T08:59:59.999Z" }
+    ]);
+    await server.close();
+  });
+});

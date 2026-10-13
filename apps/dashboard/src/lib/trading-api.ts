@@ -1117,6 +1117,17 @@ export type StrategyEvaluation = {
   failedChecks: { checkId: string; reasonCode: string; actual: string | null; limit: string | null }[];
 };
 
+export interface MarketDataOrigin {
+  symbol: string;
+  source: string | null;
+  synthetic: boolean;
+  latestCloseTime: string | null;
+}
+
+export function fetchMarketDataOrigin() {
+  return fetchApi<MarketDataOrigin[]>("/trading/market-data-origin");
+}
+
 export function fetchStrategyEvaluations(params: PaginationParams) {
   return fetchApi<StrategyEvaluation[]>(`/trading/strategy-evaluations${buildQuery(params)}`);
 }

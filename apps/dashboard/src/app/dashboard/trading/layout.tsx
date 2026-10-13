@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import { PageHeader } from "../../../components/ui";
+import { DataOriginBanner } from "../../../components/trading/data-origin-banner";
 import { ShadowBanner } from "../../../components/trading/shadow-banner";
 import { TradingDisabled } from "../../../components/trading/trading-disabled";
 import { TradingSubnav } from "../../../components/trading/trading-nav";
@@ -27,6 +28,7 @@ export default function TradingLayout({ children }: { children: ReactNode }) {
   return (
     <>
       <ShadowBanner />
+      <DataOriginBanner />
       <TradingSubnav />
       {children}
     </>
