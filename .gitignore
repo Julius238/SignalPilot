@@ -23,3 +23,7 @@ packages/database/prisma/generated/
 **/generated/prisma/
 **/.prisma/
 .claude/launch.json
+
+# Lokale Marktdaten-Snapshots (reproduzierbar per Export-Job)
+data/market-snapshots/
+data/replay-research/

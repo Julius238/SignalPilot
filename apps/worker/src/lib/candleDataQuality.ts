@@ -15,6 +15,17 @@ export type ProviderOutcomeKind =
   | "TEMPORARY"
   | "PERMANENT";
 
+/**
+ * Strategy, risk and eligibility read `gapCount`/`missingCandleCount` as "is
+ * the data the indicators use complete?" (docs/trading/05: no gap in the last
+ * 200 intervals). Those two counters therefore cover the newest 250 closed
+ * candles — the window the signal and strategy jobs read — instead of the
+ * whole history: a 2019 exchange outage must not mark an asset unhealthy
+ * forever. Oldest candle and candle counts stay full-history for coverage;
+ * the full-history gap statistics stay in `metadataJson`.
+ */
+export const DATA_QUALITY_AUDIT_WINDOW_CANDLES = 250;
+
 export async function refreshCandleDataQuality(
   database: PrismaClient,
   input: {
@@ -41,6 +52,12 @@ export async function refreshCandleDataQuality(
     marketKind: input.marketKind,
     now
   });
+  // The window plus the candle before it, so a gap at its start is visible.
+  const windowAudit = detectCandleGaps(candles.slice(-(DATA_QUALITY_AUDIT_WINDOW_CANDLES + 1)), {
+    timeframe: input.timeframe,
+    marketKind: input.marketKind,
+    now
+  });
 
   await database.candleDataQuality.upsert({
     where: qualityKey(input),
@@ -48,11 +65,11 @@ export async function refreshCandleDataQuality(
       assetId: input.assetId,
       provider: input.provider,
       timeframe: input.timeframe,
-      ...toAuditData(audit, now),
+      ...toAuditData(audit, windowAudit, now),
       lastAuditAt: now
     },
     update: {
-      ...toAuditData(audit, now),
+      ...toAuditData(audit, windowAudit, now),
       lastAuditAt: now
     }
   });
@@ -158,18 +175,21 @@ function qualityKey(input: { assetId: string; provider: string; timeframe: strin
   };
 }
 
-function toAuditData(audit: CandleGapAudit, now: Date) {
+function toAuditData(audit: CandleGapAudit, windowAudit: CandleGapAudit, now: Date) {
   return {
     oldestCandle: audit.oldestCandle,
     latestClosedCandle: audit.latestClosedCandle,
     candleCount: audit.candleCount,
     expectedCandleCount: audit.expectedCandleCount,
-    gapCount: audit.gapCount,
-    missingCandleCount: audit.missingCandleCount,
+    gapCount: windowAudit.gapCount,
+    missingCandleCount: windowAudit.missingCandleCount,
     latestDataAgeSeconds: audit.latestClosedCandle
       ? Math.max(0, Math.floor((now.getTime() - audit.latestClosedCandle.getTime()) / 1000))
       : null,
     metadataJson: {
+      auditWindowCandles: DATA_QUALITY_AUDIT_WINDOW_CANDLES,
+      lifetimeGapCount: audit.gapCount,
+      lifetimeMissingCandleCount: audit.missingCandleCount,
       gaps: audit.gaps.slice(0, 100).map((gap) => ({
         from: gap.from.toISOString(),
         to: gap.to.toISOString(),

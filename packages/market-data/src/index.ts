@@ -1,6 +1,7 @@
 export { BinanceMarketDataAdapter, normalizeBinanceKlines } from "./binance.js";
 export type { BinanceHistoryOptions, BinanceKlineRequest } from "./binance.js";
 export { FinnhubMarketDataAdapter, normalizeFinnhubResponse } from "./finnhub.js";
+export { FRED_EQUITY_BENCHMARK_PROXIES, FredSeriesAdapter, parseFredSeriesCsv } from "./fred.js";
 export type { FinnhubFetchResult } from "./finnhub.js";
 export {
   FinnhubNewsAdapter,

@@ -4,7 +4,7 @@ export type BinanceInterval = (typeof supportedBinanceIntervals)[number];
 export const supportedFinnhubIntervals = ["1h", "1d"] as const;
 export type FinnhubInterval = (typeof supportedFinnhubIntervals)[number];
 
-export type CandleSource = "BINANCE" | "FINNHUB";
+export type CandleSource = "BINANCE" | "FINNHUB" | "FRED";
 
 export type NormalizedCandle = {
   symbol: string;
