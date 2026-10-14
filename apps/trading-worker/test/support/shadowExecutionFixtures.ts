@@ -597,7 +597,8 @@ const MODEL_NAMES = [
   "tradingAlertOutbox",
   "tradingAlertOutboxAttempt",
   "alert",
-  "asset"
+  "asset",
+  "shadowReplayRun"
 ] as const;
 
 export function createFakeExecutionDatabase() {

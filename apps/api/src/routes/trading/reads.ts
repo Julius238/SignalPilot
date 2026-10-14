@@ -21,6 +21,7 @@ import {
   prisma,
   type PrismaClient
 } from "@signalpilot/database";
+import { getForwardComparison } from "@signalpilot/trading-worker/lib/forwardComparison";
 import { buildEligibilityReport } from "@signalpilot/trading-worker/lib/shadowEligibility";
 import type { FastifyInstance } from "fastify";
 
@@ -541,6 +542,13 @@ export async function registerTradingReadRoutes(server: FastifyInstance) {
   server.get("/trading/worker-status", async () => getWorkerStatus(database));
 
   server.get("/trading/market-data-origin", async () => getMarketDataOrigin(database));
+
+  /**
+   * Champion vs. challenger: forward shadow results per portfolio since its
+   * own forward start, and the historical replay of each identity as a
+   * separate block. Read-only.
+   */
+  server.get("/trading/forward-comparison", async () => getForwardComparison(database));
 
   server.get("/trading/strategy-evaluations", async (request, reply) => {
     const query = asQueryRecord(request.query);

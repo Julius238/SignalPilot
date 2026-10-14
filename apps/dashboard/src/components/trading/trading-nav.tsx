@@ -9,6 +9,7 @@ const TABS: Array<{ href: string; label: string }> = [
   { href: "/dashboard/trading/positions", label: "Positionen" },
   { href: "/dashboard/trading/orders", label: "Orders & Fills" },
   { href: "/dashboard/trading/performance", label: "Performance" },
+  { href: "/dashboard/trading/comparison", label: "Champion vs. Challenger" },
   { href: "/dashboard/trading/risk", label: "Risiko" },
   { href: "/dashboard/trading/audit", label: "Audit" },
   { href: "/dashboard/trading/operations", label: "Operations" }

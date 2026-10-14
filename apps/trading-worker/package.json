@@ -71,6 +71,14 @@
       "types": "./dist/lib/tradingRetention.d.ts",
       "default": "./dist/lib/tradingRetention.js"
     },
+    "./lib/forwardComparison": {
+      "types": "./dist/lib/forwardComparison.d.ts",
+      "default": "./dist/lib/forwardComparison.js"
+    },
+    "./lib/shadowPortfolios": {
+      "types": "./dist/lib/shadowPortfolios.d.ts",
+      "default": "./dist/lib/shadowPortfolios.js"
+    },
     "./lib/shadowPerformancePersistence": {
       "types": "./dist/lib/shadowPerformancePersistence.d.ts",
       "default": "./dist/lib/shadowPerformancePersistence.js"

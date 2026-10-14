@@ -114,6 +114,12 @@ export interface AssembleShadowPerformanceOptions {
    * reported as `null` with `NO_PRICE_EXTREMES` rather than guessed.
    */
   readonly derivePriceExtremes?: boolean;
+  /**
+   * Starts the window no earlier than this instant — a forward test's start,
+   * so the read-only champion/challenger comparison counts only trades,
+   * candidates and equity after it. Never used for a persisted snapshot.
+   */
+  readonly notBefore?: Date;
 }
 
 /** Reads everything the engine needs for one portfolio and one window. */
@@ -121,7 +127,12 @@ export async function assembleShadowPerformanceInput(
   database: PrismaClient,
   options: AssembleShadowPerformanceOptions
 ): Promise<ComputeShadowPerformanceInput> {
-  const { from, to } = resolveWindowBounds(options.window, options.asOf);
+  const bounds = resolveWindowBounds(options.window, options.asOf);
+  const from =
+    options.notBefore !== undefined && options.notBefore.getTime() > bounds.from.getTime()
+      ? options.notBefore
+      : bounds.from;
+  const { to } = bounds;
 
   const portfolio = await database.portfolio.findUnique({
     where: { id: options.portfolioId },

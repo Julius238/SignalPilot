@@ -128,6 +128,35 @@ describe("GET /trading/market-data-origin", () => {
   });
 });
 
+describe("GET /trading/forward-comparison", () => {
+  it("serves champion and challenger as not started before any portfolio exists", async () => {
+    const db = {
+      portfolio: { findUnique: async () => null },
+      marketRegimeSnapshot: { findFirst: async () => null }
+    };
+    setTradingReadsDatabaseForTests(db as never);
+    const server = Fastify({ logger: false });
+    await server.register(registerTradingReadRoutes);
+    const response = await server.inject({ method: "GET", url: "/trading/forward-comparison" });
+    assert.equal(response.statusCode, 200);
+    const body = response.json();
+    assert.deepEqual(
+      body.forward.map((entry: { role: string; portfolioKey: string; forwardStartAt: string | null }) => [
+        entry.role,
+        entry.portfolioKey,
+        entry.forwardStartAt
+      ]),
+      [
+        ["CHAMPION", "SHADOW_V1", null],
+        ["CHALLENGER", "SHADOW_CHALLENGER_V1", null]
+      ]
+    );
+    assert.equal(body.regime, null);
+    assert.deepEqual(body.replay, []);
+    await server.close();
+  });
+});
+
 describe("performance metrics on the wire", () => {
   it("sends a non-computable metric as null instead of the stored placeholder 0", async () => {
     const { metricOrNull } = await import("../src/schemas/trading/performance.js");

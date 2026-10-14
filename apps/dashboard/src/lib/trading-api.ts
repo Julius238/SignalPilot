@@ -1153,3 +1153,115 @@ export function fetchMarketDataOrigin() {
 export function fetchStrategyEvaluations(params: PaginationParams) {
   return fetchApi<StrategyEvaluation[]>(`/trading/strategy-evaluations${buildQuery(params)}`);
 }
+
+// ── Champion vs. Challenger ─────────────────────────────────────────────────
+// Spiegelt `getForwardComparison` (apps/trading-worker/src/lib/forwardComparison.ts).
+// Forward-Zahlen zählen je Portfolio erst ab dessen eigenem Startzeitpunkt;
+// Replay-Zahlen stammen aus bekannten Kursdaten und bleiben ein eigener Block.
+
+export type ForwardMetric = { value: string | null; reason: string | null };
+
+export type ForwardComparisonEntry = {
+  role: "CHAMPION" | "CHALLENGER";
+  portfolioKey: string;
+  portfolioId: string | null;
+  portfolioStatus: string | null;
+  sessionStatus: TradingSessionStatus | null;
+  killSwitchEngaged: boolean | null;
+  forwardStartAt: string | null;
+  strategies: Array<{
+    strategyKey: string;
+    strategyVersionId: string;
+    version: number;
+    engineVersion: string;
+    specificationHash: string;
+    symbol: string;
+  }>;
+  startingCash: string | null;
+  equity: string | null;
+  netPnl: string | null;
+  netPnlPct: string | null;
+  closedTrades: number;
+  wins: number;
+  losses: number;
+  winRatePct: ForwardMetric;
+  profitFactor: ForwardMetric;
+  averageR: ForwardMetric;
+  maxDrawdownPct: ForwardMetric;
+  exposurePct: ForwardMetric;
+  fees: string;
+  simulatedExecutionCost: string;
+  tradesBeforeForwardStart: number;
+  openPosition: {
+    id: string;
+    symbol: string;
+    status: ShadowPositionStatus;
+    openedAt: string | null;
+    quantity: string;
+    averageEntryPrice: string;
+    stopPrice: string;
+    takeProfitPrice: string;
+    maxHoldUntil: string;
+  } | null;
+  lastTrade: {
+    id: string;
+    symbol: string;
+    status: ShadowPositionStatus;
+    openedAt: string | null;
+    closedAt: string | null;
+    netPnl: string;
+    averageEntryPrice: string;
+    averageExitPrice: string | null;
+  } | null;
+  lastEvaluation: {
+    occurredAt: string;
+    outcome: "CANDIDATE" | "NO_CANDIDATE";
+    reasonCode: string;
+  } | null;
+};
+
+export type ReplayPeriodResult = {
+  label: string;
+  closedTrades: number | null;
+  netPnl: string | null;
+  returnPct: string | null;
+  profitFactor: string | null;
+  winRatePct: string | null;
+  averageR: string | null;
+  maxDrawdownPct: string | null;
+  exposurePct: string | null;
+  totalExecutionCost: string | null;
+  buyAndHoldReturnPct: string | null;
+};
+
+export type ForwardComparison = {
+  asOf: string;
+  regime: {
+    generatedAt: string;
+    source: string;
+    cryptoRegime: string | null;
+    riskMode: string | null;
+    confidence: number | null;
+    regimeGateOpen: boolean;
+  } | null;
+  forward: ForwardComparisonEntry[];
+  replay: Array<{
+    strategyKey: string;
+    runId: string;
+    label: string;
+    createdAt: string;
+    costProfile: string;
+    regimePolicy: string;
+    engineVersion: string;
+    firstAnchorAt: string | null;
+    lastAnchorAt: string | null;
+    closedTrades: number;
+    startingCash: string;
+    finalEquity: string;
+    periods: ReplayPeriodResult[];
+  }>;
+};
+
+export function fetchForwardComparison() {
+  return fetchApi<ForwardComparison>("/trading/forward-comparison");
+}
