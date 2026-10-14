@@ -148,8 +148,9 @@ Reihenfolge:
    | `PROVEN` / `CHAMPION` | Fitness < 40 | `PROBATION` |
    | fittester `PROVEN` | gibt es keinen Champion oder schlägt er ihn um ≥ 5 Punkte | `PROMOTE_CHAMPION`; der bisherige Champion bekommt `DEMOTE_CHAMPION` |
 
-**Rangliste:** nach Fitness, dann Rohwert. `CANDIDATE` und `RETIRED` werden
-nicht gerankt.
+**Rangliste:** nach Fitness, dann Rohwert. Exakte Gleichstände teilen den
+Rang (1, 1, 3), damit nie ein Name entscheidet. `CANDIDATE` und `RETIRED`
+werden nicht gerankt.
 
 ## Betrieb
 

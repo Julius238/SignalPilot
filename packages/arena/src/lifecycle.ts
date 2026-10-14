@@ -225,8 +225,8 @@ export interface ArenaCohortEntry {
 
 /**
  * Ranking (1 = best) of every participant with a forward test, by fitness,
- * then raw fitness, then key for a stable order. Candidates and retired
- * participants are not ranked.
+ * then raw fitness. Exact ties share a rank (1, 1, 3): a name must never
+ * decide who leads. Candidates and retired participants are not ranked.
  */
 export function rankArenaCohort(entries: readonly ArenaCohortEntry[]): ReadonlyMap<string, number> {
   const ranked = entries
@@ -238,7 +238,13 @@ export function rankArenaCohort(entries: readonly ArenaCohortEntry[]): ReadonlyM
         right.rawFitness - left.rawFitness ||
         left.participantKey.localeCompare(right.participantKey)
     );
-  return new Map(ranked.map((entry, index) => [entry.participantId, index + 1]));
+  const ranks = new Map<string, number>();
+  ranked.forEach((entry, index) => {
+    const previous = ranked[index - 1];
+    const tied = previous !== undefined && previous.fitness === entry.fitness && previous.rawFitness === entry.rawFitness;
+    ranks.set(entry.participantId, tied ? ranks.get(previous.participantId)! : index + 1);
+  });
+  return ranks;
 }
 
 /**

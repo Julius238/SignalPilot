@@ -239,6 +239,16 @@ describe("arena recommendations (only recommended, never applied)", () => {
       ["b", 1],
       ["a", 2]
     ]);
+    const tied = rankArenaCohort([
+      entry("z-incumbent", ArenaParticipantStatus.CHAMPION, 50),
+      entry("a-newcomer", ArenaParticipantStatus.ACTIVE, 50),
+      entry("m-weaker", ArenaParticipantStatus.ACTIVE, 49)
+    ]);
+    assert.deepEqual(
+      [tied.get("z-incumbent"), tied.get("a-newcomer"), tied.get("m-weaker")],
+      [1, 1, 3],
+      "an exact tie shares the rank; the name decides nothing"
+    );
   });
 });
 

@@ -223,7 +223,8 @@ describe("arena evaluation", () => {
       assert.equal(entry.recommendation, "HOLD");
       assert.equal(entry.fitness, 50, "no trade yet: exactly neutral");
     }
-    assert.deepEqual(written.map((entry) => entry.rank).sort(), [1, 2]);
+    // Both exactly neutral: they share the first rank instead of an alphabetical order.
+    assert.deepEqual(written.map((entry) => entry.rank), [1, 1]);
 
     const repeat = await evaluateArenaCohort(prisma, { cohortKey: COHORT, asOf: ASOF, codeVersion: "test" });
     assert.ok(repeat.ok && repeat.result.entries.every((entry) => entry.outcome !== "WRITTEN"));
