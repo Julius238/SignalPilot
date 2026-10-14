@@ -224,4 +224,41 @@ describe("evaluateCircuitBreaker — portfolio/ledger and stale-data signals", (
     });
     assert.equal(result.state, CircuitBreakerState.CLOSED);
   });
+
+  it("counts champion and challenger findings separately, never their sum", async () => {
+    const { database, tables, portfolio } = seed();
+    const challenger = tables.get("portfolio")!.create({ data: { key: "c", name: "c", status: "ACTIVE" } });
+    const staleEvent = (eventKey: string, portfolioId: string) =>
+      tables.get("riskEvent")!.create({
+        data: {
+          eventKey,
+          type: "DATA_STALE",
+          severity: "CRITICAL",
+          reasonCode: "DATA_STALE_CANDLES_1H",
+          portfolioId,
+          payloadJson: {},
+          inputHash: "h",
+          acknowledgedAt: null,
+          createdAt: ASOF
+        }
+      });
+    const thresholds = { ...DEFAULT_CIRCUIT_BREAKER_THRESHOLDS, staleDataEventThreshold: 2 };
+    const evaluate = () =>
+      evaluateCircuitBreaker(database as never, {
+        jobKey: "job-x",
+        portfolioId: [portfolio.id, challenger.id],
+        scope: CircuitBreakerScope.ENTRY,
+        asOf: ASOF,
+        thresholds
+      });
+
+    staleEvent("re-a1", portfolio.id);
+    staleEvent("re-b1", challenger.id);
+    assert.equal((await evaluate()).state, CircuitBreakerState.CLOSED);
+
+    staleEvent("re-b2", challenger.id);
+    const tripped = await evaluate();
+    assert.equal(tripped.allowed, false);
+    assert.equal(tripped.reasonCode, CircuitBreakerTripReason.DATA_STALE);
+  });
 });

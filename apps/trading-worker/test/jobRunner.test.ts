@@ -103,6 +103,43 @@ describe("runScheduledJob — entry workflow guard (fake DB)", () => {
     assert.equal(ran, false);
   });
 
+  it("hands an entry job only the portfolios that passed the guard", async () => {
+    const { database, tables } = createFakeExecutionDatabase();
+    const now = new Date("2026-06-01T12:00:00.000Z");
+    const seedPortfolio = (key: string, killSwitchEngaged: boolean) => {
+      const portfolio = tables.get("portfolio")!.create({
+        data: { status: "ACTIVE", lastReconciledAt: now, key, name: key }
+      });
+      tables.get("tradingSession")!.create({
+        data: { portfolioId: portfolio.id, status: "SHADOW_ACTIVE", killSwitchEngaged, sessionKey: `${key}_SESSION` }
+      });
+      tables.get("portfolioSnapshot")!.create({
+        data: { portfolioId: portfolio.id, tradingDateUtc: new Date(Date.UTC(2026, 5, 1)), asOf: now, sourceLedgerSequence: 0 }
+      });
+      return portfolio;
+    };
+    seedPortfolio("SHADOW_V1", true);
+    const challenger = seedPortfolio("SHADOW_CHALLENGER_V1", false);
+
+    let seen: readonly string[] | undefined;
+    const result = await runScheduledJob({
+      database: database as never,
+      jobKey: "job-runner-fake:entry-per-portfolio",
+      ownerId: "owner-a",
+      scope: CircuitBreakerScope.ENTRY,
+      asOf: now,
+      leaseDurationMs: 60_000,
+      heartbeatIntervalMs: 5_000,
+      checkEntryWorkflow: true,
+      run: async ({ entryPortfolioIds }) => {
+        seen = entryPortfolioIds;
+      }
+    });
+
+    assert.equal(result.ran, true);
+    assert.deepEqual(seen, [challenger.id]);
+  });
+
   it("never consults the entry workflow guard for a MONITORING-scope job", async () => {
     const { database } = createFakeExecutionDatabase();
     const jobKey = "job-runner-fake:monitoring-not-guarded";

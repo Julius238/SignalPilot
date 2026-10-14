@@ -399,6 +399,7 @@ export function createFakeDatabase(worlds: readonly FakeWorld[]) {
           enabled: boolean;
           strategy?: { key?: string };
           id?: string;
+          portfolioId?: { in: string[] };
         };
       }) =>
         merged.assignments.find(
@@ -406,13 +407,18 @@ export function createFakeDatabase(worlds: readonly FakeWorld[]) {
             assignment.assetId === where.assetId &&
             assignment.enabled === where.enabled &&
             (where.id === undefined || assignment.id === where.id) &&
+            (where.portfolioId === undefined ||
+              where.portfolioId.in.includes(assignment.portfolioId as string)) &&
             (where.strategy?.key === undefined ||
               (assignment.strategy as { key?: string } | undefined)?.key ===
                 where.strategy.key)
         ) ?? null,
-      findMany: async ({ where }: { where?: { enabled?: boolean } } = {}) =>
+      findMany: async ({ where }: { where?: { enabled?: boolean; portfolioId?: { in: string[] } } } = {}) =>
         merged.assignments.filter(
-          (assignment) => where?.enabled === undefined || assignment.enabled === where.enabled
+          (assignment) =>
+            (where?.enabled === undefined || assignment.enabled === where.enabled) &&
+            (where?.portfolioId === undefined ||
+              where.portfolioId.in.includes(assignment.portfolioId as string))
         )
     },
     candle: {

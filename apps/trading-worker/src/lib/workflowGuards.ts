@@ -20,10 +20,13 @@
  * itself does not re-check the session before turning an already-accepted
  * order into a new open position.
  *
- * Shadow v1 has exactly one non-archived portfolio and one non-`CLOSED`
- * session per portfolio (docs/trading/03), so a single guard call resolves
- * one verdict for the whole entry pipeline rather than a per-job, per-symbol
- * lookup.
+ * Every non-archived portfolio gets its own verdict (champion and challenger
+ * run side by side in separate virtual portfolios): one portfolio's paused
+ * session, kill switch or stale reconciliation never blocks another's
+ * entries. The entry jobs then work only on the portfolios that passed
+ * (`allowedPortfolioIds`); the pipeline as a whole is skipped only when none
+ * did. Each portfolio still has at most one non-`CLOSED` session
+ * (docs/trading/03).
  */
 
 import {
@@ -45,7 +48,7 @@ export const EntryWorkflowReasonCode = {
 export type EntryWorkflowReasonCode =
   (typeof EntryWorkflowReasonCode)[keyof typeof EntryWorkflowReasonCode];
 
-export type EntryWorkflowGuardResult =
+export type PortfolioEntryGuardResult =
   | { readonly allowed: true; readonly portfolioId: string; readonly sessionId: string }
   | {
       readonly allowed: false;
@@ -55,6 +58,28 @@ export type EntryWorkflowGuardResult =
       readonly sessionId: string | null;
     };
 
+/**
+ * The verdict for the whole entry pipeline. When allowed, `portfolioId` /
+ * `sessionId` name the oldest entry-ready portfolio and `allowedPortfolioIds`
+ * lists all of them; when blocked, the fields describe the oldest portfolio's
+ * reason (every portfolio's own verdict is in `portfolios`).
+ */
+export type EntryWorkflowGuardResult = (
+  | {
+      readonly allowed: true;
+      readonly portfolioId: string;
+      readonly sessionId: string;
+      readonly allowedPortfolioIds: readonly string[];
+    }
+  | {
+      readonly allowed: false;
+      readonly reasonCode: EntryWorkflowReasonCode;
+      readonly message: string;
+      readonly portfolioId: string | null;
+      readonly sessionId: string | null;
+    }
+) & { readonly portfolios: readonly PortfolioEntryGuardResult[] };
+
 const startOfUtcDay = (value: Date): Date =>
   new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()));
 
@@ -62,19 +87,52 @@ export async function resolveEntryWorkflowGuard(
   database: PrismaClient,
   asOf: Date
 ): Promise<EntryWorkflowGuardResult> {
-  const portfolio = await database.portfolio.findFirst({
+  const portfolios = await database.portfolio.findMany({
     where: { status: { not: PortfolioStatus.ARCHIVED } },
     orderBy: { createdAt: "asc" }
   });
-  if (portfolio === null) {
+  if (portfolios.length === 0) {
     return {
       allowed: false,
       reasonCode: EntryWorkflowReasonCode.NO_PORTFOLIO,
       message: "No non-archived Portfolio exists yet.",
       portfolioId: null,
-      sessionId: null
+      sessionId: null,
+      portfolios: []
     };
   }
+
+  const verdicts: PortfolioEntryGuardResult[] = [];
+  for (const portfolio of portfolios) {
+    verdicts.push(await resolvePortfolioEntryGuard(database, portfolio, asOf));
+  }
+  const allowed = verdicts.filter(
+    (verdict): verdict is Extract<PortfolioEntryGuardResult, { allowed: true }> => verdict.allowed
+  );
+  const first = allowed[0];
+  if (first === undefined) {
+    // Nothing passed, so the oldest portfolio's verdict is a refusal too.
+    const oldest = verdicts[0] as Extract<PortfolioEntryGuardResult, { allowed: false }>;
+    return { ...oldest, portfolios: verdicts };
+  }
+  return {
+    allowed: true,
+    portfolioId: first.portfolioId,
+    sessionId: first.sessionId,
+    allowedPortfolioIds: allowed.map((verdict) => verdict.portfolioId),
+    portfolios: verdicts
+  };
+}
+
+async function resolvePortfolioEntryGuard(
+  database: PrismaClient,
+  portfolio: {
+    readonly id: string;
+    readonly status: PortfolioStatus;
+    readonly lastReconciledAt: Date | null;
+  },
+  asOf: Date
+): Promise<PortfolioEntryGuardResult> {
   if (portfolio.status !== PortfolioStatus.ACTIVE) {
     return {
       allowed: false,

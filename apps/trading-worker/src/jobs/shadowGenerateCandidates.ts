@@ -125,6 +125,12 @@ export interface RunShadowGenerateCandidatesOptions {
   readonly env?: Readonly<Record<string, string | undefined>>;
   readonly codeVersion?: string;
   readonly correlationId?: string;
+  /**
+   * Scheduler only: the entry-ready portfolios. Assignments of any other
+   * portfolio are not evaluated, so a paused challenger never produces
+   * candidates while the champion keeps scanning.
+   */
+  readonly portfolioIds?: readonly string[];
 }
 
 function resolveCodeVersion(
@@ -214,10 +220,12 @@ export async function runShadowGenerateCandidates(
   // Every long identity the risk engine approves runs once an assignment of it
   // is enabled (the long flag gates the direction, the assignment the
   // strategy); without the flag only the legacy identity, as before.
+  const portfolioFilter =
+    options.portfolioIds === undefined ? {} : { portfolioId: { in: [...options.portfolioIds] } };
   const enabledStrategyKeys = new Set(
     (
       await database.strategyAssignment.findMany({
-        where: { enabled: true },
+        where: { enabled: true, ...portfolioFilter },
         include: { strategy: true }
       })
     ).map((assignment) => assignment.strategy.key)
@@ -243,7 +251,8 @@ export async function runShadowGenerateCandidates(
           symbol,
           asOf,
           codeVersion,
-          strategyKey
+          strategyKey,
+          ...(options.portfolioIds === undefined ? {} : { portfolioIds: options.portfolioIds })
         });
         if (!assembled.ok) {
           assemblerFailures += 1;

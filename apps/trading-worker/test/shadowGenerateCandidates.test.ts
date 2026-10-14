@@ -504,6 +504,35 @@ describe("shadowGenerateCandidates job", () => {
     assert.ok(!disabled.results.some((result) => result.strategyKey === "CRYPTO_TREND_CORE_LONG_V1"));
   });
 
+  it("evaluates only assignments of the portfolios the scheduler found entry-ready", async () => {
+    const asTrendCore = (): FakeWorld => {
+      const world = buildFakeWorld({ symbol: "BTCUSDT", assetId: "asset-btc" });
+      const [assignment] = world.assignments as Array<Record<string, Record<string, unknown>>>;
+      assignment.strategy = { ...assignment.strategy, key: "CRYPTO_TREND_CORE_LONG_V1" };
+      return world;
+    };
+    const longEnv = { ...ENABLED_ENV, TRADING_STRATEGY_LONG_V1_ENABLED: "true" };
+    const scan = (portfolioIds: readonly string[]) =>
+      runShadowGenerateCandidates(createFakeDatabase([asTrendCore()]).database as never, {
+        asOf: AS_OF,
+        env: longEnv,
+        correlationId: `portfolios-${portfolioIds.join("-")}`,
+        portfolioIds
+      });
+
+    const ready = await scan(["portfolio-shadow-1"]);
+    assert.ok(
+      ready.results.some(
+        (result) => result.strategyKey === "CRYPTO_TREND_CORE_LONG_V1" && result.outcome !== "ASSEMBLER_FAILURE"
+      )
+    );
+
+    // The assignment's portfolio is paused: its strategy is not scanned at all.
+    const paused = await scan(["portfolio-challenger"]);
+    assert.ok(!paused.results.some((result) => result.strategyKey === "CRYPTO_TREND_CORE_LONG_V1"));
+    assert.equal(paused.created, 0);
+  });
+
   it("creates a SHORT candidate only with both Short flags and an enabled Short assignment", async () => {
     const shortWorld = buildFakeWorld({
       symbol: "BTCUSDT",

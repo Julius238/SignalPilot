@@ -265,6 +265,17 @@ describe("shadowAssessRisk job", () => {
     }
   });
 
+  it("assesses only candidates of the portfolios the scheduler found entry-ready", async () => {
+    const paused = runJob({}, { portfolioIds: ["portfolio-challenger"] });
+    const pausedSummary = await paused.summary;
+    assert.equal(paused.writes.riskAssessments.length, 0);
+    assert.equal(pausedSummary.errored, 0);
+
+    const ready = runJob({}, { portfolioIds: ["portfolio-shadow-1"] });
+    await ready.summary;
+    assert.equal(ready.writes.riskAssessments.length, 1);
+  });
+
   it("errors and raises a critical risk event on an inconsistent portfolio", async () => {
     const { database, writes } = setup({ portfolioStatus: "ERROR_LOCKED" });
     const finished = await runShadowAssessRisk(database as never, {

@@ -44,6 +44,16 @@ export const ScheduledJobSkipReason = {
 export type ScheduledJobSkipReason =
   (typeof ScheduledJobSkipReason)[keyof typeof ScheduledJobSkipReason];
 
+/** What the runner hands to the job it starts. */
+export interface ScheduledJobContext {
+  /**
+   * ENTRY jobs with the entry-workflow check: the portfolios that passed it.
+   * The job works only on these, so a blocked portfolio pauses its own entry
+   * pipeline without blocking another's. `undefined` for every other job.
+   */
+  readonly entryPortfolioIds?: readonly string[];
+}
+
 export interface RunScheduledJobOptions<T> {
   readonly database: PrismaClient;
   readonly jobKey: string;
@@ -55,7 +65,7 @@ export interface RunScheduledJobOptions<T> {
   readonly circuitBreakerThresholds?: CircuitBreakerThresholds;
   /** Only ENTRY-scope jobs consult the entry-workflow guard. */
   readonly checkEntryWorkflow?: boolean;
-  readonly run: () => Promise<T>;
+  readonly run: (context: ScheduledJobContext) => Promise<T>;
 }
 
 export type RunScheduledJobResult<T> =
@@ -63,26 +73,27 @@ export type RunScheduledJobResult<T> =
   | { readonly ran: false; readonly reasonCode: ScheduledJobSkipReason; readonly message: string };
 
 /**
- * `portfolioId` for the circuit breaker's `RiskEvent`-based signals. Shadow
- * v1 has exactly one non-archived portfolio; `null` (none exists yet) simply
- * disables those signals for this call — the underlying job will find
- * nothing to do either way.
+ * Portfolios for the circuit breaker's `RiskEvent`-based signals: every
+ * non-archived one (champion and challenger), each counted on its own. None
+ * yet simply disables those signals for this call — the underlying job will
+ * find nothing to do either way.
  */
-async function resolvePortfolioIdForBreaker(database: PrismaClient): Promise<string> {
-  const portfolio = await database.portfolio.findFirst({
+async function resolvePortfolioIdsForBreaker(database: PrismaClient): Promise<readonly string[]> {
+  const portfolios = await database.portfolio.findMany({
     where: { status: { not: "ARCHIVED" } },
-    orderBy: { createdAt: "asc" }
+    orderBy: { createdAt: "asc" },
+    select: { id: true }
   });
-  return portfolio?.id ?? "";
+  return portfolios.map((portfolio) => portfolio.id);
 }
 
 export async function runScheduledJob<T>(options: RunScheduledJobOptions<T>): Promise<RunScheduledJobResult<T>> {
   const { database, jobKey, ownerId, scope, asOf } = options;
 
-  const portfolioId = await resolvePortfolioIdForBreaker(database);
+  const portfolioIds = await resolvePortfolioIdsForBreaker(database);
   const breaker = await evaluateCircuitBreaker(database, {
     jobKey,
-    portfolioId,
+    portfolioId: portfolioIds,
     scope,
     asOf,
     thresholds: options.circuitBreakerThresholds
@@ -95,6 +106,7 @@ export async function runScheduledJob<T>(options: RunScheduledJobOptions<T>): Pr
     };
   }
 
+  let context: ScheduledJobContext = {};
   if (options.checkEntryWorkflow === true) {
     const guard = await resolveEntryWorkflowGuard(database, asOf);
     if (!guard.allowed) {
@@ -104,6 +116,7 @@ export async function runScheduledJob<T>(options: RunScheduledJobOptions<T>): Pr
         message: `Entry workflow guard blocked ${jobKey}: ${guard.reasonCode} — ${guard.message}`
       };
     }
+    context = { entryPortfolioIds: guard.allowedPortfolioIds };
   }
 
   const leased = await withJobLease(
@@ -118,7 +131,7 @@ export async function runScheduledJob<T>(options: RunScheduledJobOptions<T>): Pr
     async () => {
       const attemptStartedAt = new Date();
       try {
-        return await options.run();
+        return await options.run(context);
       } catch (error) {
         await recordUncaughtJobError(database, jobKey, error, attemptStartedAt);
         throw error;

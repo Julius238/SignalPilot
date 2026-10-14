@@ -2,6 +2,12 @@
  * Idempotent metadata/setup job for the legacy LONG identity and the explicit
  * LONG/SHORT strategy families. Every assignment is created disabled and no
  * portfolio/session/kill-switch state is changed.
+ *
+ * Each definition names its portfolio: the champion candidates live in
+ * `SHADOW_V1`, the challenger `CRYPTO_REGIME_LONG_V1` in its own
+ * `SHADOW_CHALLENGER_V1`, so their ledgers and risk state never mix. An
+ * assignment an operator has already enabled on the current version is left
+ * exactly as it is, so the setup can be re-run during a forward test.
  */
 
 import { randomUUID } from "node:crypto";
@@ -31,6 +37,10 @@ import {
   CRYPTO_MTF_BREAKOUT_V1_KEY,
   CRYPTO_MTF_BREAKOUT_V1_PARAMETERS,
   CRYPTO_MTF_BREAKOUT_V1_SPECIFICATION_HASH,
+  CRYPTO_REGIME_LONG_V1_ENGINE_VERSION,
+  CRYPTO_REGIME_LONG_V1_KEY,
+  CRYPTO_REGIME_LONG_V1_PARAMETERS,
+  CRYPTO_REGIME_LONG_V1_SPECIFICATION_HASH,
   CRYPTO_TREND_CORE_LONG_V1_ENGINE_VERSION,
   CRYPTO_TREND_CORE_LONG_V1_KEY,
   CRYPTO_TREND_CORE_LONG_V1_PARAMETERS,
@@ -47,7 +57,11 @@ import {
   checkShadowBootstrapAllowed,
   type TradingFlagSnapshot
 } from "../lib/tradingSafety.js";
-import { SHADOW_PORTFOLIO_KEY } from "./shadowBootstrap.js";
+import {
+  SHADOW_CHALLENGER_PORTFOLIO_KEY,
+  SHADOW_PORTFOLIO_KEY,
+  type ShadowPortfolioKey
+} from "../lib/shadowPortfolios.js";
 
 const logger = pino({ name: "signalpilot-worker" });
 const jobDir = dirname(fileURLToPath(import.meta.url));
@@ -76,6 +90,7 @@ const DEFINITIONS = Object.freeze([
     parameters: CRYPTO_MTF_BREAKOUT_V1_PARAMETERS,
     specificationHash: CRYPTO_MTF_BREAKOUT_V1_SPECIFICATION_HASH,
     assignmentSymbols: ["BTCUSDT"] as const,
+    portfolioKey: SHADOW_PORTFOLIO_KEY as ShadowPortfolioKey,
     legacy: true
   }),
   Object.freeze({
@@ -87,6 +102,7 @@ const DEFINITIONS = Object.freeze([
     parameters: CRYPTO_MTF_BREAKOUT_LONG_V1_PARAMETERS,
     specificationHash: CRYPTO_MTF_BREAKOUT_LONG_V1_SPECIFICATION_HASH,
     assignmentSymbols: SHADOW_ASSIGNMENT_SYMBOLS,
+    portfolioKey: SHADOW_PORTFOLIO_KEY as ShadowPortfolioKey,
     legacy: false
   }),
   Object.freeze({
@@ -99,6 +115,20 @@ const DEFINITIONS = Object.freeze([
     parameters: CRYPTO_TREND_CORE_LONG_V1_PARAMETERS,
     specificationHash: CRYPTO_TREND_CORE_LONG_V1_SPECIFICATION_HASH,
     assignmentSymbols: SHADOW_ASSIGNMENT_SYMBOLS,
+    portfolioKey: SHADOW_PORTFOLIO_KEY as ShadowPortfolioKey,
+    legacy: false
+  }),
+  Object.freeze({
+    key: CRYPTO_REGIME_LONG_V1_KEY,
+    name: "Crypto Regime LONG v1 (challenger)",
+    description:
+      "Challenger: long while the crypto-native regime gate is open, exit when it closes; 2 x ATR(1d) stop, 4R target. Own portfolio; BTC only; assignment starts disabled.",
+    direction: "LONG" as const,
+    engineVersion: CRYPTO_REGIME_LONG_V1_ENGINE_VERSION,
+    parameters: CRYPTO_REGIME_LONG_V1_PARAMETERS,
+    specificationHash: CRYPTO_REGIME_LONG_V1_SPECIFICATION_HASH,
+    assignmentSymbols: ["BTCUSDT"] as const,
+    portfolioKey: SHADOW_CHALLENGER_PORTFOLIO_KEY as ShadowPortfolioKey,
     legacy: false
   }),
   Object.freeze({
@@ -111,6 +141,7 @@ const DEFINITIONS = Object.freeze([
     parameters: CRYPTO_MTF_BREAKDOWN_SHORT_V1_PARAMETERS,
     specificationHash: CRYPTO_MTF_BREAKDOWN_SHORT_V1_SPECIFICATION_HASH,
     assignmentSymbols: SHADOW_ASSIGNMENT_SYMBOLS,
+    portfolioKey: SHADOW_PORTFOLIO_KEY as ShadowPortfolioKey,
     legacy: false
   })
 ]);
@@ -127,10 +158,12 @@ export interface ShadowStrategySetupEntry {
    * fix) reuses the version instead of being blocked.
    */
   readonly versionCodeVersion: string;
+  readonly portfolioKey: ShadowPortfolioKey;
   readonly assignments: readonly {
     readonly symbol: string;
     readonly strategyAssignmentId: string;
-    readonly enabled: false;
+    /** Setup never enables; `true` only for an assignment an operator enabled earlier. */
+    readonly enabled: boolean;
   }[];
 }
 
@@ -242,14 +275,20 @@ export async function runShadowStrategySetup(
     );
   }
 
-  const portfolio = await database.portfolio.findUnique({
-    where: { key: SHADOW_PORTFOLIO_KEY }
-  });
-  if (portfolio === null) {
-    return blocked(
-      "SHADOW_PORTFOLIO_MISSING",
-      `${SHADOW_PORTFOLIO_KEY} is missing; run shadow bootstrap first.`
-    );
+  const portfolioByKey = new Map<ShadowPortfolioKey, { readonly id: string }>();
+  for (const portfolioKey of new Set(DEFINITIONS.map((definition) => definition.portfolioKey))) {
+    const portfolio = await database.portfolio.findUnique({
+      where: { key: portfolioKey }
+    });
+    if (portfolio === null) {
+      return blocked(
+        "SHADOW_PORTFOLIO_MISSING",
+        `${portfolioKey} is missing; run shadow bootstrap${
+          portfolioKey === SHADOW_PORTFOLIO_KEY ? "" : ` --portfolio=${portfolioKey}`
+        } first.`
+      );
+    }
+    portfolioByKey.set(portfolioKey, portfolio);
   }
   const assets = await database.asset.findMany({
     where: {
@@ -275,6 +314,7 @@ export async function runShadowStrategySetup(
   const entries: ShadowStrategySetupEntry[] = [];
 
   for (const definition of DEFINITIONS) {
+    const portfolio = portfolioByKey.get(definition.portfolioKey)!;
     const existingStrategy = await database.strategy.findUnique({
       where: { key: definition.key }
     });
@@ -397,10 +437,13 @@ export async function runShadowStrategySetup(
         }));
       if (existingAssignments.length === 0) createdCount += 1;
       else existingCount += 1;
-      if (assignment.enabled) {
+      // An enabled assignment on the current version is a running forward
+      // test: leave it alone. One on a superseded version would have to be
+      // re-pinned while trading, which setup never does.
+      if (assignment.enabled && assignment.strategyVersionId !== strategyVersion.id) {
         return blocked(
           "ASSIGNMENT_ALREADY_ENABLED",
-          `${definition.key}/${symbol} must remain disabled during setup.`
+          `${definition.key}/${symbol} is enabled on a superseded version; disable it before re-pinning.`
         );
       }
       if (assignment.strategyVersionId !== strategyVersion.id) {
@@ -471,7 +514,7 @@ export async function runShadowStrategySetup(
       }
 
       const idempotencyKey = buildSpecificationHash({
-        portfolioKey: SHADOW_PORTFOLIO_KEY,
+        portfolioKey: definition.portfolioKey,
         strategyKey: definition.key,
         specificationHash: definition.specificationHash,
         symbol,
@@ -502,7 +545,8 @@ export async function runShadowStrategySetup(
             direction: definition.direction,
             strategyVersionId: strategyVersion.id,
             strategyAssignmentId: assignment.id,
-            assignmentEnabled: false,
+            assignmentEnabled: assignment.enabled,
+            portfolioKey: definition.portfolioKey,
             symbol,
             syntheticShadowShort: definition.direction === "SHORT"
           }),
@@ -514,7 +558,7 @@ export async function runShadowStrategySetup(
       assignments.push({
         symbol,
         strategyAssignmentId: assignment.id,
-        enabled: false
+        enabled: assignment.enabled
       });
     }
     for (const versionId of supersededVersionIds) {
@@ -534,6 +578,7 @@ export async function runShadowStrategySetup(
       strategyVersionId: strategyVersion.id,
       specificationHash: definition.specificationHash,
       versionCodeVersion: strategyVersion.codeVersion,
+      portfolioKey: definition.portfolioKey,
       assignments
     });
   }
@@ -549,7 +594,7 @@ export async function runShadowStrategySetup(
     strategyId: legacy.strategyId,
     strategyVersionId: legacy.strategyVersionId,
     strategyAssignmentId: legacy.assignments[0]?.strategyAssignmentId ?? null,
-    assignmentEnabled: false,
+    assignmentEnabled: legacy.assignments[0]?.enabled ?? false,
     specificationHash: legacy.specificationHash,
     entries,
     createdCount,

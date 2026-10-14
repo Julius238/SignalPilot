@@ -50,6 +50,11 @@ export interface RunShadowCreateOrdersOptions {
   readonly correlationId?: string;
   readonly codeVersion?: string;
   readonly batchSize?: number;
+  /**
+   * Scheduler only: the entry-ready portfolios; work of any other portfolio
+   * waits until its own session, kill switch and reconciliation allow it.
+   */
+  readonly portfolioIds?: readonly string[];
 }
 
 export interface ShadowCreateOrdersSummary {
@@ -113,6 +118,9 @@ export async function runShadowCreateOrders(
 
   const candidates = await database.tradeCandidate.findMany({
     where: {
+      ...(options.portfolioIds === undefined
+        ? {}
+        : { portfolioId: { in: [...options.portfolioIds] } }),
       status: TradeCandidateStatus.APPROVED_FOR_SHADOW,
       shadowOrders: { none: {} },
       direction: {

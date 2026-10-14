@@ -11,19 +11,34 @@ import { createFakeExecutionDatabase } from "./support/shadowExecutionFixtures.j
 
 const NOW = new Date("2026-06-01T12:00:00.000Z");
 
-function seedActivePortfolio(tables: ReturnType<typeof createFakeExecutionDatabase>["tables"]) {
+function seedActivePortfolio(
+  tables: ReturnType<typeof createFakeExecutionDatabase>["tables"],
+  key = "SHADOW_V1",
+  session: { status?: string; killSwitchEngaged?: boolean } = {}
+) {
   const portfolio = tables.get("portfolio")!.create({
-    data: { status: "ACTIVE", lastReconciledAt: NOW, key: "SHADOW_V1", name: "Shadow v1" }
+    data: { status: "ACTIVE", lastReconciledAt: NOW, key, name: key }
   });
-  const session = tables.get("tradingSession")!.create({
+  const tradingSession = tables.get("tradingSession")!.create({
     data: {
       portfolioId: portfolio.id,
-      status: "SHADOW_ACTIVE",
-      killSwitchEngaged: false,
-      sessionKey: "SHADOW_V1_SESSION"
+      status: session.status ?? "SHADOW_ACTIVE",
+      killSwitchEngaged: session.killSwitchEngaged ?? false,
+      sessionKey: `${key}_SESSION`
     }
   });
-  return { portfolio, session };
+  return { portfolio, session: tradingSession };
+}
+
+function seedTodaySnapshot(tables: ReturnType<typeof createFakeExecutionDatabase>["tables"], portfolioId: string) {
+  tables.get("portfolioSnapshot")!.create({
+    data: {
+      portfolioId,
+      tradingDateUtc: new Date(Date.UTC(2026, 5, 1)),
+      asOf: NOW,
+      sourceLedgerSequence: 0
+    }
+  });
 }
 
 describe("resolveEntryWorkflowGuard", () => {
@@ -154,5 +169,57 @@ describe("resolveEntryWorkflowGuard", () => {
     if (!result.allowed) return;
     assert.equal(result.portfolioId, portfolio.id);
     assert.equal(result.sessionId, session.id);
+    assert.deepEqual(result.allowedPortfolioIds, [portfolio.id]);
+  });
+});
+
+describe("resolveEntryWorkflowGuard — champion and challenger portfolios", () => {
+  it("lets the champion trade while the challenger's session is paused", async () => {
+    const { database, tables } = createFakeExecutionDatabase();
+    const champion = seedActivePortfolio(tables, "SHADOW_V1");
+    const challenger = seedActivePortfolio(tables, "SHADOW_CHALLENGER_V1", { status: "SHADOW_PAUSED" });
+    seedTodaySnapshot(tables, champion.portfolio.id);
+    seedTodaySnapshot(tables, challenger.portfolio.id);
+
+    const result = await resolveEntryWorkflowGuard(database as never, NOW);
+    assert.equal(result.allowed, true);
+    if (!result.allowed) return;
+    assert.deepEqual(result.allowedPortfolioIds, [champion.portfolio.id]);
+    const challengerVerdict = result.portfolios.find((verdict) => verdict.portfolioId === challenger.portfolio.id);
+    assert.equal(challengerVerdict?.allowed, false);
+    if (challengerVerdict === undefined || challengerVerdict.allowed) return;
+    assert.equal(challengerVerdict.reasonCode, EntryWorkflowReasonCode.SESSION_NOT_ACTIVE);
+  });
+
+  it("lets the challenger trade while the champion's kill switch is engaged", async () => {
+    const { database, tables } = createFakeExecutionDatabase();
+    const champion = seedActivePortfolio(tables, "SHADOW_V1", { killSwitchEngaged: true });
+    const challenger = seedActivePortfolio(tables, "SHADOW_CHALLENGER_V1");
+    seedTodaySnapshot(tables, champion.portfolio.id);
+    seedTodaySnapshot(tables, challenger.portfolio.id);
+
+    const result = await resolveEntryWorkflowGuard(database as never, NOW);
+    assert.equal(result.allowed, true);
+    if (!result.allowed) return;
+    assert.deepEqual(result.allowedPortfolioIds, [challenger.portfolio.id]);
+    assert.equal(result.portfolioId, challenger.portfolio.id);
+  });
+
+  it("blocks the entry pipeline only when no portfolio is ready", async () => {
+    const { database, tables } = createFakeExecutionDatabase();
+    const champion = seedActivePortfolio(tables, "SHADOW_V1", { killSwitchEngaged: true });
+    seedActivePortfolio(tables, "SHADOW_CHALLENGER_V1");
+    seedTodaySnapshot(tables, champion.portfolio.id);
+    // The challenger has no start-of-day snapshot yet.
+
+    const result = await resolveEntryWorkflowGuard(database as never, NOW);
+    assert.equal(result.allowed, false);
+    if (result.allowed) return;
+    assert.equal(result.reasonCode, EntryWorkflowReasonCode.KILL_SWITCH_ENGAGED);
+    assert.equal(result.portfolioId, champion.portfolio.id);
+    assert.deepEqual(
+      result.portfolios.map((verdict) => (verdict.allowed ? "ALLOWED" : verdict.reasonCode)),
+      [EntryWorkflowReasonCode.KILL_SWITCH_ENGAGED, EntryWorkflowReasonCode.DAILY_SNAPSHOT_MISSING]
+    );
   });
 });

@@ -37,11 +37,12 @@ import {
 } from "@signalpilot/trading-domain";
 import { APPROVED_LONG_STRATEGY_KEYS } from "@signalpilot/risk-engine";
 
+import { SHADOW_PORTFOLIO_KEYS, isShadowPortfolioKey } from "./shadowPortfolios.js";
+
 export const SHADOW_OPS_JOB_KEY = "trading:shadow-session-ops";
 
 const RECONCILE_FRESHNESS_MS = 5 * 60 * 1000;
 const ALLOWED_ASSIGNMENT_SYMBOLS = ["BTCUSDT", "ETHUSDT"];
-const P9_PORTFOLIO_KEY = "SHADOW_V1";
 /** The risk engine's approved long identities plus the short strategy. */
 const ALLOWED_STRATEGY_KEYS = [
   ...APPROVED_LONG_STRATEGY_KEYS,
@@ -107,14 +108,15 @@ export async function setStrategyAssignmentEnabled(
     where: { id: assignment.portfolioId }
   });
   if (
-    portfolio?.key !== P9_PORTFOLIO_KEY ||
+    portfolio === null ||
+    !isShadowPortfolioKey(portfolio.key) ||
     !ALLOWED_STRATEGY_KEYS.includes(assignment.strategy.key as never) ||
     assignment.strategy.status !== StrategyStatus.ACTIVE
   ) {
     return {
       ok: false,
       reasonCode: "ASSIGNMENT_SCOPE_NOT_ALLOWED",
-      message: `Only pinned shadow strategies in ${P9_PORTFOLIO_KEY} are permitted.`
+      message: `Only pinned shadow strategies in ${SHADOW_PORTFOLIO_KEYS.join("/")} are permitted.`
     };
   }
   if (

@@ -9,11 +9,17 @@
  *
  * Creates the structures the risk engine needs and nothing else:
  *
- *   - a shadow portfolio funded with 10 000 USDT plus its `INITIAL_CASH`
- *     ledger entry and the matching opening snapshot;
+ *   - a shadow portfolio (the champion's `SHADOW_V1` by default, or the
+ *     challenger's with `--portfolio=SHADOW_CHALLENGER_V1`) funded with
+ *     10 000 USDT plus its `INITIAL_CASH` ledger entry and the matching
+ *     opening snapshot;
  *   - the pinned `RiskLimitSet` v1;
  *   - a conservative `InstrumentExecutionProfile` for BTCUSDT and ETHUSDT;
- *   - a `TradingSession` in `STOPPED` with the kill switch engaged.
+ *   - a `TradingSession` in `STOPPED` with the kill switch engaged, per
+ *     portfolio.
+ *
+ * The risk limit set and the execution profiles are shared, so every shadow
+ * portfolio trades under identical limits and costs.
  *
  * It never creates a `StrategyAssignment`, never activates a session, never
  * releases the kill switch and never starts anything. The portfolio stays
@@ -57,6 +63,12 @@ import {
 import { config } from "dotenv";
 import pino from "pino";
 
+import {
+  SHADOW_PORTFOLIO_KEY,
+  SHADOW_PORTFOLIO_NAMES,
+  isShadowPortfolioKey,
+  type ShadowPortfolioKey
+} from "../lib/shadowPortfolios.js";
 import { checkShadowBootstrapAllowed, type TradingFlagSnapshot } from "../lib/tradingSafety.js";
 
 const logger = pino({ name: "signalpilot-worker" });
@@ -68,7 +80,7 @@ config();
 export const JOB_NAME = "shadowBootstrap";
 export const BOOTSTRAP_JOB_KEY = "trading:shadow-bootstrap";
 
-export const SHADOW_PORTFOLIO_KEY = "SHADOW_V1";
+export { SHADOW_PORTFOLIO_KEY };
 export const SHADOW_PORTFOLIO_STARTING_CASH = "10000.000000000000";
 export const BOOTSTRAP_SYMBOLS: readonly string[] = ["BTCUSDT", "ETHUSDT"];
 
@@ -138,6 +150,12 @@ export interface RunShadowBootstrapOptions {
    */
   readonly activatePortfolio?: boolean;
   readonly actorId?: string;
+  /**
+   * Which shadow portfolio to create: the champion's (default) or the
+   * challenger's. Same starting cash; the risk limit set and execution
+   * profiles are shared, so both trade under identical rules and costs.
+   */
+  readonly portfolioKey?: ShadowPortfolioKey;
 }
 
 type Json = Prisma.InputJsonValue;
@@ -153,6 +171,7 @@ export async function runShadowBootstrap(
   const codeVersion = options.codeVersion ?? env.TRADING_CODE_VERSION ?? "unversioned-local-build";
   const actorId = options.actorId ?? "operations-bootstrap";
   const activatePortfolio = options.activatePortfolio === true;
+  const portfolioKey = options.portfolioKey ?? SHADOW_PORTFOLIO_KEY;
 
   const gate = checkShadowBootstrapAllowed(env);
   const botRun = await database.botRun.create({
@@ -164,6 +183,7 @@ export async function runShadowBootstrap(
         correlationId,
         asOf: asOf.toISOString(),
         activatePortfolio,
+        portfolioKey,
         symbols: [...BOOTSTRAP_SYMBOLS]
       } as Prisma.InputJsonObject
     }
@@ -198,14 +218,14 @@ export async function runShadowBootstrap(
 
   // ── Portfolio ────────────────────────────────────────────────────────────
   const existingPortfolio = await database.portfolio.findUnique({
-    where: { key: SHADOW_PORTFOLIO_KEY }
+    where: { key: portfolioKey }
   });
   const portfolio =
     existingPortfolio ??
     (await database.portfolio.create({
       data: {
-        key: SHADOW_PORTFOLIO_KEY,
-        name: "SignalPilot Shadow Portfolio v1",
+        key: portfolioKey,
+        name: SHADOW_PORTFOLIO_NAMES[portfolioKey],
         baseCurrency: "USDT",
         status: activatePortfolio ? PortfolioStatus.ACTIVE : PortfolioStatus.DRAFT,
         startingCash: SHADOW_PORTFOLIO_STARTING_CASH,
@@ -399,7 +419,7 @@ export async function runShadowBootstrap(
     aggregateType: "Portfolio",
     aggregateId: portfolio.id,
     idempotencyKey: buildSpecificationHash({
-      portfolioKey: SHADOW_PORTFOLIO_KEY,
+      portfolioKey,
       riskLimitSetKey: RISK_LIMIT_SET_KEY,
       riskLimitSetVersion: RISK_LIMIT_SET_VERSION,
       symbols: [...BOOTSTRAP_SYMBOLS]
@@ -480,7 +500,15 @@ async function writeBotLog(
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
-  runShadowBootstrap(prisma, { activatePortfolio: process.argv.includes("--activate-portfolio") })
+  const portfolioArg = process.argv.find((arg) => arg.startsWith("--portfolio="))?.slice("--portfolio=".length);
+  if (portfolioArg !== undefined && !isShadowPortfolioKey(portfolioArg)) {
+    logger.error({ portfolioArg }, `${BOOTSTRAP_JOB_KEY}: unknown shadow portfolio`);
+    process.exit(1);
+  }
+  runShadowBootstrap(prisma, {
+    activatePortfolio: process.argv.includes("--activate-portfolio"),
+    ...(portfolioArg === undefined ? {} : { portfolioKey: portfolioArg })
+  })
     .then((summary) => {
       if (summary.blocked) {
         logger.error(

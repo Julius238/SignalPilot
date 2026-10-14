@@ -24,7 +24,7 @@ import pino from "pino";
 
 import type { TradingWorkerConfig } from "./config.js";
 import { CircuitBreakerScope } from "./lib/circuitBreaker.js";
-import { ScheduledJobSkipReason, runScheduledJob } from "./lib/jobRunner.js";
+import { ScheduledJobSkipReason, runScheduledJob, type ScheduledJobContext } from "./lib/jobRunner.js";
 import { enqueueCircuitBreakerAlert } from "./lib/alertCollector.js";
 import { checkTradingAlertOutboxAllowed } from "./lib/tradingSafety.js";
 import { runShadowAssessRisk } from "./jobs/shadowAssessRisk.js";
@@ -48,7 +48,7 @@ interface ScheduledJobDefinition {
   readonly scope: CircuitBreakerScope;
   readonly checkEntryWorkflow: boolean;
   readonly enabled: (config: TradingWorkerConfig) => boolean;
-  readonly run: (database: PrismaClient, asOf: Date) => Promise<unknown>;
+  readonly run: (database: PrismaClient, asOf: Date, context: ScheduledJobContext) => Promise<unknown>;
 }
 
 /**
@@ -75,7 +75,8 @@ const JOB_DEFINITIONS: readonly ScheduledJobDefinition[] = [
     scope: CircuitBreakerScope.ENTRY,
     checkEntryWorkflow: true,
     enabled: (config) => config.jobFlags.candidateJobEnabled,
-    run: (database, asOf) => runShadowGenerateCandidates(database, { asOf })
+    run: (database, asOf, { entryPortfolioIds }) =>
+      runShadowGenerateCandidates(database, { asOf, portfolioIds: entryPortfolioIds })
   },
   {
     jobKey: "trading:risk-decide",
@@ -83,7 +84,8 @@ const JOB_DEFINITIONS: readonly ScheduledJobDefinition[] = [
     scope: CircuitBreakerScope.ENTRY,
     checkEntryWorkflow: true,
     enabled: (config) => config.jobFlags.riskJobEnabled,
-    run: (database, asOf) => runShadowAssessRisk(database, { asOf })
+    run: (database, asOf, { entryPortfolioIds }) =>
+      runShadowAssessRisk(database, { asOf, portfolioIds: entryPortfolioIds })
   },
   {
     jobKey: "trading:order-create",
@@ -91,7 +93,8 @@ const JOB_DEFINITIONS: readonly ScheduledJobDefinition[] = [
     scope: CircuitBreakerScope.ENTRY,
     checkEntryWorkflow: true,
     enabled: (config) => config.jobFlags.orderJobEnabled,
-    run: (database, asOf) => runShadowCreateOrders(database, { asOf })
+    run: (database, asOf, { entryPortfolioIds }) =>
+      runShadowCreateOrders(database, { asOf, portfolioIds: entryPortfolioIds })
   },
   {
     jobKey: "trading:simulate-fill",
@@ -99,7 +102,8 @@ const JOB_DEFINITIONS: readonly ScheduledJobDefinition[] = [
     scope: CircuitBreakerScope.ENTRY,
     checkEntryWorkflow: true,
     enabled: (config) => config.jobFlags.fillJobEnabled,
-    run: (database, asOf) => runShadowProcessFills(database, { asOf })
+    run: (database, asOf, { entryPortfolioIds }) =>
+      runShadowProcessFills(database, { asOf, portfolioIds: entryPortfolioIds })
   },
   {
     jobKey: "trading:monitor-positions",
@@ -201,7 +205,7 @@ async function runOneScheduledJob(
       leaseDurationMs: LEASE_DURATION_MS,
       heartbeatIntervalMs: HEARTBEAT_INTERVAL_MS,
       checkEntryWorkflow: definition.checkEntryWorkflow,
-      run: () => definition.run(database, asOf)
+      run: (context) => definition.run(database, asOf, context)
     });
     if (!outcome.ran) {
       logger.info({ jobKey: definition.jobKey, reasonCode: outcome.reasonCode, message: outcome.message }, "scheduled job skipped");

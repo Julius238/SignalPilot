@@ -246,6 +246,7 @@ const RELATIONS: Record<
   },
   "strategyAssignment.asset": { table: "asset", foreignKey: "id" },
   "strategyAssignment.strategy": { table: "strategy", foreignKey: "id" },
+  "strategyAssignment.portfolio": { table: "portfolio", foreignKey: "id" },
   "strategyAssignment.strategyVersion": {
     table: "strategyVersion",
     foreignKey: "id"

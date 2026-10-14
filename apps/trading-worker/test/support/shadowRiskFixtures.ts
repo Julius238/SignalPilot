@@ -334,11 +334,14 @@ export function createFakeRiskDatabase(world: RiskWorld) {
           id?: string;
           status?: { in: string[] };
           direction?: { in: string[] };
+          portfolioId?: { in: string[] };
         };
       } = {}) =>
         candidates.filter(
           (candidate) =>
             (where?.id === undefined || candidate.id === where.id) &&
+            (where?.portfolioId === undefined ||
+              where.portfolioId.in.includes(candidate.portfolioId as string)) &&
             (where?.status === undefined ||
               where.status.in.includes(candidate.status)) &&
             (where?.direction === undefined ||

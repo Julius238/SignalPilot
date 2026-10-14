@@ -65,6 +65,7 @@ import {
   CircuitBreakerScope,
   evaluateCircuitBreaker
 } from "./circuitBreaker.js";
+import { SHADOW_PORTFOLIO_KEY, isShadowPortfolioKey, type ShadowPortfolioKey } from "./shadowPortfolios.js";
 import { checkShadowBaseAllowed, type EnvSource } from "./tradingSafety.js";
 
 export const EligibilityStatus = {
@@ -108,7 +109,6 @@ export const ELIGIBILITY_REPORT_VERSION = "shadow-eligibility-v3";
 const HEARTBEAT_STALE_MS = 15 * 60_000;
 /** Reconciliation age past which the ledger check counts as stale. */
 const RECONCILE_STALE_MS = RISK_FRESHNESS_LIMITS_MS.portfolioSnapshot;
-const SHADOW_PORTFOLIO_KEY = "SHADOW_V1";
 const P9_SYMBOL = "BTCUSDT";
 const P9_TIMEFRAMES: readonly StrategyTimeframe[] = ["1h", "4h", "1d"];
 const MIN_CANDLES: Readonly<Record<StrategyTimeframe, number>> = {
@@ -214,6 +214,8 @@ const warn = (
 export interface BuildEligibilityReportOptions {
   readonly asOf: Date;
   readonly env?: EnvSource;
+  /** The shadow portfolio to grade: the champion's (default) or the challenger's. */
+  readonly portfolioKey?: ShadowPortfolioKey;
 }
 
 /**
@@ -225,6 +227,7 @@ export async function buildEligibilityReport(
 ): Promise<EligibilityReport> {
   const asOf = options.asOf;
   const env = options.env ?? process.env;
+  const portfolioKey = options.portfolioKey ?? SHADOW_PORTFOLIO_KEY;
   const checks: EligibilityCheck[] = [];
 
   try {
@@ -265,7 +268,7 @@ export async function buildEligibilityReport(
 
     // ── 3. Portfolio ──────────────────────────────────────────────────────
     const portfolio = await database.portfolio.findUnique({
-      where: { key: SHADOW_PORTFOLIO_KEY }
+      where: { key: portfolioKey }
     });
 
     if (portfolio === null) {
@@ -273,7 +276,7 @@ export async function buildEligibilityReport(
         fail(
           "PORTFOLIO_PRESENT",
           "Bootstrap vollständig",
-          `Portfolio ${SHADOW_PORTFOLIO_KEY} existiert nicht.`
+          `Portfolio ${portfolioKey} existiert nicht.`
         )
       );
     } else {
@@ -478,7 +481,7 @@ export async function buildEligibilityReport(
       // ── 7. Exact P9 scope, assignment and immutable strategy version ─────
       const allEnabledAssignments = await database.strategyAssignment.findMany({
         where: { enabled: true },
-        include: { asset: true, strategy: true, strategyVersion: true },
+        include: { asset: true, strategy: true, strategyVersion: true, portfolio: true },
         orderBy: { createdAt: "asc" }
       });
       const assignments = allEnabledAssignments.filter(
@@ -487,9 +490,11 @@ export async function buildEligibilityReport(
       const btcAssignments = assignments.filter(
         (entry) => entry.asset.symbol === P9_SYMBOL
       );
+      // The other shadow portfolio (champion or challenger) is not foreign:
+      // its assignments trade in their own ledger.
       const foreignAssignments = allEnabledAssignments.filter(
         (entry) =>
-          entry.portfolioId !== portfolio.id ||
+          !isShadowPortfolioKey(entry.portfolio.key) ||
           !CRYPTO_MTF_BREAKOUT_V1_PARAMETERS.allowedSymbols.includes(
             entry.asset.symbol as never
           ) ||
@@ -502,7 +507,7 @@ export async function buildEligibilityReport(
           ? pass(
               "BTC_ONLY_ASSIGNMENT",
               "Explizite Long-/Short-Assignments",
-              "Alle aktivierten Assignments sind auf SHADOW_V1 und BTCUSDT/ETHUSDT begrenzt; BTCUSDT ist enthalten.",
+              `Alle aktivierten Assignments liegen in Shadow-Portfolios und sind auf BTCUSDT/ETHUSDT begrenzt; ${portfolio.key} enthält BTCUSDT.`,
               {
                 assignments: assignments.map((entry) => ({
                   assignmentId: entry.id,
@@ -521,7 +526,7 @@ export async function buildEligibilityReport(
           : fail(
               "BTC_ONLY_ASSIGNMENT",
               "Explizite Long-/Short-Assignments",
-              `Mindestens ein BTCUSDT-Assignment in ${SHADOW_PORTFOLIO_KEY} ist erforderlich; fremde Portfolios, Assets oder Strategien blockieren.`,
+              `Mindestens ein BTCUSDT-Assignment in ${portfolioKey} ist erforderlich; fremde Portfolios, Assets oder Strategien blockieren.`,
               {
                 symbols: allEnabledAssignments.map(
                   (entry) => entry.asset.symbol

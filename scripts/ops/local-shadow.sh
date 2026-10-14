@@ -6,7 +6,8 @@
 #
 #   scripts/ops/local-shadow.sh job <datei>            # z. B. shadowStartTradingDay
 #   scripts/ops/local-shadow.sh ops <args…>            # shadowOps (Assignments, Session, Kill Switch)
-#   scripts/ops/local-shadow.sh bootstrap              # Portfolio/Profile + Strategy-Setup (idempotent)
+#   scripts/ops/local-shadow.sh bootstrap              # Champion-/Challenger-Portfolio, Profile, Strategy-Setup (idempotent)
+#   scripts/ops/local-shadow.sh eligibility [--portfolio=SHADOW_CHALLENGER_V1]
 #   scripts/ops/local-shadow.sh install-agent          # Trading-Worker als launchd-Agent starten
 #   scripts/ops/local-shadow.sh restart-agent | stop-agent | status | logs
 #
@@ -86,14 +87,17 @@ case "$command" in
     run_node dist/jobs/shadowOps.js "$@"
     ;;
   bootstrap)
+    # Champion and challenger portfolios, then the strategy setup that
+    # assigns each strategy to its own portfolio (all idempotent).
     run_node_with_bootstrap dist/jobs/shadowBootstrap.js
+    run_node_with_bootstrap dist/jobs/shadowBootstrap.js --portfolio=SHADOW_CHALLENGER_V1
     run_node_with_bootstrap dist/jobs/shadowStrategySetup.js
     ;;
   calibrate-execution-profile)
     run_node_with_bootstrap dist/jobs/shadowExecutionProfileCalibrate.js --confirm=CALIBRATE_EXECUTION_PROFILE
     ;;
   eligibility)
-    run_node dist/jobs/shadowEligibilityReport.js
+    run_node dist/jobs/shadowEligibilityReport.js ${@+"$@"}
     ;;
   install-agent)
     write_plist

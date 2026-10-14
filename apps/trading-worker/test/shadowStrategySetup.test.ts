@@ -5,7 +5,8 @@ import {
   CRYPTO_MTF_BREAKOUT_LONG_V1_KEY,
   CRYPTO_MTF_BREAKOUT_LONG_V1_SPECIFICATION_HASH,
   CRYPTO_MTF_BREAKOUT_V1_PARAMETERS,
-  CRYPTO_MTF_BREAKOUT_V1_SPECIFICATION_HASH
+  CRYPTO_MTF_BREAKOUT_V1_SPECIFICATION_HASH,
+  CRYPTO_REGIME_LONG_V1_SPECIFICATION_HASH
 } from "@signalpilot/strategy-engine";
 import { buildSpecificationHash } from "@signalpilot/trading-domain";
 
@@ -26,6 +27,9 @@ function seedPrerequisites() {
   tables
     .get("portfolio")!
     .create({ data: { key: "SHADOW_V1", status: "DRAFT" } });
+  tables
+    .get("portfolio")!
+    .create({ data: { key: "SHADOW_CHALLENGER_V1", status: "DRAFT" } });
   tables.get("asset")!.create({
     data: {
       symbol: "BTCUSDT",
@@ -44,7 +48,7 @@ function seedPrerequisites() {
 }
 
 describe("runShadowStrategySetup", () => {
-  it("creates legacy/current/trend-core long and short BTC/ETH assignments disabled and idempotently", async () => {
+  it("creates legacy/current/trend-core/challenger long and short assignments disabled and idempotently", async () => {
     const { database, tables } = seedPrerequisites();
 
     const first = await runShadowStrategySetup(database as never, {
@@ -58,9 +62,9 @@ describe("runShadowStrategySetup", () => {
       first.specificationHash,
       CRYPTO_MTF_BREAKOUT_V1_SPECIFICATION_HASH
     );
-    assert.equal(tables.get("strategy")!.rows.length, 4);
-    assert.equal(tables.get("strategyVersion")!.rows.length, 4);
-    assert.equal(tables.get("strategyAssignment")!.rows.length, 7);
+    assert.equal(tables.get("strategy")!.rows.length, 5);
+    assert.equal(tables.get("strategyVersion")!.rows.length, 5);
+    assert.equal(tables.get("strategyAssignment")!.rows.length, 8);
     assert.ok(
       tables
         .get("strategyAssignment")!
@@ -68,7 +72,26 @@ describe("runShadowStrategySetup", () => {
     );
     assert.deepEqual(
       first.entries.map((entry) => entry.direction),
-      ["LONG", "LONG", "LONG", "SHORT"]
+      ["LONG", "LONG", "LONG", "LONG", "SHORT"]
+    );
+    // The challenger trades BTC only, in its own portfolio.
+    const challenger = first.entries.find((entry) => entry.strategyKey === "CRYPTO_REGIME_LONG_V1");
+    assert.ok(challenger !== undefined);
+    assert.equal(challenger.portfolioKey, "SHADOW_CHALLENGER_V1");
+    assert.equal(challenger.specificationHash, CRYPTO_REGIME_LONG_V1_SPECIFICATION_HASH);
+    assert.deepEqual(
+      challenger.assignments.map((assignment) => [assignment.symbol, assignment.enabled]),
+      [["BTCUSDT", false]]
+    );
+    const challengerPortfolio = tables.get("portfolio")!.rows.find((row) => row.key === "SHADOW_CHALLENGER_V1")!;
+    const challengerAssignment = tables
+      .get("strategyAssignment")!
+      .rows.find((row) => row.id === challenger.assignments[0]!.strategyAssignmentId)!;
+    assert.equal(challengerAssignment.portfolioId, challengerPortfolio.id);
+    assert.ok(
+      first.entries
+        .filter((entry) => entry.strategyKey !== "CRYPTO_REGIME_LONG_V1")
+        .every((entry) => entry.portfolioKey === "SHADOW_V1")
     );
     const trendCore = first.entries.find((entry) => entry.strategyKey === "CRYPTO_TREND_CORE_LONG_V1");
     assert.ok(trendCore !== undefined);
@@ -91,10 +114,10 @@ describe("runShadowStrategySetup", () => {
       correlationId: "strategy-setup-2"
     });
     assert.equal(second.blocked, false);
-    assert.equal(tables.get("strategy")!.rows.length, 4);
-    assert.equal(tables.get("strategyVersion")!.rows.length, 4);
-    assert.equal(tables.get("strategyAssignment")!.rows.length, 7);
-    assert.equal(tables.get("tradingAuditEvent")!.rows.length, 7);
+    assert.equal(tables.get("strategy")!.rows.length, 5);
+    assert.equal(tables.get("strategyVersion")!.rows.length, 5);
+    assert.equal(tables.get("strategyAssignment")!.rows.length, 8);
+    assert.equal(tables.get("tradingAuditEvent")!.rows.length, 8);
   });
 
   it("supersedes a changed specification with a new immutable version and re-pins disabled assignments", async () => {
@@ -148,6 +171,61 @@ describe("runShadowStrategySetup", () => {
     );
   });
 
+  it("refuses without the challenger portfolio and names the bootstrap that creates it", async () => {
+    const { database, tables } = seedPrerequisites();
+    const rows = tables.get("portfolio")!.rows;
+    rows.splice(rows.findIndex((row) => row.key === "SHADOW_CHALLENGER_V1"), 1);
+    const result = await runShadowStrategySetup(database as never, { asOf: AS_OF, env: ENV });
+    assert.equal(result.blocked, true);
+    assert.equal(result.blockReasonCode, "SHADOW_PORTFOLIO_MISSING");
+    assert.equal(tables.get("strategy")!.rows.length, 0);
+  });
+
+  it("leaves an assignment enabled during a forward test exactly as it is", async () => {
+    const { database, tables } = seedPrerequisites();
+    const first = await runShadowStrategySetup(database as never, { asOf: AS_OF, env: ENV });
+    const trendCoreBtc = first.entries
+      .find((entry) => entry.strategyKey === "CRYPTO_TREND_CORE_LONG_V1")!
+      .assignments.find((assignment) => assignment.symbol === "BTCUSDT")!;
+    const row = tables.get("strategyAssignment")!.rows.find((entry) => entry.id === trendCoreBtc.strategyAssignmentId)!;
+    row.enabled = true;
+    const before = { ...row };
+
+    const second = await runShadowStrategySetup(database as never, {
+      asOf: new Date(AS_OF.getTime() + 1_000),
+      env: ENV
+    });
+    assert.equal(second.blocked, false, String(second.blockReasonCode));
+    assert.deepEqual({ ...row }, before);
+    assert.equal(
+      second.entries
+        .find((entry) => entry.strategyKey === "CRYPTO_TREND_CORE_LONG_V1")!
+        .assignments.find((assignment) => assignment.symbol === "BTCUSDT")!.enabled,
+      true
+    );
+  });
+
+  it("refuses to re-pin an enabled assignment of a superseded version", async () => {
+    const { database, tables } = seedPrerequisites();
+    await runShadowStrategySetup(database as never, { asOf: AS_OF, env: ENV });
+    const strategyRow = tables
+      .get("strategy")!
+      .rows.find((row) => row.key === CRYPTO_MTF_BREAKOUT_LONG_V1_KEY)!;
+    const oldParameters = { ...CRYPTO_MTF_BREAKOUT_V1_PARAMETERS, key: CRYPTO_MTF_BREAKOUT_LONG_V1_KEY };
+    const versionRow = tables.get("strategyVersion")!.rows.find((row) => row.strategyId === strategyRow.id)!;
+    versionRow.engineVersion = "crypto-mtf-breakout-v1/1.0.0";
+    versionRow.parametersJson = oldParameters;
+    versionRow.specificationHash = buildSpecificationHash(oldParameters);
+    tables.get("strategyAssignment")!.rows.find((row) => row.strategyId === strategyRow.id)!.enabled = true;
+
+    const second = await runShadowStrategySetup(database as never, {
+      asOf: new Date(AS_OF.getTime() + 1_000),
+      env: ENV
+    });
+    assert.equal(second.blocked, true);
+    assert.equal(second.blockReasonCode, "ASSIGNMENT_ALREADY_ENABLED");
+  });
+
   it("fails closed without the dedicated bootstrap flag", async () => {
     const { database, tables } = seedPrerequisites();
     const result = await runShadowStrategySetup(database as never, {
@@ -173,7 +251,7 @@ describe("runShadowStrategySetup", () => {
     });
     assert.equal(second.blocked, false);
     // Same engine and specification hash: no new version, the original build stays recorded.
-    assert.equal(tables.get("strategyVersion")!.rows.length, 4);
+    assert.equal(tables.get("strategyVersion")!.rows.length, 5);
     assert.ok(second.entries.every((entry) => entry.versionCodeVersion === ENV.TRADING_CODE_VERSION));
   });
 

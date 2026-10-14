@@ -121,7 +121,12 @@ export const SCHEDULED_JOB_RUN_NAMES: Readonly<Record<string, readonly string[]>
 
 export interface EvaluateCircuitBreakerInput {
   readonly jobKey: string;
-  readonly portfolioId: string;
+  /**
+   * Portfolio(s) whose `RiskEvent`s feed the ENTRY signals. Several
+   * portfolios (champion and challenger) are counted separately: the breaker
+   * trips when one of them reaches a threshold, never on their sum.
+   */
+  readonly portfolioId: string | readonly string[];
   readonly scope: CircuitBreakerScope;
   readonly asOf: Date;
   readonly thresholds?: CircuitBreakerThresholds;
@@ -212,9 +217,10 @@ export async function evaluateCircuitBreaker(
 
   if (input.scope === CircuitBreakerScope.ENTRY) {
     const since = new Date(input.asOf.getTime() - thresholds.riskEventLookbackMs);
+    const portfolioIds = typeof input.portfolioId === "string" ? [input.portfolioId] : input.portfolioId;
     const events = await database.riskEvent.findMany({
       where: {
-        portfolioId: input.portfolioId,
+        portfolioId: { in: [...portfolioIds] },
         severity: RiskSeverity.CRITICAL,
         acknowledgedAt: null,
         createdAt: { gte: since, lte: input.asOf },
@@ -223,16 +229,17 @@ export async function evaluateCircuitBreaker(
       orderBy: { createdAt: "desc" }
     });
 
-    const counts = new Map<CircuitBreakerTripReason, { count: number; latest: Date }>();
+    const counts = new Map<string, { reason: CircuitBreakerTripReason; count: number; latest: Date }>();
     for (const event of events) {
       const reason = ENTRY_TRIP_EVENT_TYPES[event.type];
       if (reason === undefined) continue;
-      const existing = counts.get(reason);
-      if (existing === undefined) counts.set(reason, { count: 1, latest: event.createdAt });
+      const key = `${event.portfolioId}:${reason}`;
+      const existing = counts.get(key);
+      if (existing === undefined) counts.set(key, { reason, count: 1, latest: event.createdAt });
       else existing.count += 1;
     }
 
-    for (const [reason, info] of counts) {
+    for (const { reason, ...info } of counts.values()) {
       const thresholdKey = THRESHOLD_FOR_TRIP_REASON[reason];
       const threshold = thresholdKey === undefined ? Number.POSITIVE_INFINITY : thresholds[thresholdKey];
       if (info.count >= threshold) {

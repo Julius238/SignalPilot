@@ -428,12 +428,13 @@ describe("buildEligibilityReport", () => {
     assert.ok(report.blockingFailures.includes("ACTIVE_STRATEGY_VERSION"));
   });
 
-  it("blocks when another portfolio has any enabled assignment", async () => {
+  it("blocks when a portfolio outside the shadow portfolios has any enabled assignment", async () => {
     const { database, tables } = seedReady();
     const current = tables.get("strategyAssignment")!.rows[0]!;
+    const other = tables.get("portfolio")!.create({ data: { key: "OTHER_PORTFOLIO", name: "other", status: "ACTIVE" } });
     tables.get("strategyAssignment")!.create({
       data: {
-        portfolioId: "other-portfolio",
+        portfolioId: other.id,
         assetId: current.assetId,
         strategyId: current.strategyId,
         strategyVersionId: current.strategyVersionId,
@@ -446,6 +447,60 @@ describe("buildEligibilityReport", () => {
       env: SHADOW_ENV
     });
     assert.ok(report.blockingFailures.includes("BTC_ONLY_ASSIGNMENT"));
+  });
+
+  it("treats the challenger portfolio's assignment as its own scope, not as foreign", async () => {
+    const { database, tables } = seedReady();
+    const current = tables.get("strategyAssignment")!.rows[0]!;
+    const challenger = tables.get("portfolio")!.create({
+      data: {
+        key: "SHADOW_CHALLENGER_V1",
+        name: "challenger",
+        status: "DRAFT",
+        startingCash: "10000",
+        availableCash: "10000",
+        reservedCash: "0",
+        realizedPnl: "0",
+        feesPaid: "0",
+        equity: "10000",
+        highWaterMark: "10000",
+        ledgerSequence: 0,
+        lastReconciledAt: new Date(ASOF.getTime() - 60_000)
+      }
+    });
+    tables.get("tradingSession")!.create({
+      data: {
+        sessionKey: "challenger-s1",
+        portfolioId: challenger.id,
+        status: "STOPPED",
+        killSwitchEngaged: true,
+        heartbeatAt: new Date(ASOF.getTime() - 60_000),
+        version: 0
+      }
+    });
+    tables.get("strategyAssignment")!.create({
+      data: {
+        portfolioId: challenger.id,
+        assetId: current.assetId,
+        strategyId: current.strategyId,
+        strategyVersionId: current.strategyVersionId,
+        timeframe: "1h",
+        enabled: true,
+        assignmentConfigJson: { direction: "LONG" }
+      }
+    });
+
+    const champion = await buildEligibilityReport(database as never, { asOf: ASOF, env: SHADOW_ENV });
+    assert.equal(check(champion, "BTC_ONLY_ASSIGNMENT").outcome, "PASS");
+
+    // Graded on its own, the challenger portfolio reports its own state.
+    const challengerReport = await buildEligibilityReport(database as never, {
+      asOf: ASOF,
+      env: SHADOW_ENV,
+      portfolioKey: "SHADOW_CHALLENGER_V1"
+    });
+    assert.equal(check(challengerReport, "PORTFOLIO_PRESENT").details?.portfolioId, challenger.id);
+    assert.equal(check(challengerReport, "BTC_ONLY_ASSIGNMENT").outcome, "PASS");
   });
 
   it("blocks on a thin candle history", async () => {

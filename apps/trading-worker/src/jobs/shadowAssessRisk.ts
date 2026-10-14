@@ -105,6 +105,11 @@ export interface RunShadowAssessRiskOptions {
   readonly batchSize?: number;
   /** Restrict the run to one candidate; useful for a targeted replay. */
   readonly tradeCandidateId?: string;
+  /**
+   * Scheduler only: the entry-ready portfolios; work of any other portfolio
+   * waits until its own session, kill switch and reconciliation allow it.
+   */
+  readonly portfolioIds?: readonly string[];
 }
 
 function resolveCodeVersion(
@@ -172,6 +177,9 @@ export async function runShadowAssessRisk(
       ...(options.tradeCandidateId === undefined
         ? {}
         : { id: options.tradeCandidateId }),
+      ...(options.portfolioIds === undefined
+        ? {}
+        : { portfolioId: { in: [...options.portfolioIds] } }),
       status: { in: [...ASSESSABLE_STATUSES] },
       decision: { is: null },
       direction: {

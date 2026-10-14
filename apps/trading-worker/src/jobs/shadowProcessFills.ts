@@ -51,6 +51,11 @@ export interface RunShadowProcessFillsOptions {
   readonly correlationId?: string;
   readonly codeVersion?: string;
   readonly batchSize?: number;
+  /**
+   * Scheduler only: the entry-ready portfolios; work of any other portfolio
+   * waits until its own session, kill switch and reconciliation allow it.
+   */
+  readonly portfolioIds?: readonly string[];
 }
 
 export interface ShadowProcessFillsSummary {
@@ -110,6 +115,9 @@ export async function runShadowProcessFills(
 
   const orders = await database.shadowOrder.findMany({
     where: {
+      ...(options.portfolioIds === undefined
+        ? {}
+        : { portfolioId: { in: [...options.portfolioIds] } }),
       purpose: "ENTRY",
       status: {
         in: [

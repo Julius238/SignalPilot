@@ -73,6 +73,8 @@ export interface AssembleStrategyInputOptions {
   readonly strategyKey?: string;
   /** Optional exact assignment pin for scheduler and replay callers. */
   readonly strategyAssignmentId?: string;
+  /** Only assignments of these portfolios count (the scheduler's entry-ready ones). */
+  readonly portfolioIds?: readonly string[];
   /** Git commit or immutable build identifier of the running worker. */
   readonly codeVersion: string;
 }
@@ -219,7 +221,10 @@ export async function assembleStrategyInput(
       strategy: { key: strategyKey },
       ...(strategyAssignmentId === undefined
         ? {}
-        : { id: strategyAssignmentId })
+        : { id: strategyAssignmentId }),
+      ...(options.portfolioIds === undefined
+        ? {}
+        : { portfolioId: { in: [...options.portfolioIds] } })
     },
     include: { strategyVersion: true, strategy: true },
     orderBy: { createdAt: "desc" }

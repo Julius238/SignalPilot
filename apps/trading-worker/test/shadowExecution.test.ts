@@ -17,6 +17,7 @@ import {
 import { reconcilePortfolio } from "../src/lib/shadowReconciliation.js";
 import { startTradingDay } from "../src/lib/shadowTradingDay.js";
 import { requestManualRiskClose } from "../src/lib/manualRiskClose.js";
+import { runShadowProcessFills } from "../src/jobs/shadowProcessFills.js";
 
 import { buildCandidateKey } from "@signalpilot/trading-domain";
 
@@ -589,6 +590,39 @@ describe("entry fill — spread, slippage, fee and ledger/portfolio consistency"
       Number.parseFloat(String(updatedPortfolio.availableCash)) >
         10000 - reservedAtAcceptance
     );
+  });
+});
+
+describe("fill job — only the portfolios the scheduler cleared", () => {
+  it("leaves an order untouched while its own portfolio is not entry-ready", async () => {
+    const { database, tables, portfolio, candidate } = seedWorld();
+    await createShadowOrderForCandidate(database as never, {
+      tradeCandidateId: candidate.id,
+      asOf: new Date("2026-08-02T09:00:05.000Z"),
+      codeVersion: CODE_VERSION,
+      correlationId: CORRELATION_ID,
+      capability: SAFE_LONG_CAPABILITY
+    });
+    const options = {
+      asOf: new Date("2026-08-02T10:00:00.000Z"),
+      codeVersion: CODE_VERSION,
+      env: {
+        ENABLE_LIVE_TRADING: "false",
+        TRADING_MODE: "SHADOW",
+        TRADING_SHADOW_ENABLED: "true",
+        TRADING_STRATEGY_V1_ENABLED: "true",
+        TRADING_STRATEGY_LONG_V1_ENABLED: "true",
+        TRADING_SHADOW_EXECUTION_ENABLED: "true"
+      }
+    };
+
+    const blocked = await runShadowProcessFills(database as never, { ...options, portfolioIds: ["portfolio-challenger"] });
+    assert.equal(blocked.scanned, 0);
+    assert.equal(tables.get("shadowFill")!.rows.length, 0);
+
+    const cleared = await runShadowProcessFills(database as never, { ...options, portfolioIds: [portfolio.id] });
+    assert.equal(cleared.scanned, 1);
+    assert.equal(tables.get("shadowFill")!.rows.length, 1);
   });
 });
 
