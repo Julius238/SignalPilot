@@ -94,6 +94,8 @@ export interface ArenaParticipantDto {
 export interface ArenaCohortDto {
   readonly key: string;
   readonly name: string;
+  /** LOCAL_SHAKEDOWN results are a system test, never official forward results. */
+  readonly phase: string;
   readonly description: string | null;
   readonly policyVersion: string;
   readonly policyHash: string;
@@ -226,6 +228,7 @@ export async function getArenaOverview(database: PrismaClient, asOf: Date = new 
     cohortDtos.push({
       key: cohort.key,
       name: cohort.name,
+      phase: cohort.phase,
       description: cohort.description,
       policyVersion: cohort.policyVersion,
       policyHash: cohort.policyHash,

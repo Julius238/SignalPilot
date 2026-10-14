@@ -76,6 +76,7 @@ export const TradingSessionMode = p.TradingSessionMode;
 export const TradingSessionStatus = p.TradingSessionStatus;
 
 // ── SignalPilot Arena ─────────────────────────────────────────────────────
+export const ArenaCohortPhase = p.ArenaCohortPhase;
 export const ArenaEvidenceStatus = p.ArenaEvidenceStatus;
 export const ArenaParticipantStatus = p.ArenaParticipantStatus;
 export const ArenaPostMortemStatus = p.ArenaPostMortemStatus;

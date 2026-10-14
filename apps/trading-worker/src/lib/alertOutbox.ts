@@ -56,7 +56,12 @@ export const ALERT_SEVERITY: Readonly<Record<TradingAlertEventType, RiskSeverity
   [TradingAlertEventType.DAILY_LOSS_LIMIT_REACHED]: RiskSeverity.CRITICAL,
   [TradingAlertEventType.CIRCUIT_BREAKER_OPEN]: RiskSeverity.WARNING,
   [TradingAlertEventType.WORKER_HEARTBEAT_STALE]: RiskSeverity.WARNING,
-  [TradingAlertEventType.POSITION_MONITOR_STALE]: RiskSeverity.WARNING
+  [TradingAlertEventType.POSITION_MONITOR_STALE]: RiskSeverity.WARNING,
+  // 24/7 operation. Stale market data stops every decision, so it is critical.
+  [TradingAlertEventType.MARKET_DATA_STALE]: RiskSeverity.CRITICAL,
+  [TradingAlertEventType.SCHEDULED_JOB_STALE]: RiskSeverity.WARNING,
+  [TradingAlertEventType.WORKER_RESTARTED]: RiskSeverity.WARNING,
+  [TradingAlertEventType.OPS_TEST]: RiskSeverity.WARNING
 };
 
 /**

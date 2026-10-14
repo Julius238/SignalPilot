@@ -62,6 +62,7 @@ export {
   ShadowPositionStatus,
   StrategyPerformanceSegment,
   StrategyPerformanceWindow,
+  ArenaCohortPhase,
   ArenaEvidenceStatus,
   ArenaParticipantStatus,
   ArenaPostMortemStatus,

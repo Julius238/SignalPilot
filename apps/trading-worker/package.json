@@ -71,6 +71,10 @@
       "types": "./dist/lib/tradingRetention.d.ts",
       "default": "./dist/lib/tradingRetention.js"
     },
+    "./lib/opsHealth": {
+      "types": "./dist/lib/opsHealth.d.ts",
+      "default": "./dist/lib/opsHealth.js"
+    },
     "./lib/arenaOverview": {
       "types": "./dist/lib/arenaOverview.d.ts",
       "default": "./dist/lib/arenaOverview.js"

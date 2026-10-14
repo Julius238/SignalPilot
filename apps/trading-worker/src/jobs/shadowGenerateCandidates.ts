@@ -115,6 +115,8 @@ export interface ShadowGenerateCandidatesSummary {
   readonly rejections: number;
   readonly assemblerFailures: number;
   readonly errors: number;
+  /** Scheduler catch-up: (strategy, symbol) pairs whose current anchor candle was already evaluated. */
+  readonly skippedAlreadyEvaluated: number;
   readonly results: readonly ShadowSymbolResult[];
   readonly flags: TradingFlagSnapshot | null;
 }
@@ -131,7 +133,18 @@ export interface RunShadowGenerateCandidatesOptions {
    * candidates while the champion keeps scanning.
    */
   readonly portfolioIds?: readonly string[];
+  /**
+   * Scheduler catch-up mode: the scan runs every few minutes, evaluates each
+   * (strategy, symbol) with an enabled assignment once per anchor candle and
+   * skips it until the next candle closed. A tick lost to a restart or a late
+   * data worker is caught up by the next one, and a refusal is still recorded
+   * exactly once per anchor. Manual runs evaluate unconditionally.
+   */
+  readonly skipEvaluatedAnchors?: boolean;
 }
+
+/** `TradingJobCursor.jobKey` of the per-(strategy, symbol) anchor cursor. */
+export const CANDIDATE_ANCHOR_CURSOR_JOB_KEY = "trading:candidate-scan:anchor";
 
 function resolveCodeVersion(
   env: Readonly<Record<string, string | undefined>>
@@ -181,6 +194,7 @@ export async function runShadowGenerateCandidates(
       rejections: 0,
       assemblerFailures: 0,
       errors: 0,
+      skippedAlreadyEvaluated: 0,
       results: [],
       flags: gate.flags
     };
@@ -216,19 +230,21 @@ export async function runShadowGenerateCandidates(
   let rejections = 0;
   let assemblerFailures = 0;
   let errors = 0;
+  let skippedAlreadyEvaluated = 0;
+  const catchUp = options.skipEvaluatedAnchors === true;
 
   // Every long identity the risk engine approves runs once an assignment of it
   // is enabled (the long flag gates the direction, the assignment the
   // strategy); without the flag only the legacy identity, as before.
   const portfolioFilter =
     options.portfolioIds === undefined ? {} : { portfolioId: { in: [...options.portfolioIds] } };
-  const enabledStrategyKeys = new Set(
-    (
-      await database.strategyAssignment.findMany({
-        where: { enabled: true, ...portfolioFilter },
-        include: { strategy: true }
-      })
-    ).map((assignment) => assignment.strategy.key)
+  const enabledAssignments = await database.strategyAssignment.findMany({
+    where: { enabled: true, ...portfolioFilter },
+    include: { strategy: true, asset: true }
+  });
+  const enabledStrategyKeys = new Set(enabledAssignments.map((assignment) => assignment.strategy.key));
+  const enabledPairs = new Set(
+    enabledAssignments.map((assignment) => `${assignment.strategy.key}:${assignment.asset.symbol}`)
   );
   const longKeys = gate.flags.strategyLongV1Enabled
     ? APPROVED_LONG_STRATEGY_KEYS.filter(
@@ -245,7 +261,32 @@ export async function runShadowGenerateCandidates(
   ];
 
   for (const symbol of symbols) {
+    // The anchor a decision for this symbol would be made on now.
+    const anchor = catchUp
+      ? await database.candle.findFirst({
+          where: { symbol, timeframe: "1h", closeTime: { lte: asOf } },
+          orderBy: { closeTime: "desc" },
+          select: { id: true, closeTime: true }
+        })
+      : null;
     for (const strategyKey of strategyKeys) {
+      const cursorScope = `${strategyKey}:${symbol}`;
+      if (catchUp) {
+        // Only pairs that can trade; everything else would just be noise.
+        if (!enabledPairs.has(cursorScope)) continue;
+        const cursor = await database.tradingJobCursor.findUnique({
+          where: { jobKey_scopeKey: { jobKey: CANDIDATE_ANCHOR_CURSOR_JOB_KEY, scopeKey: cursorScope } },
+          select: { lastProcessedAt: true }
+        });
+        if (
+          anchor !== null &&
+          cursor?.lastProcessedAt != null &&
+          cursor.lastProcessedAt.getTime() >= anchor.closeTime.getTime()
+        ) {
+          skippedAlreadyEvaluated += 1;
+          continue;
+        }
+      }
       try {
         const assembled = await assembleStrategyInput(database, {
           symbol,
@@ -288,6 +329,19 @@ export async function runShadowGenerateCandidates(
           codeVersion,
           occurredAt: asOf
         });
+
+        if (catchUp && anchor !== null && persisted.outcome !== PersistOutcome.CONFLICT) {
+          await database.tradingJobCursor.upsert({
+            where: { jobKey_scopeKey: { jobKey: CANDIDATE_ANCHOR_CURSOR_JOB_KEY, scopeKey: cursorScope } },
+            create: {
+              jobKey: CANDIDATE_ANCHOR_CURSOR_JOB_KEY,
+              scopeKey: cursorScope,
+              lastCandleId: anchor.id,
+              lastProcessedAt: anchor.closeTime
+            },
+            update: { lastCandleId: anchor.id, lastProcessedAt: anchor.closeTime, version: { increment: 1 } }
+          });
+        }
 
         if (persisted.outcome === PersistOutcome.CREATED) created += 1;
         else if (
@@ -370,6 +424,7 @@ export async function runShadowGenerateCandidates(
     rejections,
     assemblerFailures,
     errors,
+    skippedAlreadyEvaluated,
     results,
     flags: gate.flags
   };

@@ -1372,6 +1372,7 @@ export type ArenaOverview = {
   cohorts: Array<{
     key: string;
     name: string;
+    phase: "UNLABELED" | "LOCAL_SHAKEDOWN" | "OFFICIAL";
     description: string | null;
     policyVersion: string;
     policyHash: string;
@@ -1383,4 +1384,44 @@ export type ArenaOverview = {
 
 export function fetchArenaOverview() {
   return fetchApi<ArenaOverview>("/trading/arena");
+}
+
+// ── 24/7-Betriebszustand ────────────────────────────────────────────────────
+// Spiegelt `collectOpsHealth` (apps/trading-worker/src/lib/opsHealth.ts).
+
+export type OpsHealth = {
+  asOf: string;
+  ok: boolean;
+  marketData: Array<{
+    symbol: string;
+    latestCloseTime: string | null;
+    source: string | null;
+    ageMinutes: number | null;
+    ok: boolean;
+    problem: "MISSING" | "STALE" | "NOT_BINANCE" | null;
+  }>;
+  jobs: Array<{
+    jobName: string;
+    label: string;
+    lastSuccessAt: string | null;
+    lastStatus: string | null;
+    ageMinutes: number | null;
+    maxAgeMinutes: number;
+    neverRan: boolean;
+    ok: boolean;
+  }>;
+  lastWorkerStartAt: string | null;
+  workerStartsLast24h: number;
+  sessions: Array<{
+    portfolioKey: string;
+    portfolioStatus: string;
+    sessionStatus: string | null;
+    killSwitchEngaged: boolean | null;
+    killReasonCode: string | null;
+    unacknowledgedCriticalRiskEvents: number;
+  }>;
+};
+
+export function fetchOpsHealth() {
+  return fetchApi<OpsHealth>("/trading/ops-health");
 }

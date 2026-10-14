@@ -52,6 +52,9 @@ import { loadPortfolioForwardActivity, type PortfolioForwardActivity } from "./f
 import { loadShadowPortfolioValuation } from "./shadowPortfolioValuation.js";
 
 export const ARENA_V1_COHORT_KEY = "ARENA_V1";
+/** The official 24/7 forward test on the server (OFFICIAL_V1 portfolios). */
+export const ARENA_OFFICIAL_V1_COHORT_KEY = "ARENA_OFFICIAL_V1";
+export type ArenaCohortPhaseKey = "UNLABELED" | "LOCAL_SHAKEDOWN" | "OFFICIAL";
 export const ARENA_DOSSIER_VERSION = "arena-dossier-v1";
 export const ARENA_EVALUATION_ENGINE_VERSION = `arena-evaluation-v1/1.0.0+${ARENA_FITNESS_ENGINE_VERSION}`;
 
@@ -96,6 +99,8 @@ export interface RegisterArenaCohortInput {
   readonly description?: string;
   readonly policy?: ArenaPolicy;
   readonly actorId: string;
+  /** Which kind of run the cohort's results belong to; never mixed across phases. */
+  readonly phase: ArenaCohortPhaseKey;
 }
 
 /** Idempotent: the same key with the same policy returns the existing cohort. */
@@ -107,6 +112,12 @@ export async function registerArenaCohort(
   const policyHash = arenaPolicyHash(policy);
   const existing = await database.arenaCohort.findUnique({ where: { key: input.key } });
   if (existing !== null) {
+    if (existing.phase !== input.phase) {
+      return fail(
+        "ARENA_COHORT_PHASE_CONFLICT",
+        `Cohort ${input.key} is ${existing.phase}; change it with set-phase, never by re-registering.`
+      );
+    }
     if (existing.policyHash !== policyHash) {
       return fail(
         "ARENA_COHORT_POLICY_CONFLICT",
@@ -123,6 +134,7 @@ export async function registerArenaCohort(
       policyVersion: policy.version,
       policyJson: asJson(policy),
       policyHash,
+      phase: input.phase,
       createdBy: input.actorId
     }
   });
@@ -170,6 +182,51 @@ export async function setArenaCohortPolicy(
     });
   });
   return { ok: true, result: { policyHash } };
+}
+
+/**
+ * Labels which kind of run a cohort's results belong to (e.g. the local
+ * system test as LOCAL_SHAKEDOWN), an audited operator decision. Changes no
+ * evaluation, participant or capital — only how the results are presented
+ * and exported, so they are never mixed with an official forward test.
+ */
+export async function setArenaCohortPhase(
+  database: PrismaClient,
+  input: {
+    readonly cohortKey: string;
+    readonly phase: ArenaCohortPhaseKey;
+    readonly actorId: string;
+    readonly reason: string;
+    readonly asOf: Date;
+  }
+): Promise<ArenaOpsResult<{ readonly phase: ArenaCohortPhaseKey }>> {
+  const cohort = await database.arenaCohort.findUnique({ where: { key: input.cohortKey } });
+  if (cohort === null) return fail("ARENA_COHORT_NOT_FOUND", `No arena cohort ${input.cohortKey}.`);
+  if (input.reason.trim() === "") return fail("ARENA_REASON_REQUIRED", "A phase change needs a reason.");
+  if (cohort.phase === input.phase) return { ok: true, result: { phase: input.phase } };
+  await database.$transaction(async (tx) => {
+    await tx.arenaCohort.update({ where: { id: cohort.id }, data: { phase: input.phase } });
+    const idempotencyKey = buildSpecificationHash({ cohortId: cohort.id, from: cohort.phase, to: input.phase });
+    await tx.tradingAuditEvent.create({
+      data: {
+        eventKey: `arena-phase:${idempotencyKey}`,
+        eventType: "ARENA_PHASE_CHANGED",
+        aggregateType: "ArenaCohort",
+        aggregateId: cohort.id,
+        actorType: TradingActorType.ADMIN,
+        actorId: input.actorId,
+        correlationId: idempotencyKey,
+        causationId: idempotencyKey,
+        idempotencyKey,
+        reasonCode: "ARENA_PHASE_CHANGED",
+        beforeState: asJson({ phase: cohort.phase }),
+        afterState: asJson({ phase: input.phase, reason: input.reason }),
+        codeVersion: process.env.TRADING_CODE_VERSION ?? "unversioned-local-build",
+        occurredAt: input.asOf
+      }
+    });
+  });
+  return { ok: true, result: { phase: input.phase } };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -999,6 +1056,7 @@ export async function buildArenaPostMortemDossier(
       id: participant.id,
       participantKey: participant.participantKey,
       cohortKey: participant.cohort.key,
+      cohortPhase: participant.cohort.phase,
       cohortPolicyHash: participant.cohort.policyHash,
       status: participant.status,
       forwardStartAt: participant.forwardStartAt?.toISOString() ?? null,

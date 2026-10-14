@@ -58,8 +58,11 @@ import {
   type TradingFlagSnapshot
 } from "../lib/tradingSafety.js";
 import {
+  PORTFOLIO_SETS,
   SHADOW_CHALLENGER_PORTFOLIO_KEY,
   SHADOW_PORTFOLIO_KEY,
+  resolvePortfolioSet,
+  type PortfolioSetKey,
   type ShadowPortfolioKey
 } from "../lib/shadowPortfolios.js";
 
@@ -190,6 +193,13 @@ export interface RunShadowStrategySetupOptions {
   readonly correlationId?: string;
   readonly actorId?: string;
   readonly codeVersion?: string;
+  /**
+   * Where the forward-tested strategies trade (`TRADING_PORTFOLIO_SET`):
+   * LOCAL_SHAKEDOWN by default, OFFICIAL_V1 on the server. Strategy versions
+   * are the same in every set; the legacy and inactive identities always
+   * stay in SHADOW_V1.
+   */
+  readonly portfolioSet?: PortfolioSetKey;
 }
 
 const asJson = (value: unknown): Prisma.InputJsonValue =>
@@ -209,6 +219,12 @@ export async function runShadowStrategySetup(
     ""
   ).trim();
   const gate = checkShadowBootstrapAllowed(env);
+  const portfolioSet = options.portfolioSet ?? resolvePortfolioSet(env);
+  const placement: Readonly<Record<string, ShadowPortfolioKey>> = PORTFOLIO_SETS[portfolioSet];
+  const definitions = DEFINITIONS.map((definition) => ({
+    ...definition,
+    portfolioKey: placement[definition.key] ?? definition.portfolioKey
+  }));
 
   const botRun = await database.botRun.create({
     data: {
@@ -217,7 +233,8 @@ export async function runShadowStrategySetup(
       startedAt: new Date(),
       metadataJson: asJson({
         correlationId,
-        strategyKeys: DEFINITIONS.map((definition) => definition.key),
+        strategyKeys: definitions.map((definition) => definition.key),
+        portfolioSet,
         symbols: SHADOW_ASSIGNMENT_SYMBOLS,
         activation: false
       })
@@ -276,7 +293,7 @@ export async function runShadowStrategySetup(
   }
 
   const portfolioByKey = new Map<ShadowPortfolioKey, { readonly id: string }>();
-  for (const portfolioKey of new Set(DEFINITIONS.map((definition) => definition.portfolioKey))) {
+  for (const portfolioKey of new Set(definitions.map((definition) => definition.portfolioKey))) {
     const portfolio = await database.portfolio.findUnique({
       where: { key: portfolioKey }
     });
@@ -313,7 +330,7 @@ export async function runShadowStrategySetup(
   let existingCount = 0;
   const entries: ShadowStrategySetupEntry[] = [];
 
-  for (const definition of DEFINITIONS) {
+  for (const definition of definitions) {
     const portfolio = portfolioByKey.get(definition.portfolioKey)!;
     const existingStrategy = await database.strategy.findUnique({
       where: { key: definition.key }

@@ -9,6 +9,8 @@ import {
 } from "../src/lib/alertOutbox.js";
 import { dispatchPendingAlerts, type AlertTransport } from "../src/lib/alertDispatcher.js";
 import { collectTradingAlerts } from "../src/lib/alertCollector.js";
+import { enqueueTradingAlert } from "../src/lib/alertOutbox.js";
+import { runShadowAlertOutbox } from "../src/jobs/shadowAlertOutbox.js";
 import { createFakeExecutionDatabase } from "./support/shadowExecutionFixtures.js";
 
 const ASOF = new Date("2026-08-10T12:00:00.000Z");
@@ -375,6 +377,40 @@ describe("collectTradingAlerts", () => {
 });
 
 describe("alert delivery never blocks trading", () => {
+  it("sends the alert-path test event and nothing else that happens to be pending", async () => {
+    const { database, tables } = seed();
+    await enqueueTradingAlert(database as never, {
+      eventType: "MARKET_DATA_STALE" as never,
+      aggregateType: "MarketData",
+      aggregateId: "BTCUSDT:1h",
+      occurrence: "stuck",
+      reasonCode: "MARKET_DATA_STALE",
+      payload: {},
+      asOf: ASOF
+    });
+    const sent: string[] = [];
+    const summary = await runShadowAlertOutbox(database as never, {
+      asOf: ASOF,
+      env: {
+        ENABLE_LIVE_TRADING: "false",
+        TRADING_MODE: "SHADOW",
+        TRADING_SHADOW_ENABLED: "true",
+        TRADING_STRATEGY_V1_ENABLED: "true",
+        TRADING_ALERT_OUTBOX_ENABLED: "true",
+        TRADING_ALERT_DELIVERY_ENABLED: "true"
+      },
+      testEvent: true,
+      transport: async (input) => {
+        sent.push(input.eventType);
+        return { alertId: "alert-test", ok: true };
+      }
+    });
+    assert.equal(summary.dispatch.sent, 1);
+    assert.deepEqual(sent, ["OPS_TEST"]);
+    const pending = tables.get("tradingAlertOutbox")!.rows.filter((row) => row.status === "PENDING");
+    assert.deepEqual(pending.map((row) => row.eventType), ["MARKET_DATA_STALE"]);
+  });
+
   it("keeps the job successful-by-contract and touches no trading table when delivery throws", async () => {
     const { database, tables, portfolio } = seed();
 

@@ -1318,6 +1318,14 @@ enum TradingAlertEventType {
   POSITION_MONITOR_STALE
   DAILY_LOSS_LIMIT_REACHED
   PORTFOLIO_LEDGER_CONFLICT
+  /// 24/7 operation: the newest closed Binance candle is too old (or not from Binance).
+  MARKET_DATA_STALE
+  /// 24/7 operation: a scheduled job (trading, arena or data pipeline) stopped completing.
+  SCHEDULED_JOB_STALE
+  /// 24/7 operation: the trading worker process (re)started.
+  WORKER_RESTARTED
+  /// Harmless end-to-end test of the alert path; never caused by trading.
+  OPS_TEST
 }
 
 enum TradingActorType {
@@ -2303,6 +2311,16 @@ enum ArenaRecommendation {
   DEMOTE_CHAMPION
 }
 
+/// Which kind of run a cohort's results belong to. Results of different
+/// phases are never comparable and never mixed.
+enum ArenaCohortPhase {
+  UNLABELED
+  /// System test on a development machine; not an official forward result.
+  LOCAL_SHAKEDOWN
+  /// The official forward test (24/7 on the server).
+  OFFICIAL
+}
+
 enum ArenaPostMortemStatus {
   OPEN
   HYPOTHESIS_RECORDED
@@ -2321,6 +2339,7 @@ model ArenaCohort {
   policyVersion String
   policyJson    Json
   policyHash    String
+  phase         ArenaCohortPhase   @default(UNLABELED)
   createdBy     String
   createdAt     DateTime           @default(now())
   updatedAt     DateTime           @updatedAt

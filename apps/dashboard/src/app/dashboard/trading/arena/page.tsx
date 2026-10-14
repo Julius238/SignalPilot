@@ -2,9 +2,11 @@ import type { ReactNode } from "react";
 
 import { EmptyState, ErrorState } from "../../../../components/empty-state";
 import { MetricCard, PageHeader, PageIntro, SectionCard } from "../../../../components/ui";
+import { OpsHealthCard } from "../../../../components/trading/ops-health-card";
 import { TradingDisabled } from "../../../../components/trading/trading-disabled";
 import {
   fetchArenaOverview,
+  fetchOpsHealth,
   type ArenaEvaluation,
   type ArenaOverview,
   type ArenaParticipant,
@@ -336,7 +338,7 @@ export default async function ArenaPage() {
     return <TradingDisabled />;
   }
 
-  const result = await fetchArenaOverview();
+  const [result, healthResult] = await Promise.all([fetchArenaOverview(), fetchOpsHealth()]);
   const data = result.data;
 
   return (
@@ -370,14 +372,35 @@ export default async function ArenaPage() {
             )}
           </SectionCard>
 
+          {healthResult.data ? (
+            <div style={{ marginTop: 16 }}>
+              <OpsHealthCard health={healthResult.data} />
+            </div>
+          ) : null}
+
           {data.cohorts.length === 0 ? (
             <EmptyState title="Noch keine Arena-Kohorte registriert." />
           ) : (
             data.cohorts.map((cohort) => (
               <div key={cohort.key} style={{ marginTop: 16 }}>
+                {cohort.phase !== "OFFICIAL" ? (
+                  <PageIntro
+                    purpose={`Kohorte ${cohort.key}`}
+                    tone="warn"
+                    verdict={
+                      cohort.phase === "LOCAL_SHAKEDOWN"
+                        ? "LOCAL_SHAKEDOWN — Systemtest, keine offiziellen Forward-Ergebnisse"
+                        : "Kohorte ohne Phasen-Kennzeichnung"
+                    }
+                    detail="Diese Zahlen werden nie mit dem offiziellen Forward-Test verglichen oder zusammengeführt."
+                  />
+                ) : null}
                 <SectionCard
                   title={`Rangliste · ${cohort.name}`}
-                  subtitle={`Forward-Daten (Shadow, Live) · Stand ${formatUtcDateTime(data.asOf)}`}
+                  subtitle={`${cohort.phase} · Forward-Daten (Shadow, Live) · Stand ${formatUtcDateTime(data.asOf)}`}
+                  action={
+                    <span className={`badge ${cohort.phase === "OFFICIAL" ? "trading-good" : "trading-warn"}`}>{cohort.phase}</span>
+                  }
                 >
                   <div className="table-wrap">
                     <table>

@@ -30,6 +30,7 @@ import {
 } from "@signalpilot/database";
 
 import { enqueueTradingAlert, type EnqueueTradingAlertResult } from "./alertOutbox.js";
+import { WORKER_STARTUP_JOB_NAME, collectOpsHealth } from "./opsHealth.js";
 
 /** Non-terminal position statuses — these must always have a live exit plan. */
 const NON_TERMINAL_POSITION_STATUSES = [
@@ -299,6 +300,78 @@ export async function collectTradingAlerts(
       })
     );
     record(accumulator, TradingAlertEventType.PORTFOLIO_LEDGER_CONFLICT, result);
+  }
+
+  // ── 24/7 operation: market data, job freshness, worker restarts ──────────
+  const health = await collectOpsHealth(database, asOf);
+  for (const entry of health.marketData) {
+    if (entry.ok) continue;
+    const result = await database.$transaction((tx) =>
+      enqueueTradingAlert(tx, {
+        eventType: TradingAlertEventType.MARKET_DATA_STALE,
+        aggregateType: "MarketData",
+        aggregateId: `${entry.symbol}:1h`,
+        // One alert per stuck candle: it repeats only once a newer candle
+        // arrived and went stale again.
+        occurrence: entry.latestCloseTime ?? "missing",
+        reasonCode: `MARKET_DATA_${entry.problem}`,
+        payload: {
+          symbol: entry.symbol,
+          latestCloseTime: entry.latestCloseTime,
+          source: entry.source,
+          ageMinutes: entry.ageMinutes
+        },
+        asOf
+      })
+    );
+    record(accumulator, TradingAlertEventType.MARKET_DATA_STALE, result);
+  }
+  for (const job of health.jobs) {
+    if (job.ok) continue;
+    const result = await database.$transaction((tx) =>
+      enqueueTradingAlert(tx, {
+        eventType: TradingAlertEventType.SCHEDULED_JOB_STALE,
+        aggregateType: "ScheduledJob",
+        aggregateId: job.jobName,
+        // One alert per stall: it repeats only after the job completed again.
+        occurrence: job.lastSuccessAt ?? "never-succeeded",
+        reasonCode: "SCHEDULED_JOB_STALE",
+        payload: {
+          job: job.label,
+          lastSuccessAt: job.lastSuccessAt,
+          lastStatus: job.lastStatus,
+          ageMinutes: job.ageMinutes,
+          maxAgeMinutes: job.maxAgeMinutes
+        },
+        asOf
+      })
+    );
+    record(accumulator, TradingAlertEventType.SCHEDULED_JOB_STALE, result);
+  }
+  const starts = await database.botRun.findMany({
+    where: { jobName: WORKER_STARTUP_JOB_NAME, startedAt: { gte: new Date(asOf.getTime() - 24 * 3_600_000) } },
+    orderBy: { startedAt: "desc" },
+    take: 10
+  });
+  for (const start of starts) {
+    const metadata = (start.metadataJson ?? {}) as Record<string, unknown>;
+    const result = await database.$transaction((tx) =>
+      enqueueTradingAlert(tx, {
+        eventType: TradingAlertEventType.WORKER_RESTARTED,
+        aggregateType: "TradingWorker",
+        aggregateId: String(metadata.host ?? "trading-worker"),
+        occurrence: start.id,
+        reasonCode: "WORKER_STARTED",
+        payload: {
+          startedAt: start.startedAt,
+          codeVersion: metadata.codeVersion ?? null,
+          jobCount: metadata.jobCount ?? null,
+          startsLast24h: health.workerStartsLast24h
+        },
+        asOf
+      })
+    );
+    record(accumulator, TradingAlertEventType.WORKER_RESTARTED, result);
   }
 
   return {

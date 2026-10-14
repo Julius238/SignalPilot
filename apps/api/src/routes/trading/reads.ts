@@ -23,6 +23,7 @@ import {
 } from "@signalpilot/database";
 import { getArenaOverview } from "@signalpilot/trading-worker/lib/arenaOverview";
 import { getForwardComparison } from "@signalpilot/trading-worker/lib/forwardComparison";
+import { collectOpsHealth } from "@signalpilot/trading-worker/lib/opsHealth";
 import { buildEligibilityReport } from "@signalpilot/trading-worker/lib/shadowEligibility";
 import type { FastifyInstance } from "fastify";
 
@@ -558,6 +559,14 @@ export async function registerTradingReadRoutes(server: FastifyInstance) {
    * recommendations are never applied by a read.
    */
   server.get("/trading/arena", async () => getArenaOverview(database));
+
+  /**
+   * 24/7 operating health from persisted state: market data freshness and
+   * source, last successful run of every scheduled job (data pipeline,
+   * trading, arena), worker restarts, sessions, kill switches and critical
+   * risk events. Read-only.
+   */
+  server.get("/trading/ops-health", async () => collectOpsHealth(database, new Date()));
 
   server.get("/trading/strategy-evaluations", async (request, reply) => {
     const query = asQueryRecord(request.query);

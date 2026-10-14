@@ -533,6 +533,35 @@ describe("shadowGenerateCandidates job", () => {
     assert.equal(paused.created, 0);
   });
 
+  it("catches up a lost tick but decides each anchor candle exactly once in scheduler mode", async () => {
+    const { database, writes } = createFakeDatabase([
+      buildFakeWorld({ symbol: "BTCUSDT", assetId: "asset-btc" }),
+      buildFakeWorld({ symbol: "ETHUSDT", assetId: "asset-eth", assignmentEnabled: false })
+    ]);
+    const scan = (minutes: number) =>
+      runShadowGenerateCandidates(database as never, {
+        asOf: new Date(AS_OF.getTime() + minutes * 60_000),
+        env: ENABLED_ENV,
+        correlationId: `catch-up-${minutes}`,
+        skipEvaluatedAnchors: true
+      });
+
+    const first = await scan(0);
+    assert.equal(first.created, 1);
+    // ETH has no enabled assignment: not even attempted, so no assembler noise.
+    assert.equal(first.assemblerFailures, 0);
+    assert.ok(first.results.every((result) => result.symbol === "BTCUSDT"));
+
+    // The next ticks of the same hour see the same anchor: skipped, nothing written.
+    const auditBefore = writes.auditEvents.length;
+    const second = await scan(5);
+    const third = await scan(10);
+    assert.deepEqual([second.skippedAlreadyEvaluated, third.skippedAlreadyEvaluated], [1, 1]);
+    assert.deepEqual([second.results.length, third.results.length], [0, 0]);
+    assert.equal(writes.tradeCandidates.length, 1);
+    assert.equal(writes.auditEvents.length, auditBefore);
+  });
+
   it("creates a SHORT candidate only with both Short flags and an enabled Short assignment", async () => {
     const shortWorld = buildFakeWorld({
       symbol: "BTCUSDT",

@@ -72,12 +72,16 @@ const JOB_DEFINITIONS: readonly ScheduledJobDefinition[] = [
   },
   {
     jobKey: "trading:candidate-scan",
-    cronExpression: "5 * * * *",
+    // Every five minutes with a per-anchor cursor: each (strategy, symbol) is
+    // still decided exactly once per closed hourly candle, but a tick lost to
+    // a restart, a late data worker or a suspended host is caught up by the
+    // next one instead of skipping the whole hour.
+    cronExpression: "*/5 * * * *",
     scope: CircuitBreakerScope.ENTRY,
     checkEntryWorkflow: true,
     enabled: (config) => config.jobFlags.candidateJobEnabled,
     run: (database, asOf, { entryPortfolioIds }) =>
-      runShadowGenerateCandidates(database, { asOf, portfolioIds: entryPortfolioIds })
+      runShadowGenerateCandidates(database, { asOf, portfolioIds: entryPortfolioIds, skipEvaluatedAnchors: true })
   },
   {
     jobKey: "trading:risk-decide",

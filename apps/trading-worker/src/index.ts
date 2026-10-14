@@ -26,15 +26,17 @@
  */
 
 import { writeFile } from "node:fs/promises";
+import { hostname } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { prisma } from "@signalpilot/database";
+import { BotRunStatus, prisma } from "@signalpilot/database";
 import { config as loadDotenv } from "dotenv";
 import type { ScheduledTask } from "node-cron";
 import pino from "pino";
 
 import { resolveTradingWorkerConfig } from "./config.js";
+import { WORKER_STARTUP_JOB_NAME } from "./lib/opsHealth.js";
 import { startTradingWorkerScheduler } from "./scheduler.js";
 import { assertProductionSafety } from "./safety.js";
 
@@ -55,6 +57,34 @@ async function touchHeartbeatFile(): Promise<void> {
   }
 }
 
+/**
+ * One technical BotRun per process start of a running scheduler, so restarts
+ * (planned or not) are visible and alerted (`WORKER_RESTARTED`). Only when
+ * the scheduler actually started: an idle, flag-disabled worker writes
+ * nothing. A database error here never stops the worker.
+ */
+async function recordWorkerStartup(jobCount: number): Promise<void> {
+  try {
+    const now = new Date();
+    await prisma.botRun.create({
+      data: {
+        jobName: WORKER_STARTUP_JOB_NAME,
+        status: BotRunStatus.SUCCESS,
+        startedAt: now,
+        finishedAt: now,
+        metadataJson: {
+          codeVersion: process.env.TRADING_CODE_VERSION ?? "unversioned-local-build",
+          host: hostname(),
+          pid: process.pid,
+          jobCount
+        }
+      }
+    });
+  } catch (error) {
+    logger.warn({ error }, "could not record the worker start");
+  }
+}
+
 async function main(): Promise<void> {
   assertProductionSafety();
 
@@ -71,6 +101,7 @@ async function main(): Promise<void> {
   } else {
     tasks = startTradingWorkerScheduler(resolved.config, prisma);
     logger.info({ jobCount: tasks.length }, "trading-worker scheduler started");
+    await recordWorkerStartup(tasks.length);
   }
 
   await touchHeartbeatFile();

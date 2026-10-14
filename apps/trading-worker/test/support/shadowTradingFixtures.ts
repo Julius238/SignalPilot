@@ -378,6 +378,7 @@ export function createFakeDatabase(worlds: readonly FakeWorld[]) {
       }
     );
 
+  const cursors = new Map<string, Record<string, unknown>>();
   const database = {
     asset: {
       findFirst: async ({
@@ -414,14 +415,49 @@ export function createFakeDatabase(worlds: readonly FakeWorld[]) {
                 where.strategy.key)
         ) ?? null,
       findMany: async ({ where }: { where?: { enabled?: boolean; portfolioId?: { in: string[] } } } = {}) =>
-        merged.assignments.filter(
-          (assignment) =>
-            (where?.enabled === undefined || assignment.enabled === where.enabled) &&
-            (where?.portfolioId === undefined ||
-              where.portfolioId.in.includes(assignment.portfolioId as string))
-        )
+        merged.assignments
+          .filter(
+            (assignment) =>
+              (where?.enabled === undefined || assignment.enabled === where.enabled) &&
+              (where?.portfolioId === undefined ||
+                where.portfolioId.in.includes(assignment.portfolioId as string))
+          )
+          .map((assignment) => ({
+            ...assignment,
+            asset: merged.assets.find((asset) => asset.id === assignment.assetId) ?? null
+          }))
+    },
+    tradingJobCursor: {
+      findUnique: async ({ where }: { where: { jobKey_scopeKey: { jobKey: string; scopeKey: string } } }) =>
+        cursors.get(`${where.jobKey_scopeKey.jobKey}|${where.jobKey_scopeKey.scopeKey}`) ?? null,
+      upsert: async ({
+        where,
+        create,
+        update
+      }: {
+        where: { jobKey_scopeKey: { jobKey: string; scopeKey: string } };
+        create: Record<string, unknown>;
+        update: Record<string, unknown>;
+      }) => {
+        const key = `${where.jobKey_scopeKey.jobKey}|${where.jobKey_scopeKey.scopeKey}`;
+        const existing = cursors.get(key);
+        const { version: _version, ...changes } = update;
+        void _version;
+        const row = existing === undefined ? { ...create } : { ...existing, ...changes };
+        cursors.set(key, row);
+        return row;
+      }
     },
     candle: {
+      findFirst: async ({ where }: { where: { symbol: string; timeframe: string; closeTime?: { lte?: Date } } }) =>
+        merged.candles
+          .filter(
+            (candle) =>
+              candle.symbol === where.symbol &&
+              candle.timeframe === where.timeframe &&
+              matchesDateFilter(candle.closeTime, where.closeTime)
+          )
+          .sort((left, right) => right.closeTime.getTime() - left.closeTime.getTime())[0] ?? null,
       findMany: async ({
         where,
         take

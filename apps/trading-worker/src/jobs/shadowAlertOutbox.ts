@@ -24,11 +24,12 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { hostname } from "node:os";
 
-import { BotRunStatus, Prisma, prisma, type PrismaClient } from "@signalpilot/database";
+import { BotRunStatus, Prisma, TradingAlertEventType, prisma, type PrismaClient } from "@signalpilot/database";
 import { config } from "dotenv";
 import pino from "pino";
 
 import { collectTradingAlerts, type CollectTradingAlertsSummary } from "../lib/alertCollector.js";
+import { enqueueTradingAlert } from "../lib/alertOutbox.js";
 import {
   createN8nTransport,
   dispatchPendingAlerts,
@@ -66,6 +67,12 @@ export interface RunShadowAlertOutboxOptions {
   /** Injectable so a test never reaches the network. */
   readonly transport?: AlertTransport;
   readonly batchSize?: number;
+  /**
+   * Enqueue one harmless `OPS_TEST` alert and deliver only that entry, to
+   * prove the outbox → n8n path end to end without sending anything else
+   * that happens to be pending. Never caused by trading.
+   */
+  readonly testEvent?: boolean;
 }
 
 export interface ShadowAlertOutboxSummary {
@@ -123,8 +130,22 @@ export async function runShadowAlertOutbox(
   let dispatch = EMPTY_DISPATCH;
   let failed = false;
 
+  const testOnly = options.testEvent === true;
+  if (testOnly) {
+    await enqueueTradingAlert(database, {
+      eventType: TradingAlertEventType.OPS_TEST,
+      aggregateType: "OpsTest",
+      aggregateId: "alert-path",
+      occurrence: asOf.toISOString(),
+      reasonCode: "ALERT_PATH_TEST",
+      payload: { note: "Testalarm: keine Handelsaktion, nur Pruefung des Alert-Pfads", host: hostname() },
+      asOf
+    });
+  }
+
   try {
-    collect = await collectTradingAlerts(database, { asOf });
+    // The alert-path test records and sends only its own entry.
+    if (!testOnly) collect = await collectTradingAlerts(database, { asOf });
   } catch (error) {
     failed = true;
     await writeBotLog(database, "error", `${JOB_NAME} failed while collecting alerts`, {
@@ -141,7 +162,8 @@ export async function runShadowAlertOutbox(
         asOf,
         ownerId,
         transport: options.transport ?? createN8nTransport(database),
-        batchSize: options.batchSize
+        batchSize: options.batchSize,
+        ...(testOnly ? { onlyEventTypes: [TradingAlertEventType.OPS_TEST] } : {})
       });
     } catch (error) {
       // A delivery failure is logged, never rethrown: alerting must not be
@@ -203,7 +225,7 @@ async function writeBotLog(
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
-  runShadowAlertOutbox()
+  runShadowAlertOutbox(prisma, { testEvent: process.argv.includes("--test-event") })
     .then((summary) => {
       if (summary.blocked) {
         logger.error({ reasonCode: summary.blockReasonCode }, `${SHADOW_ALERT_OUTBOX_JOB_KEY} refused to run`);

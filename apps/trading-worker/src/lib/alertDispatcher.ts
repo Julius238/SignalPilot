@@ -19,7 +19,7 @@
  * that dies mid-attempt releases its entry instead of stranding it.
  */
 
-import { Prisma, TradingAlertOutboxStatus, type PrismaClient } from "@signalpilot/database";
+import { Prisma, TradingAlertOutboxStatus, type PrismaClient, type TradingAlertEventType } from "@signalpilot/database";
 import { sendMarketEventAlertToN8n, type ResearchAlertSeverity } from "@signalpilot/alerts";
 
 import { backoffMsForAttempt } from "./alertOutbox.js";
@@ -97,6 +97,8 @@ export interface DispatchPendingAlertsOptions {
   readonly transport: AlertTransport;
   readonly batchSize?: number;
   readonly claimDurationMs?: number;
+  /** Deliver only these event types (the alert-path test sends its own entry and nothing else). */
+  readonly onlyEventTypes?: readonly TradingAlertEventType[];
 }
 
 export interface DispatchPendingAlertsSummary {
@@ -155,7 +157,8 @@ export async function dispatchPendingAlerts(
   const due = await database.tradingAlertOutbox.findMany({
     where: {
       status: { in: [TradingAlertOutboxStatus.PENDING, TradingAlertOutboxStatus.FAILED] },
-      nextAttemptAt: { lte: asOf }
+      nextAttemptAt: { lte: asOf },
+      ...(options.onlyEventTypes === undefined ? {} : { eventType: { in: [...options.onlyEventTypes] } })
     },
     orderBy: [{ severity: "desc" }, { nextAttemptAt: "asc" }],
     take: options.batchSize ?? DEFAULT_BATCH_SIZE
