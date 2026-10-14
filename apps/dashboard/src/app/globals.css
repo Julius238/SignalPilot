@@ -5760,3 +5760,12 @@ td a {
   flex-basis: 100%;
   padding-left: 13px;
 }
+
+/* ── SignalPilot Arena: historische Replays sichtbar getrennt vom Forward-Test ── */
+.arena-replay {
+  border-style: dashed;
+  border-color: rgba(239, 189, 106, 0.45);
+  background:
+    repeating-linear-gradient(135deg, rgba(239, 189, 106, 0.035) 0 12px, transparent 12px 24px),
+    var(--panel);
+}

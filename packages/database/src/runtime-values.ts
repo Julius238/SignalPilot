@@ -75,5 +75,11 @@ export const TradingAlertOutboxStatus = p.TradingAlertOutboxStatus;
 export const TradingSessionMode = p.TradingSessionMode;
 export const TradingSessionStatus = p.TradingSessionStatus;
 
+// ── SignalPilot Arena ─────────────────────────────────────────────────────
+export const ArenaEvidenceStatus = p.ArenaEvidenceStatus;
+export const ArenaParticipantStatus = p.ArenaParticipantStatus;
+export const ArenaPostMortemStatus = p.ArenaPostMortemStatus;
+export const ArenaRecommendation = p.ArenaRecommendation;
+
 // ── Prisma client singleton ───────────────────────────────────────────────
 export const prisma = new p.PrismaClient();

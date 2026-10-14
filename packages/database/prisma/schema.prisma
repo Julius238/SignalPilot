@@ -585,7 +585,7 @@ model BacktestRun {
 /// strategy/risk/simulation engines over stored candles. Research output only —
 /// never read by the trading worker.
 model ShadowReplayRun {
-  id              String   @id @default(cuid())
+  id              String    @id @default(cuid())
   label           String
   symbol          String
   strategyKey     String
@@ -601,8 +601,8 @@ model ShadowReplayRun {
   cycles          Int
   candidates      Int
   closedTrades    Int
-  startingCash    Decimal  @db.Decimal(30, 12)
-  finalEquity     Decimal  @db.Decimal(30, 12)
+  startingCash    Decimal   @db.Decimal(30, 12)
+  finalEquity     Decimal   @db.Decimal(30, 12)
   outputHash      String
   durationMs      Int
   configJson      Json
@@ -611,7 +611,7 @@ model ShadowReplayRun {
   tradesJson      Json
   equityCurveJson Json
   notesJson       Json
-  createdAt       DateTime @default(now())
+  createdAt       DateTime  @default(now())
 
   @@index([createdAt])
   @@index([symbol, mode])
@@ -1365,6 +1365,7 @@ model StrategyVersion {
   tradeCandidates   TradeCandidate[]
   shadowPositions   ShadowPosition[]
   performances      StrategyPerformance[]
+  arenaParticipants ArenaParticipant[]
 
   @@unique([strategyId, version])
   @@index([status])
@@ -1939,6 +1940,7 @@ model Portfolio {
   riskEvents       RiskEvent[]
   sessions         TradingSession[]
   performances     StrategyPerformance[]
+  arenaParticipant ArenaParticipant?
 
   @@index([status])
 }
@@ -2068,7 +2070,7 @@ model TradingSession {
 
 /// Shadow-only performance projection. PaperSignalEvaluation is never an input.
 model StrategyPerformance {
-  id                           String                    @id @default(cuid())
+  id                           String                     @id @default(cuid())
   /// Deterministic identity of one computed snapshot: portfolio, window, asOf,
   /// segment, engine version and input hash. It replaces the former
   /// `@@unique([strategyVersionId, portfolioId, window, asOf])`, which could
@@ -2076,7 +2078,7 @@ model StrategyPerformance {
   /// versions side by side (P8: "Keine historischen Ergebnisse überschreiben,
   /// wenn sich Berechnungslogik oder Version ändert"). Built by
   /// `@signalpilot/trading-domain`'s `buildStrategyPerformanceSnapshotKey`.
-  snapshotKey                  String                    @unique
+  snapshotKey                  String                     @unique
   /// Null for every segment that is not a single strategy version (OVERALL,
   /// ASSET, MARKET_REGIME, EXIT_REASON) — those aggregate across versions.
   strategyVersionId            String?
@@ -2085,67 +2087,67 @@ model StrategyPerformance {
   segmentType                  StrategyPerformanceSegment @default(OVERALL)
   /// Bucket identity inside `segmentType`: "ALL", an assetId, a regime name,
   /// a `ShadowFillTriggerType`, a strategyVersionId, or "UNKNOWN".
-  segmentKey                   String                    @default("ALL")
-  segmentLabel                 String                    @default("ALL")
+  segmentKey                   String                     @default("ALL")
+  segmentLabel                 String                     @default("ALL")
   asOf                         DateTime
   from                         DateTime
   to                           DateTime
-  closedTrades                 Int                       @default(0)
-  wins                         Int                       @default(0)
-  losses                       Int                       @default(0)
-  breakeven                    Int                       @default(0)
-  grossPnl                     Decimal                   @default(0) @db.Decimal(30, 12)
-  netPnl                       Decimal                   @default(0) @db.Decimal(30, 12)
-  fees                         Decimal                   @default(0) @db.Decimal(30, 12)
-  averageR                     Decimal                   @default(0) @db.Decimal(30, 12)
-  profitFactor                 Decimal                   @default(0) @db.Decimal(30, 12)
-  maxDrawdownPct               Decimal                   @default(0) @db.Decimal(30, 12)
-  averageHoldMinutes           Decimal                   @default(0) @db.Decimal(30, 12)
-  expectancy                   Decimal                   @default(0) @db.Decimal(30, 12)
+  closedTrades                 Int                        @default(0)
+  wins                         Int                        @default(0)
+  losses                       Int                        @default(0)
+  breakeven                    Int                        @default(0)
+  grossPnl                     Decimal                    @default(0) @db.Decimal(30, 12)
+  netPnl                       Decimal                    @default(0) @db.Decimal(30, 12)
+  fees                         Decimal                    @default(0) @db.Decimal(30, 12)
+  averageR                     Decimal                    @default(0) @db.Decimal(30, 12)
+  profitFactor                 Decimal                    @default(0) @db.Decimal(30, 12)
+  maxDrawdownPct               Decimal                    @default(0) @db.Decimal(30, 12)
+  averageHoldMinutes           Decimal                    @default(0) @db.Decimal(30, 12)
+  expectancy                   Decimal                    @default(0) @db.Decimal(30, 12)
   // ── P8 metrics ──────────────────────────────────────────────────────────
   // Nullable columns are the metrics that are genuinely not always derivable.
   // A null here is never "zero"; `metricsJson` carries the machine-readable
   // `MetricNullReason` for every one of them.
-  winRatePct                   Decimal?                  @db.Decimal(30, 12)
-  grossProfit                  Decimal                   @default(0) @db.Decimal(30, 12)
-  grossLoss                    Decimal                   @default(0) @db.Decimal(30, 12)
-  simulatedExecutionCost       Decimal                   @default(0) @db.Decimal(30, 12)
-  averageWin                   Decimal?                  @db.Decimal(30, 12)
-  averageLoss                  Decimal?                  @db.Decimal(30, 12)
-  cumulativeR                  Decimal?                  @db.Decimal(30, 12)
-  tradesWithPlannedRisk        Int                       @default(0)
-  maxWinStreak                 Int                       @default(0)
-  maxLossStreak                Int                       @default(0)
-  maxDrawdownAmount            Decimal?                  @db.Decimal(30, 12)
-  recoveryFactor               Decimal?                  @db.Decimal(30, 12)
-  exposureMinutes              Decimal                   @default(0) @db.Decimal(30, 12)
-  exposurePct                  Decimal?                  @db.Decimal(30, 12)
-  averageMaePct                Decimal?                  @db.Decimal(30, 12)
-  averageMfePct                Decimal?                  @db.Decimal(30, 12)
-  sharpeRatio                  Decimal?                  @db.Decimal(30, 12)
-  sortinoRatio                 Decimal?                  @db.Decimal(30, 12)
-  returnObservations           Int                       @default(0)
-  assessedCandidates           Int                       @default(0)
-  riskRejectedCandidates       Int                       @default(0)
-  invalidCandidates            Int                       @default(0)
-  expiredCandidates            Int                       @default(0)
-  riskRejectionRatePct         Decimal?                  @db.Decimal(30, 12)
+  winRatePct                   Decimal?                   @db.Decimal(30, 12)
+  grossProfit                  Decimal                    @default(0) @db.Decimal(30, 12)
+  grossLoss                    Decimal                    @default(0) @db.Decimal(30, 12)
+  simulatedExecutionCost       Decimal                    @default(0) @db.Decimal(30, 12)
+  averageWin                   Decimal?                   @db.Decimal(30, 12)
+  averageLoss                  Decimal?                   @db.Decimal(30, 12)
+  cumulativeR                  Decimal?                   @db.Decimal(30, 12)
+  tradesWithPlannedRisk        Int                        @default(0)
+  maxWinStreak                 Int                        @default(0)
+  maxLossStreak                Int                        @default(0)
+  maxDrawdownAmount            Decimal?                   @db.Decimal(30, 12)
+  recoveryFactor               Decimal?                   @db.Decimal(30, 12)
+  exposureMinutes              Decimal                    @default(0) @db.Decimal(30, 12)
+  exposurePct                  Decimal?                   @db.Decimal(30, 12)
+  averageMaePct                Decimal?                   @db.Decimal(30, 12)
+  averageMfePct                Decimal?                   @db.Decimal(30, 12)
+  sharpeRatio                  Decimal?                   @db.Decimal(30, 12)
+  sortinoRatio                 Decimal?                   @db.Decimal(30, 12)
+  returnObservations           Int                        @default(0)
+  assessedCandidates           Int                        @default(0)
+  riskRejectedCandidates       Int                        @default(0)
+  invalidCandidates            Int                        @default(0)
+  expiredCandidates            Int                        @default(0)
+  riskRejectionRatePct         Decimal?                   @db.Decimal(30, 12)
   /// The complete engine result for this segment, including every
   /// `{ value, reason }` pair. The typed columns above are a query-friendly
   /// projection of it, never a separate source of truth.
   metricsJson                  Json?
-  engineVersion                String                    @default("legacy")
-  codeVersion                  String                    @default("legacy")
+  engineVersion                String                     @default("legacy")
+  codeVersion                  String                     @default("legacy")
   /// Latest source timestamp the computation saw — the data cut it is bound to.
   dataThroughAt                DateTime?
   computedAt                   DateTime?
   sourceThroughPositionEventId String?
   inputHash                    String
-  outputHash                   String                    @default("")
-  createdAt                    DateTime                  @default(now())
-  strategyVersion              StrategyVersion?          @relation(fields: [strategyVersionId], references: [id], onDelete: Restrict)
-  portfolio                    Portfolio                 @relation(fields: [portfolioId], references: [id], onDelete: Restrict)
-  sourceThroughPositionEvent   ShadowPositionEvent?      @relation(fields: [sourceThroughPositionEventId], references: [id], onDelete: Restrict)
+  outputHash                   String                     @default("")
+  createdAt                    DateTime                   @default(now())
+  strategyVersion              StrategyVersion?           @relation(fields: [strategyVersionId], references: [id], onDelete: Restrict)
+  portfolio                    Portfolio                  @relation(fields: [portfolioId], references: [id], onDelete: Restrict)
+  sourceThroughPositionEvent   ShadowPositionEvent?       @relation(fields: [sourceThroughPositionEventId], references: [id], onDelete: Restrict)
 
   @@index([portfolioId, window, asOf])
   @@index([portfolioId, segmentType, segmentKey, asOf])
@@ -2160,13 +2162,13 @@ model StrategyPerformance {
 /// trade notifications, and a delivery failure must never block trading
 /// monitoring or a risk-reducing exit.
 model TradingAlertOutbox {
-  id               String                    @id @default(cuid())
+  id               String                      @id @default(cuid())
   /// Stable, derived from the triggering aggregate — the same condition
   /// observed twice never produces a second alert.
-  idempotencyKey   String                    @unique
+  idempotencyKey   String                      @unique
   eventType        TradingAlertEventType
   severity         RiskSeverity
-  status           TradingAlertOutboxStatus  @default(PENDING)
+  status           TradingAlertOutboxStatus    @default(PENDING)
   aggregateType    String
   aggregateId      String
   portfolioId      String?
@@ -2176,8 +2178,8 @@ model TradingAlertOutbox {
   /// internal state (P8: "keine Secrets oder unbereinigten internen Payloads").
   payloadJson      Json
   payloadHash      String
-  attemptCount     Int                       @default(0)
-  maxAttempts      Int                       @default(5)
+  attemptCount     Int                         @default(0)
+  maxAttempts      Int                         @default(5)
   nextAttemptAt    DateTime
   lastAttemptAt    DateTime?
   lastError        String?
@@ -2188,9 +2190,9 @@ model TradingAlertOutbox {
   deadLetteredAt   DateTime?
   /// The `Alert` row the existing n8n dispatcher created, when one was reached.
   alertId          String?
-  version          Int                       @default(0)
-  createdAt        DateTime                  @default(now())
-  updatedAt        DateTime                  @updatedAt
+  version          Int                         @default(0)
+  createdAt        DateTime                    @default(now())
+  updatedAt        DateTime                    @updatedAt
   attempts         TradingAlertOutboxAttempt[]
 
   @@index([status, nextAttemptAt])
@@ -2270,4 +2272,195 @@ model TradingJobCursor {
   @@unique([jobKey, scopeKey])
   @@index([jobKey, lastProcessedAt])
   @@index([claimExpiresAt])
+}
+
+// ── SignalPilot Arena ────────────────────────────────────────────────────────
+// Strategies compete for survival on their own virtual capital. The arena only
+// observes and recommends (docs/trading/17-arena.md): it never writes a
+// portfolio, ledger, session, assignment or risk limit.
+
+enum ArenaParticipantStatus {
+  CANDIDATE
+  ACTIVE
+  PROBATION
+  PROVEN
+  CHAMPION
+  RETIRED
+}
+
+enum ArenaEvidenceStatus {
+  PROVISIONAL
+  SUFFICIENT
+}
+
+enum ArenaRecommendation {
+  HOLD
+  PROBATION
+  RETIRE
+  REINSTATE
+  PROMOTE_PROVEN
+  PROMOTE_CHAMPION
+  DEMOTE_CHAMPION
+}
+
+enum ArenaPostMortemStatus {
+  OPEN
+  HYPOTHESIS_RECORDED
+  SUCCESSOR_REGISTERED
+  CLOSED
+}
+
+/// A group of participants competing under one versioned, hashed policy
+/// (fitness, evidence gate, survival floor, lifecycle bands). The policy is
+/// arena configuration, never a strategy parameter.
+model ArenaCohort {
+  id            String             @id @default(cuid())
+  key           String             @unique
+  name          String
+  description   String?
+  policyVersion String
+  policyJson    Json
+  policyHash    String
+  createdBy     String
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+  participants  ArenaParticipant[]
+  evaluations   ArenaEvaluation[]
+}
+
+/// One immutable strategy version trading in its own portfolio. The
+/// portfolio's ledger is its only capital: no top-up, no reset, no transfer.
+model ArenaParticipant {
+  id                  String                  @id @default(cuid())
+  participantKey      String                  @unique
+  cohortId            String
+  /// One participant per portfolio, one portfolio per participant.
+  portfolioId         String                  @unique
+  strategyVersionId   String
+  strategyKey         String
+  specificationHash   String
+  status              ArenaParticipantStatus
+  /// The portfolio's starting cash at registration; never changes.
+  initialCapital      Decimal                 @db.Decimal(30, 12)
+  /// Activation of the portfolio's session; every forward number starts here.
+  forwardStartAt      DateTime?
+  /// The participant whose post-mortem produced this one (V1 → V2 lineage).
+  parentParticipantId String?
+  registeredBy        String
+  statusChangedAt     DateTime
+  version             Int                     @default(0)
+  createdAt           DateTime                @default(now())
+  updatedAt           DateTime                @updatedAt
+  cohort              ArenaCohort             @relation(fields: [cohortId], references: [id], onDelete: Restrict)
+  portfolio           Portfolio               @relation(fields: [portfolioId], references: [id], onDelete: Restrict)
+  strategyVersion     StrategyVersion         @relation(fields: [strategyVersionId], references: [id], onDelete: Restrict)
+  parent              ArenaParticipant?       @relation("ArenaLineage", fields: [parentParticipantId], references: [id], onDelete: Restrict)
+  successors          ArenaParticipant[]      @relation("ArenaLineage")
+  events              ArenaParticipantEvent[]
+  evaluations         ArenaEvaluation[]
+  postMortems         ArenaPostMortem[]
+
+  @@index([cohortId, status])
+}
+
+/// Append-only lifecycle history: registration and every status change, with
+/// the reason, the actor and the evaluation it relied on.
+model ArenaParticipantEvent {
+  id            String                  @id @default(cuid())
+  eventKey      String                  @unique
+  participantId String
+  eventType     String
+  fromStatus    ArenaParticipantStatus?
+  toStatus      ArenaParticipantStatus
+  reasonCode    String
+  note          String?
+  actorType     TradingActorType
+  actorId       String
+  evaluationId  String?
+  payloadJson   Json
+  occurredAt    DateTime
+  createdAt     DateTime                @default(now())
+  participant   ArenaParticipant        @relation(fields: [participantId], references: [id], onDelete: Restrict)
+
+  @@index([participantId, occurredAt])
+}
+
+/// Append-only fitness, evidence and recommendation snapshot of one
+/// participant, hash-chained per participant (`previousOutputHash`), so a
+/// rewritten history is detectable. Forward data only — never replay.
+model ArenaEvaluation {
+  id                    String                  @id @default(cuid())
+  evaluationKey         String                  @unique
+  participantId         String
+  cohortId              String
+  asOf                  DateTime
+  status                ArenaParticipantStatus
+  policyVersion         String
+  policyHash            String
+  engineVersion         String
+  codeVersion           String
+  evidenceStatus        ArenaEvidenceStatus
+  evidenceProgress      Decimal                 @db.Decimal(30, 12)
+  forwardDays           Decimal                 @db.Decimal(30, 12)
+  closedTrades          Int
+  initialCapital        Decimal                 @db.Decimal(30, 12)
+  equity                Decimal                 @db.Decimal(30, 12)
+  netPnl                Decimal                 @db.Decimal(30, 12)
+  returnPct             Decimal                 @db.Decimal(30, 12)
+  /// ln(equity / initial capital); null only for a wiped-out portfolio.
+  logGrowth             Decimal?                @db.Decimal(30, 12)
+  maxDrawdownPct        Decimal                 @db.Decimal(30, 12)
+  profitFactor          Decimal?                @db.Decimal(30, 12)
+  averageR              Decimal?                @db.Decimal(30, 12)
+  winRatePct            Decimal?                @db.Decimal(30, 12)
+  maxLossStreak         Int
+  costs                 Decimal                 @db.Decimal(30, 12)
+  exposurePct           Decimal?                @db.Decimal(30, 12)
+  rawFitness            Decimal                 @db.Decimal(30, 12)
+  fitness               Decimal                 @db.Decimal(30, 12)
+  rank                  Int?
+  survivalFloorBreached Boolean
+  hardStop              Boolean
+  recommendation        ArenaRecommendation
+  recommendedStatus     ArenaParticipantStatus?
+  reasonCodes           String[]
+  componentsJson        Json
+  metricsJson           Json
+  inputHash             String
+  previousOutputHash    String?
+  outputHash            String
+  createdAt             DateTime                @default(now())
+  participant           ArenaParticipant        @relation(fields: [participantId], references: [id], onDelete: Restrict)
+  cohort                ArenaCohort             @relation(fields: [cohortId], references: [id], onDelete: Restrict)
+
+  @@index([participantId, asOf])
+  @@index([cohortId, asOf])
+}
+
+/// The case file a later analysis (by Claude) works from when a participant
+/// lands on PROBATION or RETIRED: a frozen, hashed dossier of its forward
+/// trades, regimes and evaluations, then the hypothesis and the successor.
+model ArenaPostMortem {
+  id                        String                 @id @default(cuid())
+  caseKey                   String                 @unique
+  participantId             String
+  triggerStatus             ArenaParticipantStatus
+  triggerEvaluationId       String?
+  status                    ArenaPostMortemStatus  @default(OPEN)
+  dossierVersion            String
+  dossierJson               Json
+  dossierHash               String
+  hypothesis                String?
+  hypothesisAuthor          String?
+  hypothesisRecordedAt      DateTime?
+  proposedStrategyKey       String?
+  proposedSpecificationHash String?
+  successorParticipantId    String?
+  createdBy                 String
+  createdAt                 DateTime               @default(now())
+  updatedAt                 DateTime               @updatedAt
+  participant               ArenaParticipant       @relation(fields: [participantId], references: [id], onDelete: Restrict)
+
+  @@index([participantId, createdAt])
+  @@index([status])
 }

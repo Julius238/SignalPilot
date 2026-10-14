@@ -6,6 +6,7 @@
 #
 #   scripts/ops/local-shadow.sh job <datei>            # z. B. shadowStartTradingDay
 #   scripts/ops/local-shadow.sh ops <args…>            # shadowOps (Assignments, Session, Kill Switch)
+#   scripts/ops/local-shadow.sh arena <args…>          # SignalPilot Arena (bootstrap-v1, evaluate, transition, …)
 #   scripts/ops/local-shadow.sh bootstrap              # Champion-/Challenger-Portfolio, Profile, Strategy-Setup (idempotent)
 #   scripts/ops/local-shadow.sh eligibility [--portfolio=SHADOW_CHALLENGER_V1]
 #   scripts/ops/local-shadow.sh install-agent          # Trading-Worker als launchd-Agent starten
@@ -102,6 +103,10 @@ case "$command" in
     ;;
   ops)
     run_node dist/jobs/shadowOps.js "$@"
+    ;;
+  arena)
+    # SignalPilot Arena: bootstrap-v1, evaluate, transition, export-dossier, …
+    run_node dist/jobs/arenaOps.js "$@"
     ;;
   bootstrap)
     # Champion and challenger portfolios, then the strategy setup that

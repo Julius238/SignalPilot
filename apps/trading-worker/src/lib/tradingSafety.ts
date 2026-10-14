@@ -68,7 +68,9 @@ export const ShadowJobReasonCode = {
   // the short strategy, and the shadow-short execution capability itself.
   STRATEGY_LONG_V1_DISABLED: "STRATEGY_LONG_V1_DISABLED",
   STRATEGY_SHORT_V1_DISABLED: "STRATEGY_SHORT_V1_DISABLED",
-  SHADOW_SHORT_DISABLED: "SHADOW_SHORT_DISABLED"
+  SHADOW_SHORT_DISABLED: "SHADOW_SHORT_DISABLED",
+  // SignalPilot Arena: observing and recommending only, switchable on its own.
+  ARENA_DISABLED: "ARENA_DISABLED"
 } as const;
 export type ShadowJobReasonCode =
   (typeof ShadowJobReasonCode)[keyof typeof ShadowJobReasonCode];
@@ -434,6 +436,28 @@ export function checkShadowPerformanceJobAllowed(
       allowed: false,
       reasonCode: ShadowJobReasonCode.PERFORMANCE_JOB_DISABLED,
       message: "TRADING_PERFORMANCE_JOB_ENABLED is not true.",
+      flags: base.flags
+    };
+  }
+  return base;
+}
+
+/**
+ * Gate for the arena evaluation and its operator commands. They read the
+ * trading tables and write only arena tables, so the shared shadow gate plus
+ * their own `TRADING_ARENA_ENABLED` flag suffice.
+ */
+export function checkArenaJobAllowed(
+  env: EnvSource = process.env
+): TradingGateResult {
+  const base = checkShadowBaseAllowed(env);
+  if (!base.allowed) return base;
+  const arena = parseStrictBoolean("TRADING_ARENA_ENABLED", env.TRADING_ARENA_ENABLED, false);
+  if (!arena.ok || !arena.value) {
+    return {
+      allowed: false,
+      reasonCode: ShadowJobReasonCode.ARENA_DISABLED,
+      message: arena.ok ? "TRADING_ARENA_ENABLED is not true." : arena.message,
       flags: base.flags
     };
   }

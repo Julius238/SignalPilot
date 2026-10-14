@@ -21,6 +21,7 @@ import {
   prisma,
   type PrismaClient
 } from "@signalpilot/database";
+import { getArenaOverview } from "@signalpilot/trading-worker/lib/arenaOverview";
 import { getForwardComparison } from "@signalpilot/trading-worker/lib/forwardComparison";
 import { buildEligibilityReport } from "@signalpilot/trading-worker/lib/shadowEligibility";
 import type { FastifyInstance } from "fastify";
@@ -549,6 +550,14 @@ export async function registerTradingReadRoutes(server: FastifyInstance) {
    * separate block. Read-only.
    */
   server.get("/trading/forward-comparison", async () => getForwardComparison(database));
+
+  /**
+   * SignalPilot Arena: cohorts, leaderboard from the newest evaluation of each
+   * participant, live activity, lifecycle and post-mortems, plus the
+   * historical replay as a separate block. Read-only — the arena's
+   * recommendations are never applied by a read.
+   */
+  server.get("/trading/arena", async () => getArenaOverview(database));
 
   server.get("/trading/strategy-evaluations", async (request, reply) => {
     const query = asQueryRecord(request.query);

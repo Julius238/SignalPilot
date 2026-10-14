@@ -116,7 +116,8 @@ export const SCHEDULED_JOB_RUN_NAMES: Readonly<Record<string, readonly string[]>
   "trading:simulate-fill": ["shadowProcessFills"],
   "trading:monitor-positions": ["shadowMonitorPositions"],
   "trading:reconcile": ["shadowReconcilePortfolio"],
-  "trading:performance-refresh": ["shadowPerformanceRefresh"]
+  "trading:performance-refresh": ["shadowPerformanceRefresh"],
+  "trading:arena-evaluate": ["arenaEvaluate"]
 });
 
 export interface EvaluateCircuitBreakerInput {

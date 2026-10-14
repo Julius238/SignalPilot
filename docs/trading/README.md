@@ -37,6 +37,7 @@ Verbindlich ausgeschlossen sind Exchange-Zugangsdaten, Exchange-Schreibzugriffe,
 14. [Aktivierung des ersten BTC-Shadow-Tests](14-shadow-test-activation-runbook.md)
 15. [72-Stunden- und 60-Tage-Beobachtungsplan](15-shadow-observation-plan.md)
 16. [Rollback und Not-Aus](16-shadow-rollback-and-emergency.md)
+17. [SignalPilot Arena](17-arena.md)
 
 Architekturentscheidungen stehen unter [decisions](decisions/). Bei Konflikten gilt in dieser Reihenfolge: Sicherheitsgrenze dieses Dokuments, akzeptierte ADRs, Fachspezifikationen, Implementierungsplan.
 

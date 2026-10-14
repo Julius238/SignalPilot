@@ -18,7 +18,10 @@ import {
   TradingSessionStatus,
   type PrismaClient
 } from "@signalpilot/database";
-import { computeShadowPerformance } from "@signalpilot/performance-intelligence/shadow";
+import {
+  computeShadowPerformance,
+  type ShadowPerformanceMetrics
+} from "@signalpilot/performance-intelligence/shadow";
 import { regimeGateOpen } from "@signalpilot/strategy-engine";
 
 import { assembleShadowPerformanceInput } from "./shadowPerformancePersistence.js";
@@ -163,7 +166,7 @@ const asRecord = (value: unknown): Record<string, unknown> | null =>
 const asString = (value: unknown): string | null =>
   typeof value === "string" ? value : typeof value === "number" ? String(value) : null;
 
-async function loadRegime(database: PrismaClient): Promise<ForwardComparisonDto["regime"]> {
+export async function loadCryptoNativeRegime(database: PrismaClient): Promise<ForwardComparisonDto["regime"]> {
   const snapshot = await database.marketRegimeSnapshot.findFirst({ orderBy: { generatedAt: "desc" } });
   const native = asRecord(asRecord(snapshot?.reportJson)?.cryptoNative);
   if (snapshot === null || native === null) return null;
@@ -245,63 +248,13 @@ async function loadForwardEntry(
   };
   if (portfolio === null || forwardStart === null) return empty;
 
-  const assignmentIds = assignments.map((assignment) => assignment.id);
-  const [input, tradesBeforeForwardStart, openPosition, lastTrade, lastRejection, lastCandidate] = await Promise.all([
-    assembleShadowPerformanceInput(database, {
-      portfolioId: portfolio.id,
-      window: StrategyPerformanceWindow.ALL_TIME,
-      asOf,
-      notBefore: forwardStart
-    }),
-    database.shadowPosition.count({
-      where: {
-        portfolioId: portfolio.id,
-        status: { in: CLOSED_POSITION_STATUSES },
-        closedAt: { lt: forwardStart }
-      }
-    }),
-    database.shadowPosition.findFirst({
-      where: { portfolioId: portfolio.id, status: { in: OPEN_POSITION_STATUSES } },
-      include: { asset: true },
-      orderBy: { createdAt: "desc" }
-    }),
-    database.shadowPosition.findFirst({
-      where: {
-        portfolioId: portfolio.id,
-        status: { in: CLOSED_POSITION_STATUSES },
-        closedAt: { gte: forwardStart }
-      },
-      include: { asset: true },
-      orderBy: { closedAt: "desc" }
-    }),
-    // A refusal is recorded against the assignment, a candidate as its own row.
-    database.tradingAuditEvent.findFirst({
-      where: {
-        eventType: "STRATEGY_EVALUATION_REJECTED",
-        aggregateId: { in: assignmentIds },
-        occurredAt: { gte: forwardStart }
-      },
-      orderBy: { occurredAt: "desc" }
-    }),
-    database.tradeCandidate.findFirst({
-      where: { strategyAssignmentId: { in: assignmentIds }, createdAt: { gte: forwardStart } },
-      orderBy: { createdAt: "desc" }
-    })
-  ]);
-  const lastEvaluation: ForwardComparisonEntryDto["lastEvaluation"] =
-    lastCandidate !== null &&
-    (lastRejection === null || lastCandidate.createdAt.getTime() >= lastRejection.occurredAt.getTime())
-      ? { occurredAt: lastCandidate.createdAt.toISOString(), outcome: "CANDIDATE", reasonCode: lastCandidate.status }
-      : lastRejection === null
-        ? null
-        : {
-            occurredAt: lastRejection.occurredAt.toISOString(),
-            outcome: "NO_CANDIDATE",
-            reasonCode: lastRejection.reasonCode
-          };
-
-  const report = computeShadowPerformance(input);
-  const overall = report.segments.find((segment) => segment.segmentType === "OVERALL")?.metrics;
+  const activity = await loadPortfolioForwardActivity(database, {
+    portfolioId: portfolio.id,
+    assignmentIds: assignments.map((assignment) => assignment.id),
+    forwardStart,
+    asOf
+  });
+  const overall = activity.metrics;
   const netPnl = portfolio.equity.minus(portfolio.startingCash);
 
   return {
@@ -320,6 +273,84 @@ async function loadForwardEntry(
     exposurePct: metric(overall?.exposurePct),
     fees: overall?.fees ?? "0",
     simulatedExecutionCost: overall?.simulatedExecutionCost ?? "0",
+    tradesBeforeForwardStart: activity.tradesBeforeForwardStart,
+    openPosition: activity.openPosition,
+    lastTrade: activity.lastTrade,
+    lastEvaluation: activity.lastEvaluation
+  };
+}
+
+export interface PortfolioForwardActivity {
+  /** OVERALL metrics of the forward window (same engine as the performance refresh). */
+  readonly metrics: ShadowPerformanceMetrics | null;
+  readonly tradesBeforeForwardStart: number;
+  readonly openPosition: ForwardComparisonEntryDto["openPosition"];
+  readonly lastTrade: ForwardComparisonEntryDto["lastTrade"];
+  readonly lastEvaluation: ForwardComparisonEntryDto["lastEvaluation"];
+}
+
+/** Forward metrics and current activity of one portfolio since `forwardStart`. */
+export async function loadPortfolioForwardActivity(
+  database: PrismaClient,
+  input: {
+    readonly portfolioId: string;
+    readonly assignmentIds: readonly string[];
+    readonly forwardStart: Date;
+    readonly asOf: Date;
+  }
+): Promise<PortfolioForwardActivity> {
+  const { portfolioId, forwardStart, asOf } = input;
+  const assignmentIds = [...input.assignmentIds];
+  const [performanceInput, tradesBeforeForwardStart, openPosition, lastTrade, lastRejection, lastCandidate] =
+    await Promise.all([
+      assembleShadowPerformanceInput(database, {
+        portfolioId,
+        window: StrategyPerformanceWindow.ALL_TIME,
+        asOf,
+        notBefore: forwardStart
+      }),
+      database.shadowPosition.count({
+        where: { portfolioId, status: { in: CLOSED_POSITION_STATUSES }, closedAt: { lt: forwardStart } }
+      }),
+      database.shadowPosition.findFirst({
+        where: { portfolioId, status: { in: OPEN_POSITION_STATUSES } },
+        include: { asset: true },
+        orderBy: { createdAt: "desc" }
+      }),
+      database.shadowPosition.findFirst({
+        where: { portfolioId, status: { in: CLOSED_POSITION_STATUSES }, closedAt: { gte: forwardStart } },
+        include: { asset: true },
+        orderBy: { closedAt: "desc" }
+      }),
+      // A refusal is recorded against the assignment, a candidate as its own row.
+      database.tradingAuditEvent.findFirst({
+        where: {
+          eventType: "STRATEGY_EVALUATION_REJECTED",
+          aggregateId: { in: assignmentIds },
+          occurredAt: { gte: forwardStart }
+        },
+        orderBy: { occurredAt: "desc" }
+      }),
+      database.tradeCandidate.findFirst({
+        where: { strategyAssignmentId: { in: assignmentIds }, createdAt: { gte: forwardStart } },
+        orderBy: { createdAt: "desc" }
+      })
+    ]);
+  const lastEvaluation: ForwardComparisonEntryDto["lastEvaluation"] =
+    lastCandidate !== null &&
+    (lastRejection === null || lastCandidate.createdAt.getTime() >= lastRejection.occurredAt.getTime())
+      ? { occurredAt: lastCandidate.createdAt.toISOString(), outcome: "CANDIDATE", reasonCode: lastCandidate.status }
+      : lastRejection === null
+        ? null
+        : {
+            occurredAt: lastRejection.occurredAt.toISOString(),
+            outcome: "NO_CANDIDATE",
+            reasonCode: lastRejection.reasonCode
+          };
+
+  const report = computeShadowPerformance(performanceInput);
+  return {
+    metrics: report.segments.find((segment) => segment.segmentType === "OVERALL")?.metrics ?? null,
     tradesBeforeForwardStart,
     openPosition:
       openPosition === null
@@ -377,7 +408,7 @@ function replayPeriods(metricsJson: unknown): ReplayResultDto["periods"] {
 }
 
 /** The newest real-data replay of each strategy that is in a forward test. */
-async function loadReplays(
+export async function loadReplayResults(
   database: PrismaClient,
   strategyKeys: readonly string[]
 ): Promise<ReplayResultDto[]> {
@@ -417,7 +448,7 @@ export async function getForwardComparison(
   asOf: Date = new Date()
 ): Promise<ForwardComparisonDto> {
   const [regime, forward] = await Promise.all([
-    loadRegime(database),
+    loadCryptoNativeRegime(database),
     Promise.all(ROLES.map(({ role, portfolioKey }) => loadForwardEntry(database, role, portfolioKey, asOf)))
   ]);
   const strategyKeys = [...new Set(forward.flatMap((entry) => entry.strategies.map((strategy) => strategy.strategyKey)))];
@@ -425,6 +456,6 @@ export async function getForwardComparison(
     asOf: asOf.toISOString(),
     regime,
     forward,
-    replay: await loadReplays(database, strategyKeys)
+    replay: await loadReplayResults(database, strategyKeys)
   };
 }

@@ -157,6 +157,23 @@ describe("GET /trading/forward-comparison", () => {
   });
 });
 
+describe("GET /trading/arena", () => {
+  it("serves an empty arena before any cohort is registered", async () => {
+    const db = {
+      arenaCohort: { findMany: async () => [] },
+      marketRegimeSnapshot: { findFirst: async () => null }
+    };
+    setTradingReadsDatabaseForTests(db as never);
+    const server = Fastify({ logger: false });
+    await server.register(registerTradingReadRoutes);
+    const response = await server.inject({ method: "GET", url: "/trading/arena" });
+    assert.equal(response.statusCode, 200);
+    const body = response.json();
+    assert.deepEqual([body.cohorts, body.replay, body.regime], [[], [], null]);
+    await server.close();
+  });
+});
+
 describe("performance metrics on the wire", () => {
   it("sends a non-computable metric as null instead of the stored placeholder 0", async () => {
     const { metricOrNull } = await import("../src/schemas/trading/performance.js");

@@ -36,6 +36,7 @@ function buildConfig(overrides: Partial<TradingWorkerConfig["jobFlags"]> = {}): 
       reconciliationJobEnabled: false,
       performanceScheduleEnabled: false,
       alertScheduleEnabled: false,
+      arenaScheduleEnabled: false,
       ...overrides
     },
     ownerId: "test-owner"
@@ -81,6 +82,12 @@ describe("startTradingWorkerScheduler", () => {
 
   it("adds the alert outbox when its schedule flag is on", () => {
     const tasks = startTradingWorkerScheduler(buildConfig({ alertScheduleEnabled: true }));
+    assert.equal(tasks.length, 1);
+    tasks.forEach((task) => task.stop());
+  });
+
+  it("adds the arena evaluation when its schedule flag is on", () => {
+    const tasks = startTradingWorkerScheduler(buildConfig({ arenaScheduleEnabled: true }));
     assert.equal(tasks.length, 1);
     tasks.forEach((task) => task.stop());
   });

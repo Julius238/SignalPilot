@@ -71,6 +71,14 @@
       "types": "./dist/lib/tradingRetention.d.ts",
       "default": "./dist/lib/tradingRetention.js"
     },
+    "./lib/arenaOverview": {
+      "types": "./dist/lib/arenaOverview.d.ts",
+      "default": "./dist/lib/arenaOverview.js"
+    },
+    "./lib/arena": {
+      "types": "./dist/lib/arena.d.ts",
+      "default": "./dist/lib/arena.js"
+    },
     "./lib/forwardComparison": {
       "types": "./dist/lib/forwardComparison.d.ts",
       "default": "./dist/lib/forwardComparison.js"
@@ -130,6 +138,7 @@
     "@signalpilot/database": "workspace:*",
     "@signalpilot/market-data": "workspace:*",
     "@signalpilot/multi-timeframe": "workspace:*",
+    "@signalpilot/arena": "workspace:*",
     "@signalpilot/performance-intelligence": "workspace:*",
     "@signalpilot/portfolio": "workspace:*",
     "@signalpilot/risk-engine": "workspace:*",

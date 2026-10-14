@@ -41,6 +41,8 @@ export interface SchedulerJobFlags {
   readonly performanceScheduleEnabled: boolean;
   /** Alert outbox collect/dispatch every 2 minutes (no trading writes; own lease, MONITORING scope). */
   readonly alertScheduleEnabled: boolean;
+  /** SignalPilot Arena: hourly fitness evaluation (recommendations only). */
+  readonly arenaScheduleEnabled: boolean;
 }
 
 export interface TradingWorkerConfig {
@@ -66,7 +68,8 @@ const FLAG_DEFINITIONS = [
   ["TRADING_POSITION_MONITOR_JOB_ENABLED", "positionMonitorJobEnabled"],
   ["TRADING_RECONCILIATION_JOB_ENABLED", "reconciliationJobEnabled"],
   ["TRADING_PERFORMANCE_SCHEDULE_ENABLED", "performanceScheduleEnabled"],
-  ["TRADING_ALERT_SCHEDULE_ENABLED", "alertScheduleEnabled"]
+  ["TRADING_ALERT_SCHEDULE_ENABLED", "alertScheduleEnabled"],
+  ["TRADING_ARENA_SCHEDULE_ENABLED", "arenaScheduleEnabled"]
 ] as const;
 
 /**
@@ -117,7 +120,8 @@ export function resolveTradingWorkerConfig(env: EnvSource = process.env): Resolv
         positionMonitorJobEnabled: parsedFlags.positionMonitorJobEnabled,
         reconciliationJobEnabled: parsedFlags.reconciliationJobEnabled,
         performanceScheduleEnabled: parsedFlags.performanceScheduleEnabled,
-        alertScheduleEnabled: parsedFlags.alertScheduleEnabled
+        alertScheduleEnabled: parsedFlags.alertScheduleEnabled,
+        arenaScheduleEnabled: parsedFlags.arenaScheduleEnabled
       },
       ownerId
     }

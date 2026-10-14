@@ -27,6 +27,7 @@ import { CircuitBreakerScope } from "./lib/circuitBreaker.js";
 import { ScheduledJobSkipReason, runScheduledJob, type ScheduledJobContext } from "./lib/jobRunner.js";
 import { enqueueCircuitBreakerAlert } from "./lib/alertCollector.js";
 import { checkTradingAlertOutboxAllowed } from "./lib/tradingSafety.js";
+import { runArenaEvaluate } from "./jobs/arenaEvaluate.js";
 import { runShadowAssessRisk } from "./jobs/shadowAssessRisk.js";
 import { runShadowAlertOutbox } from "./jobs/shadowAlertOutbox.js";
 import { runShadowCreateOrders } from "./jobs/shadowCreateOrders.js";
@@ -149,6 +150,17 @@ const JOB_DEFINITIONS: readonly ScheduledJobDefinition[] = [
     checkEntryWorkflow: false,
     enabled: (config) => config.jobFlags.alertScheduleEnabled,
     run: (database, asOf) => runShadowAlertOutbox(database, { asOf })
+  },
+  {
+    // SignalPilot Arena: after the performance refresh (:15) has written the
+    // hour's equity point. Writes only arena rows and recommends; it can
+    // neither take an entry-side lease nor change any trading state.
+    jobKey: "trading:arena-evaluate",
+    cronExpression: "20 * * * *",
+    scope: CircuitBreakerScope.MONITORING,
+    checkEntryWorkflow: false,
+    enabled: (config) => config.jobFlags.arenaScheduleEnabled,
+    run: (database, asOf) => runArenaEvaluate(database, { asOf })
   }
 ];
 

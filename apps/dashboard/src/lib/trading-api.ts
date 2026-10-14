@@ -1265,3 +1265,122 @@ export type ForwardComparison = {
 export function fetchForwardComparison() {
   return fetchApi<ForwardComparison>("/trading/forward-comparison");
 }
+
+// ── SignalPilot Arena ───────────────────────────────────────────────────────
+// Spiegelt `getArenaOverview` (apps/trading-worker/src/lib/arenaOverview.ts).
+// Kennzahlen stammen aus der neuesten Arena-Evaluation (nur Forward-Daten);
+// der Replay-Block ist bekannte Historie und fließt in keine Arena-Zahl ein.
+
+export type ArenaFitnessComponent = {
+  key: string;
+  weight: number;
+  measure: number | null;
+  score: number;
+  contribution: number;
+  neutralReason: string | null;
+};
+
+export type ArenaEvaluation = {
+  asOf: string;
+  evidenceStatus: "PROVISIONAL" | "SUFFICIENT";
+  evidenceProgress: string;
+  forwardDays: string;
+  closedTrades: number;
+  equity: string;
+  netPnl: string;
+  returnPct: string;
+  logGrowth: string | null;
+  maxDrawdownPct: string;
+  profitFactor: string | null;
+  averageR: string | null;
+  winRatePct: string | null;
+  maxLossStreak: number;
+  costs: string;
+  exposurePct: string | null;
+  rawFitness: string;
+  fitness: string;
+  rank: number | null;
+  survivalFloor: string | null;
+  survivalFloorBreached: boolean;
+  hardStop: boolean;
+  recommendation: string;
+  recommendedStatus: string | null;
+  reasonCodes: string[];
+  riskCeiling: number | null;
+  components: ArenaFitnessComponent[];
+  outputHash: string;
+};
+
+export type ArenaParticipant = {
+  id: string;
+  participantKey: string;
+  strategyKey: string;
+  strategyVersion: number;
+  engineVersion: string;
+  specificationHash: string;
+  portfolioKey: string;
+  status: "CANDIDATE" | "ACTIVE" | "PROBATION" | "PROVEN" | "CHAMPION" | "RETIRED";
+  statusChangedAt: string;
+  forwardStartAt: string | null;
+  initialCapital: string;
+  parentParticipantKey: string | null;
+  evaluation: ArenaEvaluation | null;
+  openPosition: ForwardComparisonEntry["openPosition"];
+  lastTrade: ForwardComparisonEntry["lastTrade"];
+  lastStrategyEvaluation: ForwardComparisonEntry["lastEvaluation"];
+  lifecycle: Array<{
+    occurredAt: string;
+    fromStatus: string | null;
+    toStatus: string;
+    reasonCode: string;
+    actorId: string;
+    note: string | null;
+  }>;
+  postMortems: Array<{
+    id: string;
+    status: string;
+    triggerStatus: string;
+    createdAt: string;
+    dossierHash: string;
+    hypothesis: string | null;
+    successorParticipantId: string | null;
+  }>;
+};
+
+export type ArenaPolicy = {
+  version: string;
+  evidence: {
+    minClosedTrades: number;
+    minForwardDays: number;
+    longRunForwardDays: number;
+    longRunMinClosedTrades: number;
+  };
+  survival: { floorFraction: number };
+  fitness: { weights: Record<string, number>; drawdownReference: number };
+  lifecycle: {
+    probationFitness: number;
+    retireFitness: number;
+    reinstateFitness: number;
+    provenFitness: number;
+    championMargin: number;
+  };
+};
+
+export type ArenaOverview = {
+  asOf: string;
+  regime: ForwardComparison["regime"];
+  cohorts: Array<{
+    key: string;
+    name: string;
+    description: string | null;
+    policyVersion: string;
+    policyHash: string;
+    policy: ArenaPolicy;
+    participants: ArenaParticipant[];
+  }>;
+  replay: ForwardComparison["replay"];
+};
+
+export function fetchArenaOverview() {
+  return fetchApi<ArenaOverview>("/trading/arena");
+}

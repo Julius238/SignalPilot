@@ -157,6 +157,9 @@ importers:
       '@signalpilot/alerts':
         specifier: workspace:*
         version: link:../../packages/alerts
+      '@signalpilot/arena':
+        specifier: workspace:*
+        version: link:../../packages/arena
       '@signalpilot/database':
         specifier: workspace:*
         version: link:../../packages/database
@@ -288,6 +291,16 @@ importers:
       dotenv:
         specifier: ^16.4.7
         version: 16.6.1
+    devDependencies:
+      tsx:
+        specifier: ^4.19.2
+        version: 4.21.0
+
+  packages/arena:
+    dependencies:
+      '@signalpilot/trading-domain':
+        specifier: workspace:*
+        version: link:../trading-domain
     devDependencies:
       tsx:
         specifier: ^4.19.2
