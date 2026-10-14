@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { collectOpsHealth } from "../src/lib/opsHealth.js";
+import { OPS_JOB_EXPECTATIONS, collectOpsHealth } from "../src/lib/opsHealth.js";
 import { compareConsistency, type ConsistencySnapshot } from "../src/jobs/opsConsistency.js";
 import { createFakeExecutionDatabase } from "./support/shadowExecutionFixtures.js";
 
@@ -28,7 +28,7 @@ function seedHealthy() {
     ["shadowProcessFills", 2],
     ["shadowMonitorPositions", 2],
     ["shadowReconcilePortfolio", 4],
-    ["shadowPerformanceRefresh", 55],
+    ["trading:performance-refresh", 55],
     ["arenaEvaluate", 50],
     ["shadowStartTradingDay", 600]
   ] as const) {
@@ -71,6 +71,22 @@ describe("ops health", () => {
       ["shadowAssessRisk"]
     );
     assert.equal(health.sessions[0]?.killReasonCode, "R-021-CONSECUTIVE_LOSSES");
+  });
+
+  it("expects every trading job under the exact name it records its runs with", async () => {
+    const names = new Set(OPS_JOB_EXPECTATIONS.map((expectation) => expectation.jobName));
+    const recorded = [
+      (await import("../src/jobs/shadowGenerateCandidates.js")).JOB_NAME,
+      (await import("../src/jobs/shadowAssessRisk.js")).JOB_NAME,
+      (await import("../src/jobs/shadowCreateOrders.js")).JOB_NAME,
+      (await import("../src/jobs/shadowProcessFills.js")).JOB_NAME,
+      (await import("../src/jobs/shadowMonitorPositions.js")).JOB_NAME,
+      (await import("../src/jobs/shadowReconcilePortfolio.js")).JOB_NAME,
+      (await import("../src/jobs/shadowStartTradingDay.js")).JOB_NAME,
+      (await import("../src/jobs/arenaEvaluate.js")).JOB_NAME,
+      (await import("../src/lib/shadowPerformancePersistence.js")).SHADOW_PERFORMANCE_JOB_KEY
+    ];
+    for (const name of recorded) assert.ok(names.has(name), `${name} is not monitored under its recorded name`);
   });
 
   it("does not report a job that never ran as stalled", async () => {

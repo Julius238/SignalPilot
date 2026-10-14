@@ -15,6 +15,8 @@ import {
   type PrismaClient
 } from "@signalpilot/database";
 
+import { SHADOW_PERFORMANCE_JOB_KEY } from "./shadowPerformancePersistence.js";
+
 const MINUTE_MS = 60_000;
 const HOUR_MS = 60 * MINUTE_MS;
 
@@ -47,7 +49,8 @@ export const OPS_JOB_EXPECTATIONS: readonly {
   { jobName: "shadowProcessFills", label: "Fill-Lauf", maxAgeMs: 10 * MINUTE_MS },
   { jobName: "shadowMonitorPositions", label: "Positions-Monitor", maxAgeMs: 10 * MINUTE_MS },
   { jobName: "shadowReconcilePortfolio", label: "Reconciliation", maxAgeMs: 15 * MINUTE_MS },
-  { jobName: "shadowPerformanceRefresh", label: "Performance-Refresh", maxAgeMs: 75 * MINUTE_MS },
+  // The refresh records its runs under its job key, not under a JOB_NAME.
+  { jobName: SHADOW_PERFORMANCE_JOB_KEY, label: "Performance-Refresh", maxAgeMs: 75 * MINUTE_MS },
   { jobName: "arenaEvaluate", label: "Arena-Bewertung", maxAgeMs: 75 * MINUTE_MS },
   { jobName: "shadowStartTradingDay", label: "Tagesstart", maxAgeMs: 26 * HOUR_MS }
 ];
