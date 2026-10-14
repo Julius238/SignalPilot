@@ -1935,6 +1935,7 @@ model Portfolio {
   shadowPositions  ShadowPosition[]
   ledgerEntries    PortfolioLedgerEntry[]
   snapshots        PortfolioSnapshot[]
+  equityPoints     PortfolioEquityPoint[]
   riskEvents       RiskEvent[]
   sessions         TradingSession[]
   performances     StrategyPerformance[]
@@ -2002,6 +2003,31 @@ model PortfolioSnapshot {
 
   @@unique([portfolioId, asOf, sourceLedgerSequence])
   @@index([portfolioId, tradingDateUtc])
+  @@index([asOf])
+}
+
+/// Intraday equity curve of a shadow portfolio: one conservative valuation per
+/// UTC hour, written by the hourly performance refresh. Reporting only — risk,
+/// strategy, the day-start snapshot and the daily return statistics never read
+/// it, so its cadence cannot change any trading decision.
+model PortfolioEquityPoint {
+  id                   String    @id @default(cuid())
+  portfolioId          String
+  asOf                 DateTime
+  sourceLedgerSequence Int
+  availableCash        Decimal   @db.Decimal(30, 12)
+  reservedCash         Decimal   @db.Decimal(30, 12)
+  marketValue          Decimal   @db.Decimal(30, 12)
+  equity               Decimal   @db.Decimal(30, 12)
+  realizedPnl          Decimal   @db.Decimal(30, 12)
+  unrealizedPnl        Decimal   @db.Decimal(30, 12)
+  highWaterMark        Decimal   @db.Decimal(30, 12)
+  drawdownPct          Decimal   @db.Decimal(30, 12)
+  openPositionCount    Int
+  createdAt            DateTime  @default(now())
+  portfolio            Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Restrict)
+
+  @@unique([portfolioId, asOf])
   @@index([asOf])
 }
 

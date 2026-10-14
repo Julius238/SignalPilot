@@ -40,6 +40,7 @@ import {
   refreshShadowPerformance,
   type PersistShadowPerformanceSummary
 } from "../lib/shadowPerformancePersistence.js";
+import { recordPortfolioEquityPoint } from "../lib/shadowEquityPoints.js";
 import { checkShadowPerformanceJobAllowed, type TradingFlagSnapshot } from "../lib/tradingSafety.js";
 
 const logger = pino({ name: "signalpilot-worker" });
@@ -76,6 +77,8 @@ export interface ShadowPerformanceRefreshSummary {
   readonly windows: number;
   readonly segmentsWritten: number;
   readonly segmentsUnchanged: number;
+  /** Hourly intraday equity points written this run (`PortfolioEquityPoint`). */
+  readonly equityPointsWritten: number;
   readonly flags: TradingFlagSnapshot | null;
 }
 
@@ -120,6 +123,7 @@ export async function runShadowPerformanceRefresh(
       windows: 0,
       segmentsWritten: 0,
       segmentsUnchanged: 0,
+      equityPointsWritten: 0,
       flags: gate.flags
     };
   }
@@ -134,9 +138,23 @@ export async function runShadowPerformanceRefresh(
 
   let segmentsWritten = 0;
   let segmentsUnchanged = 0;
+  let equityPointsWritten = 0;
   let failures = 0;
 
   for (const portfolio of portfolios) {
+    try {
+      const point = await recordPortfolioEquityPoint(database, { portfolioId: portfolio.id, asOf });
+      if (point.outcome === "CREATED") equityPointsWritten += 1;
+    } catch (error) {
+      failures += 1;
+      await writeBotLog(database, "error", `${JOB_NAME} failed to record the hourly equity point`, {
+        botRunId: botRun.id,
+        correlationId,
+        portfolioId: portfolio.id,
+        error: error instanceof Error ? error.message : "unknown error"
+      });
+    }
+
     for (const window of WINDOWS) {
       let summary: PersistShadowPerformanceSummary | null = null;
       try {
@@ -229,6 +247,7 @@ export async function runShadowPerformanceRefresh(
     windows: WINDOWS.length,
     segmentsWritten,
     segmentsUnchanged,
+    equityPointsWritten,
     flags: gate.flags
   };
   await finishBotRun(database, botRun.id, status, { ...summary, failures });

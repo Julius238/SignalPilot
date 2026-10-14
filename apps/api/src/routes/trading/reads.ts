@@ -41,6 +41,7 @@ import {
   toPerformanceSegment
 } from "../../schemas/trading/performance.js";
 import {
+  toPortfolioEquityPoint,
   toPortfolioSnapshot,
   toPortfolioSummary
 } from "../../schemas/trading/portfolio.js";
@@ -78,6 +79,7 @@ import {
 } from "../../services/trading/performanceSegmentService.js";
 import {
   getPrimaryPortfolio,
+  listEquityPoints,
   listSnapshots
 } from "../../services/trading/portfolioService.js";
 import { listRiskAssessments } from "../../services/trading/riskService.js";
@@ -108,6 +110,9 @@ export function setTradingReadsDatabaseForTests(db: PrismaClient): void {
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
+/** Hourly equity points: one week by default, three months at most. */
+const DEFAULT_EQUITY_POINT_LIMIT = 168;
+const MAX_EQUITY_POINT_LIMIT = 2_208;
 
 export async function registerTradingReadRoutes(server: FastifyInstance) {
   server.get("/trading/overview", async () => getOverview(database));
@@ -133,6 +138,17 @@ export async function registerTradingReadRoutes(server: FastifyInstance) {
       offset
     });
     return snapshots.map(toPortfolioSnapshot);
+  });
+
+  server.get("/trading/portfolio/equity-points", async (request, reply) => {
+    const query = asQueryRecord(request.query);
+    const limit = parseLimit(query.limit, DEFAULT_EQUITY_POINT_LIMIT, MAX_EQUITY_POINT_LIMIT, reply);
+    const from = parseOptionalDate(query.from, "from", reply);
+    const to = parseOptionalDate(query.to, "to", reply);
+    if (reply.sent || limit === undefined) return reply;
+
+    const points = await listEquityPoints(database, { from, to, limit });
+    return points.map(toPortfolioEquityPoint);
   });
 
   server.get("/trading/assignments", async (request, reply) => {

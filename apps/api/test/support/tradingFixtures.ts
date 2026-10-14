@@ -492,6 +492,7 @@ const MODEL_NAMES = [
   "exitPlan",
   "portfolioLedgerEntry",
   "portfolioSnapshot",
+  "portfolioEquityPoint",
   "strategyPerformance",
   "instrumentExecutionProfile",
   "candle",

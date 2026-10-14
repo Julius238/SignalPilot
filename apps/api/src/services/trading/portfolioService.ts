@@ -34,3 +34,24 @@ export async function listSnapshots(database: PrismaClient, filters: ListSnapsho
     take: filters.limit
   });
 }
+
+/**
+ * Hourly intraday equity curve, oldest first (ready to chart). Without `from`
+ * the newest `limit` hours are returned.
+ */
+export async function listEquityPoints(
+  database: PrismaClient,
+  filters: { readonly from?: Date; readonly to?: Date; readonly limit: number }
+) {
+  const portfolio = await getPrimaryPortfolio(database);
+  if (portfolio === null) return [];
+  const points = await database.portfolioEquityPoint.findMany({
+    where: {
+      portfolioId: portfolio.id,
+      asOf: filters.from || filters.to ? { gte: filters.from, lte: filters.to } : undefined
+    },
+    orderBy: { asOf: filters.from ? "asc" : "desc" },
+    take: filters.limit
+  });
+  return filters.from ? points : points.reverse();
+}

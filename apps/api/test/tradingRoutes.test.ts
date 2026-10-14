@@ -169,6 +169,52 @@ describe("trading read routes — overview shape", () => {
   });
 });
 
+describe("trading read routes — intraday equity curve", () => {
+  it("returns the newest hourly equity points oldest first, decimals as strings", async () => {
+    const { database, tables } = createFakeTradingDatabase();
+    const portfolio = tables.get("portfolio")!.create({
+      data: { key: "SHADOW_V1", name: "Shadow v1", status: "ACTIVE" }
+    });
+    for (let hour = 0; hour < 5; hour += 1) {
+      tables.get("portfolioEquityPoint")!.create({
+        data: {
+          portfolioId: portfolio.id,
+          asOf: new Date(Date.UTC(2026, 9, 14, hour)),
+          sourceLedgerSequence: 1,
+          equity: `${10000 + hour}.000000000000`,
+          marketValue: "0",
+          availableCash: "10000",
+          reservedCash: "0",
+          realizedPnl: "0",
+          unrealizedPnl: "0",
+          highWaterMark: "10004",
+          drawdownPct: "0",
+          openPositionCount: 0
+        }
+      });
+    }
+    const server = await buildTestServer(database, false);
+    const response = await server.inject("/trading/portfolio/equity-points?limit=3");
+    assert.equal(response.statusCode, 200);
+    const body = response.json() as Array<{ asOf: string; equity: string }>;
+    assert.deepEqual(
+      body.map((point) => point.asOf),
+      ["2026-10-14T02:00:00.000Z", "2026-10-14T03:00:00.000Z", "2026-10-14T04:00:00.000Z"]
+    );
+    assert.equal(body[2].equity, "10004.000000000000");
+
+    const ranged = (await server.inject("/trading/portfolio/equity-points?from=2026-10-14T01:00:00.000Z&limit=2")).json() as Array<{
+      asOf: string;
+    }>;
+    assert.deepEqual(
+      ranged.map((point) => point.asOf),
+      ["2026-10-14T01:00:00.000Z", "2026-10-14T02:00:00.000Z"]
+    );
+    assert.equal((await server.inject("/trading/portfolio/equity-points?limit=999999")).statusCode, 400);
+    await server.close();
+  });
+});
+
 describe("trading read routes — 404 and filters", () => {
   it("returns 404 for an unknown candidate id", async () => {
     const { database } = createFakeTradingDatabase();

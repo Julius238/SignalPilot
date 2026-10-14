@@ -86,3 +86,32 @@ export function toPortfolioSnapshot(snapshot: PortfolioSnapshotRow) {
     openPositionCount: snapshot.openPositionCount
   };
 }
+
+export interface PortfolioEquityPointRow {
+  readonly asOf: Date;
+  readonly equity: unknown;
+  readonly marketValue: unknown;
+  readonly availableCash: unknown;
+  readonly reservedCash: unknown;
+  readonly realizedPnl: unknown;
+  readonly unrealizedPnl: unknown;
+  readonly highWaterMark: unknown;
+  readonly drawdownPct: unknown;
+  readonly openPositionCount: number;
+}
+
+/** One hourly point of the intraday equity curve (`PortfolioEquityPoint`). */
+export function toPortfolioEquityPoint(point: PortfolioEquityPointRow) {
+  return {
+    asOf: toIso(point.asOf),
+    equity: decimalToString(point.equity),
+    marketValue: decimalToString(point.marketValue),
+    availableCash: decimalToString(point.availableCash),
+    reservedCash: decimalToString(point.reservedCash),
+    realizedPnl: decimalToString(point.realizedPnl),
+    unrealizedPnl: decimalToString(point.unrealizedPnl),
+    highWaterMark: decimalToString(point.highWaterMark),
+    drawdownPct: decimalToString(point.drawdownPct),
+    openPositionCount: point.openPositionCount
+  };
+}

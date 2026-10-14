@@ -475,6 +475,42 @@ describe("runShadowPerformanceRefresh job", () => {
     assert.equal(second.status, "SUCCESS");
     assert.equal(audits(), afterFirst);
   });
+
+  it("records one intraday equity point per portfolio and hour", async () => {
+    const { database, tables } = seed();
+    const points = () => tables.get("portfolioEquityPoint")!.rows;
+    // The seed only sets the starting cash; give the portfolio its ledger cache.
+    Object.assign(tables.get("portfolio")!.rows[0], {
+      availableCash: decimal("10000"),
+      reservedCash: decimal("0"),
+      realizedPnl: decimal("0"),
+      feesPaid: decimal("0"),
+      highWaterMark: decimal("10000"),
+      ledgerSequence: 1
+    });
+
+    const first = await runShadowPerformanceRefresh(database as never, {
+      asOf: new Date("2026-08-10T12:15:00.000Z"),
+      env: ENV
+    });
+    assert.equal(first.equityPointsWritten, 1);
+    assert.equal(points().length, 1);
+    // Valued as of the full hour, conservatively, like the day-start snapshot.
+    assert.equal((points()[0].asOf as Date).toISOString(), "2026-08-10T12:00:00.000Z");
+    assert.ok(Number(points()[0].equity) > 0);
+
+    const sameHour = await runShadowPerformanceRefresh(database as never, {
+      asOf: new Date("2026-08-10T12:45:00.000Z"),
+      env: ENV
+    });
+    assert.equal(sameHour.equityPointsWritten, 0);
+    assert.equal(points().length, 1);
+
+    await runShadowPerformanceRefresh(database as never, { asOf: new Date("2026-08-10T13:15:00.000Z"), env: ENV });
+    assert.equal(points().length, 2);
+    // The day-start reference is untouched: no PortfolioSnapshot is written here.
+    assert.equal(tables.get("portfolioSnapshot")!.rows.filter((row) => row.valuationJson === undefined).length, 0);
+  });
 });
 
 // ───────────────────────────────────────────────────────────────────────────
