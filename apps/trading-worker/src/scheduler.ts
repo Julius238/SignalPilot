@@ -1,5 +1,6 @@
 /**
  * `apps/trading-worker` scheduler: registers the seven shadow trading jobs
+ * (plus the optional performance refresh and alert outbox)
  * on safe UTC cron intervals, each wrapped in `lib/jobRunner.ts` (lease +
  * circuit breaker + entry-workflow guard).
  *
@@ -12,7 +13,7 @@
  * `resolveTradingWorkerConfig` already returned `ok: true` (checked by
  * `index.ts`), so this module assumes a valid config was handed to it.
  *
- * All seven `cron.schedule` calls pin `{ timezone: "UTC" }` explicitly —
+ * All `cron.schedule` calls pin `{ timezone: "UTC" }` explicitly —
  * UTC is the binding time base regardless of the host container's local
  * timezone (P5 task: "UTC als verbindliche Zeitbasis").
  */
@@ -27,6 +28,7 @@ import { ScheduledJobSkipReason, runScheduledJob } from "./lib/jobRunner.js";
 import { enqueueCircuitBreakerAlert } from "./lib/alertCollector.js";
 import { checkTradingAlertOutboxAllowed } from "./lib/tradingSafety.js";
 import { runShadowAssessRisk } from "./jobs/shadowAssessRisk.js";
+import { runShadowAlertOutbox } from "./jobs/shadowAlertOutbox.js";
 import { runShadowCreateOrders } from "./jobs/shadowCreateOrders.js";
 import { runShadowGenerateCandidates } from "./jobs/shadowGenerateCandidates.js";
 import { runShadowMonitorPositions } from "./jobs/shadowMonitorPositions.js";
@@ -129,6 +131,20 @@ const JOB_DEFINITIONS: readonly ScheduledJobDefinition[] = [
     checkEntryWorkflow: false,
     enabled: (config) => config.jobFlags.performanceScheduleEnabled,
     run: (database, asOf) => runShadowPerformanceRefresh(database, { asOf })
+  },
+  {
+    // Alert delivery: collects outbox entries from persisted state and hands
+    // due ones to the n8n webhook. It writes no trading table, so like the
+    // performance refresh it has its own lease and breaker, MONITORING scope
+    // and no entry-workflow check. Collect and dispatch keep their own
+    // TRADING_ALERT_OUTBOX_ENABLED / TRADING_ALERT_DELIVERY_ENABLED gates;
+    // its BotRun rows already carry this job key.
+    jobKey: "trading:alert-outbox",
+    cronExpression: "*/2 * * * *",
+    scope: CircuitBreakerScope.MONITORING,
+    checkEntryWorkflow: false,
+    enabled: (config) => config.jobFlags.alertScheduleEnabled,
+    run: (database, asOf) => runShadowAlertOutbox(database, { asOf })
   }
 ];
 
