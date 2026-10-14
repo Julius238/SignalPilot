@@ -4,6 +4,9 @@ import { describe, it } from "node:test";
 import { DecimalValue } from "@signalpilot/trading-domain";
 
 import {
+  CRYPTO_MTF_BREAKOUT_LONG_V1_ENGINE_VERSION,
+  CRYPTO_MTF_BREAKOUT_LONG_V1_KEY,
+  CRYPTO_MTF_BREAKOUT_LONG_V1_SPECIFICATION_HASH,
   CRYPTO_MTF_BREAKOUT_V1_KEY,
   CRYPTO_MTF_BREAKOUT_V1_PARAMETERS,
   CRYPTO_MTF_BREAKOUT_V1_SPECIFICATION_HASH,
@@ -585,5 +588,156 @@ describe("strategy registry", () => {
     assert.equal(PARAMS.futuresAllowed, false);
     assert.equal(PARAMS.llmUsed, false);
     assert.equal(PARAMS.direction, "LONG");
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// Long strategy identity (Phase 2C.2c, Blocker 1)
+//
+// One evaluator serves both long identities (ADR 0011). It used to validate and
+// stamp the legacy identity unconditionally, so a snapshot carrying the current
+// key could never pass `STRATEGY_KEY_MISMATCH` — and, had it passed, would have
+// been stamped with the legacy specification hash. The hash is the identity, so
+// that mix is exactly what must be impossible.
+//
+// The registry entry binds the identity (LONG_V1 evaluates under
+// `LONG_V1_BREAKOUT_IDENTITY`), so the current identity is evaluated through
+// `evaluateStrategy`; the bare evaluator defaults to the legacy identity.
+// ───────────────────────────────────────────────────────────────────────────
+
+function asCurrentLongIdentity(
+  snapshot: StrategyInputSnapshotV1
+): StrategyInputSnapshotV1 {
+  // All three identity fields, exactly as the assembler copies them from the
+  // `StrategyVersion` row. Swapping only the key would describe a row that
+  // cannot exist, and the validator is right to refuse it.
+  const next = clone(snapshot);
+  next.strategy = {
+    ...next.strategy,
+    strategyKey: CRYPTO_MTF_BREAKOUT_LONG_V1_KEY,
+    engineVersion: CRYPTO_MTF_BREAKOUT_LONG_V1_ENGINE_VERSION,
+    specificationHash: CRYPTO_MTF_BREAKOUT_LONG_V1_SPECIFICATION_HASH
+  };
+  return next;
+}
+
+function currentLongCandidateOf(
+  snapshot: StrategyInputSnapshotV1
+): StrategyCandidateResultV1 {
+  const result = evaluateStrategy(asCurrentLongIdentity(snapshot));
+  assert.equal(
+    result.outcome,
+    "CANDIDATE",
+    `expected a candidate, got ${result.reasonCodes.join(",")}`
+  );
+  return result as StrategyCandidateResultV1;
+}
+
+describe("long strategy identity", () => {
+  it("accepts the current LONG key instead of reporting a key mismatch", () => {
+    const result = evaluateStrategy(
+      asCurrentLongIdentity(buildPassingSnapshot())
+    );
+    assert.ok(
+      !result.reasonCodes.includes(StrategyReasonCode.STRATEGY_KEY_MISMATCH),
+      `unexpected key mismatch: ${result.reasonCodes.join(",")}`
+    );
+    assert.equal(result.outcome, "CANDIDATE");
+  });
+
+  it("stamps the current LONG identity on an accepted candidate", () => {
+    const result = currentLongCandidateOf(buildPassingSnapshot());
+    assert.equal(result.strategyKey, CRYPTO_MTF_BREAKOUT_LONG_V1_KEY);
+    assert.equal(result.engineVersion, CRYPTO_MTF_BREAKOUT_LONG_V1_ENGINE_VERSION);
+    assert.equal(
+      result.specificationHash,
+      CRYPTO_MTF_BREAKOUT_LONG_V1_SPECIFICATION_HASH
+    );
+    assert.equal(result.candidate.strategyKey, CRYPTO_MTF_BREAKOUT_LONG_V1_KEY);
+    assert.equal(
+      result.candidate.specificationHash,
+      CRYPTO_MTF_BREAKOUT_LONG_V1_SPECIFICATION_HASH
+    );
+  });
+
+  it("stamps the current LONG identity on a refusal too", () => {
+    // A refusal carries an identity as well; a no-candidate run under the
+    // current key must not be attributed to the legacy rule set.
+    // RISK_OFF is a rule refusal for the long strategy (ADR 0011), so this is
+    // a genuine NO_CANDIDATE rather than a validation failure.
+    const snapshot = asCurrentLongIdentity(buildPassingSnapshot());
+    snapshot.marketRegime = {
+      ...snapshot.marketRegime,
+      cryptoRegime: "RISK_OFF",
+      overallRegime: "RISK_OFF"
+    };
+    const result = evaluateStrategy(snapshot);
+    assert.notEqual(result.outcome, "CANDIDATE");
+    assert.equal(result.strategyKey, CRYPTO_MTF_BREAKOUT_LONG_V1_KEY);
+    assert.equal(
+      result.specificationHash,
+      CRYPTO_MTF_BREAKOUT_LONG_V1_SPECIFICATION_HASH
+    );
+  });
+
+  it("keeps the legacy identity working unchanged", () => {
+    const result = candidateOf(buildPassingSnapshot());
+    assert.equal(result.strategyKey, CRYPTO_MTF_BREAKOUT_V1_KEY);
+    assert.equal(
+      result.specificationHash,
+      CRYPTO_MTF_BREAKOUT_V1_SPECIFICATION_HASH
+    );
+    assert.equal(result.candidate.strategyKey, CRYPTO_MTF_BREAKOUT_V1_KEY);
+  });
+
+  it("never mixes one identity's key with the other's specification hash", () => {
+    const legacy = candidateOf(buildPassingSnapshot());
+    const current = currentLongCandidateOf(buildPassingSnapshot());
+
+    // The two hashes genuinely differ — that is what makes the mix dangerous.
+    assert.notEqual(
+      CRYPTO_MTF_BREAKOUT_V1_SPECIFICATION_HASH,
+      CRYPTO_MTF_BREAKOUT_LONG_V1_SPECIFICATION_HASH
+    );
+    assert.notEqual(legacy.specificationHash, current.specificationHash);
+    assert.notEqual(legacy.strategyKey, current.strategyKey);
+
+    for (const result of [legacy, current]) {
+      const expected =
+        result.strategyKey === CRYPTO_MTF_BREAKOUT_V1_KEY
+          ? CRYPTO_MTF_BREAKOUT_V1_SPECIFICATION_HASH
+          : CRYPTO_MTF_BREAKOUT_LONG_V1_SPECIFICATION_HASH;
+      assert.equal(result.specificationHash, expected);
+      assert.equal(result.candidate.specificationHash, expected);
+    }
+  });
+
+  it("refuses an unknown long key instead of falling back to legacy", () => {
+    const snapshot = clone(buildPassingSnapshot());
+    snapshot.strategy = {
+      ...snapshot.strategy,
+      strategyKey: "CRYPTO_MTF_BREAKOUT_LONG_V9"
+    };
+    const result = evaluateCryptoMtfBreakoutV1(snapshot);
+    assert.equal(result.outcome, "INVALID_INPUT");
+    assert.ok(
+      result.reasonCodes.includes(StrategyReasonCode.STRATEGY_KEY_MISMATCH),
+      `expected a key mismatch, got ${result.reasonCodes.join(",")}`
+    );
+    assert.equal(result.candidate, null);
+  });
+
+  it("routes both long identities through the registry to the same rules", () => {
+    const viaRegistryLegacy = evaluateStrategy(buildPassingSnapshot());
+    const viaRegistryCurrent = evaluateStrategy(
+      asCurrentLongIdentity(buildPassingSnapshot())
+    );
+    assert.equal(viaRegistryLegacy.outcome, "CANDIDATE");
+    assert.equal(viaRegistryCurrent.outcome, "CANDIDATE");
+    assert.equal(viaRegistryLegacy.strategyKey, CRYPTO_MTF_BREAKOUT_V1_KEY);
+    assert.equal(
+      viaRegistryCurrent.strategyKey,
+      CRYPTO_MTF_BREAKOUT_LONG_V1_KEY
+    );
   });
 });

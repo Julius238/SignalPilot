@@ -174,6 +174,8 @@ export async function runShadowPerformanceRefresh(
       // input hash: re-running over unchanged data is a no-op here too.
       // Hashed: the readable composite exceeded the 128-character key-part
       // limit, and a per-run correlation id would make every re-run a new event.
+      // The correlation id stays on the row's own correlationId/causationId
+      // columns, and portfolio, window and input hash stay readable on the row.
       const idempotencyKey = buildPayloadHash({
         portfolioId: portfolio.id,
         window,
