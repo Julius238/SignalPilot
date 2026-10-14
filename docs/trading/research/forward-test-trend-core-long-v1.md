@@ -24,7 +24,7 @@ StrategyVersion mit `createdAt` ≥ Startzeitpunkt.
 | Regime | `crypto-native-regime-v1/1.0.0` (`MarketRegimeSnapshot.reportJson.cryptoNative`) |
 | Zuweisung | BTCUSDT, 1h, `cmv86cr4f000citrkmvqshcpd`; ETH und LONG_V1 deaktiviert |
 | Portfolio | `SHADOW_V1` (`cmssq3g6s000106dvosc5cz6f`), Startkapital 10 000 USDT |
-| Risk | RiskLimitSet `SHADOW_V1` v1 (`ff9ab296…`), Regelwerk `risk-rules-v1/1.2.0`, 0,25 % Risiko je Trade |
+| Risk | RiskLimitSet `SHADOW_V1` v1 (`ff9ab296…`), Regelwerk `risk-rules-v1/1.2.0` (ab 14:39 `1.3.0`, siehe Protokoll), 0,25 % Risiko je Trade |
 | Kosten | InstrumentExecutionProfile BTCUSDT v2 (`cmv86cx7t0002its9urai7gi8`), siehe unten |
 | Build bei Start | `400ed95` (Branch `claude/inspiring-noether-rjh92d`) |
 | Daten | Binance Spot über den laufenden Daten-Worker (`de.jul1us.signalpilot-worker`), kein synthetischer Feed |
@@ -61,3 +61,8 @@ Der frühere Platzhalter `MANUAL_CONSERVATIVE_V1` (10/10/10 bp) ist `RETIRED`.
 | Datum (UTC) | Commit | Art | Beschreibung |
 |---|---|---|---|
 | 2026-10-14 13:55 | — | Betrieb | Daten-Worker mit dem aktuellen Build neu gestartet (schreibt das crypto-native Regime); Migrationen 26/27 angewendet; alte LONG_V1-Zuweisung deaktiviert, Session vor der Umstellung pausiert. |
+| 2026-10-14 14:39 | `d7f5781` | Bugfix | **R-024** (keine Risikoerhöhung nach Verlust) verglich mit dem vorherigen *genehmigten Betrag* statt mit dem vorherigen *Budget* (Spezifikation). Rundungsreste der Menge hätten nach dem ersten Verlust eine kritische Risikoerhöhung mit `ERROR_LOCK` ausgelöst und den Champion gesperrt. Regelwerk jetzt `risk-rules-v1/1.3.0`. Positionsgröße unverändert; bis hierhin gab es keinen geschlossenen Trade, also keine betroffene Entscheidung. |
+| 2026-10-14 14:39 | `d7f5781` | Infrastruktur | Regime-Exit (`exitPolicy: EXIT_ON_REGIME_GATE_CLOSED`) im Positions-Monitor. Greift nur für Versionen, die ihn im gehashten Parametersatz deklarieren; der Champion tut das nicht und ist nicht betroffen. |
+| 2026-10-14 14:39 | `3ce22ac` | Infrastruktur | Champion/Challenger-Trennung: Die Entry-Sperre bewertet jedes Portfolio einzeln, der Circuit Breaker zählt Risk-Events je Portfolio. Für den Champion ändert sich keine Entscheidung; ein Problem im Challenger-Portfolio kann ihn nicht mehr blockieren. |
+| 2026-10-14 14:39:25–14:39:50 | `21cb2b2` | Betrieb | Trading-Worker mit Build `3ce22ac` neu gestartet. Der erste Versuch scheiterte an launchd (`Bootstrap failed: 5`) und ließ den Worker etwa 25 s entladen; im Fenster lag kein Kandidaten-Scan (der läuft zur Minute 05). Das Ops-Skript wartet jetzt auf das Entladen. |
+| 2026-10-14 14:41 | — | Betrieb | Challenger-Portfolio `SHADOW_CHALLENGER_V1` angelegt und aktiviert ([eigener Forward-Test](forward-test-regime-long-v1.md)). Eigener Ledger und eigene Session; die Champion-Zuweisung blieb unverändert aktiv. |
