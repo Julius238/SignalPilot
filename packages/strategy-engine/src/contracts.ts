@@ -129,6 +129,13 @@ export interface SnapshotMarketRegimeV1 {
   readonly overallRegime: string;
   readonly riskMode: string;
   readonly confidence: number;
+  /**
+   * Regime model that produced the report, e.g.
+   * `crypto-native-regime-v1/1.0.0`. Absent = the production report
+   * (`calculateMarketRegimeReport`). A strategy that declares a
+   * `regimeSource` refuses any other.
+   */
+  readonly source?: string;
 }
 
 export interface SnapshotAssetV1 {

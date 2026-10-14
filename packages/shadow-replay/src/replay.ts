@@ -55,6 +55,7 @@ import {
   type RiskInputSnapshotV1
 } from "@signalpilot/risk-engine";
 import {
+  CRYPTO_NATIVE_REGIME_SOURCE,
   INDICATORS_V1_VERSION,
   LEGACY_BREAKOUT_IDENTITY,
   LONG_V1_BREAKOUT_IDENTITY,
@@ -106,7 +107,7 @@ import {
   type DerivedSignal
 } from "./research.js";
 
-export const SHADOW_REPLAY_ENGINE_VERSION = "shadow-replay-v1/1.1.0";
+export const SHADOW_REPLAY_ENGINE_VERSION = "shadow-replay-v1/1.2.0";
 
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
@@ -1293,7 +1294,9 @@ function buildStrategySnapshot(input: {
             cryptoRegime: regime.cryptoRegime,
             overallRegime: regime.overallRegime,
             riskMode: regime.riskMode,
-            confidence: regime.confidence
+            confidence: regime.confidence,
+            // Like the live assembler: a non-production model names itself.
+            ...(config.regimePolicy === "CRYPTO_NATIVE_V1" ? { source: CRYPTO_NATIVE_REGIME_SOURCE } : {})
           },
     executionProfile: {
       id: profile.id,
@@ -1612,6 +1615,13 @@ function variantEvaluator(config: ReplayConfig): (snapshot: StrategyInputSnapsho
         ? LEGACY_BREAKOUT_IDENTITY
         : null;
   if (identity === null) throw new Error(`Variants exist only for the long breakout strategy, not ${config.strategyKey}.`);
-  const research = { ...identity, research: variant.overrides };
+  // A research variant is evaluated under the replay's regime model — that is
+  // the research question. BASELINE above runs the registered strategy
+  // exactly as specified, so it refuses a model it is not specified against.
+  const research = {
+    ...identity,
+    research: variant.overrides,
+    regimeSource: config.regimePolicy === "CRYPTO_NATIVE_V1" ? CRYPTO_NATIVE_REGIME_SOURCE : undefined
+  };
   return (snapshot) => evaluateCryptoMtfBreakoutV1(snapshot, research);
 }

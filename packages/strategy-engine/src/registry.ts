@@ -19,7 +19,11 @@ import type {
   StrategyInputSnapshotV1
 } from "./contracts.js";
 import { evaluateCryptoMtfBreakdownShortV1 } from "./crypto-mtf-breakdown-short-v1.js";
-import { LONG_V1_BREAKOUT_IDENTITY, evaluateCryptoMtfBreakoutV1 } from "./crypto-mtf-breakout-v1.js";
+import {
+  LONG_V1_BREAKOUT_IDENTITY,
+  TREND_CORE_LONG_V1_BREAKOUT_IDENTITY,
+  evaluateCryptoMtfBreakoutV1
+} from "./crypto-mtf-breakout-v1.js";
 import {
   StrategyCheckStage,
   StrategyEvaluationOutcome,
@@ -33,6 +37,10 @@ import {
   CRYPTO_MTF_BREAKOUT_LONG_V1_ENGINE_VERSION,
   CRYPTO_MTF_BREAKOUT_LONG_V1_KEY,
   CRYPTO_MTF_BREAKOUT_LONG_V1_PARAMETERS,
+  CRYPTO_TREND_CORE_LONG_V1_ENGINE_VERSION,
+  CRYPTO_TREND_CORE_LONG_V1_KEY,
+  CRYPTO_TREND_CORE_LONG_V1_PARAMETERS,
+  CRYPTO_TREND_CORE_LONG_V1_SPECIFICATION_HASH,
   CRYPTO_MTF_BREAKOUT_LONG_V1_SPECIFICATION_HASH,
   CRYPTO_MTF_BREAKOUT_V1_ENGINE_VERSION,
   CRYPTO_MTF_BREAKOUT_V1_KEY,
@@ -72,6 +80,26 @@ export const CRYPTO_MTF_BREAKOUT_LONG_V1: StrategyDefinitionV1 = Object.freeze({
   evaluate: evaluateCryptoMtfBreakoutLongV1
 });
 
+/** The breakout engine under the CRYPTO_TREND_CORE_LONG_V1 identity and rule set. */
+export function evaluateCryptoTrendCoreLongV1(
+  snapshot: StrategyInputSnapshotV1
+): StrategyEvaluationResultV1 {
+  return evaluateCryptoMtfBreakoutV1(snapshot, TREND_CORE_LONG_V1_BREAKOUT_IDENTITY);
+}
+
+/**
+ * Real-data research candidate K2 (TREND_CORE_3R · CRYPTO_NATIVE_V1), its own
+ * versioned long strategy next to LONG_V1. Registration grants nothing: a
+ * StrategyVersion, an enabled assignment and the long flag are still needed.
+ */
+export const CRYPTO_TREND_CORE_LONG_V1: StrategyDefinitionV1 = Object.freeze({
+  key: CRYPTO_TREND_CORE_LONG_V1_KEY,
+  engineVersion: CRYPTO_TREND_CORE_LONG_V1_ENGINE_VERSION,
+  specificationHash: CRYPTO_TREND_CORE_LONG_V1_SPECIFICATION_HASH,
+  parameters: CRYPTO_TREND_CORE_LONG_V1_PARAMETERS,
+  evaluate: evaluateCryptoTrendCoreLongV1
+});
+
 /**
  * Separate short strategy. Synthetic, unleveraged shadow shorts only
  * (ADR 0012); registration here grants no execution capability whatsoever —
@@ -89,6 +117,7 @@ export const CRYPTO_MTF_BREAKDOWN_SHORT_V1: StrategyDefinitionV1 =
 const REGISTRY = new Map<string, StrategyDefinitionV1>([
   [CRYPTO_MTF_BREAKOUT_V1.key, CRYPTO_MTF_BREAKOUT_V1],
   [CRYPTO_MTF_BREAKOUT_LONG_V1.key, CRYPTO_MTF_BREAKOUT_LONG_V1],
+  [CRYPTO_TREND_CORE_LONG_V1.key, CRYPTO_TREND_CORE_LONG_V1],
   [CRYPTO_MTF_BREAKDOWN_SHORT_V1.key, CRYPTO_MTF_BREAKDOWN_SHORT_V1]
 ]);
 

@@ -25,6 +25,7 @@ import {
   type RiskInputSnapshotV1
 } from "@signalpilot/risk-engine";
 
+import { regimeSourceOf, selectRegimeForStrategy } from "./regimeSource.js";
 import { loadShadowPortfolioValuation } from "./shadowPortfolioValuation.js";
 
 export const RISK_INPUT_ASSEMBLER_VERSION = "risk-input-assembler-v1/1.0.0";
@@ -169,7 +170,7 @@ export async function assembleRiskInput(
     reservingOrders,
     executionProfile,
     riskLimitSet,
-    marketRegime,
+    storedRegime,
     existingAssessment,
     previousApproval
   ] = await Promise.all([
@@ -235,6 +236,11 @@ export async function assembleRiskInput(
       select: { assessedAt: true, equity: true, riskAmount: true }
     })
   ]);
+  // The same regime model the strategy decided under (see regimeSource.ts).
+  const marketRegime = selectRegimeForStrategy(
+    storedRegime,
+    regimeSourceOf(candidate.strategyVersion.parametersJson)
+  );
 
   const [candleFreshness, dataQuality, dailyCounters] = await Promise.all([
     loadCandleFreshness(database, candidate.assetId, asOf),

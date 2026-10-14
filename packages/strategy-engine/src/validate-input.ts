@@ -411,6 +411,8 @@ export interface ExpectedStrategyIdentityV1 {
   readonly key: string;
   readonly engineVersion: string;
   readonly specificationHash: string;
+  /** Regime model the strategy is specified against; absent = the production report. */
+  readonly regimeSource?: string;
 }
 
 export const LEGACY_LONG_IDENTITY: ExpectedStrategyIdentityV1 = Object.freeze({
@@ -855,6 +857,20 @@ export function validateStrategyInput(
         StrategyReasonCode.DATA_FRESHNESS_VALID,
         String(asOfMs - generatedAtMs),
         String(PARAMS.maxRegimeAgeMs)
+      );
+    }
+    // A regime from another model is a different input, never a substitute:
+    // without this a missing crypto-native report would silently fall back
+    // to the equity-dependent production regime.
+    const actualSource = marketRegime.source ?? null;
+    const expectedSource = expected.regimeSource ?? null;
+    if (actualSource !== expectedSource) {
+      log.fail(
+        "REGIME_SOURCE",
+        stage,
+        StrategyReasonCode.REGIME_SOURCE_MISMATCH,
+        actualSource ?? "production",
+        expectedSource ?? "production"
       );
     }
   }

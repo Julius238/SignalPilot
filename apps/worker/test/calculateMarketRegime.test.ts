@@ -44,6 +44,13 @@ describe("calculateMarketRegime", () => {
     assert.equal(summary.snapshotId, "snapshot-1");
     assert.equal(createdSnapshots.length, 1);
     assert.equal((createdSnapshots[0] as { overallRegime: string }).overallRegime, "RISK_ON");
+    // The crypto-native regime rides along in reportJson; the columns stay the production report.
+    const reportJson = (createdSnapshots[0] as { reportJson: Record<string, unknown> }).reportJson;
+    const cryptoNative = reportJson.cryptoNative as { cryptoRegime: string; riskMode: string; confidence: number; summary: string };
+    assert.equal(cryptoNative.cryptoRegime, "RISK_ON");
+    assert.equal(cryptoNative.confidence, 90);
+    assert.match(cryptoNative.summary, /crypto-native-regime-v1\/1\.0\.0/);
+    assert.equal(reportJson.equityRegime, (createdSnapshots[0] as { equityRegime: string }).equityRegime);
   });
 });
 

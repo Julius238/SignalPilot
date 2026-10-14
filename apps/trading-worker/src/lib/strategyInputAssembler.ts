@@ -36,6 +36,8 @@ import {
   type StrategyTimeframe
 } from "@signalpilot/strategy-engine";
 
+import { regimeSourceOf, selectRegimeForStrategy } from "./regimeSource.js";
+
 export const STRATEGY_INPUT_ASSEMBLER_VERSION =
   "strategy-input-assembler-v1/1.0.0";
 export const MULTI_TIMEFRAME_VERSION = "multi-timeframe/1.0.0";
@@ -230,7 +232,7 @@ export async function assembleStrategyInput(
     };
   }
 
-  const [series, signals, marketRegime, executionProfile, contextEvents] =
+  const [series, signals, storedRegime, executionProfile, contextEvents] =
     await Promise.all([
       loadSeries(database, asset.id, asOf, requestedCandlesPerTimeframe),
       loadSignals(database, asset.id, asOf),
@@ -244,6 +246,10 @@ export async function assembleStrategyInput(
       }),
       loadContextEvents(database, asset.id, symbol, asOf)
     ]);
+  const marketRegime = selectRegimeForStrategy(
+    storedRegime,
+    regimeSourceOf(assignment.strategyVersion.parametersJson)
+  );
 
   const multiTimeframeInputs: MultiTimeframeSignalInput[] =
     STRATEGY_TIMEFRAMES.flatMap((timeframe) => {
@@ -347,7 +353,8 @@ export async function assembleStrategyInput(
             cryptoRegime: marketRegime.cryptoRegime,
             overallRegime: marketRegime.overallRegime,
             riskMode: marketRegime.riskMode,
-            confidence: marketRegime.confidence
+            confidence: marketRegime.confidence,
+            ...(marketRegime.source === undefined ? {} : { source: marketRegime.source })
           },
     executionProfile:
       executionProfile === null

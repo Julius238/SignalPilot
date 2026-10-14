@@ -30,7 +30,11 @@ import {
   CRYPTO_MTF_BREAKOUT_V1_ENGINE_VERSION,
   CRYPTO_MTF_BREAKOUT_V1_KEY,
   CRYPTO_MTF_BREAKOUT_V1_PARAMETERS,
-  CRYPTO_MTF_BREAKOUT_V1_SPECIFICATION_HASH
+  CRYPTO_MTF_BREAKOUT_V1_SPECIFICATION_HASH,
+  CRYPTO_TREND_CORE_LONG_V1_ENGINE_VERSION,
+  CRYPTO_TREND_CORE_LONG_V1_KEY,
+  CRYPTO_TREND_CORE_LONG_V1_PARAMETERS,
+  CRYPTO_TREND_CORE_LONG_V1_SPECIFICATION_HASH
 } from "@signalpilot/strategy-engine";
 import {
   buildAuditEventKey,
@@ -82,6 +86,18 @@ const DEFINITIONS = Object.freeze([
     engineVersion: CRYPTO_MTF_BREAKOUT_LONG_V1_ENGINE_VERSION,
     parameters: CRYPTO_MTF_BREAKOUT_LONG_V1_PARAMETERS,
     specificationHash: CRYPTO_MTF_BREAKOUT_LONG_V1_SPECIFICATION_HASH,
+    assignmentSymbols: SHADOW_ASSIGNMENT_SYMBOLS,
+    legacy: false
+  }),
+  Object.freeze({
+    key: CRYPTO_TREND_CORE_LONG_V1_KEY,
+    name: "Crypto Trend Core LONG v1",
+    description:
+      "Real-data research candidate: SMA trend stacks, breakout and the crypto-native regime; 3R target. Assignments start disabled.",
+    direction: "LONG" as const,
+    engineVersion: CRYPTO_TREND_CORE_LONG_V1_ENGINE_VERSION,
+    parameters: CRYPTO_TREND_CORE_LONG_V1_PARAMETERS,
+    specificationHash: CRYPTO_TREND_CORE_LONG_V1_SPECIFICATION_HASH,
     assignmentSymbols: SHADOW_ASSIGNMENT_SYMBOLS,
     legacy: false
   }),

@@ -483,13 +483,14 @@ describe("CRYPTO_MTF_BREAKOUT_V1 — rejections", () => {
 });
 
 describe("strategy registry", () => {
-  it("exposes the long identity, its legacy alias and the short strategy", () => {
+  it("exposes the long identities, the legacy alias and the short strategy", () => {
     assert.deepEqual(
       [...REGISTERED_STRATEGY_KEYS],
       [
         "CRYPTO_MTF_BREAKDOWN_SHORT_V1",
         "CRYPTO_MTF_BREAKOUT_LONG_V1",
-        "CRYPTO_MTF_BREAKOUT_V1"
+        "CRYPTO_MTF_BREAKOUT_V1",
+        "CRYPTO_TREND_CORE_LONG_V1"
       ]
     );
     // The legacy key still resolves so historical candidates stay evaluable

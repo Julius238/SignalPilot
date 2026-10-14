@@ -9,9 +9,11 @@
     "approvedQuantity": "0.000000000000",
     "riskAmount": "0.000000000000",
     "netRewardRisk": "1.418024286413",
-    "failedRules": ["R-008-MIN-RR:REWARD_RISK_BELOW_MINIMUM"],
-    "inputHash": "a9693abf9b9a8639d2ce9b8d46f89f921d8ef5ff55614178dbdc508be1cfcd4d",
-    "outputHash": "7962a244371944abc9c0e8a466c2aa0c4cac4df282d2a8b9e1586ba2639cf014"
+    "failedRules": [
+      "R-008-MIN-RR:REWARD_RISK_BELOW_MINIMUM"
+    ],
+    "inputHash": "d1186188cab82b08cdbf09485bf4667bce5e36e293ccd137b57026e024aa3af4",
+    "outputHash": "1f703097b7ce5df6b20a12b2ac1ee71a7b8784a374cc8d13957750ded3e9a480"
   },
   {
     "name": "daily-loss-exactly-one-percent",
@@ -23,9 +25,11 @@
     "approvedQuantity": "0.000000000000",
     "riskAmount": "0.000000000000",
     "netRewardRisk": "2.385234000979",
-    "failedRules": ["R-010-DAILY-LOSS:DAILY_LOSS_LIMIT_REACHED"],
-    "inputHash": "b91abe19dce2c0b5d7f10a3fcb07effdfe0dad7ccc61eac67c97afa57756507a",
-    "outputHash": "b543a1d728a438145f69d87fe2a8e5b867db9cdce97e1cb0f8deacd1b4ea8123"
+    "failedRules": [
+      "R-010-DAILY-LOSS:DAILY_LOSS_LIMIT_REACHED"
+    ],
+    "inputHash": "cff7594084a8d2ac8e31eb34b582f3b4c1c2d3e3665d9ca42b9e4c0e2c34a2ba",
+    "outputHash": "57d44e0d9cf424ba7851323ee09d45b8e64d31bd1c6a119b36f9fd8897cf6d4c"
   },
   {
     "name": "ledger-drift-beyond-tolerance",
@@ -37,9 +41,11 @@
     "approvedQuantity": "0.000000000000",
     "riskAmount": "0.000000000000",
     "netRewardRisk": "2.385234000979",
-    "failedRules": ["R-003-PORTFOLIO-CONSISTENCY:PORTFOLIO_INCONSISTENT"],
-    "inputHash": "53f81a326ed4c88f42f1840afcdc1416b9803f64fe3a9b07e0dc60f6bd6b4e12",
-    "outputHash": "2020e140abbb0efabfe1d16e673ba85755f54ec1ae1441d8a8aa1c6c392b154f"
+    "failedRules": [
+      "R-003-PORTFOLIO-CONSISTENCY:PORTFOLIO_INCONSISTENT"
+    ],
+    "inputHash": "52a612f9d6c5201de47d36d3ecbab3e9eef28162044cdaee36941966d7acb75e",
+    "outputHash": "d63a571045ed82f69b036ed1af6876b02f1de8027305e55d8304c51eacd6e955"
   },
   {
     "name": "correlated-exposure-capped-then-below-minimum-notional",
@@ -51,9 +57,11 @@
     "approvedQuantity": "0.000000000000",
     "riskAmount": "0.000000000000",
     "netRewardRisk": "2.385234000979",
-    "failedRules": ["R-025-INSTRUMENT-MINIMUMS:BELOW_INSTRUMENT_MINIMUM"],
-    "inputHash": "c24a9a1ef8aa660583d1b70aef5fe6f034c780dedabcbc7986eaa4791ecb920c",
-    "outputHash": "e56e9d58f744ab704c5131f4483be9217c94fee8c8906c11f3ba334a6d36c55f"
+    "failedRules": [
+      "R-025-INSTRUMENT-MINIMUMS:BELOW_INSTRUMENT_MINIMUM"
+    ],
+    "inputHash": "b408fba3aac28798d7a2c44fe80f771969da7df9db2ae1b725f34c55477535ea",
+    "outputHash": "67248c1ac21d800c3d2b6471f412853dc767128527ca9abeb9e957e2db49d7d4"
   },
   {
     "name": "missing-execution-profile",
@@ -72,8 +80,8 @@
       "R-019-SLIPPAGE:EXECUTION_PROFILE_MISSING",
       "R-025-INSTRUMENT-MINIMUMS:BELOW_INSTRUMENT_MINIMUM"
     ],
-    "inputHash": "3befb4cd02f8d57185b4f51b1f2f30039b3c731ef48909a14a85f93efcc1d909",
-    "outputHash": "262ef21ea2ab700dd6af220500077048c5c2cfd8689ffe7897eed353e1626c25"
+    "inputHash": "c16f8fe13fbc3fe25ca5c9df701e7543c7b9d24e2865a259629ea3d7e139de26",
+    "outputHash": "66ac01f13ade2a8aaf03290916007fade1c3aa914d3468e4707214861765d3d6"
   },
   {
     "name": "missing-regime-snapshot",
@@ -85,9 +93,11 @@
     "approvedQuantity": "0.000000000000",
     "riskAmount": "0.000000000000",
     "netRewardRisk": "2.385234000979",
-    "failedRules": ["R-020-REGIME:REGIME_MISSING"],
-    "inputHash": "4415e6e6aa7cae68f9c6f446c285ef9cf919fe0e98a17d890f76f9901765d256",
-    "outputHash": "25fef1362d4734380d448544b4076d28ce23506cbe4ad7557edf5e7a3b9b3b50"
+    "failedRules": [
+      "R-020-REGIME:REGIME_MISSING"
+    ],
+    "inputHash": "5d48fce079ad209172860194422bffb1152d60dd732d81b41733a290bb35cdec",
+    "outputHash": "45650e3e8a1a61216ec158f00c0c67328c9ae392399976aed4192455a21cf441"
   },
   {
     "name": "post-loss-risk-multiplier",
@@ -99,9 +109,11 @@
     "approvedQuantity": "0.000000000000",
     "riskAmount": "0.000000000000",
     "netRewardRisk": "2.385234000979",
-    "failedRules": ["R-023-NO-MARTINGALE:NON_DETERMINISTIC_SIZE_OVERRIDE"],
-    "inputHash": "eb6626488df86beb27ba9c170bc50e77498c71b42aa55b136de42a2dbff3e8a8",
-    "outputHash": "be4fbb51a70c32dbfd35320e1c3eed6c6801ec60d17bb30be020abfb94696be0"
+    "failedRules": [
+      "R-023-NO-MARTINGALE:NON_DETERMINISTIC_SIZE_OVERRIDE"
+    ],
+    "inputHash": "e4cf4943d4f6b15f4f2b908815f761141d519dcd96c87e51a5cb9bd1a2b72736",
+    "outputHash": "df5d6f62b062ba342a00ee282328c5e8a3b41faa5f0fe76a0a212693932fabd4"
   },
   {
     "name": "kill-switch-engaged",
@@ -113,9 +125,11 @@
     "approvedQuantity": "0.000000000000",
     "riskAmount": "0.000000000000",
     "netRewardRisk": "2.385234000979",
-    "failedRules": ["R-002-SESSION:SESSION_KILL_SWITCH_ENGAGED"],
-    "inputHash": "9c7de8cec182238a68a2a373d5ac48bd311bcecc4325806c0cc780db76a22695",
-    "outputHash": "f96cd252be3230667c6a7adfd8de96085ab6bdbdf594920f0f796691a1aa7155"
+    "failedRules": [
+      "R-002-SESSION:SESSION_KILL_SWITCH_ENGAGED"
+    ],
+    "inputHash": "89a15808318d272da59a04aa585a42f3d056c8b9b53257de7b9fe244de405a00",
+    "outputHash": "899c7b2f9187e43b37316e55d16cb685dd80b93b02882f04ef6abe44d4352258"
   },
   {
     "name": "three-consecutive-losses",
@@ -127,9 +141,11 @@
     "approvedQuantity": "0.000000000000",
     "riskAmount": "0.000000000000",
     "netRewardRisk": "2.385234000979",
-    "failedRules": ["R-021-LOSS-STREAK:CONSECUTIVE_LOSS_LIMIT"],
-    "inputHash": "02628ea05537f51d8cba46afe87b602178fc64fad60cf3deb3a942244e453701",
-    "outputHash": "ff5f6b934075341e8cae8e075c560a7c23ba12ad29ca0ce7a7ef832e26ccec4c"
+    "failedRules": [
+      "R-021-LOSS-STREAK:CONSECUTIVE_LOSS_LIMIT"
+    ],
+    "inputHash": "c03ac028a5450a2dbaef6c0e671e349ec27eddfd0175b8930e92cd500925cdba",
+    "outputHash": "299a1259527fed2791ec7cfdc361a217069092418932178aabe88f003515655f"
   },
   {
     "name": "assessment-hash-conflict",
@@ -144,7 +160,7 @@
     "failedRules": [
       "R-026-IDEMPOTENCY-VERSION:IDEMPOTENCY_OR_VERSION_CONFLICT"
     ],
-    "inputHash": "2fc7d4df03ff3ead7229346d67b030b810ac07e1684ed6830d5533f803967326",
-    "outputHash": "a917e2ee88e7cb366da5dfdd1f93734b74580ef706628c627ea4f6c657d48cdf"
+    "inputHash": "8f71919c31fb14464c0d2ffa44279d38b574b530dfc52322ccdbda92e3b9d617",
+    "outputHash": "708f399608ad0274e3892599b07629953c52b7cf91c3ddfc65d0df6c5d99def1"
   }
 ]

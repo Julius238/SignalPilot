@@ -24,6 +24,7 @@ import type {
   RiskSizingResultV1
 } from "./contracts.js";
 import {
+  APPROVED_LONG_STRATEGY_KEYS,
   CRYPTO_MAJOR_GROUP_KEY,
   PORTFOLIO_TOLERANCE,
   RISK_ASSET_SCOPE,
@@ -536,10 +537,7 @@ function ruleLongOnly(ctx: RiskEvaluationContext): RuleVerdict {
     );
   }
   if (direction === "LONG") {
-    if (
-      strategyKey !== "CRYPTO_MTF_BREAKOUT_V1" &&
-      strategyKey !== "CRYPTO_MTF_BREAKOUT_LONG_V1"
-    ) {
+    if (!APPROVED_LONG_STRATEGY_KEYS.includes(strategyKey as never)) {
       return critical(
         RiskReasonCode.STRATEGY_DIRECTION_MISMATCH,
         "LONG candidate references an unapproved strategy identity.",

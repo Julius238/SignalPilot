@@ -207,6 +207,56 @@ export const CRYPTO_MTF_BREAKOUT_LONG_V1_SPECIFICATION_HASH =
   buildSpecificationHash(CRYPTO_MTF_BREAKOUT_LONG_V1_PARAMETERS);
 
 // ───────────────────────────────────────────────────────────────────────────
+// CRYPTO_TREND_CORE_LONG_V1 — the real-data research candidate (K2)
+// ───────────────────────────────────────────────────────────────────────────
+
+export const CRYPTO_TREND_CORE_LONG_V1_KEY = "CRYPTO_TREND_CORE_LONG_V1";
+
+/** 1.2.0 = the 1.1.0 breakout evaluator with a specified (not research) rule set. */
+export const CRYPTO_TREND_CORE_LONG_V1_ENGINE_VERSION =
+  "crypto-mtf-breakout-v1/1.2.0";
+
+/**
+ * Regime model the strategy is specified against. Equals
+ * `CRYPTO_NATIVE_REGIME_VERSION` of `@signalpilot/market-regime` (the shadow
+ * replay tests assert it); kept as a literal so the strategy engine does not
+ * depend on the regime package.
+ */
+export const CRYPTO_NATIVE_REGIME_SOURCE = "crypto-native-regime-v1/1.0.0";
+
+/**
+ * Research variant TREND_CORE_3R under the CRYPTO_NATIVE_V1 regime, promoted
+ * as its own versioned identity after the pre-registered real-data check
+ * (docs/trading/research/2026-10-14-*): training 2018–2023 PF 1.42 / avg R
+ * +0.26 over 73 BTC trades, untouched test 2024–2026 PF 1.12 / avg R +0.08
+ * over 49 — plausible, not proven. Same entry engine as LONG_V1; it keeps the
+ * conditions that carried a forward-return spread on training data (SMA trend
+ * stacks on 1h/4h/1d, breakout, regime) and drops the signal-engine
+ * confirmations, the relative-volume, RSI and ATR filters; stop cap 6 %, stop
+ * floor 1.75 % (net 2R after costs), target 3R. Its regime is the
+ * crypto-native report, never the equity-dependent production one.
+ */
+export const CRYPTO_TREND_CORE_LONG_V1_PARAMETERS = Object.freeze({
+  ...CRYPTO_MTF_BREAKOUT_LONG_V1_PARAMETERS,
+  key: CRYPTO_TREND_CORE_LONG_V1_KEY,
+  engineVersion: CRYPTO_TREND_CORE_LONG_V1_ENGINE_VERSION,
+  requireSignalConfirmation1h: false,
+  requireHigherTimeframeSignals: false,
+  relativeVolumeMinimum: "0",
+  rsiMinimum: "0",
+  rsiMaximum: "100",
+  atrToCloseMinimum: "0",
+  atrToCloseMaximum: "1",
+  stopDistanceCapPct: "0.06",
+  stopDistanceFloorPct: "0.0175",
+  takeProfitRMultiple: "3",
+  regimeSource: CRYPTO_NATIVE_REGIME_SOURCE
+} as const);
+
+export const CRYPTO_TREND_CORE_LONG_V1_SPECIFICATION_HASH =
+  buildSpecificationHash(CRYPTO_TREND_CORE_LONG_V1_PARAMETERS);
+
+// ───────────────────────────────────────────────────────────────────────────
 // CRYPTO_MTF_BREAKDOWN_SHORT_V1 — the separate short strategy
 // ───────────────────────────────────────────────────────────────────────────
 

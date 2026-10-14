@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
+import { CRYPTO_NATIVE_REGIME_VERSION } from "@signalpilot/market-regime";
+import { CRYPTO_NATIVE_REGIME_SOURCE } from "@signalpilot/strategy-engine";
+
 import { generateBreakoutScenario, generateSyntheticSeries, runShadowReplay, type ReplayConfig, type ReplayMarketData } from "../src/index.js";
 import { forcedCandidates } from "./support/forced-candidates.js";
 
@@ -155,6 +158,17 @@ describe("shadow replay", () => {
       (Number(overall.fees) + Number(overall.spreadCost) + Number(overall.slippageCost)).toFixed(6)
     );
     assert.ok(overall.maxConsecutiveLosses >= 0);
+  });
+
+  it("feeds a crypto-native strategy only the crypto-native regime", () => {
+    // The literal in the strategy engine is the regime package's version.
+    assert.equal(CRYPTO_NATIVE_REGIME_SOURCE, CRYPTO_NATIVE_REGIME_VERSION);
+    const trendCore = { strategyKey: "CRYPTO_TREND_CORE_LONG_V1", mode: "SPEC" as const };
+    const wrongRegime = runShadowReplay(data, config({ ...trendCore, regimePolicy: "CRYPTO_ONLY" }));
+    assert.equal(wrongRegime.funnel.candidates, 0);
+    assert.ok((wrongRegime.funnel.strategyReasons.REGIME_SOURCE_MISMATCH ?? 0) > 0);
+    const native = runShadowReplay(data, config({ ...trendCore, regimePolicy: "CRYPTO_NATIVE_V1" }));
+    assert.equal(native.funnel.strategyReasons.REGIME_SOURCE_MISMATCH ?? 0, 0);
   });
 
   it("reports near misses and forward returns against the all-hours baseline", () => {

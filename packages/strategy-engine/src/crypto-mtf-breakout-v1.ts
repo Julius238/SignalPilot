@@ -49,7 +49,11 @@ import {
   CRYPTO_MTF_BREAKOUT_LONG_V1_ENGINE_VERSION,
   CRYPTO_MTF_BREAKOUT_LONG_V1_KEY,
   CRYPTO_MTF_BREAKOUT_LONG_V1_SPECIFICATION_HASH,
-  CRYPTO_MTF_BREAKOUT_V1_PARAMETERS
+  CRYPTO_MTF_BREAKOUT_V1_PARAMETERS,
+  CRYPTO_TREND_CORE_LONG_V1_ENGINE_VERSION,
+  CRYPTO_TREND_CORE_LONG_V1_KEY,
+  CRYPTO_TREND_CORE_LONG_V1_PARAMETERS,
+  CRYPTO_TREND_CORE_LONG_V1_SPECIFICATION_HASH
 } from "./specification-v1.js";
 import {
   LEGACY_LONG_IDENTITY,
@@ -73,6 +77,12 @@ const PARAMS = CRYPTO_MTF_BREAKOUT_V1_PARAMETERS;
  */
 export interface BreakoutIdentityV1 extends ExpectedStrategyIdentityV1 {
   readonly tickAlignedPricePlan: boolean;
+  /**
+   * The specified rule set of a registered identity that deviates from the
+   * base parameters (part of its specification hash). Distinct from
+   * `research`, which only ever exists inside a replay.
+   */
+  readonly rules?: BreakoutResearchOverrides;
   /** Research-only rule variant (see `BreakoutResearchOverrides`). */
   readonly research?: BreakoutResearchOverrides;
 }
@@ -87,6 +97,29 @@ export const LONG_V1_BREAKOUT_IDENTITY: BreakoutIdentityV1 = Object.freeze({
   engineVersion: CRYPTO_MTF_BREAKOUT_LONG_V1_ENGINE_VERSION,
   specificationHash: CRYPTO_MTF_BREAKOUT_LONG_V1_SPECIFICATION_HASH,
   tickAlignedPricePlan: true
+});
+
+const TREND_CORE = CRYPTO_TREND_CORE_LONG_V1_PARAMETERS;
+
+/** CRYPTO_TREND_CORE_LONG_V1: rules read from its hashed parameters, regime from the crypto-native report. */
+export const TREND_CORE_LONG_V1_BREAKOUT_IDENTITY: BreakoutIdentityV1 = Object.freeze({
+  key: CRYPTO_TREND_CORE_LONG_V1_KEY,
+  engineVersion: CRYPTO_TREND_CORE_LONG_V1_ENGINE_VERSION,
+  specificationHash: CRYPTO_TREND_CORE_LONG_V1_SPECIFICATION_HASH,
+  regimeSource: TREND_CORE.regimeSource,
+  tickAlignedPricePlan: true,
+  rules: Object.freeze({
+    skipOneHourSignal: !TREND_CORE.requireSignalConfirmation1h,
+    skipHigherTimeframeSignals: !TREND_CORE.requireHigherTimeframeSignals,
+    relativeVolumeMinimum: TREND_CORE.relativeVolumeMinimum,
+    rsiMinimum: TREND_CORE.rsiMinimum,
+    rsiMaximum: TREND_CORE.rsiMaximum,
+    atrToCloseMinimum: TREND_CORE.atrToCloseMinimum,
+    atrToCloseMaximum: TREND_CORE.atrToCloseMaximum,
+    stopDistanceCapPct: TREND_CORE.stopDistanceCapPct,
+    stopDistanceFloorPct: TREND_CORE.stopDistanceFloorPct,
+    takeProfitRMultiple: TREND_CORE.takeProfitRMultiple
+  })
 });
 const ENTRY = StrategyCheckStage.ENTRY;
 const PRICE_PLAN = StrategyCheckStage.PRICE_PLAN;
@@ -594,7 +627,8 @@ export function evaluateCryptoMtfBreakoutV1(
 
   const validated = validation.validated;
   const log = createCheckLog();
-  const rules = identity.research === undefined ? SPECIFIED_RULES : compileRules(identity.research);
+  const overrides = identity.research ?? identity.rules;
+  const rules = overrides === undefined ? SPECIFIED_RULES : compileRules(overrides);
 
   // ── Trend, breakout, momentum, volume, volatility ────────────────────────
   const trend = evaluateTrend(log, validated, rules);

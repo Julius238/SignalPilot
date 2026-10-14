@@ -9,6 +9,8 @@ import {
   evaluateRisk
 } from "@signalpilot/risk-engine";
 
+import { CRYPTO_NATIVE_REGIME_SOURCE } from "@signalpilot/strategy-engine";
+
 import { assembleRiskInput } from "../src/lib/riskInputAssembler.js";
 import { runShadowAssessRisk } from "../src/jobs/shadowAssessRisk.js";
 import { runShadowBootstrap } from "../src/jobs/shadowBootstrap.js";
@@ -59,6 +61,40 @@ const runJob = (
 };
 
 describe("risk input assembler", () => {
+  it("reads the crypto-native regime for a strategy version specified against it, and fails closed without it", async () => {
+    const world = buildRiskWorld();
+    world.candidates[0] = {
+      ...world.candidates[0],
+      strategyVersion: {
+        ...world.candidates[0].strategyVersion,
+        // The fixture types parametersJson as { direction }; a real version carries more keys.
+        parametersJson: { direction: "LONG", regimeSource: CRYPTO_NATIVE_REGIME_SOURCE } as { direction: string }
+      }
+    };
+    const production = world.regimes[0];
+    world.regimes[0] = {
+      ...production,
+      reportJson: {
+        cryptoNative: { equityRegime: "UNKNOWN", cryptoRegime: "NEUTRAL", overallRegime: "NEUTRAL", riskMode: "NORMAL", confidence: 65 }
+      }
+    } as typeof production;
+    const input = { tradeCandidateId: "trade-candidate-1", asOf: AS_OF, codeVersion: "test-code-version", capability: CAPABILITY };
+
+    const native = await assembleRiskInput(createFakeRiskDatabase(world).database as never, input);
+    assert.equal(native.ok, true);
+    if (!native.ok) return;
+    assert.equal(native.snapshot.marketRegime!.cryptoRegime, "NEUTRAL");
+    assert.equal(native.snapshot.marketRegime!.confidence, 65);
+    assert.equal(evaluateRisk(native.snapshot).outcome, "REJECTED");
+
+    // Without a stored crypto-native report the regime is missing — never the production one.
+    world.regimes[0] = production;
+    const missing = await assembleRiskInput(createFakeRiskDatabase(world).database as never, input);
+    assert.equal(missing.ok, true);
+    if (!missing.ok) return;
+    assert.equal(missing.snapshot.marketRegime, null);
+  });
+
   it("builds a snapshot the pure engine can approve", async () => {
     const { database } = setup();
     const assembled = await assembleRiskInput(database as never, {

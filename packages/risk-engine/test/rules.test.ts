@@ -67,6 +67,20 @@ describe("risk registry", () => {
 describe("approval path", () => {
   const result = evaluateRisk(buildApprovableSnapshot());
 
+  it("approves exactly the listed long strategy identities", () => {
+    const withKey = (strategyKey: string) =>
+      mutate((snapshot) => {
+        snapshot.candidate.strategyKey = strategyKey;
+      });
+    for (const approved of ["CRYPTO_MTF_BREAKOUT_LONG_V1", "CRYPTO_TREND_CORE_LONG_V1"]) {
+      assert.equal(evaluateRisk(withKey(approved)).outcome, "APPROVED", approved);
+    }
+    // An unlisted identity is critical, not merely rejected.
+    const unknown = evaluateRisk(withKey("CRYPTO_SOMETHING_LONG_V9"));
+    assert.equal(unknown.outcome, "ERROR");
+    assert.equal(unknown.primaryReasonCode, RiskReasonCode.STRATEGY_DIRECTION_MISMATCH);
+  });
+
   it("approves a clean candidate and sizes it", () => {
     assert.equal(result.outcome, "APPROVED");
     assert.equal(result.directive, "NONE");

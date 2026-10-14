@@ -1,7 +1,11 @@
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { calculateMarketRegimeReport, type MarketRegimeReport } from "@signalpilot/market-regime";
+import {
+  calculateCryptoNativeRegimeReport,
+  calculateMarketRegimeReport,
+  type MarketRegimeReport
+} from "@signalpilot/market-regime";
 import { AssetType, BotRunStatus, Prisma, prisma, type PrismaClient } from "@signalpilot/database";
 import { assessCandleSeriesQuality } from "@signalpilot/market-data";
 import { config } from "dotenv";
@@ -121,6 +125,13 @@ export async function calculateMarketRegime(
     }
 
     const report = calculateMarketRegimeReport({ benchmarks });
+    // The versioned crypto-native regime rides along in reportJson: the
+    // columns stay the production report every existing reader uses, and a
+    // strategy specified against the crypto-native model reads it from here.
+    const cryptoNative = calculateCryptoNativeRegimeReport({
+      benchmarks,
+      generatedAt: new Date(report.generatedAt)
+    });
     const snapshot = await database.marketRegimeSnapshot.create({
       data: {
         generatedAt: new Date(report.generatedAt),
@@ -131,7 +142,7 @@ export async function calculateMarketRegime(
         confidence: report.confidence,
         summary: report.summary,
         riskNote: report.riskNote,
-        reportJson: report as unknown as Prisma.InputJsonObject
+        reportJson: { ...report, cryptoNative } as unknown as Prisma.InputJsonObject
       }
     });
     const summary = toSummary(BotRunStatus.SUCCESS, snapshot.id, false, report, missingSymbols.size);

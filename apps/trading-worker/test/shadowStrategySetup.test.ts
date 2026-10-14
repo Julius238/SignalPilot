@@ -44,7 +44,7 @@ function seedPrerequisites() {
 }
 
 describe("runShadowStrategySetup", () => {
-  it("creates legacy/current long and short BTC/ETH assignments disabled and idempotently", async () => {
+  it("creates legacy/current/trend-core long and short BTC/ETH assignments disabled and idempotently", async () => {
     const { database, tables } = seedPrerequisites();
 
     const first = await runShadowStrategySetup(database as never, {
@@ -58,9 +58,9 @@ describe("runShadowStrategySetup", () => {
       first.specificationHash,
       CRYPTO_MTF_BREAKOUT_V1_SPECIFICATION_HASH
     );
-    assert.equal(tables.get("strategy")!.rows.length, 3);
-    assert.equal(tables.get("strategyVersion")!.rows.length, 3);
-    assert.equal(tables.get("strategyAssignment")!.rows.length, 5);
+    assert.equal(tables.get("strategy")!.rows.length, 4);
+    assert.equal(tables.get("strategyVersion")!.rows.length, 4);
+    assert.equal(tables.get("strategyAssignment")!.rows.length, 7);
     assert.ok(
       tables
         .get("strategyAssignment")!
@@ -68,7 +68,16 @@ describe("runShadowStrategySetup", () => {
     );
     assert.deepEqual(
       first.entries.map((entry) => entry.direction),
-      ["LONG", "LONG", "SHORT"]
+      ["LONG", "LONG", "LONG", "SHORT"]
+    );
+    const trendCore = first.entries.find((entry) => entry.strategyKey === "CRYPTO_TREND_CORE_LONG_V1");
+    assert.ok(trendCore !== undefined);
+    assert.deepEqual(
+      trendCore.assignments.map((assignment) => [assignment.symbol, assignment.enabled]),
+      [
+        ["BTCUSDT", false],
+        ["ETHUSDT", false]
+      ]
     );
     assert.equal(
       tables.get("tradingSession")!.rows.length,
@@ -82,10 +91,10 @@ describe("runShadowStrategySetup", () => {
       correlationId: "strategy-setup-2"
     });
     assert.equal(second.blocked, false);
-    assert.equal(tables.get("strategy")!.rows.length, 3);
-    assert.equal(tables.get("strategyVersion")!.rows.length, 3);
-    assert.equal(tables.get("strategyAssignment")!.rows.length, 5);
-    assert.equal(tables.get("tradingAuditEvent")!.rows.length, 5);
+    assert.equal(tables.get("strategy")!.rows.length, 4);
+    assert.equal(tables.get("strategyVersion")!.rows.length, 4);
+    assert.equal(tables.get("strategyAssignment")!.rows.length, 7);
+    assert.equal(tables.get("tradingAuditEvent")!.rows.length, 7);
   });
 
   it("supersedes a changed specification with a new immutable version and re-pins disabled assignments", async () => {
