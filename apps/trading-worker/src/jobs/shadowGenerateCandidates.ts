@@ -41,6 +41,7 @@ import {
   CRYPTO_MTF_BREAKOUT_V1_SPECIFICATION_HASH,
   evaluateStrategy
 } from "@signalpilot/strategy-engine";
+import { APPROVED_LONG_STRATEGY_KEYS } from "@signalpilot/risk-engine";
 import { config } from "dotenv";
 import pino from "pino";
 
@@ -210,10 +211,26 @@ export async function runShadowGenerateCandidates(
   let assemblerFailures = 0;
   let errors = 0;
 
+  // Every long identity the risk engine approves runs once an assignment of it
+  // is enabled (the long flag gates the direction, the assignment the
+  // strategy); without the flag only the legacy identity, as before.
+  const enabledStrategyKeys = new Set(
+    (
+      await database.strategyAssignment.findMany({
+        where: { enabled: true },
+        include: { strategy: true }
+      })
+    ).map((assignment) => assignment.strategy.key)
+  );
+  const longKeys = gate.flags.strategyLongV1Enabled
+    ? APPROVED_LONG_STRATEGY_KEYS.filter(
+        (key) =>
+          key !== CRYPTO_MTF_BREAKOUT_V1_KEY &&
+          (key === CRYPTO_MTF_BREAKOUT_LONG_V1_KEY || enabledStrategyKeys.has(key))
+      )
+    : [CRYPTO_MTF_BREAKOUT_V1_KEY];
   const strategyKeys = [
-    gate.flags.strategyLongV1Enabled
-      ? CRYPTO_MTF_BREAKOUT_LONG_V1_KEY
-      : CRYPTO_MTF_BREAKOUT_V1_KEY,
+    ...longKeys,
     ...(gate.flags.shadowShortEnabled && gate.flags.strategyShortV1Enabled
       ? [CRYPTO_MTF_BREAKDOWN_SHORT_V1_KEY]
       : [])

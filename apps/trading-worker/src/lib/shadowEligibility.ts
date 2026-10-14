@@ -48,6 +48,10 @@ import {
   CRYPTO_MTF_BREAKOUT_V1_KEY,
   CRYPTO_MTF_BREAKOUT_V1_PARAMETERS,
   CRYPTO_MTF_BREAKOUT_V1_SPECIFICATION_HASH,
+  CRYPTO_TREND_CORE_LONG_V1_ENGINE_VERSION,
+  CRYPTO_TREND_CORE_LONG_V1_KEY,
+  CRYPTO_TREND_CORE_LONG_V1_PARAMETERS,
+  CRYPTO_TREND_CORE_LONG_V1_SPECIFICATION_HASH,
   TIMEFRAME_INTERVAL_MS,
   type StrategyTimeframe
 } from "@signalpilot/strategy-engine";
@@ -126,6 +130,16 @@ const STRATEGY_IDENTITIES = new Map([
       engineVersion: CRYPTO_MTF_BREAKOUT_LONG_V1_ENGINE_VERSION,
       specificationHash: CRYPTO_MTF_BREAKOUT_LONG_V1_SPECIFICATION_HASH,
       parameters: CRYPTO_MTF_BREAKOUT_LONG_V1_PARAMETERS,
+      legacy: false
+    }
+  ],
+  [
+    CRYPTO_TREND_CORE_LONG_V1_KEY,
+    {
+      direction: TradeDirection.LONG,
+      engineVersion: CRYPTO_TREND_CORE_LONG_V1_ENGINE_VERSION,
+      specificationHash: CRYPTO_TREND_CORE_LONG_V1_SPECIFICATION_HASH,
+      parameters: CRYPTO_TREND_CORE_LONG_V1_PARAMETERS,
       legacy: false
     }
   ],
@@ -536,8 +550,6 @@ export async function buildEligibilityReport(
           assignment.strategy.status === StrategyStatus.ACTIVE &&
           assignment.strategyVersion.status === StrategyVersionStatus.ACTIVE &&
           assignment.strategyVersion.engineVersion === identity.engineVersion &&
-          (identity.legacy ||
-            assignment.strategyVersion.codeVersion === deployedCodeVersion) &&
           deployedCodeVersion !== "" &&
           assignment.strategyVersion.specificationHash ===
             identity.specificationHash &&
@@ -573,10 +585,41 @@ export async function buildEligibilityReport(
           : fail(
               "ACTIVE_STRATEGY_VERSION",
               "Aktuelle StrategyVersion",
-              "Direction, ACTIVE-Status, Engine-/Code-Version, 1h-Timeframe oder Specification Hash stimmen nicht.",
+              "Direction, ACTIVE-Status, Engine-Version, 1h-Timeframe oder Specification Hash stimmen nicht (oder TRADING_CODE_VERSION fehlt).",
               {
                 expectedCodeVersion: deployedCodeVersion,
                 assignmentFailures: strategyVersionFailures
+              }
+            )
+      );
+
+      // A StrategyVersion records the build that created it; what decides is
+      // its engine version and specification hash (checked above). Running a
+      // later build — e.g. a documented bug fix during a forward test — is
+      // shown, not blocking.
+      const otherBuildVersions = assignments.filter(
+        (assignment) =>
+          STRATEGY_IDENTITIES.get(assignment.strategy.key as never)?.legacy === false &&
+          assignment.strategyVersion.codeVersion !== deployedCodeVersion
+      );
+      checks.push(
+        otherBuildVersions.length === 0
+          ? pass(
+              "STRATEGY_VERSION_BUILD",
+              "Build der StrategyVersion",
+              "Alle aktivierten Versionen wurden mit dem laufenden Build angelegt.",
+              { deployedCodeVersion }
+            )
+          : warn(
+              "STRATEGY_VERSION_BUILD",
+              "Build der StrategyVersion",
+              "Mindestens eine aktivierte Version wurde mit einem anderen Build angelegt; Engine-Version und Specification Hash sind unverändert.",
+              {
+                deployedCodeVersion,
+                versions: otherBuildVersions.map((assignment) => ({
+                  strategyVersionId: assignment.strategyVersionId,
+                  codeVersion: assignment.strategyVersion.codeVersion
+                }))
               }
             )
       );
@@ -585,10 +628,10 @@ export async function buildEligibilityReport(
         (assignment) =>
           assignment.strategy.key === CRYPTO_MTF_BREAKDOWN_SHORT_V1_KEY
       );
-      const currentLongAssignments = assignments.filter(
-        (assignment) =>
-          assignment.strategy.key === CRYPTO_MTF_BREAKOUT_LONG_V1_KEY
-      );
+      const currentLongAssignments = assignments.filter((assignment) => {
+        const identity = STRATEGY_IDENTITIES.get(assignment.strategy.key as never);
+        return identity !== undefined && !identity.legacy && identity.direction === TradeDirection.LONG;
+      });
       const longFlagsValid =
         currentLongAssignments.length === 0 ||
         (base.allowed &&

@@ -35,15 +35,16 @@ import {
   type SessionUnlockContext,
   type TradingCapabilityContext
 } from "@signalpilot/trading-domain";
+import { APPROVED_LONG_STRATEGY_KEYS } from "@signalpilot/risk-engine";
 
 export const SHADOW_OPS_JOB_KEY = "trading:shadow-session-ops";
 
 const RECONCILE_FRESHNESS_MS = 5 * 60 * 1000;
 const ALLOWED_ASSIGNMENT_SYMBOLS = ["BTCUSDT", "ETHUSDT"];
 const P9_PORTFOLIO_KEY = "SHADOW_V1";
+/** The risk engine's approved long identities plus the short strategy. */
 const ALLOWED_STRATEGY_KEYS = [
-  "CRYPTO_MTF_BREAKOUT_V1",
-  "CRYPTO_MTF_BREAKOUT_LONG_V1",
+  ...APPROVED_LONG_STRATEGY_KEYS,
   "CRYPTO_MTF_BREAKDOWN_SHORT_V1"
 ] as const;
 

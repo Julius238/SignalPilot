@@ -121,6 +121,12 @@ export interface ShadowStrategySetupEntry {
   readonly strategyId: string;
   readonly strategyVersionId: string;
   readonly specificationHash: string;
+  /**
+   * Build that created the version. Provenance only: the identity that decides
+   * is engine version + specification hash, so a later build (a documented bug
+   * fix) reuses the version instead of being blocked.
+   */
+  readonly versionCodeVersion: string;
   readonly assignments: readonly {
     readonly symbol: string;
     readonly strategyAssignmentId: string;
@@ -328,14 +334,13 @@ export async function runShadowStrategySetup(
     if (
       strategyVersion.status !== StrategyVersionStatus.ACTIVE ||
       strategyVersion.engineVersion !== definition.engineVersion ||
-      (!definition.legacy && strategyVersion.codeVersion !== codeVersion) ||
       strategyVersion.specificationHash !== definition.specificationHash ||
       buildSpecificationHash(strategyVersion.parametersJson) !==
         definition.specificationHash
     ) {
       return blocked(
         "STRATEGY_VERSION_CONFLICT",
-        `${definition.key} v${strategyVersion.version} does not match its immutable engine, parameters, build or hash.`
+        `${definition.key} v${strategyVersion.version} does not match its immutable engine, parameters or hash.`
       );
     }
     const supersededVersionIds = versions
@@ -528,6 +533,7 @@ export async function runShadowStrategySetup(
       strategyId: strategy.id,
       strategyVersionId: strategyVersion.id,
       specificationHash: definition.specificationHash,
+      versionCodeVersion: strategyVersion.codeVersion,
       assignments
     });
   }

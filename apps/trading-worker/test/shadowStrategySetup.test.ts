@@ -159,8 +159,8 @@ describe("runShadowStrategySetup", () => {
     assert.equal(tables.get("strategyAssignment")!.rows.length, 0);
   });
 
-  it("refuses to reuse an immutable version from a different code build", async () => {
-    const { database } = seedPrerequisites();
+  it("reuses an immutable version under a later build and reports the build it was created with", async () => {
+    const { database, tables } = seedPrerequisites();
     const first = await runShadowStrategySetup(database as never, {
       asOf: AS_OF,
       env: ENV
@@ -171,6 +171,18 @@ describe("runShadowStrategySetup", () => {
       asOf: new Date(AS_OF.getTime() + 1_000),
       env: { ...ENV, TRADING_CODE_VERSION: "different-build" }
     });
+    assert.equal(second.blocked, false);
+    // Same engine and specification hash: no new version, the original build stays recorded.
+    assert.equal(tables.get("strategyVersion")!.rows.length, 4);
+    assert.ok(second.entries.every((entry) => entry.versionCodeVersion === ENV.TRADING_CODE_VERSION));
+  });
+
+  it("still refuses a version whose stored parameters no longer match its hash", async () => {
+    const { database, tables } = seedPrerequisites();
+    assert.equal((await runShadowStrategySetup(database as never, { asOf: AS_OF, env: ENV })).blocked, false);
+    const version = tables.get("strategyVersion")!.rows.find((row) => row.engineVersion === "crypto-mtf-breakout-v1/1.2.0")!;
+    version.parametersJson = { ...(version.parametersJson as Record<string, unknown>), takeProfitRMultiple: "4" };
+    const second = await runShadowStrategySetup(database as never, { asOf: new Date(AS_OF.getTime() + 1_000), env: ENV });
     assert.equal(second.blocked, true);
     assert.equal(second.blockReasonCode, "STRATEGY_VERSION_CONFLICT");
   });

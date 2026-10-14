@@ -34,6 +34,7 @@ import {
   type PrismaClient
 } from "@signalpilot/database";
 import { computeReserveEntry } from "@signalpilot/portfolio";
+import { APPROVED_LONG_STRATEGY_KEYS } from "@signalpilot/risk-engine";
 import {
   DecimalValue,
   ENTRY_SIDE,
@@ -248,12 +249,12 @@ export async function createShadowOrderForCandidate(
     capability.exchangeExecutionEnabled === false &&
     capability.marginTradingEnabled === false &&
     capability.futuresTradingEnabled === false;
+  const longKey = candidate.strategyVersion.strategy.key;
   const directionEnabled =
     candidate.direction === TradeDirection.LONG
       ? capabilitySafe &&
-        (candidate.strategyVersion.strategy.key === "CRYPTO_MTF_BREAKOUT_V1" ||
-          (candidate.strategyVersion.strategy.key ===
-            "CRYPTO_MTF_BREAKOUT_LONG_V1" &&
+        (longKey === "CRYPTO_MTF_BREAKOUT_V1" ||
+          (APPROVED_LONG_STRATEGY_KEYS.includes(longKey as never) &&
             capability.strategyLongV1Enabled === true))
       : candidate.direction === TradeDirection.SHORT &&
         capabilitySafe &&

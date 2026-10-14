@@ -480,6 +480,30 @@ describe("shadowGenerateCandidates job", () => {
     assert.equal(writes.auditEvents.length, 0);
   });
 
+  it("scans an approved long strategy only while one of its assignments is enabled", async () => {
+    const asTrendCore = (enabled: boolean): FakeWorld => {
+      const world = buildFakeWorld({ symbol: "BTCUSDT", assetId: "asset-btc", assignmentEnabled: enabled });
+      const [assignment] = world.assignments as Array<Record<string, Record<string, unknown>>>;
+      assignment.strategy = { ...assignment.strategy, key: "CRYPTO_TREND_CORE_LONG_V1" };
+      return world;
+    };
+    const longEnv = { ...ENABLED_ENV, TRADING_STRATEGY_LONG_V1_ENABLED: "true" };
+
+    const enabled = await runShadowGenerateCandidates(createFakeDatabase([asTrendCore(true)]).database as never, {
+      asOf: AS_OF,
+      env: longEnv,
+      correlationId: "trend-core-enabled"
+    });
+    assert.ok(enabled.results.some((result) => result.strategyKey === "CRYPTO_TREND_CORE_LONG_V1"));
+
+    const disabled = await runShadowGenerateCandidates(createFakeDatabase([asTrendCore(false)]).database as never, {
+      asOf: AS_OF,
+      env: longEnv,
+      correlationId: "trend-core-disabled"
+    });
+    assert.ok(!disabled.results.some((result) => result.strategyKey === "CRYPTO_TREND_CORE_LONG_V1"));
+  });
+
   it("creates a SHORT candidate only with both Short flags and an enabled Short assignment", async () => {
     const shortWorld = buildFakeWorld({
       symbol: "BTCUSDT",

@@ -409,7 +409,11 @@ export function createFakeDatabase(worlds: readonly FakeWorld[]) {
             (where.strategy?.key === undefined ||
               (assignment.strategy as { key?: string } | undefined)?.key ===
                 where.strategy.key)
-        ) ?? null
+        ) ?? null,
+      findMany: async ({ where }: { where?: { enabled?: boolean } } = {}) =>
+        merged.assignments.filter(
+          (assignment) => where?.enabled === undefined || assignment.enabled === where.enabled
+        )
     },
     candle: {
       findMany: async ({
