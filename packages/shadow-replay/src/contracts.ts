@@ -52,8 +52,11 @@ export type ReplayMode = "SPEC" | "SIGNAL_EDGE";
  * - `CRYPTO_ONLY`: research assumption when no equity benchmarks exist — the
  *   regime is computed from the crypto benchmarks alone and its confidence is
  *   normalised to those benchmarks.
+ * - `CRYPTO_NATIVE_V1`: the versioned crypto-native regime
+ *   (`calculateCryptoNativeRegimeReport`): regime, risk mode and confidence
+ *   from BTC/ETH only, with a 200-day trend filter.
  */
-export type RegimePolicy = "AS_SPECIFIED" | "CRYPTO_ONLY";
+export type RegimePolicy = "AS_SPECIFIED" | "CRYPTO_ONLY" | "CRYPTO_NATIVE_V1";
 
 export interface ReplayExecutionProfile {
   readonly tickSize: string;
@@ -84,6 +87,12 @@ export interface ReplayConfig {
   readonly scanDelayMinutes?: number;
   /** Research variant key from `STRATEGY_VARIANTS` (default BASELINE). */
   readonly variant?: string;
+  /**
+   * Hours after which the replay assumes the operator's review releases a
+   * kill switch engaged by the loss-streak rule (R-021); live, only the
+   * operator releases it. Default 24.
+   */
+  readonly killSwitchReviewHours?: number;
 }
 
 export interface ReplayTrade {
@@ -106,6 +115,10 @@ export interface ReplayTrade {
   readonly fees: string;
   readonly netPnl: string;
   readonly rMultiple: string | null;
+  /** Price impact of the simulated half spread on entry and exit (quote currency). */
+  readonly spreadCost: string;
+  /** Price impact of the simulated slippage on entry and exit (quote currency). */
+  readonly slippageCost: string;
   readonly maxAdversePrice: string;
   readonly maxFavorablePrice: string;
   readonly marketRegime: string | null;
@@ -127,11 +140,21 @@ export interface ReplayPeriodMetrics {
   readonly profitFactor: string | null;
   readonly expectancy: string | null;
   readonly averageR: string | null;
+  /** Mean net PnL of winning / losing trades (losses negative). */
+  readonly averageWin: string | null;
+  readonly averageLoss: string | null;
+  /** Longest run of consecutive losing trades in closing order. */
+  readonly maxConsecutiveLosses: number;
   readonly netPnl: string;
   readonly fees: string;
+  readonly spreadCost: string;
+  readonly slippageCost: string;
+  /** Fees + spread + slippage: everything the simulated execution cost. */
+  readonly totalExecutionCost: string;
   readonly returnPct: string | null;
   readonly maxDrawdownPct: string | null;
   readonly sharpeRatio: string | null;
+  readonly sortinoRatio: string | null;
   readonly averageHoldHours: string | null;
   /** Buy-and-hold of the same symbol over the same window, one round trip of costs. */
   readonly buyAndHoldReturnPct: string | null;

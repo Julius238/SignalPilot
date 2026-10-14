@@ -118,6 +118,45 @@ describe("shadow replay", () => {
     assert.equal(result.invariantViolations, 0);
   });
 
+  it("releases the loss-streak kill switch after the assumed operator review instead of stopping for good", () => {
+    // A synthetic market with a three-loss streak under twice-daily forced candidates.
+    const streaky: ReplayMarketData = {
+      origin: "SYNTHETIC",
+      synthetic: true,
+      series: [
+        generateSyntheticSeries({ symbol: "BTCUSDT", startMs: START, hours: 245 * 24, startPrice: 40000, seed: 29, baseVolume: 900 }),
+        generateSyntheticSeries({ symbol: "ETHUSDT", startMs: START, hours: 245 * 24, startPrice: 2300, seed: 33, baseVolume: 9000 })
+      ]
+    };
+    const twiceDaily = forcedCandidates({ every: (closeMs) => [9, 21].includes(new Date(closeMs + 1).getUTCHours()), stopPct: "0.022" });
+    const reviewed = runShadowReplay(streaky, config({ mode: "SPEC" }), { evaluate: twiceDaily });
+    const neverReleased = runShadowReplay(streaky, config({ mode: "SPEC", killSwitchReviewHours: 1e9 }), { evaluate: twiceDaily });
+
+    assert.equal(reviewed.funnel.riskReasons.CONSECUTIVE_LOSS_LIMIT, 1);
+    assert.ok(reviewed.notes.some((note) => note.includes("Kill-Switch") && note.includes("24 h")));
+    // Without a review the kill switch blocks every later candidate, as live without an operator.
+    assert.ok((neverReleased.funnel.riskReasons.SESSION_KILL_SWITCH_ENGAGED ?? 0) > (reviewed.funnel.riskReasons.SESSION_KILL_SWITCH_ENGAGED ?? 0));
+    assert.ok(reviewed.trades.length > neverReleased.trades.length);
+    assert.equal(reviewed.invariantViolations, 0);
+  });
+
+  it("splits execution costs into fees, spread and slippage", () => {
+    const result = runShadowReplay(data, config({ mode: "SPEC" }), { evaluate: everyThirdMorning });
+    const overall = result.metrics.overall;
+    assert.ok(result.trades.length > 0);
+    for (const trade of result.trades) {
+      assert.ok(Number(trade.spreadCost) > 0 && Number(trade.slippageCost) > 0);
+    }
+    // Half spread 1 bp vs slippage 3 bp: slippage carries three quarters of the price impact.
+    const share = Number(overall.slippageCost) / (Number(overall.slippageCost) + Number(overall.spreadCost));
+    assert.ok(Math.abs(share - 0.75) < 0.001, String(share));
+    assert.equal(
+      Number(overall.totalExecutionCost).toFixed(6),
+      (Number(overall.fees) + Number(overall.spreadCost) + Number(overall.slippageCost)).toFixed(6)
+    );
+    assert.ok(overall.maxConsecutiveLosses >= 0);
+  });
+
   it("reports near misses and forward returns against the all-hours baseline", () => {
     const result = runShadowReplay(data, config());
     const { nearMiss } = result.metrics;

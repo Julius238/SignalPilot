@@ -70,5 +70,45 @@ export const STRATEGY_VARIANTS: Readonly<Record<string, StrategyVariant>> = Obje
       relativeVolumeMinimum: "1.2",
       rsiMaximum: "78"
     }
+  ),
+  // Second round, derived 2026-10-14 from the condition study on the real-data
+  // TRAINING period only (2018-03 → 2023-12, BTC and ETH alike): the SMA trend
+  // stacks, the breakout and the regime carry a positive forward-return spread;
+  // relative volume (blocks 85 % of hours) and the RSI band (blocks 60 %) carry
+  // none; the ATR band and the 3 % stop cap exclude volatile hours that did
+  // better; the signal-engine confirmations are informative but pass in only
+  // 1–2 % of hours each, so their conjunction leaves no trade.
+  TREND_CORE: variant(
+    "TREND_CORE",
+    "Trend-Kern",
+    "Nur Bedingungen mit Informationsgehalt im Training: SMA-Trend 1h/4h/1d, Ausbruch, Regime. Ohne Signal-Engine, Volumen-, RSI- und ATR-Filter; Stop-Kappe 6 % statt 3 %, Mindest-Stop 1,75 % (Netto-2R nach Kosten).",
+    {
+      skipOneHourSignal: true,
+      skipHigherTimeframeSignals: true,
+      relativeVolumeMinimum: "0",
+      rsiMinimum: "0",
+      rsiMaximum: "100",
+      atrToCloseMinimum: "0",
+      atrToCloseMaximum: "1",
+      stopDistanceCapPct: "0.06",
+      stopDistanceFloorPct: "0.0175"
+    }
+  ),
+  TREND_CORE_3R: variant(
+    "TREND_CORE_3R",
+    "Trend-Kern, Ziel 3R",
+    "Wie TREND_CORE, Ziel 3R statt 2,5R: Trendphasen tragen weiter; prüft, ob größere Gewinner die geringere Trefferquote ausgleichen.",
+    {
+      skipOneHourSignal: true,
+      skipHigherTimeframeSignals: true,
+      relativeVolumeMinimum: "0",
+      rsiMinimum: "0",
+      rsiMaximum: "100",
+      atrToCloseMinimum: "0",
+      atrToCloseMaximum: "1",
+      stopDistanceCapPct: "0.06",
+      stopDistanceFloorPct: "0.0175",
+      takeProfitRMultiple: "3"
+    }
   )
 });

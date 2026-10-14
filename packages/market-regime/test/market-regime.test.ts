@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  CRYPTO_NATIVE_REGIME_VERSION,
   buildSignalRegimeContext,
+  calculateCryptoNativeRegimeReport,
   calculateMarketRegimeReport,
   type BenchmarkInput
 } from "../src/index.js";
@@ -103,3 +105,60 @@ function uptrend() {
 function downtrend() {
   return Array.from({ length: 240 }, (_, index) => 220 - index * 0.4);
 }
+
+/** Long decline, then a sharp rally that clears the 50-day but not the 200-day SMA. */
+function bearMarketRally() {
+  const decline = Array.from({ length: 200 }, (_, index) => 300 - index);
+  const rally = Array.from({ length: 40 }, (_, index) => 100 + index * 1.25);
+  return [...decline, ...rally];
+}
+
+describe("crypto-native regime", () => {
+  const crypto = (btc: number[], eth: number[]) => [
+    benchmark("BTCUSDT", "CRYPTO", btc),
+    benchmark("ETHUSDT", "CRYPTO", eth)
+  ];
+
+  it("is RISK_ON with sufficient confidence from BTC and ETH alone", () => {
+    const report = calculateCryptoNativeRegimeReport({ benchmarks: crypto(uptrend(), uptrend()) });
+    assert.equal(report.cryptoRegime, "RISK_ON");
+    assert.equal(report.overallRegime, "RISK_ON");
+    assert.equal(report.equityRegime, "UNKNOWN");
+    assert.equal(report.confidence, 90);
+    assert.equal(report.riskMode, "AGGRESSIVE");
+    assert.match(report.summary, new RegExp(CRYPTO_NATIVE_REGIME_VERSION.replace(/[/.]/g, "\\$&")));
+  });
+
+  it("ignores equity benchmarks entirely", () => {
+    const withEquityRiskOff = calculateCryptoNativeRegimeReport({
+      benchmarks: [...crypto(uptrend(), uptrend()), benchmark("SPY", "ETF", downtrend()), benchmark("QQQ", "ETF", downtrend())]
+    });
+    const production = calculateMarketRegimeReport({
+      benchmarks: [...crypto(uptrend(), uptrend()), benchmark("SPY", "ETF", downtrend()), benchmark("QQQ", "ETF", downtrend())]
+    });
+    assert.equal(withEquityRiskOff.riskMode, "AGGRESSIVE");
+    assert.equal(withEquityRiskOff.benchmarkSummaries.length, 2);
+    // The production report vetoes the same crypto picture through the equity regime.
+    assert.equal(production.cryptoRegime, "RISK_ON");
+    assert.equal(production.riskMode, "HIGH_RISK");
+  });
+
+  it("keeps a bear-market rally below the 200-day SMA out of RISK_ON", () => {
+    const report = calculateCryptoNativeRegimeReport({ benchmarks: crypto(bearMarketRally(), bearMarketRally()) });
+    const production = calculateMarketRegimeReport({ benchmarks: crypto(bearMarketRally(), bearMarketRally()) });
+    assert.equal(production.cryptoRegime, "RISK_ON");
+    assert.notEqual(report.cryptoRegime, "RISK_ON");
+  });
+
+  it("is RISK_OFF with a high-risk mode in a downtrend", () => {
+    const report = calculateCryptoNativeRegimeReport({ benchmarks: crypto(downtrend(), downtrend()) });
+    assert.equal(report.cryptoRegime, "RISK_OFF");
+    assert.equal(report.riskMode, "HIGH_RISK");
+  });
+
+  it("is UNKNOWN without enough history", () => {
+    const report = calculateCryptoNativeRegimeReport({ benchmarks: crypto(uptrend().slice(0, 100), uptrend()) });
+    assert.equal(report.cryptoRegime, "UNKNOWN");
+    assert.equal(report.riskMode, "UNKNOWN");
+  });
+});

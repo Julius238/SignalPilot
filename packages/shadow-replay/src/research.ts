@@ -8,6 +8,7 @@
 import { buildIndicatorSnapshot } from "@signalpilot/indicators";
 import {
   buildSignalRegimeContext,
+  calculateCryptoNativeRegimeReport,
   calculateMarketRegimeReport,
   type MarketRegime,
   type MarketRegimeReport,
@@ -175,7 +176,7 @@ export function deriveRegime(
   generatedAtMs: number,
   policy: RegimePolicy
 ): MarketRegimeReport {
-  const wanted = policy === "CRYPTO_ONLY" ? CRYPTO_BENCHMARKS : [...EQUITY_BENCHMARKS, ...CRYPTO_BENCHMARKS];
+  const wanted = policy === "AS_SPECIFIED" ? [...EQUITY_BENCHMARKS, ...CRYPTO_BENCHMARKS] : CRYPTO_BENCHMARKS;
   const benchmarks = series.flatMap((entry) => {
     if (!wanted.includes(entry.symbol)) return [];
     const daily = entry.candles["1d"] ?? [];
@@ -194,6 +195,9 @@ export function deriveRegime(
     ];
   });
 
+  if (policy === "CRYPTO_NATIVE_V1") {
+    return calculateCryptoNativeRegimeReport({ benchmarks, generatedAt: new Date(generatedAtMs) });
+  }
   const report = calculateMarketRegimeReport({ benchmarks, generatedAt: new Date(generatedAtMs) });
   return policy === "CRYPTO_ONLY" ? normaliseToCrypto(report) : report;
 }
@@ -236,10 +240,15 @@ export interface DerivedDataQuality {
   readonly latestClosedCandle: number | null;
 }
 
+/** Same window as the live audit (`DATA_QUALITY_AUDIT_WINDOW_CANDLES` in apps/worker). */
+export const DATA_QUALITY_AUDIT_WINDOW_CANDLES = 250;
+
 /**
- * Gap audit over the whole stored history up to `atMs`, like the live
- * `refreshCandleDataQuality`. `gapEnds` holds, ascending, the close time of
- * every candle that follows a gap — precomputed once per series.
+ * Data-quality record as the live `refreshCandleDataQuality` writes it at
+ * `atMs`: candle counts over the whole stored history, gap counters over the
+ * newest 250 closed candles plus the one before them. `gapEnds` holds,
+ * ascending, the close time of every candle that follows a gap —
+ * precomputed once per series.
  */
 export function deriveDataQuality(
   candles: readonly ReplayCandle[],
@@ -252,18 +261,28 @@ export function deriveDataQuality(
     return { candleCount: 0, expectedCandleCount: 0, gapCount: 0, missingCandleCount: 0, latestClosedCandle: null };
   }
   const candleCount = last + 1;
+  const step = TIMEFRAME_MS[timeframe];
   const span = candles[last].openTime - candles[0].openTime;
-  const expectedCandleCount = Math.floor(span / TIMEFRAME_MS[timeframe]) + 1;
+  const expectedCandleCount = Math.floor(span / step) + 1;
+
+  const windowFirst = Math.max(0, last - DATA_QUALITY_AUDIT_WINDOW_CANDLES);
   let gapCount = 0;
-  for (const end of gapEnds) {
-    if (end > atMs) break;
-    gapCount += 1;
+  let missingCandleCount = 0;
+  // Only gaps that end inside the window; the scan runs only when one does.
+  if (gapEnds.some((end) => end > candles[windowFirst].closeTime && end <= candles[last].closeTime)) {
+    for (let index = windowFirst + 1; index <= last; index += 1) {
+      const missing = Math.round((candles[index].openTime - candles[index - 1].openTime) / step) - 1;
+      if (missing > 0) {
+        gapCount += 1;
+        missingCandleCount += missing;
+      }
+    }
   }
   return {
     candleCount,
     expectedCandleCount,
     gapCount,
-    missingCandleCount: Math.max(0, expectedCandleCount - candleCount),
+    missingCandleCount,
     latestClosedCandle: candles[last].closeTime
   };
 }

@@ -373,3 +373,82 @@ function clamp(value: number, min: number, max: number) {
 function round(value: number | null) {
   return value === null ? null : Math.round(value * 100) / 100;
 }
+
+// ───────────────────────────────────────────────────────────────────────────
+// Crypto-native regime (versioned variant, additive)
+// ───────────────────────────────────────────────────────────────────────────
+
+export const CRYPTO_NATIVE_REGIME_VERSION = "crypto-native-regime-v1/1.0.0";
+
+/**
+ * Crypto-native market regime: a versioned alternative to
+ * `calculateMarketRegimeReport`, which stays unchanged. The production report
+ * takes the crypto regime from BTC/ETH but risk mode and confidence from all
+ * five benchmarks, so missing or weak equity data (SPY/QQQ/IWM) blocks crypto
+ * entries. This variant derives all three from BTC and ETH alone:
+ *
+ * - RISK_ON: BTC above its 200- and 50-day SMA with non-negative 20-day
+ *   momentum, and ETH above its 50-day SMA (breadth).
+ * - RISK_OFF: BTC below its 200- and its 50-day SMA.
+ * - MIXED: BTC and ETH on different sides of their 50-day SMA.
+ * - NEUTRAL otherwise; UNKNOWN without 200 daily candles of both.
+ *
+ * The 200-day filter is the standard long-term trend rule; it keeps
+ * bear-market rallies above the 50-day SMA out of RISK_ON. Standard periods
+ * only, no fitted thresholds. Confidence: data coverage of BTC and ETH (65)
+ * plus 25 when both sit on the same side of their 200-day SMA.
+ */
+export function calculateCryptoNativeRegimeReport(input: {
+  benchmarks: BenchmarkInput[];
+  generatedAt?: Date;
+}): MarketRegimeReport {
+  const generatedAt = input.generatedAt ?? new Date();
+  const benchmarkSummaries = input.benchmarks
+    .filter((benchmark) => (cryptoBenchmarks as readonly string[]).includes(benchmark.symbol))
+    .map(summarizeBenchmark);
+  const btc = benchmarkSummaries.find((summary) => summary.symbol === "BTCUSDT");
+  const eth = benchmarkSummaries.find((summary) => summary.symbol === "ETHUSDT");
+  const complete = (summary: BenchmarkSummary | undefined): summary is BenchmarkSummary =>
+    summary !== undefined && hasData(summary) && summary.priceVsSma200 !== null;
+
+  let cryptoRegime: MarketRegime = "UNKNOWN";
+  if (complete(btc) && complete(eth)) {
+    if (isAboveSma200(btc) && isAboveSma50(btc) && btc.momentumState !== "NEGATIVE" && isAboveSma50(eth)) {
+      cryptoRegime = "RISK_ON";
+    } else if (!isAboveSma200(btc) && isBelowSma50(btc)) {
+      cryptoRegime = "RISK_OFF";
+    } else if (isAboveSma50(btc) !== isAboveSma50(eth)) {
+      cryptoRegime = "MIXED";
+    } else {
+      cryptoRegime = "NEUTRAL";
+    }
+  }
+
+  const covered = [btc, eth].filter(complete).length;
+  const sameLongTermSide =
+    complete(btc) && complete(eth) && isAboveSma200(btc) === isAboveSma200(eth) ? 25 : 0;
+  const confidence = round(clamp((covered / cryptoBenchmarks.length) * 65 + sameLongTermSide, 0, 100)) ?? 0;
+  const riskMode: RiskMode =
+    cryptoRegime === "UNKNOWN"
+      ? "UNKNOWN"
+      : cryptoRegime === "RISK_OFF"
+        ? "HIGH_RISK"
+        : cryptoRegime === "MIXED"
+          ? "DEFENSIVE"
+          : cryptoRegime === "RISK_ON" && confidence >= 75
+            ? "AGGRESSIVE"
+            : "NORMAL";
+
+  return {
+    generatedAt: generatedAt.toISOString(),
+    equityRegime: "UNKNOWN",
+    cryptoRegime,
+    overallRegime: cryptoRegime,
+    riskMode,
+    confidence,
+    benchmarkSummaries,
+    summary: `[${CRYPTO_NATIVE_REGIME_VERSION}] Crypto ${cryptoRegime}, Risk Mode ${riskMode}, Confidence ${confidence}/100 (nur BTC/ETH).`,
+    riskNote: buildRiskNote(cryptoRegime, riskMode),
+    recommendations: buildRecommendations(cryptoRegime, riskMode, confidence)
+  };
+}

@@ -21,7 +21,7 @@
  *   REPLAY_PERSIST=true
  */
 
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -280,10 +280,19 @@ async function loadDatabaseMarket(
   return { series, origin: "DATABASE", synthetic };
 }
 
-async function loadSnapshotMarket(
+/**
+ * Gzip-CSV snapshots `<SYMBOL>-<tf>.csv.gz` of the traded symbol and every
+ * regime benchmark found in `dir`. An optional `sources.json` names the
+ * provider per symbol (e.g. FRED index proxies for SPY/QQQ).
+ */
+export async function loadSnapshotMarket(
   dir: string,
   symbol: string
 ): Promise<ReplayMarketData> {
+  const sourcesPath = resolve(dir, "sources.json");
+  const sources = existsSync(sourcesPath)
+    ? (JSON.parse(readFileSync(sourcesPath, "utf8")) as Record<string, { provider?: string }>)
+    : {};
   const symbols = [
     ...new Set([symbol, ...CRYPTO_SERIES, ...EQUITY_BENCHMARKS])
   ];
@@ -311,7 +320,7 @@ async function loadSnapshotMarket(
     series.push({
       symbol: name,
       assetType: EQUITY_BENCHMARKS.includes(name) ? "ETF" : "CRYPTO",
-      source: "BINANCE",
+      source: sources[name]?.provider ?? "BINANCE",
       candles
     });
   }

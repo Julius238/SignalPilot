@@ -106,7 +106,7 @@ import {
   type DerivedSignal
 } from "./research.js";
 
-export const SHADOW_REPLAY_ENGINE_VERSION = "shadow-replay-v1/1.0.0";
+export const SHADOW_REPLAY_ENGINE_VERSION = "shadow-replay-v1/1.1.0";
 
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
@@ -156,6 +156,8 @@ interface OpenPosition {
   readonly regime: string | null;
   state: PositionStateV1;
   entryFeesTotal: string;
+  /** Spread + slippage price impact of every fill so far (quote currency). */
+  executionCost: string;
   lastProcessedCloseMs: number;
   pendingExit: { trigger: string; referencePrice: string } | null;
   forceClose: boolean;
@@ -231,6 +233,12 @@ export function runShadowReplay(market: ReplayMarketData, config: ReplayConfig, 
   let highWaterMark = startingCash;
   let startOfDay: { day: number; asOfMs: number; equity: string; sequence: number } | null = null;
   let previousApproval: { assessedAt: string; equity: string; riskAmount: string } | null = null;
+  // R-021 engages the kill switch "until a review"; live, the operator's release
+  // restarts the loss streak. The replay assumes that review after a fixed delay.
+  const killSwitchReviewMs = (config.killSwitchReviewHours ?? 24) * HOUR_MS;
+  let killSwitchEngagedAtMs: number | null = null;
+  let lastKillSwitchReleaseMs: number | null = null;
+  let killSwitchEngagements = 0;
   let equity = startingCash;
   let invariantViolations = 0;
   const notes: string[] = [];
@@ -392,6 +400,7 @@ export function runShadowReplay(market: ReplayMarketData, config: ReplayConfig, 
           regime: order.regime,
           state: update.position,
           entryFeesTotal: fill.feeAmount,
+          executionCost: priceImpact(fill.fillPrice, anchorSnapshot.open, fill.fillQuantity),
           lastProcessedCloseMs: anchor.closeTime,
           pendingExit: null,
           forceClose: false,
@@ -404,6 +413,7 @@ export function runShadowReplay(market: ReplayMarketData, config: ReplayConfig, 
       } else {
         position.state = update.position;
         position.entryFeesTotal = add(position.entryFeesTotal, fill.feeAmount);
+        position.executionCost = add(position.executionCost, priceImpact(fill.fillPrice, anchorSnapshot.open, fill.fillQuantity));
       }
       order.positionId = positionId;
       order.remainingQuantity = remaining.sub(fillQuantity).toString();
@@ -501,10 +511,11 @@ export function runShadowReplay(market: ReplayMarketData, config: ReplayConfig, 
       pushLedger(booking.entries, booking.ok ? booking.nextState : null, `exit fill ${fillId}`);
       ledgerChanged = true;
       position.state = update.position;
+      position.executionCost = add(position.executionCost, priceImpact(fill.fillPrice, exit.referencePrice, fill.fillQuantity));
       position.pendingExit = dec(update.position.openQuantity).isPositive() ? exit : null;
 
       if (!dec(update.position.openQuantity).isPositive()) {
-        closed.push(closeTrade(position, exit.trigger, anchor.closeTime, splitMs));
+        closed.push(closeTrade(position, exit.trigger, anchor.closeTime, splitMs, profile));
       }
     }
     positions = positions.filter((position) => dec(position.state.openQuantity).isPositive());
@@ -552,6 +563,11 @@ export function runShadowReplay(market: ReplayMarketData, config: ReplayConfig, 
         invariantViolations += 1;
         if (notes.length < 10) notes.push(`Invarianten verletzt bei ${iso(anchor.closeTime)}: ${report.violations.join(", ")}`);
       }
+    }
+
+    if (killSwitchEngagedAtMs !== null && asOfMs >= killSwitchEngagedAtMs + killSwitchReviewMs) {
+      lastKillSwitchReleaseMs = killSwitchEngagedAtMs + killSwitchReviewMs;
+      killSwitchEngagedAtMs = null;
     }
 
     // 4. Research inputs and strategy evaluation at asOf.
@@ -653,9 +669,15 @@ export function runShadowReplay(market: ReplayMarketData, config: ReplayConfig, 
         regime: currentRegime,
         traded,
         pipelineMs,
-        previousApproval
+        previousApproval,
+        killSwitchEngaged: killSwitchEngagedAtMs !== null,
+        lastKillSwitchReleaseMs
       });
       const risk = evaluateRisk(riskSnapshot);
+      if (risk.directive === "ENGAGE_KILL_SWITCH" && killSwitchEngagedAtMs === null) {
+        killSwitchEngagedAtMs = asOfMs;
+        killSwitchEngagements += 1;
+      }
       for (const rule of risk.ruleResults) {
         if (rule.outcome === "FAIL" || rule.outcome === "ERROR") bump(funnel.failedRiskRules, `${rule.ruleCode}:${rule.reasonCode}`);
       }
@@ -774,11 +796,19 @@ export function runShadowReplay(market: ReplayMarketData, config: ReplayConfig, 
     const variant = STRATEGY_VARIANTS[config.variant!]!;
     notes.push(`Forschungsvariante ${variant.key} (${variant.label}): ${variant.rationale} Nicht live ausführbar.`);
   }
+  if (config.mode === "SPEC" && killSwitchEngagements > 0) {
+    notes.push(
+      `Kill-Switch (R-021, Verlustserie) ${killSwitchEngagements}× ausgelöst; Replay-Annahme: Operator-Freigabe nach ${config.killSwitchReviewHours ?? 24} h.`
+    );
+  }
   if (config.mode === "SIGNAL_EDGE") {
     notes.push("Forschungsmodus SIGNAL_EDGE: Risk-Engine-Regeln nicht angewendet; Sizing, Fill- und Exitmodell wie produktiv; eine Position je Symbol.");
   }
   if (config.regimePolicy === "CRYPTO_ONLY") {
     notes.push("Regime-Annahme CRYPTO_ONLY: Regime und Konfidenz nur aus BTC/ETH-Tageskerzen (keine Aktien-Benchmarks).");
+  }
+  if (config.regimePolicy === "CRYPTO_NATIVE_V1") {
+    notes.push("Regime-Variante CRYPTO_NATIVE_V1: Regime, Risk Mode und Konfidenz nur aus BTC/ETH mit 200-Tage-Trendfilter.");
   }
   notes.push("Kontext-Events (News/Radar) und Paper-Statistiken sind historisch nicht rekonstruierbar und fließen nicht ein.");
 
@@ -901,8 +931,24 @@ function markPositions(positions: readonly OpenPosition[], close: string, profil
   });
 }
 
-function closeTrade(position: OpenPosition, trigger: string, closedAtMs: number, splitMs: number | null): ClosedPosition {
+/** |fill − reference| × quantity: what the simulated spread and slippage moved the price. */
+function priceImpact(fillPrice: string, referencePrice: string, quantity: string): string {
+  return dec(fillPrice).sub(dec(referencePrice)).abs().mul(dec(quantity), RoundingMode.HALF_UP).toString();
+}
+
+function closeTrade(
+  position: OpenPosition,
+  trigger: string,
+  closedAtMs: number,
+  splitMs: number | null,
+  costs: { readonly fullSpreadBps: number; readonly slippageBps: number }
+): ClosedPosition {
   const state = position.state;
+  // Fill prices move by half the spread plus the slippage (then tick-rounded),
+  // so the impact is attributed to both in that proportion.
+  const impactBps = costs.fullSpreadBps / 2 + costs.slippageBps;
+  const spreadShare = impactBps > 0 ? costs.fullSpreadBps / 2 / impactBps : 0;
+  const spreadCost = dec(position.executionCost).mul(dec(spreadShare), RoundingMode.HALF_UP);
   const netPnl = state.realizedPnl;
   const fees = state.feesPaid;
   const grossPnl = add(netPnl, fees);
@@ -927,6 +973,8 @@ function closeTrade(position: OpenPosition, trigger: string, closedAtMs: number,
     fees,
     netPnl,
     rMultiple: risk.isPositive() ? dec(netPnl).div(risk, RoundingMode.HALF_UP).toString() : null,
+    spreadCost: spreadCost.toString(),
+    slippageCost: dec(position.executionCost).sub(spreadCost).toString(),
     maxAdversePrice: position.maxAdverse,
     maxFavorablePrice: position.maxFavorable,
     marketRegime: position.regime
@@ -1001,6 +1049,17 @@ function periodMetrics(
   const end = curve.at(-1)?.equity ?? base;
   const returnPct = Number(base) > 0 ? (((Number(end) - Number(base)) / Number(base)) * 100).toFixed(4) : null;
 
+  let maxConsecutiveLosses = 0;
+  let streak = 0;
+  for (const trade of [...trades].sort((a, b) => a.closedAt.localeCompare(b.closedAt))) {
+    streak = dec(trade.netPnl).isNegative() ? streak + 1 : 0;
+    maxConsecutiveLosses = Math.max(maxConsecutiveLosses, streak);
+  }
+  const sum = (pick: (trade: ReplayTrade) => string) =>
+    trades.reduce((total, trade) => add(total, pick(trade)), "0.000000000000");
+  const spreadCost = sum((trade) => trade.spreadCost);
+  const slippageCost = sum((trade) => trade.slippageCost);
+
   return {
     label,
     from: fromIso,
@@ -1012,11 +1071,18 @@ function periodMetrics(
     profitFactor: metrics?.profitFactor.value ?? null,
     expectancy: metrics?.expectancy.value ?? null,
     averageR: metrics?.averageR.value ?? null,
+    averageWin: metrics?.averageWin.value ?? null,
+    averageLoss: metrics?.averageLoss.value ?? null,
+    maxConsecutiveLosses,
     netPnl: metrics?.netPnl ?? "0.000000000000",
     fees: metrics?.fees ?? "0.000000000000",
+    spreadCost,
+    slippageCost,
+    totalExecutionCost: add(add(metrics?.fees ?? "0.000000000000", spreadCost), slippageCost),
     returnPct,
     maxDrawdownPct: curve.length === 0 ? null : (maxDrawdown * 100).toFixed(4),
     sharpeRatio: metrics?.sharpeRatio.value ?? null,
+    sortinoRatio: metrics?.sortinoRatio.value ?? null,
     averageHoldHours:
       metrics?.averageHoldMinutes.value === null || metrics?.averageHoldMinutes.value === undefined
         ? null
@@ -1278,6 +1344,8 @@ function buildRiskSnapshot(input: {
   readonly traded: PreparedSeries;
   readonly pipelineMs: number;
   readonly previousApproval: { assessedAt: string; equity: string; riskAmount: string } | null;
+  readonly killSwitchEngaged: boolean;
+  readonly lastKillSwitchReleaseMs: number | null;
 }): RiskInputSnapshotV1 {
   const { candidate, asOfMs, state, profile, regime, traded } = input;
   const today = utcDay(asOfMs);
@@ -1296,8 +1364,10 @@ function buildRiskSnapshot(input: {
     }
   );
 
+  // Like the live assembler: the streak restarts after the latest kill-switch release.
   let consecutiveLosses = 0;
   for (const position of [...input.closed].sort((a, b) => b.closedAtMs - a.closedAtMs)) {
+    if (input.lastKillSwitchReleaseMs !== null && position.closedAtMs <= input.lastKillSwitchReleaseMs) break;
     const pnl = dec(position.netPnl);
     if (pnl.isPositive()) break;
     if (pnl.isNegative()) consecutiveLosses += 1;
@@ -1389,7 +1459,7 @@ function buildRiskSnapshot(input: {
       portfolioId: PORTFOLIO_ID,
       mode: "SHADOW",
       status: "SHADOW_ACTIVE",
-      killSwitchEngaged: false,
+      killSwitchEngaged: input.killSwitchEngaged,
       reconciledAt: iso(asOfMs),
       heartbeatAt: iso(asOfMs),
       version: 1
