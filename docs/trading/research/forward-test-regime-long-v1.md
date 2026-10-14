@@ -67,4 +67,6 @@ Trades je Strategie oder 6 Monaten (vorab festgelegt).
 
 | Datum (UTC) | Commit | Art | Beschreibung |
 |---|---|---|---|
-| — | — | — | Noch keine Einträge seit dem Start. |
+| 2026-10-14 16:00:25 | `7a74257` | Infrastruktur | Arena-Migration `20261014160000_add_arena` in die Dev-DB eingespielt (vorher Backup `backups/homebrew-dev-before-arena-20261014T160025Z.dump`). Rein additiv: nur neue Arena-Tabellen; keine bestehende Tabelle, kein Ledger, keine Session, keine Strategieversion geändert. |
+| 2026-10-14 16:01 | `7a74257` | Betrieb | Als Teilnehmer der SignalPilot Arena registriert (`ARENA_V1:CRYPTO_REGIME_LONG_V1:v1`, Status `ACTIVE`). Forward-Start, Portfolio, Kapital, Ledger und Session unverändert; die Arena liest nur und empfiehlt ([17-arena.md](../17-arena.md)). |
+| 2026-10-14 16:06:30.168–16:06:31.756 | `6dee3f4` | Betrieb | Trading-Worker neu gestartet, damit der stündliche Arena-Job `trading:arena-evaluate` (Minute 20) registriert wird. Unterbrechung 1,6 s, außerhalb jeder Job-Minute; der Kandidaten-Scan um 16:05 lief vorher regulär. Keine Änderung an Strategie, Risk Engine oder Ausführung. |
