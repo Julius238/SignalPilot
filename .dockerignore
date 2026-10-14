@@ -35,3 +35,6 @@ Thumbs.db
 
 # Test artifacts
 coverage/
+
+# Local research data (gitignored, never needed in an image)
+data/market-snapshots/

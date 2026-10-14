@@ -25,7 +25,23 @@ Setup (never activates portfolio, assignment, kill switch or session):
   bootstrap
 
 One-time jobs:
-  job day-start|candidate|risk|order|fill|monitor|reconcile|performance|alerts
+  job day-start|candidate|risk|order|fill|monitor|reconcile|performance|alerts|arena
+
+24/7 operation (docs/trading/18-vps-24-7-shadow-runbook.md):
+  preflight                                   # read-only: branch, flags, single trading worker, DB state
+  monitor                                     # read-only health report (exit 1 on problems)
+  watch                                       # for cron: alerts n8n directly only if the worker cannot
+  alert-test                                  # sends exactly one harmless OPS_TEST alert through n8n
+  consistency-snapshot <file>                 # restart test: state before
+  consistency-compare <file>                  # restart test: verify nothing was lost or duplicated
+  eligibility-for <portfolio-key>
+  arena <arena-command> [--args]              # bootstrap-official-v1, evaluate, transition, export-dossier, ...
+
+Official forward test (portfolio set OFFICIAL_V1):
+  official-bootstrap OFFICIAL_BOOTSTRAP       # portfolios + strategy setup; activates nothing
+  enable-strategy <portfolio-key> <strategy-key> <symbol> <actor> <idempotency-key> ENABLE_<STRATEGY>_<SYMBOL>_IN_<PORTFOLIO>
+  portfolio-op <portfolio-key> activate-portfolio|release-kill-switch|activate-session|pause-session <actor> <idempotency-key> <OP>_<PORTFOLIO>
+  portfolio-op <portfolio-key> engage-kill-switch <actor> <idempotency-key> ENGAGE_KILL_SWITCH_<PORTFOLIO> <reason-code>
 
 Explicit state changes:
   calibrate-execution-profile CALIBRATE_EXECUTION_PROFILE   # new cost-profile version, see job header
@@ -145,7 +161,9 @@ const keys = [
   "TRADING_FILL_JOB_ENABLED", "TRADING_POSITION_MONITOR_JOB_ENABLED",
   "TRADING_RECONCILIATION_JOB_ENABLED", "TRADING_API_ENABLED", "TRADING_API_OPERATIONS_ENABLED",
   "NEXT_PUBLIC_TRADING_DASHBOARD_ENABLED", "TRADING_PERFORMANCE_JOB_ENABLED",
-  "TRADING_ALERT_OUTBOX_ENABLED", "TRADING_ALERT_DELIVERY_ENABLED", "TRADING_RETENTION_ENABLED"
+  "TRADING_ALERT_OUTBOX_ENABLED", "TRADING_ALERT_DELIVERY_ENABLED", "TRADING_RETENTION_ENABLED",
+  "TRADING_PERFORMANCE_SCHEDULE_ENABLED", "TRADING_ALERT_SCHEDULE_ENABLED", "TRADING_ARENA_ENABLED",
+  "TRADING_ARENA_SCHEDULE_ENABLED", "TRADING_PORTFOLIO_SET", "TRADING_CODE_VERSION"
 ];
 for (const key of keys) console.log(`${key}=${process.env[key] ?? "<unset>"}`);
 '
@@ -274,6 +292,113 @@ FROM \"TradingJobCursor\" ORDER BY \"jobKey\", \"scopeKey\";
 "'
 }
 
+# Runs a one-off node command in the trading-worker image with extra
+# environment for exactly that command (e.g. the bootstrap gate). Never starts
+# a scheduler: only the given script runs.
+run_trading_node_env() {
+  local env_args=()
+  while [ "$#" -gt 0 ] && [ "$1" != "--" ]; do
+    env_args+=(-e "$1")
+    shift
+  done
+  shift
+  require_production_env
+  require_service_running trading-worker
+  "${COMPOSE[@]}" exec -T "${env_args[@]}" trading-worker node "$@"
+}
+
+# One-off container from the trading-worker image (works while the service is
+# down); runs only the given script, never the scheduler.
+run_trading_oneoff() {
+  require_production_env
+  "${COMPOSE[@]}" run --rm --no-deps -T trading-worker node "$@"
+}
+
+require_key() {
+  local label="$1"
+  local value="$2"
+  if ! [[ "$value" =~ ^[A-Z0-9_]{1,64}$ ]]; then
+    echo "ERROR: $label must match ^[A-Z0-9_]+\$, got: $value" >&2
+    exit 1
+  fi
+}
+
+portfolio_id_for() {
+  require_key "portfolio key" "$1"
+  require_scalar "Portfolio $1" "SELECT \"id\" FROM \"Portfolio\" WHERE \"key\" = '$1' AND \"status\" <> 'ARCHIVED';"
+}
+
+session_id_for() {
+  require_key "portfolio key" "$1"
+  require_scalar "open TradingSession of $1" "SELECT s.\"id\" FROM \"TradingSession\" s JOIN \"Portfolio\" p ON p.\"id\" = s.\"portfolioId\" WHERE p.\"key\" = '$1' AND s.\"status\" <> 'CLOSED' ORDER BY s.\"createdAt\" DESC LIMIT 1;"
+}
+
+preflight() {
+  echo "=== Repository ==="
+  echo "branch=$(git rev-parse --abbrev-ref HEAD) commit=$(git rev-parse --short HEAD)"
+  if [ -n "$(git status --porcelain --untracked-files=no)" ]; then echo "WARN: tracked files modified on this host"; fi
+  echo ""
+  echo "=== Trading workers on this host (all Compose projects) ==="
+  local workers
+  workers=$(docker ps --filter "label=com.docker.compose.service=trading-worker" --format '{{.Names}} project={{.Label "com.docker.compose.project"}} status={{.Status}}')
+  printf '%s\n' "${workers:-none}"
+  if [ "$(printf '%s' "$workers" | grep -c . || true)" -gt 1 ]; then
+    echo "ERROR: more than one trading worker is running." >&2
+    exit 1
+  fi
+  echo ""
+  echo "=== Shadow flags in $ENV_FILE (booleans and modes only) ==="
+  require_production_env
+  grep -E '^(ENABLE_LIVE_TRADING|PAPER_TRADING_ONLY|TRADING_[A-Z0-9_]*(ENABLED|MODE|SET)|NEXT_PUBLIC_TRADING_DASHBOARD_ENABLED)=' "$ENV_FILE" | sort || true
+  echo ""
+  echo "=== Database state ==="
+  require_service_running postgres
+  compose_exec postgres sh -c 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -P pager=off -c "$1"' sh '
+SELECT count(*) FILTER (WHERE finished_at IS NOT NULL) AS migrations_applied, max(migration_name) AS latest_migration FROM _prisma_migrations;
+SELECT p.key, p.status, p."startingCash", p.equity, p."ledgerSequence",
+  s.status AS session_status, s."killSwitchEngaged" AS kill_switch, s."startedAt" AS session_started_at
+FROM "Portfolio" p
+LEFT JOIN LATERAL (SELECT * FROM "TradingSession" t WHERE t."portfolioId" = p.id AND t.status <> '\''CLOSED'\'' ORDER BY t."createdAt" DESC LIMIT 1) s ON true
+ORDER BY p."createdAt";
+SELECT p.key AS portfolio, st.key AS strategy, x.symbol, sv.version, left(sv."specificationHash", 12) AS spec_hash
+FROM "StrategyAssignment" a JOIN "Portfolio" p ON p.id = a."portfolioId" JOIN "Strategy" st ON st.id = a."strategyId"
+JOIN "StrategyVersion" sv ON sv.id = a."strategyVersionId" JOIN "Asset" x ON x.id = a."assetId"
+WHERE a.enabled ORDER BY p.key, st.key;
+SELECT x.symbol, ep.version, ep."feeBps", ep."fullSpreadBps", ep."slippageBps", ep.source, left(ep."specificationHash", 12) AS spec_hash
+FROM "InstrumentExecutionProfile" ep JOIN "Asset" x ON x.id = ep."assetId" WHERE ep.status = '\''ACTIVE'\'' AND x.symbol IN ('\''BTCUSDT'\'', '\''ETHUSDT'\'');
+SELECT symbol, max("closeTime") AS latest_1h_close, max(source) AS source FROM "Candle" WHERE timeframe = '\''1h'\'' AND symbol IN ('\''BTCUSDT'\'', '\''ETHUSDT'\'') GROUP BY symbol;
+'
+  echo "Arena cohorts (if the arena migration is applied):"
+  query_scalar 'SELECT string_agg(key || '\''='\'' || phase, '\'', '\'') FROM "ArenaCohort";' 2>/dev/null || echo "  none / not migrated"
+}
+
+container_problems() {
+  local service container_id health
+  for service in postgres worker-scheduler trading-worker api dashboard; do
+    container_id=$("${COMPOSE[@]}" ps -q "$service" 2>/dev/null || true)
+    if [ -z "$container_id" ]; then
+      echo "CONTAINER_DOWN: $service"
+      continue
+    fi
+    health=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$container_id" 2>/dev/null || true)
+    if [ "$health" != "healthy" ] && [ "$health" != "running" ]; then
+      echo "CONTAINER_UNHEALTHY: $service=$health"
+    fi
+  done
+}
+
+ops_watch() {
+  require_production_env
+  local state_dir="${SIGNALPILOT_OPS_STATE_DIR:-/var/lib/signalpilot}"
+  mkdir -p "$state_dir"
+  local args=(--alert --state-file=/state/ops-watch.json)
+  local problem
+  while IFS= read -r problem; do
+    if [ -n "$problem" ]; then args+=("--container-problem=$problem"); fi
+  done <<<"$(container_problems)"
+  "${COMPOSE[@]}" run --rm --no-deps -T -v "$state_dir:/state" trading-worker node dist/jobs/opsWatch.js "${args[@]}"
+}
+
 run_job() {
   local job="$1"
   local target
@@ -287,6 +412,7 @@ run_job() {
     reconcile) target=dist/jobs/shadowReconcilePortfolio.js ;;
     performance) target=dist/jobs/shadowPerformanceRefresh.js ;;
     alerts) target=dist/jobs/shadowAlertOutbox.js ;;
+    arena) target=dist/jobs/arenaEvaluate.js ;;
     *)
       echo "ERROR: unsupported one-time trading job: $job" >&2
       exit 1
@@ -330,7 +456,113 @@ case "$command_name" in
   calibrate-execution-profile)
     require_exact_args 1 "$@"
     require_confirmation "$1" CALIBRATE_EXECUTION_PROFILE
-    run_trading_node dist/jobs/shadowExecutionProfileCalibrate.js --confirm=CALIBRATE_EXECUTION_PROFILE
+    # The gate flag only for this explicitly confirmed one-off command.
+    run_trading_node_env TRADING_BOOTSTRAP_ENABLED=true -- dist/jobs/shadowExecutionProfileCalibrate.js --confirm=CALIBRATE_EXECUTION_PROFILE
+    ;;
+  preflight)
+    require_exact_args 0 "$@"
+    preflight
+    ;;
+  monitor)
+    require_exact_args 0 "$@"
+    if [ -n "$("${COMPOSE[@]}" ps --status running -q trading-worker 2>/dev/null)" ]; then
+      run_trading_node dist/jobs/opsWatch.js
+    else
+      run_trading_oneoff dist/jobs/opsWatch.js "--container-problem=CONTAINER_DOWN: trading-worker"
+    fi
+    ;;
+  watch)
+    require_exact_args 0 "$@"
+    ops_watch
+    ;;
+  alert-test)
+    require_exact_args 0 "$@"
+    run_trading_node dist/jobs/shadowAlertOutbox.js --test-event
+    ;;
+  consistency-snapshot)
+    require_exact_args 1 "$@"
+    run_trading_node dist/jobs/opsConsistency.js snapshot >"$1"
+    echo "snapshot written to $1"
+    ;;
+  consistency-compare)
+    require_exact_args 1 "$@"
+    require_production_env
+    require_service_running trading-worker
+    "${COMPOSE[@]}" exec -T trading-worker node dist/jobs/opsConsistency.js compare --before=- <"$1"
+    ;;
+  eligibility-for)
+    require_exact_args 1 "$@"
+    require_key "portfolio key" "$1"
+    run_trading_node dist/jobs/shadowEligibilityReport.js "--portfolio=$1"
+    ;;
+  arena)
+    if [ "$#" -lt 1 ]; then
+      usage >&2
+      exit 1
+    fi
+    run_trading_node dist/jobs/arenaOps.js "$@"
+    ;;
+  official-bootstrap)
+    require_exact_args 1 "$@"
+    require_confirmation "$1" OFFICIAL_BOOTSTRAP
+    # Creates disabled structures only: the legacy home SHADOW_V1 (if missing),
+    # the two official portfolios (DRAFT, stopped session, kill switch on) and
+    # the strategy setup with every forward-tested strategy in its own official
+    # portfolio. Activates nothing.
+    run_trading_node_env TRADING_BOOTSTRAP_ENABLED=true -- dist/jobs/shadowBootstrap.js
+    run_trading_node_env TRADING_BOOTSTRAP_ENABLED=true -- dist/jobs/shadowBootstrap.js --portfolio=OFFICIAL_TREND_CORE_LONG_V1
+    run_trading_node_env TRADING_BOOTSTRAP_ENABLED=true -- dist/jobs/shadowBootstrap.js --portfolio=OFFICIAL_REGIME_LONG_V1
+    run_trading_node_env TRADING_BOOTSTRAP_ENABLED=true TRADING_PORTFOLIO_SET=OFFICIAL_V1 -- dist/jobs/shadowStrategySetup.js
+    ;;
+  enable-strategy)
+    require_exact_args 6 "$@"
+    require_key "portfolio key" "$1"
+    require_key "strategy key" "$2"
+    require_key "symbol" "$3"
+    require_confirmation "$6" "ENABLE_$2_$3_IN_$1"
+    strategy_row=$(require_scalar "assignment $2/$3 in $1" "SELECT a.\"id\" || '|' || a.\"version\" || '|' || (a.\"assignmentConfigJson\"->>'direction') FROM \"StrategyAssignment\" a JOIN \"Portfolio\" p ON p.\"id\" = a.\"portfolioId\" JOIN \"Strategy\" s ON s.\"id\" = a.\"strategyId\" JOIN \"Asset\" x ON x.\"id\" = a.\"assetId\" WHERE p.\"key\" = '$1' AND s.\"key\" = '$2' AND x.\"symbol\" = '$3' ORDER BY a.\"createdAt\" ASC LIMIT 1;")
+    IFS='|' read -r strategy_assignment_id strategy_assignment_version strategy_direction <<<"$strategy_row"
+    run_ops enable-assignment --assignment-id="$strategy_assignment_id" --actor="$4" --idempotency-key="$5" --expected-version="$strategy_assignment_version" --confirmation="ENABLE_$3_${strategy_direction}_$2_V${strategy_assignment_version}"
+    ;;
+  portfolio-op)
+    if [ "$#" -lt 5 ]; then
+      usage >&2
+      exit 1
+    fi
+    target_key="$1"
+    operation="$2"
+    require_key "portfolio key" "$target_key"
+    case "$operation" in
+      activate-portfolio)
+        require_exact_args 5 "$@"
+        require_confirmation "$5" "ACTIVATE_PORTFOLIO_$target_key"
+        run_ops activate-portfolio --portfolio-id="$(portfolio_id_for "$target_key")" --actor="$3" --idempotency-key="$4"
+        ;;
+      release-kill-switch)
+        require_exact_args 5 "$@"
+        require_confirmation "$5" "RELEASE_KILL_SWITCH_$target_key"
+        run_ops release-kill-switch --session-id="$(session_id_for "$target_key")" --actor="$3" --idempotency-key="$4"
+        ;;
+      activate-session)
+        require_exact_args 5 "$@"
+        require_confirmation "$5" "ACTIVATE_SESSION_$target_key"
+        run_ops activate-session --session-id="$(session_id_for "$target_key")" --actor="$3" --idempotency-key="$4"
+        ;;
+      pause-session)
+        require_exact_args 5 "$@"
+        require_confirmation "$5" "PAUSE_SESSION_$target_key"
+        run_ops pause-session --session-id="$(session_id_for "$target_key")" --actor="$3" --idempotency-key="$4"
+        ;;
+      engage-kill-switch)
+        require_exact_args 6 "$@"
+        require_confirmation "$5" "ENGAGE_KILL_SWITCH_$target_key"
+        run_ops engage-kill-switch --session-id="$(session_id_for "$target_key")" --actor="$3" --idempotency-key="$4" --reason="$6"
+        ;;
+      *)
+        echo "ERROR: unknown portfolio operation: $operation" >&2
+        exit 1
+        ;;
+    esac
     ;;
   bootstrap)
     require_exact_args 0 "$@"

@@ -3,7 +3,7 @@
  *
  *   node dist/jobs/opsConsistency.js snapshot > before.json
  *   … stop / start the data and trading workers …
- *   node dist/jobs/opsConsistency.js compare --before=before.json
+ *   node dist/jobs/opsConsistency.js compare --before=before.json   (or --before=- < before.json)
  *
  * A snapshot captures, per shadow portfolio, the ledger (sequence, entry count,
  * cash caches), orders, fills and positions, the session and kill switch, and
@@ -208,7 +208,8 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1
     .then((snapshot) => {
       if (mode === "compare") {
         if (beforeFile === undefined) throw new Error("compare needs --before=<snapshot.json>");
-        const before = JSON.parse(readFileSync(beforeFile, "utf8")) as ConsistencySnapshot;
+        // "-" reads the snapshot from stdin (the file lives on the host, not in the container).
+        const before = JSON.parse(readFileSync(beforeFile === "-" ? 0 : beforeFile, "utf8")) as ConsistencySnapshot;
         const verdict = compareConsistency(before, snapshot);
         process.stdout.write(`${JSON.stringify({ ...verdict, after: snapshot }, null, 2)}\n`);
         process.exitCode = verdict.ok ? 0 : 1;

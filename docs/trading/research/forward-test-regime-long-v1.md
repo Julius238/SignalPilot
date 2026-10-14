@@ -1,5 +1,12 @@
 # Forward-Test CRYPTO_REGIME_LONG_V1 (Challenger)
 
+> **Phase `LOCAL_SHAKEDOWN`** (seit 2026-10-14, nachträglich so gekennzeichnet):
+> lokaler Systemtest auf dem Entwicklungs-Mac, **kein offizielles
+> Forward-Ergebnis**. Der offizielle Test läuft auf dem VPS
+> ([official-forward-test-v1.md](official-forward-test-v1.md)); beide werden
+> nie verglichen oder zusammengeführt. Der Mac schläft zeitweise — Ausfälle
+> stündlicher Jobs sind hier erwartet.
+
 Echter Shadow-Forward-Test des Challengers gegen den Champion
 [`CRYPTO_TREND_CORE_LONG_V1`](forward-test-trend-core-long-v1.md). Die Regeln
 wurden vor diesem Start festgeschrieben
