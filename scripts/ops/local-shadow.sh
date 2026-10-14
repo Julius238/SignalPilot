@@ -76,6 +76,23 @@ $(printf '%b' "$vars")  </dict>
   plutil -lint "$PLIST" >/dev/null
 }
 
+# launchd entlädt asynchron: ein bootstrap direkt nach dem bootout scheitert
+# sonst mit "Bootstrap failed: 5: Input/output error".
+reload_agent() {
+  launchctl bootout "gui/$UID/$LABEL" 2>/dev/null || true
+  local attempt
+  for attempt in 1 2 3 4 5 6 7 8 9 10; do
+    launchctl print "gui/$UID/$LABEL" >/dev/null 2>&1 || break
+    sleep 1
+  done
+  for attempt in 1 2 3 4 5; do
+    launchctl bootstrap "gui/$UID" "$PLIST" && return 0
+    echo "bootstrap Versuch $attempt fehlgeschlagen, neuer Versuch in 2 s" >&2
+    sleep 2
+  done
+  return 1
+}
+
 command="${1:-status}"
 shift || true
 case "$command" in
@@ -101,14 +118,12 @@ case "$command" in
     ;;
   install-agent)
     write_plist
-    launchctl bootout "gui/$UID/$LABEL" 2>/dev/null || true
-    launchctl bootstrap "gui/$UID" "$PLIST"
+    reload_agent
     echo "gestartet: $LABEL (TRADING_CODE_VERSION=$TRADING_CODE_VERSION)"
     ;;
   restart-agent)
     write_plist
-    launchctl bootout "gui/$UID/$LABEL" 2>/dev/null || true
-    launchctl bootstrap "gui/$UID" "$PLIST"
+    reload_agent
     echo "neu gestartet: $LABEL (TRADING_CODE_VERSION=$TRADING_CODE_VERSION)"
     ;;
   stop-agent)
