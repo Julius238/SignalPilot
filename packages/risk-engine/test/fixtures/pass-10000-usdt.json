@@ -206,7 +206,7 @@
     "existingAssessment": null,
     "policyVersions": {
       "riskEngineVersion": "risk-engine-v1/1.1.0",
-      "ruleSetVersion": "risk-rules-v1/1.2.0",
+      "ruleSetVersion": "risk-rules-v1/1.3.0",
       "sizingPolicyVersion": "risk-sizing-v1/1.1.0",
       "costPolicyVersion": "risk-cost-v1/1.1.0",
       "inputAssemblerVersion": "risk-input-assembler-v1/1.0.0",
@@ -220,7 +220,7 @@
     "ruleResults": [
       {
         "ruleCode": "R-001-SHADOW-MODE",
-        "ruleVersion": "risk-rules-v1/1.2.0",
+        "ruleVersion": "risk-rules-v1/1.3.0",
         "outcome": "PASS",
         "severity": "INFO",
         "reasonCode": "SHADOW_MODE_OK",
@@ -245,7 +245,7 @@
       },
       {
         "ruleCode": "R-002-SESSION",
-        "ruleVersion": "risk-rules-v1/1.2.0",
+        "ruleVersion": "risk-rules-v1/1.3.0",
         "outcome": "PASS",
         "severity": "INFO",
         "reasonCode": "SESSION_OK",
@@ -263,7 +263,7 @@
       },
       {
         "ruleCode": "R-003-PORTFOLIO-CONSISTENCY",
-        "ruleVersion": "risk-rules-v1/1.2.0",
+        "ruleVersion": "risk-rules-v1/1.3.0",
         "outcome": "PASS",
         "severity": "INFO",
         "reasonCode": "PORTFOLIO_CONSISTENT",
@@ -283,7 +283,7 @@
       },
       {
         "ruleCode": "R-004-ASSET-SCOPE",
-        "ruleVersion": "risk-rules-v1/1.2.0",
+        "ruleVersion": "risk-rules-v1/1.3.0",
         "outcome": "PASS",
         "severity": "INFO",
         "reasonCode": "ASSET_SCOPE_OK",
@@ -301,7 +301,7 @@
       },
       {
         "ruleCode": "R-005-LONG-ONLY",
-        "ruleVersion": "risk-rules-v1/1.2.0",
+        "ruleVersion": "risk-rules-v1/1.3.0",
         "outcome": "PASS",
         "severity": "INFO",
         "reasonCode": "LONG_ONLY_OK",
@@ -326,7 +326,7 @@
       },
       {
         "ruleCode": "R-006-NO-LEVERAGE",
-        "ruleVersion": "risk-rules-v1/1.2.0",
+        "ruleVersion": "risk-rules-v1/1.3.0",
         "outcome": "PASS",
         "severity": "INFO",
         "reasonCode": "NO_LEVERAGE_OK",
@@ -345,7 +345,7 @@
       },
       {
         "ruleCode": "R-007-STOP-REQUIRED",
-        "ruleVersion": "risk-rules-v1/1.2.0",
+        "ruleVersion": "risk-rules-v1/1.3.0",
         "outcome": "PASS",
         "severity": "INFO",
         "reasonCode": "STOP_VALID",
@@ -362,7 +362,7 @@
       },
       {
         "ruleCode": "R-008-MIN-RR",
-        "ruleVersion": "risk-rules-v1/1.2.0",
+        "ruleVersion": "risk-rules-v1/1.3.0",
         "outcome": "PASS",
         "severity": "INFO",
         "reasonCode": "REWARD_RISK_OK",
@@ -383,7 +383,7 @@
       },
       {
         "ruleCode": "R-009-RISK-PER-TRADE",
-        "ruleVersion": "risk-rules-v1/1.2.0",
+        "ruleVersion": "risk-rules-v1/1.3.0",
         "outcome": "PASS",
         "severity": "INFO",
         "reasonCode": "TRADE_RISK_WITHIN_LIMIT",
@@ -401,7 +401,7 @@
       },
       {
         "ruleCode": "R-010-DAILY-LOSS",
-        "ruleVersion": "risk-rules-v1/1.2.0",
+        "ruleVersion": "risk-rules-v1/1.3.0",
         "outcome": "PASS",
         "severity": "INFO",
         "reasonCode": "DAILY_LOSS_WITHIN_LIMIT",
@@ -418,7 +418,7 @@
       },
       {
         "ruleCode": "R-011-OPEN-POSITIONS",
-        "ruleVersion": "risk-rules-v1/1.2.0",
+        "ruleVersion": "risk-rules-v1/1.3.0",
         "outcome": "PASS",
         "severity": "INFO",
         "reasonCode": "OPEN_POSITIONS_WITHIN_LIMIT",
@@ -435,7 +435,7 @@
       },
       {
         "ruleCode": "R-012-TRADES-PER-DAY",
-        "ruleVersion": "risk-rules-v1/1.2.0",
+        "ruleVersion": "risk-rules-v1/1.3.0",
         "outcome": "PASS",
         "severity": "INFO",
         "reasonCode": "DAILY_TRADES_WITHIN_LIMIT",
@@ -451,7 +451,7 @@
       },
       {
         "ruleCode": "R-013-GROSS-EXPOSURE",
-        "ruleVersion": "risk-rules-v1/1.2.0",
+        "ruleVersion": "risk-rules-v1/1.3.0",
         "outcome": "PASS",
         "severity": "INFO",
         "reasonCode": "GROSS_EXPOSURE_WITHIN_LIMIT",
@@ -469,7 +469,7 @@
       },
       {
         "ruleCode": "R-014-ASSET-EXPOSURE",
-        "ruleVersion": "risk-rules-v1/1.2.0",
+        "ruleVersion": "risk-rules-v1/1.3.0",
         "outcome": "PASS",
         "severity": "INFO",
         "reasonCode": "ASSET_EXPOSURE_WITHIN_LIMIT",
@@ -487,7 +487,7 @@
       },
       {
         "ruleCode": "R-015-CORRELATION",
-        "ruleVersion": "risk-rules-v1/1.2.0",
+        "ruleVersion": "risk-rules-v1/1.3.0",
         "outcome": "PASS",
         "severity": "INFO",
         "reasonCode": "CORRELATED_EXPOSURE_WITHIN_LIMIT",
@@ -505,7 +505,7 @@
       },
       {
         "ruleCode": "R-016-DATA-FRESHNESS",
-        "ruleVersion": "risk-rules-v1/1.2.0",
+        "ruleVersion": "risk-rules-v1/1.3.0",
         "outcome": "PASS",
         "severity": "INFO",
         "reasonCode": "DATA_FRESH",
@@ -528,7 +528,7 @@
       },
       {
         "ruleCode": "R-017-DATA-QUALITY",
-        "ruleVersion": "risk-rules-v1/1.2.0",
+        "ruleVersion": "risk-rules-v1/1.3.0",
         "outcome": "PASS",
         "severity": "INFO",
         "reasonCode": "DATA_QUALITY_OK",
@@ -559,7 +559,7 @@
       },
       {
         "ruleCode": "R-018-SPREAD",
-        "ruleVersion": "risk-rules-v1/1.2.0",
+        "ruleVersion": "risk-rules-v1/1.3.0",
         "outcome": "PASS",
         "severity": "INFO",
         "reasonCode": "SPREAD_WITHIN_LIMIT",
@@ -576,7 +576,7 @@
       },
       {
         "ruleCode": "R-019-SLIPPAGE",
-        "ruleVersion": "risk-rules-v1/1.2.0",
+        "ruleVersion": "risk-rules-v1/1.3.0",
         "outcome": "PASS",
         "severity": "INFO",
         "reasonCode": "SLIPPAGE_WITHIN_LIMIT",
@@ -593,7 +593,7 @@
       },
       {
         "ruleCode": "R-020-REGIME",
-        "ruleVersion": "risk-rules-v1/1.2.0",
+        "ruleVersion": "risk-rules-v1/1.3.0",
         "outcome": "PASS",
         "severity": "INFO",
         "reasonCode": "REGIME_OK",
@@ -611,7 +611,7 @@
       },
       {
         "ruleCode": "R-021-LOSS-STREAK",
-        "ruleVersion": "risk-rules-v1/1.2.0",
+        "ruleVersion": "risk-rules-v1/1.3.0",
         "outcome": "PASS",
         "severity": "INFO",
         "reasonCode": "LOSS_STREAK_WITHIN_LIMIT",
@@ -627,7 +627,7 @@
       },
       {
         "ruleCode": "R-022-NO-SCALE-IN",
-        "ruleVersion": "risk-rules-v1/1.2.0",
+        "ruleVersion": "risk-rules-v1/1.3.0",
         "outcome": "PASS",
         "severity": "INFO",
         "reasonCode": "NO_SCALE_IN_OK",
@@ -645,7 +645,7 @@
       },
       {
         "ruleCode": "R-023-NO-MARTINGALE",
-        "ruleVersion": "risk-rules-v1/1.2.0",
+        "ruleVersion": "risk-rules-v1/1.3.0",
         "outcome": "PASS",
         "severity": "INFO",
         "reasonCode": "DETERMINISTIC_SIZE_OK",
@@ -663,7 +663,7 @@
       },
       {
         "ruleCode": "R-024-NO-POST-LOSS-INCREASE",
-        "ruleVersion": "risk-rules-v1/1.2.0",
+        "ruleVersion": "risk-rules-v1/1.3.0",
         "outcome": "PASS",
         "severity": "INFO",
         "reasonCode": "RISK_NOT_INCREASED_AFTER_LOSS",
@@ -681,7 +681,7 @@
       },
       {
         "ruleCode": "R-025-INSTRUMENT-MINIMUMS",
-        "ruleVersion": "risk-rules-v1/1.2.0",
+        "ruleVersion": "risk-rules-v1/1.3.0",
         "outcome": "PASS",
         "severity": "INFO",
         "reasonCode": "INSTRUMENT_MINIMUMS_OK",
@@ -704,7 +704,7 @@
       },
       {
         "ruleCode": "R-026-IDEMPOTENCY-VERSION",
-        "ruleVersion": "risk-rules-v1/1.2.0",
+        "ruleVersion": "risk-rules-v1/1.3.0",
         "outcome": "PASS",
         "severity": "INFO",
         "reasonCode": "VERSIONS_CONSISTENT",
@@ -715,7 +715,7 @@
         "inputJson": {
           "candidateKey": "candidate.v1|assignment-btcusdt|strategy-version-1|asset-btc|btcusdt-1h-249",
           "candidateInputHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          "assessmentInputHash": "8f71919c31fb14464c0d2ffa44279d38b574b530dfc52322ccdbda92e3b9d617",
+          "assessmentInputHash": "54c36446b48e9c648414eed25ed0f92100a9e754a6a375a65c1ede206a93a3f7",
           "existingAssessmentHash": null,
           "strategyVersionStatus": "ACTIVE",
           "riskLimitSetStatus": "ACTIVE",
@@ -725,12 +725,12 @@
       }
     ],
     "assessment": {
-      "assessmentKey": "risk-assessment.v1|trade-candidate-1|risk-limit-set-1|8f71919c31fb14464c0d2ffa44279d38b574b530dfc52322ccdbda92e3b9d617",
+      "assessmentKey": "risk-assessment.v1|trade-candidate-1|risk-limit-set-1|54c36446b48e9c648414eed25ed0f92100a9e754a6a375a65c1ede206a93a3f7",
       "tradeCandidateId": "trade-candidate-1",
       "portfolioId": "portfolio-shadow-1",
       "riskLimitSetId": "risk-limit-set-1",
       "status": "PASS",
-      "ruleSetVersion": "risk-rules-v1/1.2.0",
+      "ruleSetVersion": "risk-rules-v1/1.3.0",
       "equity": "10000.000000000000",
       "availableCash": "10000.000000000000",
       "reservedCash": "0.000000000000",
@@ -779,24 +779,24 @@
         "postTradeAssetExposure": "971.239480800000",
         "postTradeCorrelatedExposure": "971.239480800000"
       },
-      "inputHash": "8f71919c31fb14464c0d2ffa44279d38b574b530dfc52322ccdbda92e3b9d617",
+      "inputHash": "54c36446b48e9c648414eed25ed0f92100a9e754a6a375a65c1ede206a93a3f7",
       "assessedAt": "2026-08-02T09:05:00.000Z",
-      "outputHash": "47f9c9eab71fd4176a7abd5eba26c0eeff1554914bb9654f425c40917bc44831"
+      "outputHash": "62b09d00e1153ad9c9ecd7e7c8200737d3daffeac01d5b5d0f3028c4c04a09d7"
     },
     "decision": {
-      "decisionKey": "trade-decision.v1|trade-candidate-1|risk-limit-set-1|8f71919c31fb14464c0d2ffa44279d38b574b530dfc52322ccdbda92e3b9d617",
+      "decisionKey": "trade-decision.v1|trade-candidate-1|risk-limit-set-1|54c36446b48e9c648414eed25ed0f92100a9e754a6a375a65c1ede206a93a3f7",
       "tradeCandidateId": "trade-candidate-1",
       "outcome": "APPROVE_SHADOW",
       "reasonCode": "RISK_APPROVED",
-      "inputHash": "8f71919c31fb14464c0d2ffa44279d38b574b530dfc52322ccdbda92e3b9d617",
-      "outputHash": "a58b48f25d973729c0605c19f013aade3978632d5db00a3750f0db6f43dc31f1",
+      "inputHash": "54c36446b48e9c648414eed25ed0f92100a9e754a6a375a65c1ede206a93a3f7",
+      "outputHash": "f924a3d49d40a4da7c4e4383884405d3cb5559b1ad55c1aa37b53f5cdca862ba",
       "decidedAt": "2026-08-02T09:05:00.000Z"
     },
-    "inputHash": "8f71919c31fb14464c0d2ffa44279d38b574b530dfc52322ccdbda92e3b9d617",
-    "outputHash": "47f9c9eab71fd4176a7abd5eba26c0eeff1554914bb9654f425c40917bc44831",
-    "policyHash": "3537b5bb1ee39bd0228b46febafb11ee44919db6d14fe311aa25e645b0847a9e",
+    "inputHash": "54c36446b48e9c648414eed25ed0f92100a9e754a6a375a65c1ede206a93a3f7",
+    "outputHash": "62b09d00e1153ad9c9ecd7e7c8200737d3daffeac01d5b5d0f3028c4c04a09d7",
+    "policyHash": "c8c0fefa196a55f089e11467ec468dd873705fa30ea6cf1a70cd7c130a900862",
     "engineVersion": "risk-engine-v1/1.1.0",
-    "ruleSetVersion": "risk-rules-v1/1.2.0",
+    "ruleSetVersion": "risk-rules-v1/1.3.0",
     "evaluatedAt": "2026-08-02T09:05:00.000Z"
   }
 }

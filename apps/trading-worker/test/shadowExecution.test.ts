@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { CRYPTO_NATIVE_REGIME_SOURCE, REGIME_EXIT_POLICY } from "@signalpilot/strategy-engine";
 import { describe, it } from "node:test";
 
 import {
@@ -654,6 +655,101 @@ describe("position monitor — forced MANUAL_RISK_CLOSE after a post-fill CRV sh
     // Priced at C2's close, not its open — the request arose only after C1's
     // open had already been used for the entry fill.
     assert.equal(Number.parseFloat(String(exitFill!.referencePrice)), 24180);
+  });
+});
+
+describe("position monitor — exit on a closed regime gate (CRYPTO_REGIME_LONG_V1)", () => {
+  const nativeReport = (cryptoRegime: string) => ({
+    equityRegime: "UNKNOWN",
+    cryptoRegime,
+    overallRegime: cryptoRegime,
+    riskMode: cryptoRegime === "RISK_ON" ? "AGGRESSIVE" : "DEFENSIVE",
+    confidence: 90
+  });
+
+  async function openWithPolicy(parametersJson: Record<string, unknown>, cryptoRegime: string) {
+    const world = seedWorld();
+    const { database, tables, candidate, candleC1 } = world;
+    tables.get("strategyVersion")!.rows[0].parametersJson = parametersJson;
+    const orderResult = await createShadowOrderForCandidate(database as never, {
+      tradeCandidateId: candidate.id,
+      asOf: new Date("2026-08-02T09:00:05.000Z"),
+      codeVersion: CODE_VERSION,
+      correlationId: CORRELATION_ID,
+      capability: SAFE_LONG_CAPABILITY
+    });
+    await processEntryOrderFillForCandle(database as never, {
+      shadowOrderId: orderResult.shadowOrderId!,
+      candleId: candleC1.id,
+      asOf: new Date("2026-08-02T10:00:00.000Z"),
+      codeVersion: CODE_VERSION,
+      correlationId: CORRELATION_ID
+    });
+    // The regime generated during the quiet candle below, before its close.
+    tables.get("marketRegimeSnapshot")!.create({
+      data: {
+        id: `regime-${cryptoRegime}`,
+        generatedAt: new Date("2026-08-02T10:00:21.000Z"),
+        equityRegime: "UNKNOWN",
+        cryptoRegime: "MIXED",
+        overallRegime: "MIXED",
+        riskMode: "DEFENSIVE",
+        confidence: 18,
+        reportJson: { cryptoNative: nativeReport(cryptoRegime) }
+      }
+    });
+    const quiet = tables.get("candle")!.create({
+      data: {
+        id: "candle-c2-quiet",
+        assetId: candidate.assetId,
+        symbol: "BTCUSDT",
+        timeframe: "1h",
+        openTime: new Date("2026-08-02T10:00:00.000Z"),
+        closeTime: new Date("2026-08-02T10:59:59.999Z"),
+        open: "24150",
+        high: "24250",
+        low: "24050",
+        close: "24180",
+        volume: "1000",
+        source: "BINANCE"
+      }
+    });
+    const position = tables.get("shadowPosition")!.rows[0];
+    const result = await monitorPositionForCandle(database as never, {
+      shadowPositionId: position.id,
+      candleId: quiet.id,
+      asOf: new Date("2026-08-02T11:00:00.000Z"),
+      codeVersion: CODE_VERSION,
+      correlationId: CORRELATION_ID
+    });
+    return { result, tables, position };
+  }
+
+  const regimeLongParameters = {
+    direction: "LONG",
+    exitPolicy: REGIME_EXIT_POLICY,
+    regimeSource: CRYPTO_NATIVE_REGIME_SOURCE,
+    maxRegimeAgeMs: 26 * 60 * 60 * 1000
+  };
+
+  it("keeps the position while the crypto-native gate is open", async () => {
+    const { result } = await openWithPolicy(regimeLongParameters, "RISK_ON");
+    assert.equal(result.outcome, ShadowMonitorOutcome.NO_TRIGGER);
+  });
+
+  it("closes it at the candle's close as INVALIDATED once the gate is shut", async () => {
+    const { result, tables, position } = await openWithPolicy(regimeLongParameters, "MIXED");
+    assert.equal(result.outcome, ShadowMonitorOutcome.TRIGGERED_CLOSED);
+    const closed = tables.get("shadowPosition")!.rows.find((row) => row.id === position.id)!;
+    assert.equal(closed.status, "INVALIDATED");
+    const exitFill = tables.get("shadowFill")!.rows.find((row) => row.triggerType === "INVALIDATION");
+    assert.ok(exitFill !== undefined);
+    assert.equal(Number.parseFloat(String(exitFill!.referencePrice)), 24180);
+  });
+
+  it("never touches a version without the exit policy, whatever the regime", async () => {
+    const { result } = await openWithPolicy({ direction: "LONG", regimeSource: CRYPTO_NATIVE_REGIME_SOURCE }, "MIXED");
+    assert.equal(result.outcome, ShadowMonitorOutcome.NO_TRIGGER);
   });
 });
 

@@ -19,6 +19,7 @@ import type {
   StrategyInputSnapshotV1
 } from "./contracts.js";
 import { evaluateCryptoMtfBreakdownShortV1 } from "./crypto-mtf-breakdown-short-v1.js";
+import { evaluateCryptoRegimeLongV1 } from "./crypto-regime-long-v1.js";
 import {
   LONG_V1_BREAKOUT_IDENTITY,
   TREND_CORE_LONG_V1_BREAKOUT_IDENTITY,
@@ -37,6 +38,10 @@ import {
   CRYPTO_MTF_BREAKOUT_LONG_V1_ENGINE_VERSION,
   CRYPTO_MTF_BREAKOUT_LONG_V1_KEY,
   CRYPTO_MTF_BREAKOUT_LONG_V1_PARAMETERS,
+  CRYPTO_REGIME_LONG_V1_ENGINE_VERSION,
+  CRYPTO_REGIME_LONG_V1_KEY,
+  CRYPTO_REGIME_LONG_V1_PARAMETERS,
+  CRYPTO_REGIME_LONG_V1_SPECIFICATION_HASH,
   CRYPTO_TREND_CORE_LONG_V1_ENGINE_VERSION,
   CRYPTO_TREND_CORE_LONG_V1_KEY,
   CRYPTO_TREND_CORE_LONG_V1_PARAMETERS,
@@ -101,6 +106,19 @@ export const CRYPTO_TREND_CORE_LONG_V1: StrategyDefinitionV1 = Object.freeze({
 });
 
 /**
+ * Challenger: the crypto-native regime gate as the whole entry rule, exit on
+ * a closed gate (docs/trading/research/2026-10-14-challenger-regime-long-v1.md).
+ * Registration grants nothing on its own, like every other strategy.
+ */
+export const CRYPTO_REGIME_LONG_V1: StrategyDefinitionV1 = Object.freeze({
+  key: CRYPTO_REGIME_LONG_V1_KEY,
+  engineVersion: CRYPTO_REGIME_LONG_V1_ENGINE_VERSION,
+  specificationHash: CRYPTO_REGIME_LONG_V1_SPECIFICATION_HASH,
+  parameters: CRYPTO_REGIME_LONG_V1_PARAMETERS,
+  evaluate: evaluateCryptoRegimeLongV1
+});
+
+/**
  * Separate short strategy. Synthetic, unleveraged shadow shorts only
  * (ADR 0012); registration here grants no execution capability whatsoever —
  * the risk engine and the feature flags decide that independently.
@@ -118,6 +136,7 @@ const REGISTRY = new Map<string, StrategyDefinitionV1>([
   [CRYPTO_MTF_BREAKOUT_V1.key, CRYPTO_MTF_BREAKOUT_V1],
   [CRYPTO_MTF_BREAKOUT_LONG_V1.key, CRYPTO_MTF_BREAKOUT_LONG_V1],
   [CRYPTO_TREND_CORE_LONG_V1.key, CRYPTO_TREND_CORE_LONG_V1],
+  [CRYPTO_REGIME_LONG_V1.key, CRYPTO_REGIME_LONG_V1],
   [CRYPTO_MTF_BREAKDOWN_SHORT_V1.key, CRYPTO_MTF_BREAKDOWN_SHORT_V1]
 ]);
 

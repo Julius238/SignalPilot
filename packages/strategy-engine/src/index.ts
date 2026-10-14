@@ -19,5 +19,6 @@ export * from "./indicators-v1.js";
 export * from "./validate-input.js";
 export * from "./crypto-mtf-breakout-v1.js";
 export * from "./crypto-mtf-breakdown-short-v1.js";
+export * from "./crypto-regime-long-v1.js";
 export * from "./registry.js";
 export * from "./price-plan.js";

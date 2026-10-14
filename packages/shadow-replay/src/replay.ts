@@ -57,6 +57,8 @@ import {
 import {
   CRYPTO_NATIVE_REGIME_SOURCE,
   INDICATORS_V1_VERSION,
+  REGIME_EXIT_POLICY,
+  regimeGateOpen,
   LEGACY_BREAKOUT_IDENTITY,
   LONG_V1_BREAKOUT_IDENTITY,
   STRATEGY_INPUT_SNAPSHOT_VERSION,
@@ -107,7 +109,7 @@ import {
   type DerivedSignal
 } from "./research.js";
 
-export const SHADOW_REPLAY_ENGINE_VERSION = "shadow-replay-v1/1.2.0";
+export const SHADOW_REPLAY_ENGINE_VERSION = "shadow-replay-v1/1.3.0";
 
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
@@ -194,6 +196,8 @@ export function runShadowReplay(market: ReplayMarketData, config: ReplayConfig, 
 
   const profile = buildProfile(config);
   const evaluate = hooks.evaluate ?? variantEvaluator(config);
+  // Like the live monitor: only a strategy that declares the policy exits on a shut regime gate.
+  const exitOnRegimeGate = (definition.parameters as { exitPolicy?: unknown }).exitPolicy === REGIME_EXIT_POLICY;
   const simProfile: ExecutionProfileSnapshotV1 = {
     id: profile.id,
     tickSize: profile.tickSize,
@@ -468,6 +472,10 @@ export function runShadowReplay(market: ReplayMarketData, config: ReplayConfig, 
           exit = { trigger: resolution.trigger, referencePrice: resolution.referencePrice };
         } else if (position.forceClose) {
           exit = { trigger: "MANUAL_RISK_CLOSE", referencePrice: anchorSnapshot.close };
+        } else if (exitOnRegimeGate && (regimeReport === null || !regimeGateOpen(regimeReport))) {
+          // The report known at this candle's close: derived at an earlier
+          // pipeline time (step 4 runs after monitoring), never a later one.
+          exit = { trigger: "INVALIDATION", referencePrice: anchorSnapshot.close };
         }
       }
       if (exit === null) continue;

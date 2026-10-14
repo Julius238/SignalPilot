@@ -247,7 +247,7 @@ function evidence(
   };
 }
 
-function buildEvidence(validated: ValidatedSnapshotV1): readonly StrategyEvidenceDraftV1[] {
+export function buildEvidence(validated: ValidatedSnapshotV1): readonly StrategyEvidenceDraftV1[] {
   const capturedAt = validated.snapshot.asOf;
   const drafts: StrategyEvidenceDraftV1[] = [];
 
@@ -381,7 +381,7 @@ function sortedUnique(codes: readonly StrategyReasonCode[]): readonly StrategyRe
   return Object.freeze([...new Set(codes)].sort());
 }
 
-function refuse(
+export function refuse(
   identity: BreakoutIdentityV1,
   outcome: typeof StrategyEvaluationOutcome.NO_CANDIDATE | typeof StrategyEvaluationOutcome.INVALID_INPUT,
   checks: readonly StrategyCheckV1[],

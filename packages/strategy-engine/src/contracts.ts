@@ -283,6 +283,22 @@ export interface StrategyEvidenceDraftV1 {
  * Indicator values the decision used, carried into the candidate for review.
  * Every value is a canonical decimal string computed with `indicators-v1`.
  */
+/**
+ * Indicator snapshot of a regime strategy (CRYPTO_REGIME_LONG_V1): no
+ * breakout, momentum or volume rule, so only the values its entry, stop and
+ * entry-gap rules use, plus the regime it decided under.
+ */
+export interface RegimeStrategyIndicatorSnapshotV1 {
+  readonly close1h: DecimalString;
+  readonly atr14_1h: DecimalString;
+  readonly close1d: DecimalString;
+  readonly atr14_1d: DecimalString;
+  readonly cryptoRegime: string;
+  readonly riskMode: string;
+  readonly regimeConfidence: number;
+  readonly regimeSource: string;
+}
+
 export interface StrategyIndicatorSnapshotV1 {
   readonly close1h: DecimalString;
   readonly sma20_1h: DecimalString;
@@ -352,7 +368,7 @@ export interface TradeCandidateDraftV1 {
   readonly minimumRewardRisk: DecimalString;
   readonly plannedRewardRisk: DecimalString;
   readonly maxHoldHours: number;
-  readonly indicators: StrategyIndicatorSnapshotV1;
+  readonly indicators: StrategyIndicatorSnapshotV1 | RegimeStrategyIndicatorSnapshotV1;
   readonly evidence: readonly StrategyEvidenceDraftV1[];
   readonly reasonCodes: readonly StrategyReasonCode[];
   readonly engineVersion: string;

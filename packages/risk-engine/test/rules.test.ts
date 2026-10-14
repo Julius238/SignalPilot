@@ -72,7 +72,7 @@ describe("approval path", () => {
       mutate((snapshot) => {
         snapshot.candidate.strategyKey = strategyKey;
       });
-    for (const approved of ["CRYPTO_MTF_BREAKOUT_LONG_V1", "CRYPTO_TREND_CORE_LONG_V1"]) {
+    for (const approved of ["CRYPTO_MTF_BREAKOUT_LONG_V1", "CRYPTO_TREND_CORE_LONG_V1", "CRYPTO_REGIME_LONG_V1"]) {
       assert.equal(evaluateRisk(withKey(approved)).outcome, "APPROVED", approved);
     }
     // An unlisted identity is critical, not merely rejected.
@@ -776,17 +776,23 @@ describe("structural prohibition rules", () => {
     }
   });
 
-  it("R-024 fails when equity fell but the approved risk grew", () => {
+  it("R-024 compares with the previous risk budget, so quantity rounding after a loss is no increase", () => {
+    // The previous approval's amount sat a few cents under its budget
+    // (quantity floored to the step); equity has since fallen slightly. The
+    // new amount may round to a few cents more than the old one while staying
+    // under the new, smaller budget — that is not a risk increase.
+    const base = evaluateRisk(buildApprovableSnapshot());
+    const currentRisk = d(base.assessment!.riskAmount);
     const snapshot = mutate((next) => {
       next.previousApproval = {
         assessedAt: "2026-08-01T12:00:00.000Z",
-        equity: "20000.000000000000",
-        riskAmount: "1.000000000000"
+        equity: "10010.000000000000",
+        riskAmount: currentRisk.sub(d("0.05")).toString()
       };
     });
     const rule = ruleOf(snapshot, RiskRuleCode.NO_POST_LOSS_INCREASE);
-    assert.equal(rule.reasonCode, RiskReasonCode.RISK_INCREASE_AFTER_LOSS);
-    assert.equal(evaluateRisk(snapshot).directive, "ERROR_LOCK");
+    assert.equal(rule.reasonCode, RiskReasonCode.RISK_NOT_INCREASED_AFTER_LOSS);
+    assert.equal(evaluateRisk(snapshot).outcome, "APPROVED");
   });
 
   it("R-025 blocks below the minimum quantity, notional and available cash", () => {

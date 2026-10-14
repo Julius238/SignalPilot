@@ -490,6 +490,7 @@ describe("strategy registry", () => {
         "CRYPTO_MTF_BREAKDOWN_SHORT_V1",
         "CRYPTO_MTF_BREAKOUT_LONG_V1",
         "CRYPTO_MTF_BREAKOUT_V1",
+        "CRYPTO_REGIME_LONG_V1",
         "CRYPTO_TREND_CORE_LONG_V1"
       ]
     );

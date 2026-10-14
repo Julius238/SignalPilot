@@ -1728,16 +1728,36 @@ function ruleNoPostLossIncrease(ctx: RiskEvaluationContext): RuleVerdict {
         unit: "USDT"
       };
     }
-    // Equity fell since the last approval, so the risk must not have grown.
-    if (ctx.equity.lt(previousEquity) && riskAmount.gt(previousRisk)) {
+    // Equity fell since the last approval, so the risk must not exceed the
+    // previous approval's risk *budget* (docs/trading/06, R-024: "<= vorheriger
+    // gleichartiger Risikobudgetwert"). Comparing with the previous approved
+    // *amount* instead treated quantity rounding as a risk increase: an amount
+    // floored a few cents below one budget could sit a few cents above the
+    // next, smaller budget's floored amount, and that CRITICAL verdict
+    // error-locked the session after an ordinary loss.
+    const maxRiskPct = decimal(ctx.snapshot.riskLimitSet?.maxRiskPerTradePct ?? null);
+    const previousBudget = maxRiskPct === null ? null : previousEquity.mul(maxRiskPct, RoundingMode.FLOOR);
+    if (previousBudget === null) {
+      return {
+        outcome: "ERROR",
+        severity: "BLOCKER",
+        reasonCode: RiskReasonCode.RISK_INCREASE_AFTER_LOSS,
+        message: "Previous risk budget is not computable.",
+        inputJson,
+        actualValue: null,
+        limitValue: null,
+        unit: "USDT"
+      };
+    }
+    if (ctx.equity.lt(previousEquity) && riskAmount.gt(previousBudget)) {
       return {
         outcome: "FAIL",
         severity: "CRITICAL",
         reasonCode: RiskReasonCode.RISK_INCREASE_AFTER_LOSS,
-        message: "Equity fell but the approved risk grew.",
-        inputJson,
+        message: "Equity fell but the approved risk exceeds the previous risk budget.",
+        inputJson: { ...inputJson, previousRiskBudget: previousBudget.toString(), previousRiskAmount: previousRisk.toString() },
         actualValue: riskAmount.toString(),
-        limitValue: previousRisk.toString(),
+        limitValue: previousBudget.toString(),
         unit: "USDT",
         directive: "ERROR_LOCK"
       };

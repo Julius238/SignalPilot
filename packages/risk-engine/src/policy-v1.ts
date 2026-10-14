@@ -15,18 +15,20 @@
 import { buildSpecificationHash } from "@signalpilot/trading-domain";
 
 export const RISK_ENGINE_VERSION = "risk-engine-v1/1.1.0";
-export const RISK_RULE_SET_VERSION = "risk-rules-v1/1.2.0";
+export const RISK_RULE_SET_VERSION = "risk-rules-v1/1.3.0";
 
 /**
  * LONG strategy identities R-001 approves; every other LONG key is refused as
  * an unapproved identity, so registering a strategy never makes it
  * executable on its own. 1.2.0 adds CRYPTO_TREND_CORE_LONG_V1, the real-data
- * research candidate (docs/trading/research/2026-10-14-*).
+ * research candidate (docs/trading/research/2026-10-14-*); 1.3.0 adds the
+ * challenger CRYPTO_REGIME_LONG_V1.
  */
 export const APPROVED_LONG_STRATEGY_KEYS = Object.freeze([
   "CRYPTO_MTF_BREAKOUT_V1",
   "CRYPTO_MTF_BREAKOUT_LONG_V1",
-  "CRYPTO_TREND_CORE_LONG_V1"
+  "CRYPTO_TREND_CORE_LONG_V1",
+  "CRYPTO_REGIME_LONG_V1"
 ] as const);
 export const RISK_SIZING_POLICY_VERSION = "risk-sizing-v1/1.1.0";
 export const RISK_COST_POLICY_VERSION = "risk-cost-v1/1.1.0";

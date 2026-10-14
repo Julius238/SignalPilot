@@ -12,8 +12,8 @@
     "failedRules": [
       "R-008-MIN-RR:REWARD_RISK_BELOW_MINIMUM"
     ],
-    "inputHash": "d1186188cab82b08cdbf09485bf4667bce5e36e293ccd137b57026e024aa3af4",
-    "outputHash": "1f703097b7ce5df6b20a12b2ac1ee71a7b8784a374cc8d13957750ded3e9a480"
+    "inputHash": "6f362301362c6b3b2fe13afdb82471c5e7a626475d9742f379f0f282bf8714c6",
+    "outputHash": "8b098c043cb87fba2aaf10aa68e9d85876f097c4249d0ee5ef6f973ac76c825b"
   },
   {
     "name": "daily-loss-exactly-one-percent",
@@ -28,8 +28,8 @@
     "failedRules": [
       "R-010-DAILY-LOSS:DAILY_LOSS_LIMIT_REACHED"
     ],
-    "inputHash": "cff7594084a8d2ac8e31eb34b582f3b4c1c2d3e3665d9ca42b9e4c0e2c34a2ba",
-    "outputHash": "57d44e0d9cf424ba7851323ee09d45b8e64d31bd1c6a119b36f9fd8897cf6d4c"
+    "inputHash": "08f6e78ab4009ae73032ada03e8324c11af13030e8cb0518d89969c921a02dc8",
+    "outputHash": "802cce54dcfa08daca02eae462ba08781fa5342edeb5cb1593ddff69875d5d50"
   },
   {
     "name": "ledger-drift-beyond-tolerance",
@@ -44,8 +44,8 @@
     "failedRules": [
       "R-003-PORTFOLIO-CONSISTENCY:PORTFOLIO_INCONSISTENT"
     ],
-    "inputHash": "52a612f9d6c5201de47d36d3ecbab3e9eef28162044cdaee36941966d7acb75e",
-    "outputHash": "d63a571045ed82f69b036ed1af6876b02f1de8027305e55d8304c51eacd6e955"
+    "inputHash": "48837f78de976b54cca4e40fdb0a66a3c7e2b91193c7b12f66ccee396cd2434d",
+    "outputHash": "72664982564ba4ce35f3963a27ba3431c849f1fcaad4ca2b803c432e8de8b1ef"
   },
   {
     "name": "correlated-exposure-capped-then-below-minimum-notional",
@@ -60,8 +60,8 @@
     "failedRules": [
       "R-025-INSTRUMENT-MINIMUMS:BELOW_INSTRUMENT_MINIMUM"
     ],
-    "inputHash": "b408fba3aac28798d7a2c44fe80f771969da7df9db2ae1b725f34c55477535ea",
-    "outputHash": "67248c1ac21d800c3d2b6471f412853dc767128527ca9abeb9e957e2db49d7d4"
+    "inputHash": "7e5bca6d259d34956140b3970bc5990e793de2e91511b32564958db9fe2a1382",
+    "outputHash": "dc92fcb0302c8a375a7d3ae91b1929ebd56e913bd63b94d7182beca418b03dd2"
   },
   {
     "name": "missing-execution-profile",
@@ -80,8 +80,8 @@
       "R-019-SLIPPAGE:EXECUTION_PROFILE_MISSING",
       "R-025-INSTRUMENT-MINIMUMS:BELOW_INSTRUMENT_MINIMUM"
     ],
-    "inputHash": "c16f8fe13fbc3fe25ca5c9df701e7543c7b9d24e2865a259629ea3d7e139de26",
-    "outputHash": "66ac01f13ade2a8aaf03290916007fade1c3aa914d3468e4707214861765d3d6"
+    "inputHash": "8f3eaef7ca3b634f94e897ec7d2c3ea19f3cfa21720d385bf05e6031af37f795",
+    "outputHash": "5a844aa31d24fdf67563cf160b38896e0431195492739f50a9e1781b6fa9da78"
   },
   {
     "name": "missing-regime-snapshot",
@@ -96,8 +96,8 @@
     "failedRules": [
       "R-020-REGIME:REGIME_MISSING"
     ],
-    "inputHash": "5d48fce079ad209172860194422bffb1152d60dd732d81b41733a290bb35cdec",
-    "outputHash": "45650e3e8a1a61216ec158f00c0c67328c9ae392399976aed4192455a21cf441"
+    "inputHash": "6f1ec03eebc7c9ff7f780cfd8fe35a11d5b073b03b71ddfa74050c596f096f62",
+    "outputHash": "42e5304b024b61ddd3e64bd608580b219d6824e69b1a6659f26095dd5b7f61d1"
   },
   {
     "name": "post-loss-risk-multiplier",
@@ -112,8 +112,8 @@
     "failedRules": [
       "R-023-NO-MARTINGALE:NON_DETERMINISTIC_SIZE_OVERRIDE"
     ],
-    "inputHash": "e4cf4943d4f6b15f4f2b908815f761141d519dcd96c87e51a5cb9bd1a2b72736",
-    "outputHash": "df5d6f62b062ba342a00ee282328c5e8a3b41faa5f0fe76a0a212693932fabd4"
+    "inputHash": "93bac139103200a4d021df34f4542a14e884361488adc2eee1e68355def5ed7a",
+    "outputHash": "cc06a8a21636761b7f7d6d72eee11e266536a335cbea844bad94a35efe5d63ef"
   },
   {
     "name": "kill-switch-engaged",
@@ -128,8 +128,8 @@
     "failedRules": [
       "R-002-SESSION:SESSION_KILL_SWITCH_ENGAGED"
     ],
-    "inputHash": "89a15808318d272da59a04aa585a42f3d056c8b9b53257de7b9fe244de405a00",
-    "outputHash": "899c7b2f9187e43b37316e55d16cb685dd80b93b02882f04ef6abe44d4352258"
+    "inputHash": "cf1b07134c6894ff903ec0b423fb6d7e5d73c0cd1c57f6c47fb2a23634df1505",
+    "outputHash": "58622cc0c7fd98f289ad0715d76e4942c57a21846f14266a09dcf31dc0c627e6"
   },
   {
     "name": "three-consecutive-losses",
@@ -144,8 +144,8 @@
     "failedRules": [
       "R-021-LOSS-STREAK:CONSECUTIVE_LOSS_LIMIT"
     ],
-    "inputHash": "c03ac028a5450a2dbaef6c0e671e349ec27eddfd0175b8930e92cd500925cdba",
-    "outputHash": "299a1259527fed2791ec7cfdc361a217069092418932178aabe88f003515655f"
+    "inputHash": "633a5fa1f67769c1bf3b87272d5e988cd9f7deb109668e903736f0a869a3961d",
+    "outputHash": "23fd57ef5949d58660791ce1edb5904a54b018f343c1d3d099d0cabd233cd773"
   },
   {
     "name": "assessment-hash-conflict",
@@ -160,7 +160,7 @@
     "failedRules": [
       "R-026-IDEMPOTENCY-VERSION:IDEMPOTENCY_OR_VERSION_CONFLICT"
     ],
-    "inputHash": "8f71919c31fb14464c0d2ffa44279d38b574b530dfc52322ccdbda92e3b9d617",
-    "outputHash": "708f399608ad0274e3892599b07629953c52b7cf91c3ddfc65d0df6c5d99def1"
+    "inputHash": "54c36446b48e9c648414eed25ed0f92100a9e754a6a375a65c1ede206a93a3f7",
+    "outputHash": "84641d4ed08339721dd316dbe263b386a1e3a473584e0535753fbd8e46b4aee0"
   }
 ]
