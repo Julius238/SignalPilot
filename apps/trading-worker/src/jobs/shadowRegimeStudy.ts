@@ -10,8 +10,10 @@
  * ≥ 60). It then compares forward returns of gated and blocked days and a
  * "hold only while the gate is open" curve with buy-and-hold.
  *
- * Only days before `RESEARCH_SPLIT_AT` are used unless STUDY_PHASE=FULL: the
- * study informs design decisions and must never see the test period.
+ * Only days before `RESEARCH_SPLIT_AT` are used by default: the study informs
+ * design decisions and must never see the test period. STUDY_PHASE=TEST
+ * evaluates only the days from the split (the one-time out-of-sample check),
+ * STUDY_PHASE=FULL all days.
  */
 
 import { writeFile } from "node:fs/promises";
@@ -44,7 +46,7 @@ export function entryGateOpen(report: { cryptoRegime: string; riskMode: string; 
   );
 }
 
-export function observeDays(market: ReplayMarketData, untilMs: number): DayObservation[] {
+export function observeDays(market: ReplayMarketData, untilMs: number, fromMs = Number.NEGATIVE_INFINITY): DayObservation[] {
   const daily = (symbol: string) => market.series.find((series) => series.symbol === symbol)?.candles["1d"] ?? [];
   const btc = daily("BTCUSDT");
   const symbols = ["BTCUSDT", "ETHUSDT"];
@@ -52,6 +54,7 @@ export function observeDays(market: ReplayMarketData, untilMs: number): DayObser
   for (let index = 220; index < btc.length; index += 1) {
     const closeMs = btc[index].closeTime;
     if (closeMs >= untilMs) break;
+    if (closeMs < fromMs) continue;
     const at = closeMs + 5 * 60 * 1000;
     const reports = Object.fromEntries(POLICIES.map((policy) => [policy, deriveRegime(market.series, at, policy)])) as Record<
       RegimePolicy,
@@ -114,11 +117,11 @@ function filterCurve(observations: readonly DayObservation[], symbol: string, op
   };
 }
 
-export function renderRegimeStudy(observations: readonly DayObservation[], untilIso: string): string {
+export function renderRegimeStudy(observations: readonly DayObservation[], scope: string): string {
   const first = observations[0] === undefined ? "–" : new Date(observations[0].at).toISOString().slice(0, 10);
   const last = observations.at(-1) === undefined ? "–" : new Date(observations.at(-1)!.at).toISOString().slice(0, 10);
   const lines = [
-    `# Regime-Studie (${first} → ${last}, nur vor ${untilIso})`,
+    `# Regime-Studie (${first} → ${last}, ${scope})`,
     "",
     `${observations.length} Tage. Gate = Einstiegsbedingung von LONG_V1: cryptoRegime RISK_ON, Risk Mode nicht DEFENSIVE/HIGH_RISK/UNKNOWN, Konfidenz ≥ 60. AS_SPECIFIED nutzt S&P 500 und Nasdaq-100 (FRED) als SPY/QQQ-Proxy; IWM fehlt.`,
     ""
@@ -148,10 +151,15 @@ export function renderRegimeStudy(observations: readonly DayObservation[], until
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
   const snapshotDir = resolve(process.env.STUDY_SNAPSHOT_DIR ?? "candle-snapshot");
-  const full = process.env.STUDY_PHASE === "FULL";
-  const untilMs = full ? Number.POSITIVE_INFINITY : Date.parse(RESEARCH_SPLIT_AT);
+  const phase = process.env.STUDY_PHASE ?? "TRAINING";
+  const splitMs = Date.parse(RESEARCH_SPLIT_AT);
   const market = await loadSnapshotMarket(snapshotDir, "BTCUSDT");
-  const report = renderRegimeStudy(observeDays(market, untilMs), full ? "Datenende" : RESEARCH_SPLIT_AT);
+  const observations =
+    phase === "TEST"
+      ? observeDays(market, Number.POSITIVE_INFINITY, splitMs)
+      : observeDays(market, phase === "FULL" ? Number.POSITIVE_INFINITY : splitMs);
+  const scope = phase === "TEST" ? `nur Testzeitraum ab ${RESEARCH_SPLIT_AT}` : phase === "FULL" ? "Gesamtzeitraum" : `nur vor ${RESEARCH_SPLIT_AT}`;
+  const report = renderRegimeStudy(observations, scope);
   if (process.env.STUDY_OUT) await writeFile(resolve(process.env.STUDY_OUT), report);
   console.log(report);
 }
