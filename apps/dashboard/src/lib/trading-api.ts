@@ -179,6 +179,20 @@ export type PortfolioSnapshot = {
   openPositionCount: number;
 };
 
+/** One hourly point of the intraday equity curve (`/trading/portfolio/equity-points`). */
+export type PortfolioEquityPoint = {
+  asOf: string;
+  equity: string;
+  marketValue: string;
+  availableCash: string;
+  reservedCash: string;
+  realizedPnl: string;
+  unrealizedPnl: string;
+  highWaterMark: string;
+  drawdownPct: string;
+  openPositionCount: number;
+};
+
 export type StrategyAssignment = {
   id: string;
   portfolioId: string;
@@ -544,6 +558,12 @@ export function fetchTradingPortfolioSnapshots(
 ) {
   return fetchApi<PortfolioSnapshot[]>(
     `/trading/portfolio/snapshots${buildQuery(params)}`
+  );
+}
+
+export function fetchTradingEquityPoints(params: { limit: number; from?: string }) {
+  return fetchApi<PortfolioEquityPoint[]>(
+    `/trading/portfolio/equity-points${buildQuery(params)}`
   );
 }
 

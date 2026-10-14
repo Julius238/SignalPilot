@@ -13,6 +13,7 @@ import {
   fetchLatestPerformanceRun,
   fetchShadowPositions,
   fetchStrategyPerformance,
+  fetchTradingEquityPoints,
   fetchTradingPortfolioSnapshots
 } from "../../../../lib/trading-api";
 import {
@@ -25,6 +26,8 @@ import {
 import { TRADING_DASHBOARD_ENABLED } from "../../../../lib/trading-flag";
 
 const SNAPSHOT_LIMIT = 200;
+/** Hourly equity points: the last seven days. */
+const EQUITY_POINT_LIMIT = 168;
 const CLOSED_POSITION_LIMIT = 200;
 
 type PageProps = {
@@ -43,12 +46,14 @@ export default async function PerformancePage({ searchParams }: PageProps) {
     performanceResult,
     snapshotsResult,
     closedPositionsResult,
-    latestRunResult
+    latestRunResult,
+    equityPointsResult
   ] = await Promise.all([
     fetchStrategyPerformance({ window, limit: 50 }),
     fetchTradingPortfolioSnapshots({ limit: SNAPSHOT_LIMIT }),
     fetchShadowPositions({ open: "false", limit: CLOSED_POSITION_LIMIT }),
-    fetchLatestPerformanceRun({ window })
+    fetchLatestPerformanceRun({ window }),
+    fetchTradingEquityPoints({ limit: EQUITY_POINT_LIMIT })
   ]);
 
   const performance = performanceResult.data ?? [];
@@ -88,6 +93,10 @@ export default async function PerformancePage({ searchParams }: PageProps) {
     time: snapshot.asOf,
     value: `-${snapshot.drawdownAmount}`
   }));
+  const intradayEquityPoints = (equityPointsResult.data ?? []).map((point) => ({
+    time: point.asOf,
+    value: point.equity
+  }));
   const perTradePnlPoints = closedPositions
     .filter((position) => position.closedAt)
     .map((position) => ({
@@ -125,10 +134,21 @@ export default async function PerformancePage({ searchParams }: PageProps) {
         <button type="submit">Filtern</button>
       </form>
 
+      <div style={{ marginBottom: 16 }}>
+        <TradingLineChart
+          points={intradayEquityPoints}
+          title="Intraday-Equity (stündlich, letzte 7 Tage)"
+          emptyLabel={
+            equityPointsResult.error
+              ? "Stündliche Equity-Punkte konnten nicht geladen werden."
+              : "Noch keine stündlichen Equity-Punkte — sie entstehen mit dem stündlichen Performance-Refresh."
+          }
+        />
+      </div>
       <div className="grid two">
         <TradingLineChart
           points={equityPoints}
-          title="Equity-Kurve"
+          title="Equity-Kurve (täglich)"
           emptyLabel="Keine Portfolio-Snapshots vorhanden."
         />
         <TradingLineChart
