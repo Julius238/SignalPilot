@@ -13,8 +13,10 @@
  * Train/test discipline: the split is fixed below, before any real-data
  * result was looked at. `TRAINING` replays only the period before the split —
  * the test period is not even simulated — and is the only phase used to
- * design or compare new variants. `FULL` replays everything once and reports
- * training and test separately.
+ * design or compare new variants. `TEST` replays only the period from the
+ * split with a fresh portfolio (earlier candles serve as indicator warm-up
+ * only): the one-time out-of-sample check of frozen variants. `FULL` replays
+ * everything in one portfolio and reports both periods.
  */
 
 import { fork } from "node:child_process";
@@ -38,7 +40,7 @@ import { REPLAY_COST_PROFILES, loadSnapshotMarket } from "./shadowReplay.js";
 
 /** Pre-registered 2026-10-14, before the first real-data replay: training until 2023, test from 2024. */
 export const RESEARCH_SPLIT_AT = "2024-01-01T00:00:00.000Z";
-export type ResearchPhase = "TRAINING" | "FULL";
+export type ResearchPhase = "TRAINING" | "TEST" | "FULL";
 
 export interface ResearchRunSpec {
   readonly key: string;
@@ -99,8 +101,9 @@ export function runResearchSpec(market: ReplayMarketData, spec: ResearchRunSpec,
     startingCash: "10000",
     executionProfile: { ...baseProfile, ...REPLAY_COST_PROFILES[spec.costProfile], maxParticipationRate: "0.010000000000" },
     // TRAINING ends one millisecond before the split: no test-period anchor is replayed.
+    from: phase === "TEST" ? RESEARCH_SPLIT_AT : undefined,
     to: phase === "TRAINING" ? new Date(Date.parse(RESEARCH_SPLIT_AT) - 1).toISOString() : undefined,
-    trainTestSplitAt: phase === "FULL" ? RESEARCH_SPLIT_AT : undefined,
+    trainTestSplitAt: phase === "TRAINING" ? undefined : RESEARCH_SPLIT_AT,
     codeVersion: process.env.TRADING_CODE_VERSION ?? "replay-research",
     variant: spec.variant
   });
@@ -142,7 +145,7 @@ const HEADER =
 
 export function renderResearchReport(phase: ResearchPhase, runs: readonly ResearchRunSummary[], snapshotDir: string): string {
   const lines: string[] = [
-    `# Shadow-Replay-Research (${phase === "TRAINING" ? "nur Trainingszeitraum" : "Training + Test"})`,
+    `# Shadow-Replay-Research (${phase === "TRAINING" ? "nur Trainingszeitraum" : phase === "TEST" ? "nur Testzeitraum, frisches Portfolio" : "Training + Test"})`,
     "",
     `Datenquelle: ${snapshotDir} · Split ${RESEARCH_SPLIT_AT} (vorab festgelegt) · ${runs.length} Läufe`,
     "",
@@ -159,6 +162,8 @@ export function renderResearchReport(phase: ResearchPhase, runs: readonly Resear
     for (const run of entries.sort((a, b) => a.spec.variant.localeCompare(b.spec.variant))) {
       if (phase === "TRAINING") {
         lines.push(periodRow(run.spec.variant, run.metrics.overall));
+      } else if (phase === "TEST") {
+        lines.push(periodRow(`${run.spec.variant} · Test`, run.metrics.test));
       } else {
         lines.push(periodRow(`${run.spec.variant} · Training`, run.metrics.training));
         lines.push(periodRow(`${run.spec.variant} · Test`, run.metrics.test));
@@ -309,7 +314,9 @@ if (process.env.RESEARCH_ROLE === "worker") {
   void workerMain();
 } else if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
   const phase = (process.env.RESEARCH_PHASE ?? "TRAINING") as ResearchPhase;
-  if (phase !== "TRAINING" && phase !== "FULL") throw new Error(`RESEARCH_PHASE must be TRAINING or FULL, not ${phase}.`);
+  if (phase !== "TRAINING" && phase !== "TEST" && phase !== "FULL") {
+    throw new Error(`RESEARCH_PHASE must be TRAINING, TEST or FULL, not ${phase}.`);
+  }
   const snapshotDir = resolve(process.env.RESEARCH_SNAPSHOT_DIR ?? "candle-snapshot");
   const outDir = resolve(process.env.RESEARCH_OUT_DIR ?? `replay-research-${phase.toLowerCase()}`);
   const specs = buildResearchMatrix({
