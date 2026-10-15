@@ -13,6 +13,12 @@ readonly ENV_FILE=".env.production"
 readonly COMPOSE_FILE="docker-compose.prod.yml"
 readonly COMPOSE_PROJECT_NAME
 COMPOSE=(docker compose --project-name "$COMPOSE_PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE")
+# Optional host-specific overlay (never committed), e.g. the Traefik/HTTPS
+# routing of the dashboard on the VPS: docker-compose.prod.override.example.yml.
+readonly COMPOSE_OVERRIDE_FILE="docker-compose.prod.override.yml"
+if [ -f "$COMPOSE_OVERRIDE_FILE" ]; then
+  COMPOSE+=(-f "$COMPOSE_OVERRIDE_FILE")
+fi
 readonly ENV_FILE COMPOSE_FILE REPO_ROOT OPS_DIR
 
 # Names the env keys whose value contains a "$" that Docker Compose would treat

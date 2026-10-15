@@ -27,3 +27,6 @@ packages/database/prisma/generated/
 # Lokale Marktdaten-Snapshots (reproduzierbar per Export-Job)
 data/market-snapshots/
 data/replay-research/
+
+# Host-specific production Compose overlay (e.g. Traefik on the VPS)
+docker-compose.prod.override.yml

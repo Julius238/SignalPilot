@@ -1,0 +1,34 @@
+# Host-specific overlay for docker-compose.prod.yml — copy to
+# docker-compose.prod.override.yml on the server (gitignored); the ops
+# scripts pick it up automatically (scripts/ops/_common.sh).
+#
+# Serves the dashboard over HTTPS through an existing Traefik (here: the n8n
+# stack's Traefik with its Let's Encrypt resolver `mytlschallenge` on the
+# Docker network `n8n_default`) and closes the plain-HTTP public port 3000.
+# The n8n stack itself is not changed. Needs a hostname that resolves to the
+# server; set AUTH_COOKIE_SECURE=true and DASHBOARD_ORIGIN=https://<host> in
+# .env.production. Replace signalpilot.example.org with that hostname.
+#
+# Requires Docker Compose >= 2.24 for `!override`.
+
+services:
+  dashboard:
+    ports: !override
+      # Reachable only from the server itself (and through an SSH tunnel).
+      - "127.0.0.1:3000:3000"
+    networks:
+      - internal
+      - traefik
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=n8n_default
+      - traefik.http.routers.signalpilot.rule=Host(`signalpilot.example.org`)
+      - traefik.http.routers.signalpilot.entrypoints=web,websecure
+      - traefik.http.routers.signalpilot.tls=true
+      - traefik.http.routers.signalpilot.tls.certresolver=mytlschallenge
+      - traefik.http.services.signalpilot.loadbalancer.server.port=3000
+
+networks:
+  traefik:
+    name: n8n_default
+    external: true
