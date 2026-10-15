@@ -13,6 +13,8 @@ test -x scripts/ops/trading-shadow.sh
 test -x scripts/ops/prod-build.sh
 test -x scripts/ops/prod-migrate-docker.sh
 test -x scripts/ops/validate-prod-config.sh
+test -x scripts/ops/backup.sh
+test -x scripts/ops/backup-postgres.sh
 
 help_output=$(bash scripts/ops/trading-shadow.sh --help)
 grep -q "rollback-disabled" <<<"$help_output"
@@ -147,6 +149,10 @@ if ! grep -qF "assignmentConfigJson\"->>'\\''direction'\\''" scripts/ops/trading
   echo "ERROR: rollback query does not quote the direction JSON key safely." >&2
   exit 1
 fi
+
+# Backups: retention, checksums, throwaway restore, encrypted off-site copy and
+# n8n alerts, behaviourally with stub docker/age/gpg/rsync/rclone.
+bash scripts/ops/test-backup.sh
 
 if command -v shellcheck >/dev/null 2>&1; then
   # Warnungen und Fehler brechen ab; reine Hinweise (z. B. SC2016 für bewusst

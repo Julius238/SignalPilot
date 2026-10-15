@@ -138,7 +138,8 @@ Capabilities, kein Docker-Socket, eigenes `.env.evolution`.
 
 Freigabeschritte (in dieser Reihenfolge, jeweils nach Zustimmung):
 
-1. Backup-Rotation und externe Sicherung einrichten (bisher fehlt beides).
+1. Backup-Rotation und externe Sicherung einrichten (bisher fehlt beides;
+   vorbereitet in [Runbook 18, Abschnitt 13](18-vps-24-7-shadow-runbook.md#13-backups-rotation-prüfung-externe-kopie)).
 2. Vollsicherung, dann die additive Migration `20261015120000_add_evolution_engine`
    (`migrate`-Image vorher bauen).
 3. `scripts/ops/evolution-db-role.sql` mit eigenem Passwort ausführen.
