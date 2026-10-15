@@ -157,7 +157,13 @@ bash scripts/ops/test-backup.sh
 if command -v shellcheck >/dev/null 2>&1; then
   # Warnungen und Fehler brechen ab; reine Hinweise (z. B. SC2016 für bewusst
   # einfach zitierte SQL-/JS-Snippets) nicht.
-  shellcheck -x --severity=warning scripts/ops/*.sh
+  if [ "${GITHUB_ACTIONS:-}" = true ]; then
+    # In CI zusätzlich als Annotationen, lesbar ohne Zugriff auf das Job-Log.
+    shellcheck -x --severity=warning --format=gcc scripts/ops/*.sh |
+      sed -E 's/^([^:]+):([0-9]+):([0-9]+): (.*)$/::error file=\1,line=\2,col=\3::\4/'
+  else
+    shellcheck -x --severity=warning scripts/ops/*.sh
+  fi
 else
   echo "shellcheck not installed; bash -n and command-surface checks passed."
 fi

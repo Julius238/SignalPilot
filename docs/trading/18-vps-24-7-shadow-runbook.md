@@ -357,8 +357,10 @@ Jeder Schritt unten braucht vorher deine Zustimmung. Jeder angewendete Schritt
 kommt ins Änderungsprotokoll des
 [offiziellen Forward-Tests](research/official-forward-test-v1.md).
 
-Kein Schritt startet, stoppt oder erstellt einen SignalPilot-Container neu.
-Die Produktionsdatenbank wird nur von `pg_dump` gelesen.
+Kein Schritt startet, stoppt oder erstellt einen laufenden SignalPilot-Dienst
+neu. Es entstehen nur kurzlebige Container: zur Prüfung, für den Restore-Test
+und den One-off-`opsWatch` für Alerts. Die Produktionsdatenbank wird nur von
+`pg_dump` gelesen.
 
 **Stand am 2026-10-15 (read-only geprüft).** Der 03:00-Cron schreibt nach
 `/opt/signalpilot/backups`. Es gibt keine Rotation und keine externe Kopie.

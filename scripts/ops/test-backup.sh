@@ -12,6 +12,8 @@ cd "$REPO_ROOT"
 
 fail() {
   echo "FAIL: $*" >&2
+  # Also as a CI annotation: readable without access to the job log.
+  if [ "${GITHUB_ACTIONS:-}" = true ]; then echo "::error file=scripts/ops/test-backup.sh::$*"; fi
   exit 1
 }
 
@@ -492,7 +494,7 @@ offsite_files() {
 rsync_config() {
   write_config OFFSITE_METHOD=rsync OFFSITE_RSYNC_TARGET=u1@box.example:signalpilot \
     OFFSITE_AGE_RECIPIENT="$age_recipient" OFFSITE_SSH_KEY="$sandbox/etc/offsite_ed25519" \
-    OFFSITE_SSH_PORT=23 OFFSITE_SSH_KNOWN_HOSTS="$sandbox/etc/known_hosts" "$@"
+    OFFSITE_SSH_PORT=23 OFFSITE_SSH_KNOWN_HOSTS="$sandbox/etc/known_hosts"
 }
 
 reset
@@ -576,7 +578,7 @@ backup offsite
 expect_ok "off-site with rclone + gpg"
 [ -f "$remote/signalpilot_20261015_030000.dump.gpg" ] || fail "rclone/gpg object missing: $(ls "$remote")"
 expect_log "--trust-model always --compress-algo none --recipient 0123456789ABCDEF0123456789ABCDEF01234567" "gpg to the public key"
-rm -f "$bdir/signalpilot_20261015_030000.dump.offsite" "$remote/"*
+rm -f "$bdir/signalpilot_20261015_030000.dump.offsite" "${remote:?}"/*
 # Negative control: gpg has no header to check, so only the plaintext
 # comparison stops a no-op encryption.
 backup_env FAKE_ENCRYPT=noop -- offsite
