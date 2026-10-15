@@ -4,10 +4,14 @@
  * - Structured output: every request carries the JSON schema of its task
  *   (`output_config.format`), the answer is parsed and validated again by
  *   the engine — model output is untrusted input.
+ * - Streaming: every call streams and waits for the final message, so a
+ *   long adaptive-thinking answer never hits an HTTP idle timeout.
  * - Retries: own loop (the SDK's built-in retries are off so every attempt
- *   is counted and audited): rate limits, overload, 5xx, timeouts and
- *   connection errors back off exponentially and honour `retry-after`; bad
- *   requests, authentication and refusals are never retried.
+ *   is counted and audited): rate limits, overload and 5xx back off
+ *   exponentially and honour `retry-after`. Timeouts and dropped
+ *   connections are not retried — the call may already have been billed —
+ *   and are booked at their worst case by the budget guard. Bad requests,
+ *   authentication and refusals are never retried.
  * - Refusals: with `refusalFallback: "default"` the API re-runs a declined
  *   request server-side on Anthropic's recommended fallback model
  *   (beta `server-side-fallback-2026-07-01`). Usage is then read per attempt
@@ -106,7 +110,13 @@ export class AnthropicResearchProvider implements ResearchAiProvider {
       if (!options.apiKey) throw new AiProviderError("NOT_CONFIGURED", "ANTHROPIC_API_KEY is not configured.");
       // maxRetries 0: the retry loop below owns retries so each attempt is counted.
       const sdk = new Anthropic({ apiKey: options.apiKey, maxRetries: 0, timeout: options.timeoutMs });
-      this.client = { create: (params) => sdk.beta.messages.create(params) };
+      this.client = {
+        create: async (params) => {
+          const stream = sdk.beta.messages.stream(params as unknown as Anthropic.Beta.Messages.MessageCreateParamsStreaming);
+          const message = await stream.finalMessage();
+          return { ...(message as BetaMessage), _request_id: stream.request_id ?? null };
+        }
+      };
     }
   }
 

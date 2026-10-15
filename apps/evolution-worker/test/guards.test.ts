@@ -5,9 +5,10 @@ import { join, resolve } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { gzipSync } from "node:zlib";
 
-import { AiProviderError, EVOLUTION_DATA_SPLIT_V1, HYPOTHESIS_RESPONSE_SCHEMA, type AiRequest, type ResearchAiProvider } from "@signalpilot/evolution";
+import { AiProviderError, EVOLUTION_DATA_SPLIT_V1, HYPOTHESIS_RESPONSE_SCHEMA, MockResearchProvider, type AiRequest, type ResearchAiProvider } from "@signalpilot/evolution";
 
 import { budgetStatus, callResearchAi } from "../src/ai/budgetedAi.js";
+import { runAiSmoke } from "../src/ai/smoke.js";
 import { decideCandidate } from "../src/cli.js";
 import { EvolutionConfigError, describeConfig, loadEvolutionConfig } from "../src/config.js";
 import { decodeSnapshot, loadEvolutionMarket, snapshotFileName } from "../src/market/snapshots.js";
@@ -181,6 +182,37 @@ describe("budget, lease and audit against PostgreSQL", { skip: db === null ? DB_
     await assert.rejects(callResearchAi({ db: db!, provider: failing, config: { monthlyBudgetUsd: 5, runBudgetUsd: 1 }, now: () => now, log: silentLog }, { runId: null, request: request(1000) }), /declined/);
     const call = await db!.evolutionAiCall.findFirstOrThrow({ where: { status: "REFUSED" } });
     assert.equal(Number(call.costUsd), (500 * 4 + 100 * 20) / 1_000_000);
+  });
+
+  it("books a billable call without reported usage (timeout) at its worst case, never as free", async () => {
+    const now = new Date("2027-01-04T10:00:00.000Z");
+    const timingOut: ResearchAiProvider = {
+      name: "fake-billable",
+      billable: true,
+      async complete() {
+        throw new AiProviderError("TIMEOUT", "request timed out");
+      }
+    };
+    await assert.rejects(callResearchAi({ db: db!, provider: timingOut, config: { monthlyBudgetUsd: 5, runBudgetUsd: 1 }, now: () => now, log: silentLog }, { runId: null, request: request(1000) }), /timed out/);
+    const call = await db!.evolutionAiCall.findFirstOrThrow({ where: { errorKind: "TIMEOUT" } });
+    assert.equal(Number(call.costUsd), Number(call.worstCaseUsd));
+    assert.ok(Number(call.costUsd) > 0);
+    assert.match(call.errorMessage!, /unbestätigt/);
+    assert.equal((await budgetStatus(db!, { monthlyBudgetUsd: 5 }, now)).spentUsd, Number(call.worstCaseUsd));
+  });
+
+  it("the connection smoke test makes one tiny, recorded call per tier", async () => {
+    const now = new Date("2027-02-05T10:00:00.000Z");
+    const before = await db!.evolutionAiCall.count({ where: { task: "RESULT_REVIEW", budgetMonth: "2027-02" } });
+    const results = await runAiSmoke({
+      db: db!,
+      provider: new MockResearchProvider(),
+      config: { models: { STANDARD: "claude-haiku-5-5", ADVANCED: "claude-opus-5-5" }, monthlyBudgetUsd: 2, runBudgetUsd: 1 },
+      now: () => now,
+      log: silentLog
+    });
+    assert.deepEqual(results.map((entry) => [entry.tier, entry.model, entry.ok]), [["STANDARD", "claude-haiku-5-5", true], ["ADVANCED", "claude-opus-5-5", true]]);
+    assert.equal(await db!.evolutionAiCall.count({ where: { task: "RESULT_REVIEW", budgetMonth: "2027-02" } }), before + 2);
   });
 
   it("allows only one research run at a time; an expired lease can be taken over", async () => {

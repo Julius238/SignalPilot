@@ -74,11 +74,21 @@ export type AiErrorKind =
   | "NOT_CONFIGURED"
   | "UNKNOWN";
 
-const RETRYABLE: ReadonlySet<AiErrorKind> = new Set(["RATE_LIMIT", "OVERLOADED", "SERVER", "CONNECTION", "TIMEOUT"]);
+/**
+ * Safe to retry: the API refused the request before working on it (rate
+ * limit, overload) or failed server-side. A timeout or a dropped connection
+ * is NOT retried: the request may have run and been billed, and a retry
+ * would spend the budget twice without the first cost ever being reported.
+ */
+const RETRYABLE: ReadonlySet<AiErrorKind> = new Set(["RATE_LIMIT", "OVERLOADED", "SERVER"]);
+/** The request may have been processed (and billed) although no usage came back. */
+const BILLING_UNCERTAIN: ReadonlySet<AiErrorKind> = new Set(["TIMEOUT", "CONNECTION", "UNKNOWN"]);
 
 export class AiProviderError extends Error {
   readonly kind: AiErrorKind;
   readonly retryable: boolean;
+  /** No usage was reported, but the API may have billed the call (booked at its worst case). */
+  readonly billingUncertain: boolean;
   readonly status: number | null;
   readonly attempts: number;
   /** Tokens already billed before the failure (e.g. a refusal mid-stream), if known. */
@@ -89,6 +99,7 @@ export class AiProviderError extends Error {
     this.name = "AiProviderError";
     this.kind = kind;
     this.retryable = RETRYABLE.has(kind);
+    this.billingUncertain = BILLING_UNCERTAIN.has(kind) && (options.usageByModel ?? []).length === 0;
     this.status = options.status ?? null;
     this.attempts = options.attempts ?? 1;
     this.usageByModel = options.usageByModel ?? [];

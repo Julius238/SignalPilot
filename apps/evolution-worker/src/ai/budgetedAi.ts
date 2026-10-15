@@ -142,7 +142,10 @@ export async function callResearchAi(deps: BudgetedAiDeps, input: { readonly run
     return { ok: true, response, callId: call.id, costUsd };
   } catch (error) {
     const failure = error instanceof AiProviderError ? error : new AiProviderError("UNKNOWN", error instanceof Error ? error.message : String(error));
-    const costUsd = costOfModelUsage(failure.usageByModel);
+    // Reported usage is priced exactly. Without any (timeout, dropped connection) the call may still have
+    // been billed: a billable call is then booked at its reserved worst case, never as free.
+    const unconfirmed = failure.usageByModel.length === 0 && failure.billingUncertain && provider.billable;
+    const costUsd = unconfirmed ? worstCaseUsd : costOfModelUsage(failure.usageByModel);
     const usage = failure.usageByModel.reduce(
       (total, entry) => ({ inputTokens: total.inputTokens + entry.usage.inputTokens, outputTokens: total.outputTokens + entry.usage.outputTokens }),
       { inputTokens: 0, outputTokens: 0 }
@@ -155,13 +158,13 @@ export async function callResearchAi(deps: BudgetedAiDeps, input: { readonly run
         inputTokens: usage.inputTokens,
         outputTokens: usage.outputTokens,
         costUsd,
-        usageJson: { byModel: failure.usageByModel } as never,
+        usageJson: { byModel: failure.usageByModel, costBasis: unconfirmed ? "WORST_CASE_UNCONFIRMED" : "REPORTED_USAGE" } as never,
         latencyMs: Date.now() - started,
         errorKind: failure.kind,
-        errorMessage: failure.message.slice(0, 1000)
+        errorMessage: `${failure.message.slice(0, 900)}${unconfirmed ? " — Kosten unbestätigt, konservativ mit dem schlechtesten Fall gebucht." : ""}`
       }
     });
-    if (runId !== null && failure.usageByModel.length > 0) {
+    if (runId !== null && (failure.usageByModel.length > 0 || unconfirmed)) {
       await addRunUsage(db, runId, { ...usage, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 }, provider.billable ? costUsd : 0);
     }
     await recordAuditEvent(db, {

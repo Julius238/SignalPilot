@@ -75,7 +75,7 @@ describe("Anthropic research provider", () => {
     assert.equal("betas" in off.calls[0]!, false);
   });
 
-  it("retries rate limits, overload and connection errors with back-off, honouring retry-after", async () => {
+  it("retries rate limits, overload and server errors with back-off, honouring retry-after", async () => {
     const waits: number[] = [];
     const client = fakeClient([
       () => {
@@ -85,7 +85,7 @@ describe("Anthropic research provider", () => {
         throw new Anthropic.InternalServerError(529, undefined, "overloaded", headers());
       },
       () => {
-        throw new Anthropic.APIConnectionError({ message: "socket hang up" });
+        throw new Anthropic.InternalServerError(500, undefined, "internal", headers());
       },
       () => message()
     ]);
@@ -114,6 +114,21 @@ describe("Anthropic research provider", () => {
         throw failure;
       }, () => message()]);
       await assert.rejects(new AnthropicResearchProvider({ client, maxRetries: 3, timeoutMs: 60_000, refusalFallback: "off", sleep: noSleep }).complete(request()), (error: unknown) => (error as AiProviderError).kind === kind);
+      assert.equal(client.calls.length, 1);
+    }
+  });
+
+  it("never retries a timeout or dropped connection: the call may already have been billed", async () => {
+    for (const failure of [new Anthropic.APIConnectionTimeoutError({ message: "timeout" }), new Anthropic.APIConnectionError({ message: "socket hang up" })]) {
+      const client = fakeClient([() => {
+        throw failure;
+      }, () => message()]);
+      await assert.rejects(new AnthropicResearchProvider({ client, maxRetries: 3, timeoutMs: 60_000, refusalFallback: "off", sleep: noSleep }).complete(request()), (error: unknown) => {
+        assert.ok(error instanceof AiProviderError);
+        assert.equal(error.retryable, false);
+        assert.equal(error.billingUncertain, true);
+        return true;
+      });
       assert.equal(client.calls.length, 1);
     }
   });

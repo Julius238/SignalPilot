@@ -2,6 +2,7 @@
  * Operator commands of the Evolution Engine.
  *
  *   evolution status
+ *   evolution ai-smoke [--tier=STANDARD|ADVANCED]   tiny budget-guarded connection test
  *   evolution run-cycle [--force]           one research cycle now
  *   evolution pause   --actor=<name> [--reason=…]
  *   evolution resume  --actor=<name>
@@ -18,9 +19,10 @@
 
 import "dotenv/config";
 
-import { checkOperatorDecision, OPERATOR_DECISIONS, type CandidateStatus } from "@signalpilot/evolution";
+import { checkOperatorDecision, OPERATOR_DECISIONS, type AiTier, type CandidateStatus } from "@signalpilot/evolution";
 
 import { budgetStatus } from "./ai/budgetedAi.js";
+import { runAiSmoke } from "./ai/smoke.js";
 import { EvolutionConfigError, describeConfig, loadEvolutionConfig } from "./config.js";
 import { runResearchCycle } from "./cycle/researchCycle.js";
 import { createEvolutionDatabase, type EvolutionDb } from "./database.js";
@@ -84,6 +86,13 @@ async function main(): Promise<void> {
         const lastRun = await db.evolutionRun.findFirst({ orderBy: { startedAt: "desc" } });
         const counts = await db.evolutionCandidate.groupBy({ by: ["status"], _count: true });
         console.log(JSON.stringify({ agent: { status: state.status, reason: state.statusReason, lastRunAt: state.lastRunAt, nextRunAt: state.nextRunAt }, budget, lastRun: lastRun && { runKey: lastRun.runKey, status: lastRun.status, startedAt: lastRun.startedAt }, candidates: counts, config: describeConfig(config) }, null, 2));
+        return;
+      }
+      case "ai-smoke": {
+        const tier: AiTier[] = flags.tier === "STANDARD" || flags.tier === "ADVANCED" ? [flags.tier] : ["STANDARD", "ADVANCED"];
+        const results = await runAiSmoke({ db, provider: createProvider(config), config, now, log: logger }, tier);
+        console.log(JSON.stringify({ provider: config.provider, results, budget: await budgetStatus(db, config, now()) }, null, 2));
+        if (results.some((entry) => !entry.ok)) process.exitCode = 1;
         return;
       }
       case "run-cycle": {

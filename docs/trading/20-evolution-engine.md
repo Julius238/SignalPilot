@@ -95,8 +95,11 @@ Buy & Hold. Gates und Score: siehe Vorregistrierung.
 - Modelle konfigurierbar: Hypothesen `claude-opus-5-5` (Effort medium),
   Zusammenfassung `claude-haiku-5-5` (Effort low).
 - Structured Output (JSON-Schema), danach strenges eigenes Parsing.
-- Eigene Retry-Schleife: 429, Überlast, 5xx, Timeout und Verbindungsfehler
-  mit Backoff und `retry-after`; Bad Request, Auth und Refusal nie.
+- Jeder Aufruf streamt (keine HTTP-Zeitüberschreitung bei langem Denken).
+- Eigene Retry-Schleife: 429, Überlast und 5xx mit Backoff und `retry-after`.
+  Timeout und Verbindungsabbruch werden nicht wiederholt, weil der Aufruf
+  bereits abgerechnet sein kann; ohne gemeldete Tokens wird er mit seinem
+  schlechtesten Fall gebucht. Bad Request, Auth und Refusal nie.
 - Refusal: serverseitiger Fallback (`fallbacks: "default"`, nicht für Haiku);
   Kosten je Versuch aus `usage.iterations` mit dem Preis des jeweiligen
   Modells.
@@ -114,9 +117,15 @@ Buy & Hold. Gates und Score: siehe Vorregistrierung.
 
 1. In der Anthropic Console einen API-Key anlegen und ein Ausgabenlimit von
    20 USD setzen (zusätzliche Sicherung neben dem Engine-Budget).
-2. In die Root-`.env` (gitignored) eintragen:
-   `EVOLUTION_AI_PROVIDER=anthropic` und `ANTHROPIC_API_KEY=…`.
-3. `corepack pnpm evolution status` zeigt `anthropicApiKeyConfigured: true`.
+2. `bash scripts/ops/set-anthropic-key.sh` im Repo-Root ausführen und den Key
+   genau einmal einfügen (jedes Zeichen erscheint als `*`). Das Skript schreibt
+   `ANTHROPIC_API_KEY` und `EVOLUTION_AI_PROVIDER=anthropic` in die gitignorte
+   Root-`.env` (Rechte 600), verweigert nicht ignorierte Dateien und doppelt
+   eingefügte Keys und zeigt nur Typ und Länge. Alternativ beide Zeilen von Hand
+   eintragen.
+3. `corepack pnpm evolution ai-smoke` macht je einen winzigen, budgetgeprüften
+   Aufruf mit beiden Modellen (zusammen unter 0,01 USD) und zeigt Tokens,
+   Kosten und Request-IDs.
 
 ## Freigabe und Arena
 
