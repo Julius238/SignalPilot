@@ -1,7 +1,7 @@
 # Entwurf: Vorregistrierung der Strategiefamilie REGIME_PULLBACK_LONG („Regime-Rücksetzer“)
 
 > **Entwurf zur Prüfung durch den Betreiber, noch nicht festgeschrieben.**
-> Stand 2026-10-15, Basis `0ca95f8`. Es gibt keinen Code, keinen Backtest,
+> Stand 2026-10-15, dritte Fassung. Es gibt keinen Code, keinen Backtest,
 > keinen KI-Lauf und keine Freigabe. Champion, Challenger, Risk Engine
 > (einschließlich R-020), Arena V1 und der offizielle VPS-Forward-Test bleiben
 > unberührt. Geprüft wird die Familie nach dem
@@ -11,14 +11,19 @@
 
 ## 1. Entscheidungen
 
-**Betreiberentscheidung vom 2026-10-15:**
+**Betreiberentscheidungen vom 2026-10-15:**
 
 - Die Familie wird als eigenständige Familie weiterentwickelt.
-- Geprüft wird sie nach einem neuen Gates v4, das ihren zusätzlichen Nutzen
-  im Gesamtportfolio bewertet.
+- Geprüft wird sie nach einem neuen Gates v4. Gates v4 bewertet ihren
+  zusätzlichen Nutzen in einer **chronologischen Simulation mehrerer
+  Strategie-Portfolios**, mit gleichem Gesamtkapital, vorab festen
+  Kapitalplätzen und doppelter Risikoprüfung.
 - Die zuerst vorgeschlagene Variante, offene Challenger-Positionen bei der
   Überschneidung zu ignorieren, ist **abgelehnt** und kommt nicht vor.
-- Gates v1–v3 und die Risk Engine bleiben unverändert.
+- Die Schwellen sind nach der Kalibrierungsprüfung angepasst
+  (v4-Entwurf, Abschnitt 6).
+- Gates v1–v3 und das Paket `@signalpilot/risk-engine` bleiben unverändert.
+- Die Familie erhält eine eigene, klar unterscheidbare Forschungsidentität.
 
 **Noch offen (Empfehlung jeweils „ja“):**
 
@@ -28,7 +33,8 @@
 | F2 | eigenständige Logik | kein Regime-Vorfilter im Evaluator, kein Regime-Exit; R-020 wirkt allein in der Risk Engine (Abschnitt 5) |
 | F3 | Stufen und Budget | Stufe 1 nur das Startgenom, ohne KI. Stufe 2 nur nach bestandenem Screening und eigener Freigabe; höchstens 4 Validierungsprüfungen je Monat und 9 insgesamt |
 | F4 | Abbruch | Scheitert das Startgenom im Screening, ist die Familie unter dieser Vorregistrierung geschlossen |
-| F5 | Gates v4 | Prüfregeln und offene Punkte siehe [Entwurf Gates v4](2026-10-15-evolution-gates-v4-draft.md), Abschnitt 11 |
+| F5 | Identität | Forschungsidentität `RESEARCH:REGIME_PULLBACK_LONG_V1` mit eigener Engine-Version und eigenem Spezifikations-Hash; der Challenger-Schlüssel dient nur als Replay-Hülle (Abschnitt 5.3) |
+| F6 | Gates v4 und Simulation | Prüfregeln und die offenen technischen Entscheidungen T1–T10 siehe [Entwurf Gates v4](2026-10-15-evolution-gates-v4-draft.md), Abschnitt 11 |
 
 Kosten der Stufe 1: 0 USD API, lokal grob 10–20 CPU-Minuten.
 Mehrfachtest-Zähler N = 52 → 53 (55, falls das Startgenom ins Finale kommt).
@@ -112,11 +118,13 @@ Strategien mit einer **anderen Ertragsquelle** und einem **anderen Zeitpunkt**:
 
 **Beitrag zum Portfolio:** Die Familie soll an Tagen, an denen der
 Challenger nur Beta hält, einen eigenen kurzfristigen Ertrag liefern, bei
-geringer Kapitalbindung. Ob das stimmt, prüft Gates v4 im gemeinsamen
-Portfolio:
+geringer Kapitalbindung. Ob das stimmt, prüft Gates v4 in der
+chronologischen Portfolio-Simulation, Bestand ohne und mit der Familie:
 
-- Netto-Zuwachs, Sharpe, Drawdown, Risiko- und Kapitaleffizienz;
-- α, α-Anteil und eigene Schwankung.
+- Netto-Zuwachs nach Kosten, Sharpe, Rendite je Drawdown;
+- Risiko- und Kapitaleffizienz;
+- ein statistisch belastbarer Zusatzertrag (P9);
+- ein eigenes α gegenüber den bestehenden Strategien (P8).
 
 ## 5. Regeln
 
@@ -139,22 +147,39 @@ Logik des Challengers, und R-020 wird weder umgangen noch dupliziert.
 
 | Teil | Wert | Bemerkung |
 |---|---|---|
-| Stop | Einstieg − 2 × ATR(14, 1d), auf den Tick abgerundet | üblicher Schutz-Stop für Tagesschwankungen; gleiches Risiko je Trade wie beim Challenger, damit der Pool-Vergleich nicht von der Stopgeometrie lebt |
+| Stop | Einstieg − 2 × ATR(14, 1d), auf den Tick abgerundet | üblicher Schutz-Stop für Tagesschwankungen; gleiches Risiko je Trade wie beim Challenger, damit der Vergleich in der Portfolio-Simulation nicht von der Stopgeometrie lebt |
 | Ziel | Einstieg + 4 × Stopabstand, auf den Tick abgerundet, Mindest-CRV 2 brutto | R-008 (netto 2R) braucht einen Stop ≥ 0,42 %, das ist immer erfüllt. Bei 72 h praktisch nur Obergrenze |
 | Zeit-Exit | 72 h | kurzfristige Umkehrprämie über ein bis drei Tage |
 | Regime-Exit | **keiner** | Er wäre die Ausstiegslogik des Challengers. Im Replay wird er ausdrücklich abgeschaltet (`regimeExit.enabled = false`), weil die technische Hülle sonst die `exitPolicy` des Challengers erben würde |
 | Größe, Kosten, Risk-Regeln | 0,25 % Risiko je Trade, `BINANCE_SPOT_VIP0_ESTIMATE_V1`, Risk Engine `SPEC` | unverändert |
 
-### 5.3 Was die Familie nicht ist
+### 5.3 Identität und was die Familie nicht ist
 
 - Kein Hebel, kein Short, keine Derivate, keine neue Datenquelle.
 - Keine Änderung an Stop, Ziel oder Haltedauer durch die KI.
-- Kein neuer registrierter Strategie-Schlüssel. Die Familie läuft nur als
-  Research-Identität im Replay. Die technische Hülle ist der Schlüssel des
-  Challengers, weil Replay und Risk Engine (`APPROVED_LONG_STRATEGY_KEYS`)
-  eine registrierte, freigegebene Identität verlangen. Das ist bei allen
-  Evolution-Genomen so. Die Einstiegslogik teilt dabei keinen Code mit dem
-  Challenger.
+- **Eigene Forschungsidentität**, maßgeblich in jeder Evolution-Zeile, jedem
+  Bericht und im Dashboard:
+  - Schlüssel `RESEARCH:REGIME_PULLBACK_LONG_V1`;
+  - Engine-Version `crypto-regime-pullback-research-v1/1.0.0`;
+  - Spezifikations-Hash über Familienspezifikation und Genom.
+- **Replay-Hülle, nur technisch:**
+  - Replay und Risk Engine verlangen einen registrierten, freigegebenen
+    Schlüssel (`R-005`, `APPROVED_LONG_STRATEGY_KEYS`).
+  - Innerhalb des Replays trägt der Kandidaten-Entwurf deshalb Schlüssel und
+    Spezifikations-Hash des Challengers. Gespeichert wird das nur im Feld
+    `replayHull`.
+  - Das ist bei allen Evolution-Genomen so. Wiederverwendet wird dabei nur
+    die Identität als Hülle, **nicht** der Evaluator des Challengers.
+- **Schutz vor falscher Zuordnung und vor einer Umgehung der Freigabeliste**
+  (v4-Entwurf, Abschnitt 7):
+  - kein Registry-Eintrag;
+  - keine Abhängigkeit des Live-Pfads von `@signalpilot/evolution`;
+  - Zuordnung der Trades über das Portfolio, nie über den Schlüssel;
+  - keine Forward-Freigabe unter dem Challenger-Schlüssel;
+  - Regime-Exit der Hülle abgeschaltet.
+- **Für einen Forward-Test** sind ein eigener registrierter Schlüssel und ein
+  gesonderter Beschluss über die Freigabeliste nötig. Ohne diesen Beschluss
+  lehnt die unveränderte Risk Engine den Schlüssel ab.
 
 ## 6. Geschlossener Parameterraum
 
@@ -204,7 +229,8 @@ verlangt unter anderem:
 - ≥ 97 Trades, was gegen die Selektivität für Pfad B steht.
 
 Diese Werte messen vor allem die Haltedauer, nicht die Qualität. Gates v4
-ersetzt beides durch den Vergleich im gemeinsamen Portfolio. Die
+ersetzt beides durch den Vergleich in der chronologischen
+Portfolio-Simulation. Die
 Trade-Kennzahlen bestehender Strategien gelten dort nur bei vergleichbarer
 Geometrie als Mindestwerte (v4, Abschnitt 5.2). Gegenüber dem Challenger
 (Ø Haltedauer rund neun Tage gegen höchstens drei) ist das voraussichtlich
@@ -214,13 +240,21 @@ nicht der Fall. Gegenüber dem Champion entscheidet die gemessene Geometrie.
 
 - **Regeln:** [Gates v4](2026-10-15-evolution-gates-v4-draft.md), Abschnitt 5:
   - v1-Basisprüfungen mit absoluten Schwellen;
-  - `INDEPENDENT_FAMILY` und `TRADE_GEOMETRY`;
+  - `INDEPENDENT_FAMILY` (einschließlich Identität) und `TRADE_GEOMETRY`;
   - Portfolio-Mehrwert P1–P7;
-  - Schutz vor Scheindiversifikation P8–P10;
+  - Statistik P8 (eigenes α) und P9 (belastbarer Zusatzertrag des
+    Gesamtportfolios), beide mit Mehrfachtest-Schwelle;
   - Finale mit den Nachbarn aus Abschnitt 6, Walk-Forward und Holdout nur als
     Schutz.
-- **Bestand im Pool:** Champion, Challenger und alle freigegebenen Kandidaten.
-  Das Startgenom ist keine Wurzel und nie Teil des Bestands.
+- **Simulation:** chronologisch, mit gleichem Gesamtkapital und festen Plätzen
+  à 20 000 USDT.
+  - Vergleich A: Champion, Challenger, freigegebene Kandidaten und ein
+    Reserveplatz als Kasse.
+  - Vergleich B: die Familie auf dem Reserveplatz.
+  - Jeder Einstieg wird in Stufe 1 vollständig von der unveränderten Risk
+    Engine gegen das eigene Portfolio geprüft und in Stufe 2 nur begrenzend
+    gegen die Gesamtsicht.
+  - Das Startgenom ist keine Wurzel und nie Teil des Bestands.
 - **Abstammung:** Das Startgenom ist der Familienstart (`SEED:REGIME_PULLBACK_LONG_V1`,
   Generation 1). Eine Bezugswurzel aus einer anderen Familie gibt es nicht.
 - **Budget:** v3/v4 erlaubt 10 Validierungsprüfungen je Familie und Monat.
@@ -262,10 +296,11 @@ nicht der Fall. Gegenüber dem Champion entscheidet die gemessene Geometrie.
 
 | Bereich | Änderung |
 |---|---|
-| `packages/strategy-engine` | Neue Datei `crypto-regime-pullback-research-v1.ts` mit `evaluateRegimePullbackResearchV1(snapshot, identity)`. Die Identität ist `{ ...REGIME_LONG_V1_IDENTITY, pullbackResearch }`, also nur die technische Hülle (gleicher Vertrag wie `regimeResearch`: nie registriert, nie als StrategyVersion angelegt). Sie nutzt `validateStrategyInput`, `refuse`, `buildEvidence`, `averageTrueRange`, `priorPeriodHigh`, `relativeVolume` und die Tick-Ausrichtung. Sie nutzt **nicht** `regimeGateOpen` und keinen anderen Einstiegs-Evaluator. Den Helfer für das höchste relative Volumen der letzten 6 Kerzen enthält die neue Datei selbst, nicht `indicators-v1.ts`. Reason-Codes für Tiefe, Umkehrkerze und Volumen sowie ein Indikator-Typ für den Kandidaten kommen additiv hinzu. `crypto-regime-long-v1.ts`, Registry, Spezifikations-Hashes und Golden Fixtures bleiben byte-gleich |
+| `packages/strategy-engine` | Neue Datei `crypto-regime-pullback-research-v1.ts` mit `evaluateRegimePullbackResearchV1(snapshot, identity)`. Die Identität ist `{ ...REGIME_LONG_V1_IDENTITY, pullbackResearch, researchIdentity }`: Die Challenger-Felder dienen nur als Replay-Hülle, `researchIdentity` trägt Schlüssel, Engine-Version und Spezifikations-Hash der Familie (gleicher Vertrag wie `regimeResearch`: nie registriert, nie als StrategyVersion angelegt). Sie nutzt `validateStrategyInput`, `refuse`, `buildEvidence`, `averageTrueRange`, `priorPeriodHigh`, `relativeVolume` und die Tick-Ausrichtung. Sie nutzt **nicht** `regimeGateOpen` und keinen anderen Einstiegs-Evaluator. Den Helfer für das höchste relative Volumen der letzten 6 Kerzen enthält die neue Datei selbst, nicht `indicators-v1.ts`. Reason-Codes für Tiefe, Umkehrkerze und Volumen sowie ein Indikator-Typ für den Kandidaten kommen additiv hinzu. `crypto-regime-long-v1.ts`, Registry, Spezifikations-Hashes und Golden Fixtures bleiben byte-gleich |
 | `packages/evolution` | `genome.ts`: Familie `REGIME_PULLBACK_LONG` in `FAMILY_SPECS` mit Beschreibung `independence` (Evaluator, „nur Einstieg“, feste Ausstiege, Vorregistrierungs-Hash); `EVOLUTION_FAMILY_SEEDS` mit Startgenom, Nachbarn und Budgetgrenzen; Zweig in `genomeReplayPlan` (Hülle `CRYPTO_REGIME_LONG_V1`, `hooks.evaluate` auf den neuen Evaluator, `regimeExit: { enabled: false }`); `distanceFromRoot` misst bei Familien mit Startgenom gegen das Startgenom. `lineage.ts`: Präfix `RPB` (`EVO-RPB-0001`), Startgenom als Generation 1. `context.ts`/`prompt.ts`: Familie, feste Ausstiege, Restbudget. `mock-provider.ts`: deterministische Hypothesen für Tests. `EVOLUTION_ROOTS` bleibt unverändert. Gates: siehe v4-Entwurf, Abschnitt 9 |
-| `apps/evolution-worker` | Pool-Prüfung für eigenständige Familien in Schritt 5d; `FAMILY_PREREGISTRATION_LIMIT` vor dem Backtest; `evaluate-seed`. Der Befehl ruft keine KI auf, verweigert einen zweiten Lauf desselben Startgenoms und verweigert den Lauf, wenn der Hash im Code nicht zur Vorregistrierung passt |
-| `apps/dashboard` | Familien-, Reason-Code- und Prüfungsbeschriftungen, Pool-Vergleich; nur lesend |
+| `packages/shadow-replay` | chronologische Portfolio-Simulation `runPortfolioReplay` und Gruppenprüfung `group-risk-v1` (v4-Entwurf, Abschnitte 3, 4 und 10) |
+| `apps/evolution-worker` | Portfolio-Simulation A/B für eigenständige Familien in Schritt 5d; Forschungsidentität in allen gespeicherten Zeilen, Hülle nur in `replayHull`; `FAMILY_PREREGISTRATION_LIMIT` vor dem Backtest; `evaluate-seed`. Der Befehl ruft keine KI auf, verweigert einen zweiten Lauf desselben Startgenoms und verweigert den Lauf, wenn der Hash im Code nicht zur Vorregistrierung passt |
+| `apps/dashboard` | Familien-, Reason-Code- und Prüfungsbeschriftungen, Vergleich A/B; nur lesend |
 | Datenbank | keine Migration (`EvolutionCandidate.family` ist `String`, Ergebnisse liegen in JSON-Feldern) |
 
 **Tests:**
@@ -276,6 +311,11 @@ nicht der Fall. Gegenüber dem Champion entscheidet die gemessene Geometrie.
   selbst prüft kein Regime.
 - Kein Regime-Exit im Replay.
 - Import-Graph ohne fremden Einstiegs-Evaluator.
+- Identität:
+  - jede gespeicherte Zeile trägt `RESEARCH:REGIME_PULLBACK_LONG_V1`;
+  - die Hülle steht nur in `replayHull`;
+  - kein Kandidaten-Trade wird dem Challenger zugeordnet;
+  - die Registry-Zuordnung des Challenger-Schlüssels ist unverändert.
 - Genom: 240 Konfigurationen, Startgenom gültig und normalisiert, Hash
   festgenagelt, Hashes bestehender Genome unverändert.
 - Bestehende Hash-Tests für Challenger, Champion und Gates v1–v3 bleiben
@@ -337,14 +377,17 @@ ausgeschlossen und bräuchte eine eigene Grundsatzentscheidung.
 
 ## 13. Einschätzung
 
-- Unter v4 ist die Hürde hoch, aber sachgerecht. Die Familie muss
-  - das Portfolio bei gleichem Kapital und gleichen Grenzen netto und
-    risikobereinigt in beiden Zeiträumen verbessern;
+- Unter v4 ist die Hürde hoch, aber sachgerecht. Die Familie muss in der
+  chronologischen Simulation, bei gleichem Kapital und festen Plätzen,
+  - das Gesamtportfolio nach Kosten in beiden Zeiträumen verbessern;
+  - Rendite je Drawdown halten;
   - ihr zusätzliches Risiko und Kapital ausreichend verzinsen;
-  - einen überwiegend eigenen, signifikanten Ertrag liefern.
+  - einen statistisch belastbaren Zusatzertrag (P9) mit eigenem α (P8)
+    liefern.
 - Die Erfolgsaussicht des Startgenoms schätze ich trotzdem als gering ein,
-  eher 1 zu 10 als 1 zu 2. Kurzfristige Umkehrprämien sind klein, und ein
-  α mit t ≥ 2,82 ist mit wenigen, kurzen Trades schwer zu erreichen.
+  eher 1 zu 10 als 1 zu 2. Kurzfristige Umkehrprämien sind klein, und
+  t ≥ 2,82 verlangt ein jährliches Informationsverhältnis von rund 1,2 (bei
+  IR 1,0 liegt die Chance bei 34 %).
 - **Warum es sich trotzdem lohnt:** Stufe 1 kostet keine API-Gebühren und
   erhöht N um 1 bis 3. Das Ergebnis beantwortet die Frage, ob
   Einstiegs-Timing innerhalb des Regimes etwas Eigenes verdient.

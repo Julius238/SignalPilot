@@ -1,172 +1,273 @@
 # Entwurf: Gates v4 — Portfolio-Mehrwert eigenständiger Strategiefamilien
 
 > **Entwurf zur Prüfung durch den Betreiber, noch nicht festgeschrieben.**
-> Stand 2026-10-15, Basis `0ca95f8`. Es gibt keinen Code, keinen Backtest
-> und keinen KI-Lauf. Gates v1–v3 bleiben unverändert (Hashes
-> `65da3536…`, `8341a3c7…`, `250bf745…`); die Risk Engine, insbesondere
-> R-020, wird weder verändert noch umgangen. Der offizielle VPS-Forward-Test
-> bleibt unberührt. Festgeschrieben wird v4 erst nach der Prüfung, mit eigenem
-> Hash und ADR, **vor** dem ersten Experiment.
+> Stand 2026-10-15, zweite Fassung. Es gibt keinen Code, keinen Backtest
+> und keinen KI-Lauf.
+>
+> - Gates v1–v3 bleiben unverändert (Hashes `65da3536…`, `8341a3c7…`,
+>   `250bf745…`).
+> - Das Paket `@signalpilot/risk-engine` bleibt unverändert: keine Regel,
+>   kein Grenzwert, keine Freigabeliste, kein Refactoring.
+> - Der offizielle VPS-Forward-Test bleibt unberührt.
+> - v4 wird erst nach der Prüfung mit Hash und ADR festgeschrieben, **vor**
+>   dem ersten Experiment.
 >
 > Zugehörige Familie: [REGIME_PULLBACK_LONG](2026-10-15-evolution-family-regime-pullback-draft.md).
 
 ## 1. Auftrag und Umsetzung
 
-Betreiberentscheidung vom 2026-10-15: Option B, also ein eigenes Gates v4 für
-neue, eigenständige Familien. Die Diversifikationsprüfung wird dabei
-ausdrücklich **nicht** dadurch gelockert, dass offene Challenger-Positionen bei
-der Überschneidung ignoriert werden. Stattdessen bewertet v4 den zusätzlichen
-Nutzen im Gesamtportfolio.
-
-| Vorgabe | Umsetzung |
-|---|---|
-| 1. Familie unabhängig von bisherigen Einstiegslogiken | Strukturprüfung `INDEPENDENT_FAMILY` (Abschnitt 3); der Evaluator der Familie prüft kein Regime mehr und hat keinen Regime-Exit; R-020 wirkt allein in der Risk Engine |
-| 2. Portfolio mit und ohne Kandidat, gleiches Gesamtkapital, gleiche übergeordnete Risikogrenzen | Methode `shared-pool-v1` (Abschnitt 4) |
-| 3. Nettorendite, Sharpe, Drawdown, gleichzeitiges Risiko, Kapitalbindung, tatsächlicher Zusatzgewinn; kein Durchfallen nur wegen einer Challenger-Position | Prüfungen P1–P7 (Abschnitt 5.3). Die Überschneidung mit offenen Positionen wird gemessen und berichtet, entscheidet aber nicht |
-| 4. Keine Scheindiversifikation | Prüfungen P8–P10 und die Redundanzprüfung (Abschnitt 5.4); Abschnitt 6 ordnet jedem bekannten Muster seine Prüfung zu |
-| 5. Trade-Kennzahlen des Challengers nur bei vergleichbarer Geometrie als Mindestwerte | `TRADE_GEOMETRY` (Abschnitt 5.2) |
-| 6. v1–v3 unverändert, v4 vorab registriert, Zähler und Vorwissen berücksichtigt | Abschnitte 7, 8 und 10 |
-| 7. Risk Engine und R-020 unverändert | Der Pool verwendet nur Trades, die die Risk Engine im Backtest jedes Mitglieds bereits genehmigt hat. Er kann Trades streichen, aber keine hinzufügen (Abschnitt 4.1) |
+| # | Anforderung des Betreibers | Umsetzung |
+|---|---|---|
+| 1 | Chronologische Simulation mit echten Einstiegen, Fills, Exits, Gebühren, Kapitalbindung und Risikolimits; kein Zusammenrechnen | Abschnitt 3: eine Uhr, alle Strategien, Stunde für Stunde, mit denselben Produktionsbausteinen wie der Shadow-Replay |
+| 2 | Gleiches Gesamtkapital, Gewichte vorab fest, keine Gewichtsoptimierung | Abschnitt 3.2: feste Plätze à 20 000 USDT; eine andere Gewichtung wird nie gerechnet oder berichtet |
+| 3 | Risk-Regeln unverändert; die Gesamtprüfung begrenzt nur; exakte Dokumentation der Wiederverwendung | Abschnitt 4: Stufe 1 = unverändertes `evaluateRisk`; Stufe 2 = unveränderte Regelfunktionen aus `RISK_RULES` auf einer Gesamtsicht, nur nach einer Freigabe in Stufe 1 |
+| 4 | Angepasste Schwellenwerte; belastbarer Zusatzertrag nach Kosten bei kontrolliertem Risiko | Abschnitte 5 und 6 |
+| 5 | Strenge Statistik; Bekanntes ist kein Nachweis; alles vorregistriert | P8 und P9 mit Mehrfachtest-Schwelle (Abschnitt 5.4); Abschnitte 5.8 und 10 |
+| 6 | Eigene Strategieidentität für REGIME_PULLBACK_LONG; keine falsche Zuordnung, keine spätere Umgehung der Freigabeliste | Abschnitt 7 |
+| 7 | Gates v1–v3 und VPS-Forward-Test unverändert | Abschnitt 9 |
 
 ## 2. Kurzfassung
 
-- Für BREAKOUT_LONG und REGIME_LONG ist v4 **identisch** mit v3. Ein Test
-  sichert das ab.
-- Für Kandidaten einer **eigenständigen Familie** ersetzt v4 die
-  Linienentscheidung von v3 durch eine **Portfolioentscheidung**:
-  - Gleiches Kapital, gleiche Portfolio-Grenzen aus `RISK_LIMIT_SET_V1`.
-  - Einmal mit, einmal ohne Kandidat.
-  - Der Kandidat muss das Portfolio netto, risikobereinigt und in beiden
-    Zeiträumen verbessern.
-  - Er muss sein zusätzlich gebundenes Risiko und Kapital mindestens halb so
-    gut verzinsen wie der Bestand.
-  - Sein Ertrag muss überwiegend eigener Ertrag sein: signifikantes α,
-    α-Anteil ≥ 50 %, höchstens die Hälfte seiner Schwankung durch bestehende
-    Strategien erklärt.
-- **Die v3-Maße Korrelation ≤ 0,5 und „bespielte Einstiege“ entscheiden in
-  diesem Pfad nicht mehr.** Sie werden weiter berechnet und angezeigt. Ersetzt
-  werden sie durch Wertmaße, die eine Scheindiversifikation direkt messen.
-- **Trade-Kennzahlen bestehender Strategien** sind nur dann harte
-  Mindestwerte, wenn Haltedauer **und** Handelsfrequenz vergleichbar sind
-  (innerhalb Faktor 2).
+- **Geltungsbereich.** Für BREAKOUT_LONG und REGIME_LONG ist v4 identisch mit
+  v3; ein Test sichert das ab. Für Kandidaten einer **eigenständigen
+  Familie** ersetzt v4 die Linienentscheidung durch eine
+  **Portfolioentscheidung**.
+- **Simulation.** Der Bestand (Champion, Challenger, freigegebene Kandidaten)
+  wird einmal mit einem leeren Reserveplatz und einmal mit dem Kandidaten auf
+  diesem Platz gerechnet. Beide Läufe sind chronologisch und nutzen dasselbe
+  Gesamtkapital.
+- **Risikoprüfung.** Jeder Einstieg wird zweimal geprüft:
+  - zuerst vollständig gegen das eigene Strategie-Portfolio, genau wie live;
+  - dann zusätzlich gegen die Gesamtsicht aller Portfolios.
+  - Die zweite Prüfung kann nur ablehnen.
+- **Entscheidend:**
+  - Der Gesamtertrag steigt nach Kosten in beiden Zeiträumen.
+  - Er steigt **statistisch belastbar**: gepaarter Monatsvergleich mit
+    Mehrfachtest-Schwelle (P9).
+  - Er stammt aus eigener Quelle: signifikantes α gegenüber den bestehenden
+    Strategien (P8).
+  - Das Risiko bleibt kontrolliert: Rendite je Drawdown nicht schlechter,
+    Risiko- und Kapitaleffizienz, Kostenstress.
+- **Gestrichen oder nur noch berichtet** werden die Schwellen, die wertvolle
+  Strategien systematisch ausschließen (Begründung in Abschnitt 6):
+  - ΔSharpe ≥ +0,10 bei festem Gewicht;
+  - Drawdown ≤ 1,10 ×;
+  - α-Anteil ≥ 50 %;
+  - R² ≤ 0,5.
 
-## 3. Eigenständige Familie (Definition)
+## 3. Chronologische Portfolio-Simulation (`portfolio-replay-v1`)
 
-Eine Familie gilt nur dann als eigenständig, wenn **alle** Punkte erfüllt
-sind. Das ist Teil ihrer eigenen Vorregistrierung und wird im Code geprüft
-(`INDEPENDENT_FAMILY`, blockierend):
+### 3.1 Grundsatz
 
-1. **Eigener Einstiegs-Evaluator** in einer eigenen Datei. Er ruft keinen
-   Einstiegs-Evaluator einer anderen Strategie auf und prüft kein
-   Regime-Gate. Ein Test über den Import-Graphen sichert das ab.
-2. **Nur Einstiegsparameter sind suchbar.** Stop, Ziel und Haltedauer sind in
-   der Familienspezifikation fest. Damit kann die Familie keine
-   Ausstiegsvarianten erzeugen, also genau das Muster, das v3 bekämpft.
-3. **Eigenes Startgenom und eigenes Raster**, vorregistriert mit Hash vor dem
-   ersten Experiment.
-4. **Läuft unverändert durch die Risk Engine** (Modus `SPEC`, alle Regeln
-   einschließlich R-020 und R-008) als Research-Identität. Die Familie wird nie
-   registriert, nie als `StrategyVersion` angelegt und ist nie live
-   ausführbar.
+Die Simulation erweitert den bestehenden Shadow-Replay. Sie ersetzt ihn
+nicht und rechnet keine Einzel-Backtests zusammen.
 
-## 4. Gemeinsames Portfolio (Methode `shared-pool-v1`)
+**Gleiche Bausteine wie der Einzel-Replay:**
 
-### 4.1 Mitglieder
+- Fills: Market-Fill, Einstiegslücke, Ablauf nach 2 Kerzen
+  (`trading-simulation`).
+- Ledger, Reservierungen, konservative Marks, Bewertung und
+  Tagesbeginn-Snapshot (`@signalpilot/portfolio`).
+- Risk Engine (`evaluateRisk`) und Fill-Nachprüfung
+  (`computePostFillNetRewardRisk`).
+- Kennzahlen (`performance-intelligence`).
 
-- **Bestand:** alle bestehenden Strategien wie in v3, also die Wurzeln
-  (Champion, Challenger) und alle vom Betreiber freigegebenen Kandidaten aller
-  Familien.
-- **Mit Kandidat:** derselbe Bestand plus der Kandidat.
-- **Trades:** Jedes Mitglied bringt die Trades aus seinem eigenen Backtest
-  (Entdeckung + Validierung, im Finale auch Holdout) mit. Darin hat die Risk
-  Engine schon jede Regel angewendet, auch R-020, R-008, höchstens 2 offene
-  Positionen, höchstens 4 neue Trades je Tag, Verlustserie und kein Aufstocken.
-- **Wirkung des Pools:** Er kann Trades nur **streichen**, nie hinzufügen
-  oder verändern.
+**Neu ist nur:**
 
-### 4.2 Kapital und Positionsgröße
+- mehrere Strategie-Portfolios und beide Symbole in **einer** gemeinsamen
+  Zeitschleife;
+- die Gesamtsicht über alle Portfolios (Abschnitt 4).
 
-- Ein gemeinsamer Kapitalpool mit 20 000 USDT Startkapital, in beiden
-  Portfolios gleich. Alle Kennzahlen sind relativ, der Betrag dient nur dem
-  Bericht.
-- **Jeder Trade riskiert 0,25 % der Pool-Equity**, gemessen zum letzten
-  Stundenmark vor dem Einstieg. Das ist `maxRiskPerTradePct` der Risk Engine.
-- Der Mitglieds-Trade wird mit s = 0,25 % · Equity ÷ `plannedRisk` skaliert.
-  Menge, Brutto-PnL, Gebühren, Spread und Slippage skalieren linear.
-- Warum kein fester Kapitalanteil (½ gegen ⅓)? Ein Drittel für den
-  Kandidaten würde die bestehenden Strategien verkleinern. Gemessen würde dann
-  eine Umverteilung, nicht der Zusatz. Die Risk Engine bemisst ohnehin jeden
-  Trade am Kapital des ganzen Portfolios.
+### 3.2 Kapitalrahmen: vorab fest
 
-### 4.3 Übergeordnete Grenzen
-
-Die Grenzen sind in beiden Portfolios identisch. Die Werte stammen aus
-`RISK_LIMIT_SET_V1` und werden im v4-Hash festgenagelt.
-
-| Grenze | Wert | Herkunft |
+| | Plätze (je 20 000 USDT) | Gesamtkapital |
 |---|---|---|
-| offenes Gesamtrisiko (Summe des Anfangsrisikos aller offenen Positionen) | ≤ 1,0 % der Equity | `maxDailyLossPct`: Auch ein gleichzeitiger Stop aller Positionen bleibt innerhalb des Tagesverlust-Limits. Zugleich das Höchstmaß des Bestands (2 Strategien × 2 Positionen × 0,25 %) |
-| Tagesverlust | ab −1,0 % gegenüber dem Tagesbeginn (realisiert + Mark) keine neuen Einstiege bis Tagesende UTC | `maxDailyLossPct` (R-010) |
-| Brutto-Exposure | ≤ 40 % der Equity | `maxGrossExposurePct` (R-013) |
-| je Asset | ≤ 20 % | `maxAssetExposurePct` (R-014) |
-| korrelierte Gruppe BTC + ETH | ≤ 30 % | `maxCorrelatedExposurePct` (R-015) |
+| Vergleich **A** (ohne Kandidat) | Champion, Challenger, je freigegebener Kandidat ein Platz, **ein Reserveplatz als Kasse** | 20 000 × (Bestand + 1) |
+| Vergleich **B** (mit Kandidat) | derselbe Bestand, der Kandidat **auf dem Reserveplatz** | identisch |
 
-**Nicht aggregiert** werden die Regeln, die heute je Strategie-Portfolio
-gelten: höchstens 2 offene Positionen, höchstens 4 neue Trades je Tag,
-Verlustserie, kein Aufstocken. Sie wirken weiter im Backtest jedes Mitglieds.
+- Heute heißt das 60 000 USDT: drei Plätze in A wie in B.
+- Jeder Platz ist ein **eigenes Strategie-Portfolio mit beiden Symbolen**
+  (BTCUSDT, ETHUSDT), wie ein Shadow-Portfolio im Live-Betrieb. Die
+  Risk-Engine-Regeln gelten je Portfolio über beide Symbole hinweg (siehe
+  Entscheidung T1 in Abschnitt 11).
+- Die Positionsgröße bestimmt die Risk Engine je Portfolio unverändert: 0,25 %
+  Risiko der Portfolio-Equity.
+- **Keine Optimierung der Gewichtung.**
+  - Gerechnet werden ausschließlich A und B mit gleich großen Plätzen.
+  - Keine andere Gewichtung wird gerechnet, gespeichert, angezeigt oder an die
+    KI gemeldet.
+  - Die Platzgröße ist Teil des v4-Hashes.
+  - Über eine andere Kapitalverteilung im Live-Betrieb entscheidet der
+    Betreiber getrennt und nach dem Forward-Test.
 
-- Würde man „höchstens 2 offene Positionen“ unverändert auf das ganze
-  Portfolio anwenden, wäre schon der Bestand nicht mehr darstellbar. Champion
-  und Challenger brauchen auf zwei Symbolen bis zu vier Plätze.
-- Außerdem würde der Kandidat dann blockiert, sobald der Challenger hält, was
-  Vorgabe 3 ausschließt.
-- Das Gesamtrisiko begrenzen stattdessen die Risiko-Obergrenze und der
-  Tagesverlust.
+### 3.3 Ablauf je Stunde (feste Reihenfolge)
 
-### 4.4 Reihenfolge, wenn eine Grenze greift
+Für jede geschlossene 1h-Ankerkerze:
 
-- Einstiege werden chronologisch nach Eröffnungszeit verarbeitet.
-- Bei gleicher Zeit geht der Bestand vor, in fester Reihenfolge: Champion,
-  Challenger, freigegebene Kandidaten nach Schlüssel. Der Kandidat kommt
-  zuletzt.
-- Offene Positionen werden nie gekürzt.
-- Ein blockierter Einstieg entfällt ganz, ohne Ersatz-Einstieg in einer
-  späteren Stunde. Das ist **konservativ zulasten des Kandidaten**: Auch ein
-  Bestandstrade, den er verdrängt, zählt voll gegen ihn, obwohl der Bestand in
-  Wirklichkeit oft eine Stunde später einsteigen würde.
+1. **Fills.** Für jedes Portfolio und jedes Symbol, in fester Reihenfolge,
+   versuchen offene Einstiegsorders zu füllen (Logik des Einzel-Replays).
+2. **Positionen überwachen.**
+   - Reihenfolge: Stop zuerst, dann Ziel, dann Zeit-Exit.
+   - Ein Regime-Exit gilt nur für Strategien, die ihn spezifizieren
+     (Challenger ja, REGIME_PULLBACK_LONG nein).
+3. **Bewertung.**
+   - Jedes Portfolio wird zum Kerzenschluss bewertet.
+   - An einem neuen UTC-Tag wird ein Tagesbeginn-Snapshot je Portfolio
+     erzeugt, zusätzlich einer für die Gesamtsicht.
+4. **Gesamtsicht aktualisieren** (Abschnitt 4.3).
+5. **Entscheidungen.**
+   - Reihenfolge der Portfolios: Champion, Challenger, freigegebene Kandidaten
+     nach Schlüssel, Kandidat bzw. Reserve. Symbole: BTCUSDT, dann ETHUSDT.
+   - Je Paar: Evaluator → Stufe 1 → Stufe 2 → Reservierung.
+   - Eine Reservierung geht sofort in die Gesamtsicht ein. Das nächste
+     Portfolio in derselben Stunde sieht sie also bereits.
 
-### 4.5 Bewertung
+Ein abgelehnter Einstieg wird nicht nachgeholt oder ersetzt. Die Strategie
+bewertet in der nächsten Stunde neu, wie live.
 
-- Stündliches Mark-to-Market mit den 1h-Schlusskursen aus dem Markt-Snapshot
-  des Laufs.
-- Der Ausstieg folgt aus dem Brutto-PnL des Mitglieds-Trades.
-- Tages-Equity ist der letzte Stundenwert, wie in den Mitglieds-Backtests.
+### 3.4 Gemessene Größen (je Vergleich, je Fenster)
+
+- Nettorendite des Gesamtkapitals nach allen Kosten.
 - Sharpe aus Tagesrenditen mit √365, wie in v3.
-- Kostenstress: Gebühren, Spread und Slippage aller Mitglieder analytisch
-  verdoppelt.
+- Maximaler Drawdown und Rendite ÷ Drawdown.
+- **Gleichzeitiges Risiko:** Ø und Spitze des Anfangsrisikos aller offenen
+  Positionen ÷ Gesamt-Equity.
+- **Kapitalbindung:** Ø Brutto-Notional ÷ Gesamt-Equity.
+- Schlechtester Tag und Tage mit Gruppen-Tagesverlust-Sperre.
+- Ausgeführte und abgelehnte Einstiege je Portfolio, getrennt nach Stufe 1
+  und Stufe 2, jeweils mit Regelcode.
+- **Zusatzgewinn:** Netto-PnL der Kandidaten-Trades in B.
+- **Verdrängung:** Bestandstrades, die in A ausgeführt, in B aber von Stufe 2
+  abgelehnt wurden, mit ihrem Netto-PnL aus A.
+- Nur zur Information: Klumpenrisiko (Kandidaten-Risikostunden, in denen eine
+  bestehende Strategie dasselbe Asset hält), das v3-Maß „bespielte
+  Einstiege“ und Korrelationen.
 
-### 4.6 Gemessene Größen (je Portfolio, je Fenster)
+### 3.5 Determinismus und Laufzeit
 
-- Nettorendite, Sharpe, maximaler Drawdown, Rendite ÷ Drawdown.
-- **Gleichzeitiges Risiko:** Ø und Spitze des offenen Gesamtrisikos;
-  Anteil der Stunden mit ≥ 0,75 %.
-- **Kapitalbindung:** Ø Brutto-Notional ÷ Equity.
-- Schlechtester Tag; Tage mit Tagesverlust-Sperre.
-- Ausgeführte und blockierte Trades je Mitglied, jeweils mit Grund.
-- **Zusatzgewinn:** Netto-PnL der ausgeführten Kandidaten-Trades.
-- **Verdrängung:** Netto-PnL der Bestandstrades, die nur wegen offener
-  Kandidaten-Positionen blockiert wurden.
-- **Klumpenrisiko** (nur Bericht): Anteil der Kandidaten-Risikostunden, in
-  denen eine bestehende Strategie dasselbe Asset hält, und das v3-Maß
-  „bespielte Einstiege“.
+- Ohne Uhrzeit und Zufall, mit deterministischen IDs und einem `outputHash`
+  wie im Einzel-Replay.
+- Die Strategie-Bewertung hängt nicht vom Portfolio-Zustand ab. Sie wird je
+  Strategie, Symbol und Stunde vorab parallel berechnet und gecacht. Nur die
+  Schleife aus Fills, Exits und Risikoprüfung läuft sequenziell.
+- Geschätzt: Entdeckung + Validierung für A und B zusammen etwa 20–30
+  CPU-Minuten.
+
+## 4. Doppelte Risikoprüfung: genaue Wiederverwendung
+
+### 4.1 Stufe 1: das eigene Strategie-Portfolio
+
+- **Code:** `evaluateRisk(snapshot)` aus `@signalpilot/risk-engine`,
+  unverändert. Der Snapshot entsteht mit der bestehenden Replay-Funktion
+  `buildRiskSnapshot` aus dem Zustand **dieses** Portfolios.
+- **Inhalt:**
+  - Alle 26 Regeln laufen, mit Limitset v1 und Policy v1.
+  - Die Größe berechnet `computePositionSizing` in `evaluateRisk`.
+  - Kill-Switch und `ERROR_LOCK` wirken wie im Einzel-Replay, einschließlich
+    der Annahme einer Freigabe nach 24 h.
+- **Wirkung:** Nur `APPROVED` geht weiter. Menge, Stop und Ziel stehen ab
+  hier fest.
+
+### 4.2 Stufe 2: die Gesamtsicht, nur nach Freigabe in Stufe 1
+
+- **Code:** dieselben, unveränderten Regelfunktionen aus der exportierten
+  Tabelle `RISK_RULES`, nur diese vier:
+
+  | Regel | Prüft in der Gesamtsicht |
+  |---|---|
+  | `R-010-DAILY-LOSS` | Tagesverlust aller Portfolios ≤ 1 % der Gesamt-Equity zum Tagesbeginn |
+  | `R-013-GROSS-EXPOSURE` | Brutto-Exposure aller Portfolios nach dem Trade ≤ 40 % |
+  | `R-014-ASSET-EXPOSURE` | Exposure im Asset über alle Portfolios ≤ 20 % |
+  | `R-015-CORRELATION` | BTC + ETH über alle Portfolios ≤ 30 % |
+
+- **Eingabe:** ein Gruppenkontext vom exportierten Typ
+  `RiskEvaluationContext`. Ihn baut die neue, versionierte Research-Funktion
+  `buildGroupRiskContext` (`group-risk-v1`, im Paket `shadow-replay`).
+
+  | Feld | Wert |
+  |---|---|
+  | `snapshot` | der Stufe-1-Snapshot desselben Kandidaten; nur `startOfDay.equity` wird durch die Gesamt-Equity zum Tagesbeginn ersetzt und `dailyCounters.dailyPnl` durch das Tagesergebnis aller Portfolios |
+  | `equity` | Summe der Equity aller Portfolios plus Reserve-Kasse |
+  | `grossExposure`, `assetExposure`, `correlatedExposure` | Summen über alle Portfolios, mit **denselben Formeln** wie in `evaluateRisk`: Marktwert der Positionen mit Exposure plus offene ENTRY-Reservierungen, nach Asset bzw. Korrelationsgruppe gefiltert |
+  | `sizing` | das Stufe-1-Ergebnis mit **unveränderter Menge**; nur die drei Felder `postTrade…Exposure` werden auf Gesamtsicht + Notional des Trades umgerechnet |
+  | `dailyPnl` | Tagesergebnis aller Portfolios |
+  | `assetAlreadyOpen` | `false` (Begründung unten) |
+  | übrige Felder | wie in Stufe 1; die vier Regeln lesen sie nicht |
+
+- **Wirkung:**
+  - `FAIL` oder `ERROR` einer der vier Regeln lehnt den Einstieg ab
+    (Grund: Regelcode mit Zusatz `GROUP`). `WARN` lehnt nicht ab, genau wie
+    in `evaluateRisk`.
+  - Schlägt `R-010` in der Gesamtsicht an (`ENGAGE_KILL_SWITCH`), sind neue
+    Einstiege **aller** Portfolios bis zur Freigabe nach 24 h gesperrt. Das
+    ist dieselbe Annahme wie beim Kill-Switch im Einzel-Replay.
+
+### 4.3 Garantien
+
+1. Stufe 2 läuft nur nach `APPROVED` in Stufe 1. Die Gesamtentscheidung ist
+   Stufe 1 **und** Stufe 2. Ein Trade, den die normale Risk Engine
+   abgelehnt hat, ist damit ausgeschlossen.
+2. Stufe 2 ändert weder Menge, Preise noch Richtung. Sie kann nur ablehnen.
+3. Keine Regelfunktion, kein Grenzwert, keine Policy und keine Freigabeliste
+   wird verändert. Das Risk-Engine-Paket bleibt byte-gleich. Ein Test
+   vergleicht die Hashes von Policy, Limitset und Regelreihenfolge.
+4. **Treuetest:** Bei einer Gesamtsicht aus genau einem Portfolio müssen die
+   `inputJson`-Werte der vier Regeln aus Stufe 2 mit denen aus den
+   Stufe-1-`ruleResults` übereinstimmen: aktuelle Exposure, Exposure nach dem
+   Trade, Equity. So ist belegt, dass die Aggregation dieselben Formeln nutzt.
+
+### 4.4 Warum nicht einfach `evaluateRisk` auf die Gesamtsicht
+
+1. **Falsche Menge.** `evaluateRisk` berechnet die Positionsgröße selbst aus
+   der Equity. Mit der Gesamt-Equity entstünde bei drei Plätzen die
+   dreifache Menge eines Trades, den es nie gab.
+2. **Falsche Sperren.** Mehrere Regeln sind portfoliobezogene
+   Ausschlussregeln:
+   - `R-011`: höchstens 2 offene Positionen;
+   - `R-012`: höchstens 4 Einstiege je Tag;
+   - `R-021`: Verlustserie;
+   - `R-022`: kein Aufstocken im selben Asset, kritisch mit `ERROR_LOCK`;
+   - der Duplikat-Teil von `R-014`.
+
+   In der Gesamtsicht würden sie einen Kandidaten nur deshalb sperren, weil
+   **ein anderes** Portfolio dasselbe Asset hält. Genau das ist
+   ausgeschlossen. Diese Regeln wirken vollständig in Stufe 1 für das eigene
+   Portfolio, so wie live.
+3. **Zu `assetAlreadyOpen = false`.** `R-014` enthält vor der
+   Exposure-Grenze eine Duplikatsperre. Sie gehört zur Portfolio-Ebene und
+   ist in Stufe 1 bereits geprüft. In der Gesamtsicht zählt nur die
+   Exposure-Grenze. Der Wert `false` schaltet deshalb keine Prüfung des
+   eigenen Portfolios ab. Er verhindert nur, dass die Position einer anderen
+   Strategie als Duplikat gilt.
+
+### 4.5 Bewusst nicht enthalten
+
+- Keine zusätzliche Grenze, die es in der Risk Engine nicht gibt, zum
+  Beispiel keine Obergrenze für das offene Gesamtrisiko. Das gleichzeitige
+  Risiko wird gemessen und über P4 bewertet.
+- Mit den heutigen Größen werden die vier Gruppenregeln selten greifen: 0,25 %
+  je Trade von 20 000 USDT entspricht 0,083 % des Gesamtkapitals. Die
+  Simulation belegt das, statt es anzunehmen.
 
 ## 5. Prüfregeln für Kandidaten eigenständiger Familien
 
 Entdeckung + Validierung heißt 2018-04 – 2023-12. „Je Fenster“ heißt
-Entdeckung und Validierung getrennt. Die Schwellen sind Vorschläge zur
-Prüfung (Abschnitt 11).
+Entdeckung und Validierung getrennt.
 
-### 5.1 Basis: v1-Prüfungen des Kandidaten allein (Schwellen unverändert)
+### 5.1 Eigenständige Familie (`INDEPENDENT_FAMILY`, blockierend)
+
+1. Eigener Einstiegs-Evaluator in eigener Datei. Er ruft keinen
+   Einstiegs-Evaluator einer anderen Strategie auf und prüft kein
+   Regime-Gate. Ein Test über den Import-Graphen sichert das ab.
+2. Nur Einstiegsparameter sind suchbar. Stop, Ziel und Haltedauer sind fest.
+3. Eigenes Startgenom und Raster, vorregistriert mit Hash.
+4. Eigene Forschungsidentität nach Abschnitt 7. Der Hash der Vorregistrierung
+   passt zum Code.
+5. Läuft unverändert durch die Risk Engine (`SPEC`).
+
+### 5.2 Basis: v1-Prüfungen des Kandidaten allein (Schwellen unverändert)
+
+Gerechnet auf dem Standard-Backtest der Evolution Engine:
 
 - Technik und Datenintegrität;
 - ≥ 20 / ≥ 6 Trades;
@@ -175,234 +276,301 @@ Prüfung (Abschnitt 11).
 - doppelte Kosten > 0;
 - Drawdown ≤ 10 %;
 - ≥ 50 % positive Phasen, keine Phase > 65 %;
-- Benchmark gegen den Champion.
+- Benchmark gegen den Champion;
+- Redundanz: Korrelation ≤ 0,9 mit jeder bestehenden Strategie.
 
-Diese Schwellen sind **absolut**, nicht relativ zum Challenger.
+Die Schwellen sind absolut, nicht relativ zum Challenger.
 
-### 5.2 Eigenständigkeit und Geometrie
+**`TRADE_GEOMETRY`:** Sind Ø Haltedauer **und** Trades je Jahr jeweils
+innerhalb Faktor 2 einer bestehenden Strategie, gelten deren v3-Trade-Toleranzen
+als harte Mindestwerte:
 
-| Prüfung | Bestanden, wenn | Wirkung |
-|---|---|---|
-| `INDEPENDENT_FAMILY` | Die Familie erfüllt Abschnitt 3, und der Hash ihrer Vorregistrierung passt zum Code | blockierend |
-| `TRADE_GEOMETRY` | Für jede bestehende Strategie: Ist Ø Haltedauer **und** Trades je Jahr jeweils innerhalb Faktor 2 der Strategie, gelten deren v3-Trade-Toleranzen als harte Mindestwerte (Validierung Ø R ≥ Referenz − 0,05; PF ≥ 90 %; Ø R bei doppelten Kosten ≥ Referenz − 0,05; Trades ≥ 80 %). Weicht eines davon um Faktor 2 oder mehr ab, werden sie nur berichtet | blockierend nur bei vergleichbarer Geometrie |
+- Validierung Ø R ≥ Referenz − 0,05;
+- PF ≥ 90 % der Referenz;
+- Ø R bei doppelten Kosten ≥ Referenz − 0,05;
+- Trades ≥ 80 % der Referenz.
 
-Ø R und PF hängen an der Haltedauer, die Trade-Zahl an der Frequenz. Bei
-deutlich anderer Geometrie messen diese Werte die Bauart, nicht die Qualität.
-Wer dagegen gebaut ist wie eine bestehende Strategie, muss sich auch an deren
-Trade-Qualität messen lassen.
+Andernfalls werden diese Werte nur berichtet.
 
-### 5.3 Portfolio-Mehrwert (mit gegen ohne Kandidat, Abschnitt 4)
+### 5.3 Portfolio-Mehrwert (Simulation A gegen B, Abschnitt 3)
 
 | Nr. | Prüfung | Bestanden, wenn |
 |---|---|---|
-| P1 | `PORTFOLIO_NET_GAIN` | ΔNettorendite > 0 über Entdeckung + Validierung **und** in jedem Fenster. Verdrängte Bestandstrades sind eingerechnet |
-| P2 | `PORTFOLIO_SHARPE_GAIN` | ΔSharpe ≥ +0,10 über Entdeckung + Validierung, > 0 in jedem Fenster |
-| P3 | `PORTFOLIO_DRAWDOWN` | max. Drawdown mit Kandidat ≤ 1,10 × ohne (gesamt und je Fenster) **und** Rendite ÷ Drawdown mit ≥ ohne (gesamt) |
-| P4 | `PORTFOLIO_RISK_EFFICIENCY` | ΔNettorendite ÷ Δ Ø offenes Gesamtrisiko ≥ 0,5 × (Nettorendite ÷ Ø offenes Gesamtrisiko) ohne Kandidat. Steigt das Ø Risiko nicht, genügt P1 |
+| P1 | `PORTFOLIO_NET_GAIN` | ΔNettorendite des Gesamtkapitals > 0 über Entdeckung + Validierung **und** in jedem Fenster, nach allen Kosten und einschließlich Verdrängung |
+| P2 | `PORTFOLIO_SHARPE_GAIN` | ΔSharpe > 0 gesamt **und** in jedem Fenster |
+| P3 | `PORTFOLIO_DRAWDOWN` | Rendite ÷ maximaler Drawdown in B ≥ A, gesamt und in jedem Fenster; max. Drawdown in B ≤ 10 % des Gesamtkapitals |
+| P4 | `PORTFOLIO_RISK_EFFICIENCY` | ΔNettorendite ÷ Δ Ø gleichzeitiges Risiko ≥ 0,5 × (Nettorendite ÷ Ø gleichzeitiges Risiko) in A. Steigt das Ø Risiko nicht, genügt P1 |
 | P5 | `PORTFOLIO_CAPITAL_EFFICIENCY` | wie P4 mit Ø Kapitalbindung |
-| P6 | `INCREMENT_STABILITY` | Zuwachs je Marktphase (Kalenderjahr, Netto-PnL mit minus ohne): ≥ 50 % der Phasen mit Kandidaten-Trades positiv, keine Phase trägt mehr als 65 % des positiven Zuwachses (v1-Schwellen) |
-| P7 | `INCREMENT_COST_STRESS` | bei doppelten Kosten aller Mitglieder ΔNettorendite > 0 und ΔSharpe > 0 (gesamt) |
+| P6 | `INCREMENT_STABILITY` | Zuwachs je Marktphase (Kalenderjahr, Netto-PnL B − A): ≥ 50 % der Phasen mit Kandidaten-Trades positiv, keine Phase trägt mehr als 65 % des positiven Zuwachses |
+| P7 | `INCREMENT_COST_STRESS` | bei doppelten Gebühren, Spread und Slippage **aller** Portfolios ΔNettorendite > 0 und ΔSharpe > 0 (gesamt; analytisch auf denselben Trades wie der v1-Kostenstress, siehe T5) |
 
-P4 und P5 verhindern, dass mehr Ertrag nur aus mehr gebundenem Risiko oder
-Kapital kommt, also ein reiner Hebeleffekt ist. Der Faktor 0,5 lässt einen
-Zusatz zu, der weniger effizient ist als der Bestand. Der Zusatz muss dann
-aber über P2 und die α-Prüfungen diversifizieren.
+### 5.4 Statistik: belastbarer, eigener Zusatzertrag
 
-### 5.4 Keine Scheindiversifikation
-
-Grundlage ist die Regression der Monatsrenditen des Kandidaten auf jede
-bestehende Strategie als eigenen Regressor. Das ist die unveränderte
-v3-Methode `alpha`, eine gemeinsame Regression und keine Mischung.
+Beide Tests verwenden die Mehrfachtest-Schwelle
+**t\* = max(2,0; √(2·ln N); t₀,₉₇₅)**. N ist der unveränderte, nie
+zurückgesetzte Zähler (heute 52, also t\* ≥ 2,82). Beide brauchen mindestens 36
+Monate, davon 24 aussagekräftige.
 
 | Nr. | Prüfung | Bestanden, wenn |
 |---|---|---|
-| – | `REDUNDANCY` (v1, unverändert) | Korrelation der Tagesrenditen ≤ 0,9 mit jeder bestehenden Strategie |
-| P8 | `OWN_ALPHA` | α-t ≥ max(2,0; √(2·ln N); t₀,₉₇₅ mit n − K − 1 Freiheitsgraden), mindestens 36 Monate, davon 24 mit eigenem Ertrag |
-| P9 | `ALPHA_SHARE` | α̂ ≥ 50 % der Ø Monatsrendite des Kandidaten (gesamt) **und** α̂ > 0 in jedem Fenster |
-| P10 | `OWN_VARIANCE` | R² der Regression ≤ 0,5: höchstens die Hälfte der Monatsschwankung wird durch bestehende Strategien erklärt (entspricht einer multiplen Korrelation ≤ 0,71) |
+| P8 | `OWN_ALPHA` | Monatsrenditen des Kandidaten-Portfolios aus B, gemeinsam regressiert auf die Monatsrenditen **jedes** Bestandsportfolios aus B (v3-Methode `alpha`, unverändert): α-t ≥ t\* (Freiheitsgrade n − K − 1) **und** α̂ > 0 in jedem Fenster |
+| P9 | `INCREMENT_SIGNIFICANCE` | gepaarter Monatsvergleich der Gesamtrenditen B − A (v3-Methode `paired`, unverändert: Newey–West, Student-t): t ≥ t\* |
 
-P9 misst, ob der **Ertrag** eigener Ertrag ist. P10 misst, ob die
-**Bewegungen** eigene Bewegungen sind. Zusammen mit P8 heißt das: Eine
-Strategie, „die nur dieselben Marktbewegungen anders handelt“, scheitert.
-Das gilt auch dann, wenn ihre Positionen zeitlich mit dem Challenger
-zusammenfallen.
+- P9 belegt, dass das Gesamtportfolio **nach Kosten belastbar mehr** verdient.
+- P8 belegt, dass dieser Mehrertrag **nicht** aus denselben Bewegungen kommt,
+  die der Bestand schon handelt.
+- Beide müssen bestehen.
+
+**Nur berichtet, nicht entscheidend:** α-Anteil, R², Korrelationen,
+Klumpenrisiko und das v3-Maß „bespielte Einstiege“.
 
 ### 5.5 Entscheidung `PORTFOLIO_DECISION`
 
-- **Bestanden** nur, wenn 5.1, `INDEPENDENT_FAMILY`, die harten Teile von
-  `TRADE_GEOMETRY` und P1–P10 alle bestehen.
-- **Für spätere Generationen** derselben Familie gilt ein zweiter Weg,
-  sobald die Familie freigegebene Mitglieder hat: v3-Pfad A gegen den besten
-  freigegebenen Vertreter der eigenen Familie. Innerhalb der Familie ist die
-  Geometrie gleich, deshalb sind die Trade-Toleranzen dort sachgerecht.
-  - Ein freigegebener Familienvertreter ist zugleich Teil des Bestands.
-  - Eine bloße Variante von ihm scheitert deshalb am Portfolio-Weg (α ≈ 0)
-    und muss ihn über Pfad A schlagen.
+- **Bestanden** nur, wenn alle Teile bestehen: 5.1, 5.2 einschließlich der
+  harten Teile von `TRADE_GEOMETRY`, P1–P9.
+- **Spätere Generationen** einer Familie mit freigegebenen Mitgliedern dürfen
+  stattdessen v3-Pfad A gegen den besten freigegebenen Vertreter der eigenen
+  Familie bestehen. Innerhalb der Familie ist die Geometrie gleich.
+  - Ein freigegebener Vertreter ist Teil des Bestands.
+  - Eine bloße Variante von ihm scheitert deshalb an P8.
 - **Das Startgenom** hat nur den Portfolio-Weg.
 
 ### 5.6 Finale und Holdout
 
 - Alle v1-Finalprüfungen: Nachbarvarianten mit Ø R > 0, Walk-Forward mit
   Effizienz ≥ 0,25, Holdout mit ≥ 5 Trades, Ø R > 0 und PF ≥ 1.
-- Zusätzlich muss **jede Nachbarvariante** im Pool ΔNettorendite > 0 und
-  ΔSharpe > 0 erreichen (gesamt).
-- **Holdout-Schutz im Pool:** ΔSharpe ≥ −0,05 und ΔNettorendite ≥ 0. Der
-  Holdout ist bereits analysiert und **nie Nachweis**, er kann nur stoppen.
+- **Jede Nachbarvariante** wird ebenfalls als B simuliert und braucht
+  ΔNettorendite > 0 und ΔSharpe > 0 (gesamt).
+- **Holdout-Schutz:** A und B werden auch auf 2024-01 – 2026-10-14 simuliert.
+  Verlangt sind ΔSharpe ≥ −0,05 und ΔNettorendite ≥ 0. Der Holdout ist
+  bereits analysiert und **nie Nachweis**, er kann nur stoppen.
 
 ### 5.7 Budget und Zähler
 
-- Das v3-Familienbudget gilt unverändert: 10 Validierungsprüfungen je Familie
-  und Monat, über alle Versionen gezählt, und höchstens ein Finalist je
-  Familie und Durchlauf.
-- Strengere Grenzen aus der Familien-Vorregistrierung gelten zusätzlich.
-- Der Mehrfachtest-Zähler N läuft mit der unveränderten Methode weiter
-  (heute 52). Er wird nie zurückgesetzt.
+- v3-Familienbudget unverändert: 10 Validierungsprüfungen je Familie und
+  Monat, über alle Versionen gezählt, und höchstens ein Finalist je Familie
+  und Durchlauf.
+- Strengere Grenzen der Familien-Vorregistrierung gelten zusätzlich.
+- Die Simulationen A und B sind keine neuen Konfigurationen.
+  - A ist ein Referenzlauf.
+  - B gehört zu dem bereits gezählten Kandidaten bzw. Nachbarn.
+  - Der Zähler N läuft daher mit unveränderter Methode weiter.
 
-## 6. Wie v4 Scheindiversifikation abfängt
+### 5.8 Bekanntes ist kein Nachweis
 
-| Muster | Beispiel | Abgelehnt durch |
+- Alle historischen Zeiträume sind bekannt.
+  - Vergleich A besteht nur aus Strategien mit bekannten Ergebnissen.
+  - Der Holdout ist `PREVIOUSLY_ANALYZED`.
+- Ein bestandenes v4 heißt nur „historisch nicht widerlegt“. Nachweis ist
+  allein ein Forward-Test auf Daten ab 2026-10-15, nach gesonderter
+  Freigabe.
+- Frühere Kandidaten werden nicht neu bewertet; ihre Genome bleiben gesperrt.
+
+## 6. Kalibrierung: was geändert wurde und warum
+
+Die Werte unten stammen aus einer Modellrechnung, nicht aus Backtests.
+
+| Schwelle (erste Fassung) | Problem | jetzt |
 |---|---|---|
-| Ausstiegsvariante einer bestehenden Strategie | EVO-REG-0006 – 0010 | In einer eigenständigen Familie unmöglich, weil die Ausstiege fest sind. Solche Varianten bleiben in ihrer Familie unter den v3-Regeln |
-| Kopie oder Neugewichtung bestehender Strategien | dieselben Positionen, anders gewichtet | P8 (α ≈ 0), P9, P10, Redundanz |
-| Mehr Risiko auf dieselben Bewegungen | zusätzlicher Long an Challenger-Tagen ohne Timing-Vorteil | P2 (Sharpe steigt nicht), P4/P5, P9/P10 |
-| Verdünnung | schwankungsarmer Zusatz fast ohne Ertrag, der nur die Volatilität senkt | P1, P4/P5, P8 |
-| Glückstreffer | Ertrag aus einem Jahr oder wenigen Trades | P6, „in jedem Fenster“ bei P1/P2/P9, Mehrfachtest-Schwelle in P8, Nachbarn, Walk-Forward |
-| Ertrag nur bei günstiger Ausführung | knapper Vorteil pro Trade | P7, v1-Kostenstress |
-| Verdrängung | Kandidat blockiert Bestandstrades | in P1 eingerechnet, konservativ ohne Ersatz-Einstieg |
+| ΔSharpe ≥ +0,10 bei festem Gewicht | Der Gewinn hängt vom Volatilitätsanteil ab: Eine Strategie mit Sharpe 1,5 und 5 % Anteil bringt +0,06 und fiele durch. Bei festen Gewichten lässt sich das nicht durch Umgewichten „reparieren“, und das soll auch nicht sein | ΔSharpe > 0 gesamt und je Fenster (P2); die Belastbarkeit prüfen P8 und P9 |
+| Drawdown ≤ 1,10 × | Jedes zusätzliche Risiko auf demselben Kapital hebt den absoluten Drawdown etwa mit der Volatilität: Bei Gewicht 0,3 und Korrelation 0,3 steigt sie um 13 %, obwohl Sharpe um +0,31 steigt | Rendite ÷ Drawdown nicht schlechter, absolut ≤ 10 % (P3) |
+| α-Anteil ≥ 50 % | Der Wert einer Strategie hängt nur von α ÷ Restschwankung ab. Der Anteil, der dem Bestand folgt, ist kein Schaden | nur Bericht; α̂ > 0 je Fenster bleibt Pflicht (P8) |
+| R² ≤ 0,5 | bestraft gerade die Strategien, deren α am genauesten gemessen ist | nur Bericht |
+| – | „belastbarer zusätzlicher Portfolio-Ertrag“ war nur indirekt geprüft | neu: P9, gepaarter Test B − A mit t\* |
 
-## 7. Methoden (Teil des v4-Hashes)
+**Unverändert streng:** P8 und P9 mit t\* ≥ 2,82. Bei 5,75 Jahren Daten hängt
+die Bestehenschance stark vom wahren Informationsverhältnis IR (α ÷
+Restschwankung, jährlich) ab:
 
-| Kennung | Bedeutung |
+| wahres IR | Chance, P8 zu bestehen |
+|---:|---:|
+| 0,5 | 5 % |
+| 1,0 | 34 % |
+| 1,5 | 78 % |
+
+- Der historische Test findet damit zuverlässig nur außergewöhnliche
+  Strategien.
+- Mäßige, aber wertvolle Vorteile verwirft er meist. Das ist die Folge von
+  Datenlänge und Mehrfachtests und ist so gewollt; ein Fehler in der
+  Kalibrierung ist es nicht.
+
+**Weiterhin gilt:**
+
+- P4/P5 mit Faktor 0,5 entsprechen bei zwei Tagen Haltedauer etwa 0,05 R je
+  Trade. Sie schließen nur reine Hebeleffekte aus.
+- P1, P6 und P7 sind Vorzeichen- und Stabilitätsprüfungen.
+
+## 7. Strategieidentität und Freigabeliste
+
+**Problem:**
+
+- Replay und Risk Engine verlangen einen registrierten, freigegebenen
+  Schlüssel: `R-005` prüft `APPROVED_LONG_STRATEGY_KEYS`, die
+  Eingabevalidierung prüft Schlüssel und Spezifikations-Hash.
+- Eine neue Forschungsfamilie hat keinen solchen Schlüssel. Ihn hinzuzufügen
+  hieße, die Risk-Policy zu ändern.
+- Deshalb laufen alle Evolution-Genome heute mit dem Schlüssel einer
+  bestehenden Strategie als **technischer Hülle**.
+
+**Lösung: Identität und Hülle strikt trennen.**
+
+| | Forschungsidentität (maßgeblich) | Replay-Hülle (nur technisch) |
+|---|---|---|
+| Schlüssel | `RESEARCH:REGIME_PULLBACK_LONG_V1` | `CRYPTO_REGIME_LONG_V1` |
+| Engine-Version | `crypto-regime-pullback-research-v1/1.0.0` | die des Challengers |
+| Spezifikations-Hash | eigener: Hash über Familienspezifikation und Genom | der des Challengers |
+| erscheint in | jeder Evolution-Zeile (Kandidat, Backtest, Trades, Simulation, Bericht, Dashboard, Audit) | nur im Risk-Input und Kandidaten-Entwurf **innerhalb** eines Replays; gespeichert nur im ausdrücklich benannten Feld `replayHull` |
+
+**Schutz vor falscher Zuordnung und vor einer Umgehung der Freigabeliste:**
+
+1. **Kein Registry-Eintrag.** Der Pullback-Evaluator steht in keiner Registry.
+   Der Live-Pfad löst Evaluatoren nur über die Registry auf. Der Schlüssel
+   des Challengers führt dort immer zu `evaluateCryptoRegimeLongV1`. Ein
+   Test hält die Zuordnung Schlüssel → Evaluator → Spezifikations-Hash fest.
+2. **Keine Abhängigkeit.** Trading-Worker, API-Trading-Pfade und der
+   Daten-Worker hängen nicht von `@signalpilot/evolution` ab. Ein
+   Abhängigkeitstest sichert das ab. Die Evolution-Datenbankrolle hat keine
+   Schreibrechte auf Trading-Tabellen.
+3. **Zuordnung über das Portfolio.** In der Simulation werden Trades über das
+   Portfolio einer Strategie zugeordnet, nie über den Schlüssel im
+   Kandidaten-Entwurf. Ein Test prüft, dass kein Kandidaten-Trade dem
+   Challenger zugeordnet wird und umgekehrt.
+4. **Keine Hülle im Forward.**
+   - Der Freigabebefehl der Evolution Engine registriert nichts.
+   - Eine Freigabe für einen Forward-Test unter dem Challenger-Schlüssel ist
+     ausgeschlossen; das steht in der Vorregistrierung.
+   - Ein Forward-Test braucht einen eigenen registrierten Schlüssel (zum
+     Beispiel `CRYPTO_REGIME_PULLBACK_LONG_V1`) mit eigenem
+     Spezifikations-Hash und eigener StrategyVersion.
+   - Ohne einen **gesonderten** Beschluss über
+     `APPROVED_LONG_STRATEGY_KEYS` lehnt die unveränderte Risk Engine diesen
+     Schlüssel mit `R-005` kritisch ab. Die Freigabeliste bleibt damit die
+     einzige Tür.
+5. **Ausstieg der Hülle abgeschaltet.** Der Challenger deklariert einen
+   Regime-Exit, den der Replay sonst erben würde. Er wird ausdrücklich
+   abgeschaltet (`regimeExit.enabled = false`), ein Test sichert das ab.
+
+## 8. Scheindiversifikation
+
+| Muster | Abgelehnt durch |
 |---|---|
-| alle v3-Methoden | unverändert: `sharpe`, `paired`, `alpha`, `signalOverlap`, `portfolio` (nur für v3-Pfad B der alten Familien), `trials` |
-| `pool` | `shared-pool-v1`: Abschnitt 4 (gemeinsames Kapital, 0,25 % je Trade von der Pool-Equity, Reihenfolge Bestand vor Kandidat, kein Ersatz-Einstieg, stündliche Marks) |
-| `poolLimits` | die fünf Werte aus 4.3, festgenagelt (nicht per Verweis) |
-| `geometry` | Ø Haltedauer und Trades je Jahr über Entdeckung + Validierung, Faktor 2 |
-| `efficiency` | ΔNettorendite ÷ Δ Ø offenes Risiko bzw. Δ Ø Kapitalbindung, Faktor 0,5 gegen den Bestand |
-| `alphaShare` | α̂ ÷ Ø Monatsrendite und R² aus derselben Regression wie `alpha` |
-| `increment` | ΔNetto-PnL je Kalenderjahr-Phase |
+| Ausstiegsvariante einer bestehenden Strategie | In einer eigenständigen Familie unmöglich (feste Ausstiege). Solche Varianten bleiben unter v3 |
+| Kopie, Mischung oder Neugewichtung bestehender Strategien | P8 (α ≈ 0), P9, Redundanz |
+| Mehr Risiko auf dieselben Bewegungen ohne Timing-Vorteil | P8, P2, P4/P5 |
+| Verdünnung (schwankungsarm, fast ohne Ertrag) | P1, P9, P4/P5 |
+| Glückstreffer (ein Jahr, wenige Trades) | P6, „je Fenster“ bei P1/P2/P3/P8, t\* in P8/P9, Nachbarn, Walk-Forward |
+| Ertrag nur bei günstiger Ausführung | P7, v1-Kostenstress |
+| Ertrag auf Kosten des Bestands (Verdrängung) | Verdrängte Trades sind in P1 und P9 enthalten, denn A und B werden vollständig simuliert |
 
-## 8. Was unverändert bleibt
+## 9. Was unverändert bleibt
 
-- Gates v1–v3: Code, Schwellen, Methoden und Hashes. Frühere Entscheidungen
-  werden nicht neu bewertet. Bekannte Genome und Nachbarn bleiben gesperrt.
-  EVO-REG-0004 bleibt `REJECTED_BY_OPERATOR`.
-- BREAKOUT_LONG- und REGIME_LONG-Kandidaten unter v4 entscheiden exakt wie
-  unter v3. Ein Gleichheitstest auf gespeicherten Kandidaten sichert das ab.
-- Split `evolution-split-v1` mit Holdout als `PREVIOUSLY_ANALYZED`,
-  Kostenmodell, Daten-Lader mit Forward-Sperre, Zählmethode, Familienbudgets
-  und KI-Budget.
-- Risk Engine mit allen Regeln (R-020, R-008, Limitset), Strategie-Registry,
-  Spezifikations-Hashes und Golden Fixtures von Champion und Challenger.
-- Arena V1, Portfolios und Sessions des offiziellen Forward-Tests, VPS.
+- Gates v1–v3 mit Code, Schwellen, Methoden und Hashes. Keine rückwirkende
+  Neubewertung. EVO-REG-0004 bleibt `REJECTED_BY_OPERATOR`.
+- BREAKOUT_LONG und REGIME_LONG unter v4 entscheiden exakt wie unter v3.
+  Ein Gleichheitstest läuft auf gespeicherten Kandidaten.
+- Das Paket `@signalpilot/risk-engine` vollständig, einschließlich R-020,
+  R-005 mit Freigabeliste, R-008 und Limitset.
+- Strategie-Registry, Spezifikations-Hashes und Golden Fixtures von Champion
+  und Challenger.
+- Der Einzel-Replay `runShadowReplay` liefert für jede bestehende
+  Konfiguration denselben `outputHash` wie vorher (Regressionstest).
+- Split, Kostenmodell, Daten-Lader mit Forward-Sperre, Zählmethode,
+  Familienbudgets und KI-Budget.
+- Arena V1, offizieller Forward-Test, VPS.
 
-## 9. Technische Integration
+## 10. Technische Integration
 
-### 9.1 Bausteine
+### 10.1 Bausteine
 
 | Bereich | Neu oder geändert |
 |---|---|
-| `packages/evolution/src/pool.ts` (neu, rein) | `simulateSharedPool({ members, hourlyCloses, limits, from, to })` → Stunden- und Tages-Equity, ausgeführte und blockierte Trades je Mitglied (mit Grund), Risiko- und Kapitalbindung, Zusatzgewinn, Verdrängung, Klumpenrisiko; `poolComparison(base, withCandidate, windows)` → Deltas für P1–P7 |
-| `packages/evolution/src/gates-v4.ts` (neu) | `EVOLUTION_GATES_V4 = { ...EVOLUTION_GATES_V3, version: "evolution-gates-v4", independentFamily: {...} }` mit allen Schwellen und Methodenkennungen; `independentFamilyGates(input, gates)`; `isGatesV4`; Hash festgenagelt. Alte Familien laufen über `lineageScreeningGates` aus v3 |
-| `gates.ts` | nur der Typ `GateId` wird additiv erweitert; `EVOLUTION_GATES_V1` und sein Hash bleiben unberührt |
-| `gate-versions.ts` | `v4` registrieren; Standard erst beim Festschreiben umstellen (Abschnitt 11) |
-| `paired.ts` | `spanningAlphaTest` wiederverwenden; zusätzlich α̂, Ø Monatsrendite und R² ausgeben (additiv) |
-| `genome.ts`, `lineage.ts` | Familie REGIME_PULLBACK_LONG mit Beschreibung `independence` (Evaluator, „nur Einstieg“, feste Ausstiege, Vorregistrierungs-Hash), Startgenom, Präfix `RPB`; Einzelheiten im Familienentwurf |
-| `context.ts`, `prompt.ts`, `report.ts` | Die KI sieht für eigenständige Familien die Pool-Kennzahlen nur auf Entdeckungsdaten und für die Validierung nur das Urteil (Leak-Prüfung wie bisher); der Bericht zeigt den Pool-Vergleich |
-| `packages/strategy-engine` | eigener Evaluator der Familie (siehe Familienentwurf); Challenger- und Champion-Dateien bleiben byte-gleich |
-| `apps/evolution-worker` | `researchCycle.ts`: Für Kandidaten eigenständiger Familien wird in Schritt 5d der Bestand aus den gecachten Referenz-Backtests zusammengestellt; der Pool-Bestand wird je Lauf und Fenster einmal gerechnet; 1h-Schlusskurse kommen aus dem bereits geladenen Markt-Snapshot, ohne neue Datenquelle. `cli.ts`: `evolution evaluate-seed --family=… --actor=…` ohne KI-Aufruf. Ergebnisse werden in `metricsJson.portfolioV4` und `gatesJson` gespeichert, ohne Migration. Das Manifest erhält Gate-Version, v4-Hash und den Hash der Familien-Vorregistrierung |
-| `apps/dashboard`, `apps/api` | Beschriftungen der neuen Prüfungen und eine Pool-Vergleichstabelle auf der Kandidatenseite; nur lesend |
+| `packages/shadow-replay` | **Umbau ohne Verhaltensänderung:** Die Zustandslogik eines Portfolios (Orders, Positionen, Ledger, Zähler, Tagesbeginn, Kill-Switch) und die Schritte Fill, Überwachung, Bewertung und Entscheidung werden aus `runShadowReplay` in wiederverwendbare Funktionen gezogen. `runShadowReplay` bleibt ein dünner Wrapper mit identischem `outputHash`. **Neu:** `runPortfolioReplay(market, config)` mit Mitgliedern (Portfolio-Schlüssel, Forschungsidentität, Hülle, Hooks, Platzkapital), Reserveplatz und fester Reihenfolge. **Neu:** `group-risk.ts` mit `buildGroupRiskContext` und `evaluateGroupRisk` (`group-risk-v1`, Abschnitt 4.2) |
+| `packages/evolution` | `gates-v4.ts` mit allen Schwellen, Methodenkennungen, Platzgröße und Regelauswahl im Hash; `isGatesV4`; Prüfungen P1–P9; Weiterleitung alter Familien an `lineageScreeningGates` (v3). `gate-versions.ts`: v4 registrieren. `gates.ts`: nur der Typ `GateId` wird additiv erweitert. `paired.ts`: `pairedMonthlyTest` und `spanningAlphaTest` werden wiederverwendet. Familie und Forschungsidentität in `genome.ts` und `lineage.ts` (siehe Familienentwurf); Bericht und KI-Kontext nur mit Entdeckungswerten und Urteilen |
+| `apps/evolution-worker` | Schritt 5d für eigenständige Familien: A einmal je Lauf und Fenster rechnen und cachen, B je Kandidat bzw. Nachbar. Vorab-Bewertungen parallel in Kindprozessen, die Portfolio-Schleife sequenziell. `evolution evaluate-seed` ohne KI. Speicherung in `metricsJson.portfolioV4` und `gatesJson` (keine Migration). Das Manifest enthält Gate-Version, v4-Hash, Hash der Familien-Vorregistrierung und `outputHash` beider Simulationen |
+| `apps/dashboard`, `apps/api` | nur lesend: Beschriftungen der Prüfungen, Vergleich A/B, Entscheidungsprotokoll der Stufen 1 und 2 |
 
-### 9.2 Tests
+### 10.2 Tests
 
-**Pool:**
+**Replay und Simulation:**
 
-- Skalierung, Kosten und Ausstiegspreis exakt;
-- Grenzen blockieren in der festgelegten Reihenfolge;
-- offene Positionen werden nie gekürzt;
-- der Bestand allein ist mit und ohne leeren Kandidaten identisch;
-- der Pool erzeugt nie einen Trade, den kein Mitglied hatte (Eigenschaftstest).
+- Regression: `runShadowReplay` mit identischen `outputHash`-Werten für alle
+  vorhandenen Fixtures und die gecachten Wurzel-Backtests.
+- Ein Portfolio allein ergibt in der Portfolio-Simulation dieselben Trades
+  wie im Einzel-Replay mit gleichem Kapital und gleichen Symbolen.
+- A mit leerer Reserve ändert die Bestandsportfolios nicht, solange keine
+  Gruppenregel greift.
+- Treuetest der Gruppensicht (4.3, Punkt 4).
+- Eigenschaftstests:
+  - Stufe 2 lässt nie einen in Stufe 1 abgelehnten Trade zu.
+  - Stufe 2 ändert nie die Menge.
+- Die Gruppenregeln greifen in konstruierten Fällen: Tagesverlust,
+  Exposure, Korrelation.
+- Determinismus.
 
 **Gates v4:**
 
-- Hash festgenagelt;
-- Hashes von v1–v3 unverändert;
-- gespeicherte BREAKOUT_LONG- und REGIME_LONG-Kandidaten erhalten unter v4
-  dieselben Urteile wie unter v3;
-- jede Prüfung P1–P10 und die Geometrie-Weiche einzeln mit Grenzfällen;
-- synthetische Scheindiversifikation (Kopie, Neugewichtung, Hebel,
-  Verdünnung) wird abgelehnt.
+- Hash festgenagelt; Hashes von v1–v3 unverändert.
+- Gleiche Urteile für alte Familien unter v3 und v4.
+- P1–P9 und die Geometrie-Weiche einzeln mit Grenzfällen.
+- Synthetische Scheindiversifikation wird abgelehnt: Kopie, Mischung,
+  Hebel, Verdünnung.
 
-**Familie und Ablauf:**
+**Identität:**
 
-- Familie unabhängig: Der Import-Graph zeigt keinen fremden
-  Einstiegs-Evaluator.
-- Ende-zu-Ende mit Mock-Daten über `evaluate-seed`.
-- Kontext ohne Leck.
+- Registry-Zuordnung unverändert.
+- Abhängigkeitsgrenze zu `@signalpilot/evolution`.
+- Zuordnung der Trades über das Portfolio.
+- Regime-Exit der Hülle abgeschaltet.
+- Hashes von Risk-Policy und Limitset unverändert.
 
-### 9.3 Reihenfolge der Commits
+### 10.3 Reihenfolge
 
-Jeder Schritt ist für sich grün; danach folgt kein Lauf.
+Jeder Schritt ist für sich grün; es folgt kein Lauf.
 
-1. `pool.ts` mit Tests.
-2. `gates-v4.ts`, Registrierung, Hash- und Gleichheitstests.
-3. Evaluator der Familie mit Tests.
-4. Familie in `packages/evolution` mit Tests.
-5. Worker-Integration, `evaluate-seed`, Ende-zu-Ende-Test.
-6. Dashboard-Beschriftungen.
-7. Endgültige Vorregistrierungen (v4 und Familie) mit Hashes und ADR 0019.
+1. Umbau `shadow-replay` mit Regressionstests (noch ohne neue Funktion).
+2. `runPortfolioReplay` und `group-risk` mit Tests.
+3. `gates-v4.ts` mit Hash- und Gleichheitstests.
+4. Evaluator und Familie (siehe Familienentwurf).
+5. Worker-Integration, `evaluate-seed`, Ende-zu-Ende-Test mit Mock-Daten.
+6. Dashboard und API (lesend).
+7. Endgültige Vorregistrierungen mit Hashes und ADR 0019.
 
-Grobe Schätzung: zwei bis drei Arbeitstage.
+**Aufwand grob:**
 
-## 10. Ablauf bis zum ersten Experiment
+- Schritte 1–2 (Simulation): 3–5 Tage.
+- Schritte 3–7: 2–3 Tage.
 
-1. **Prüfung dieses Entwurfs** durch den Betreiber (offene Punkte in
-   Abschnitt 11).
-2. **Implementierung** nach eigener Freigabe, auf
+## 11. Offene technische Entscheidungen
+
+| # | Entscheidung | Optionen | Empfehlung | spätestens |
+|---|---|---|---|---|
+| T1 | Strategie-Portfolio in der Simulation | **a)** ein Portfolio je Strategie mit beiden Symbolen · b) zwei Konten je Strategie (wie im Standard-Backtest) | a): realistisch, Portfolioregeln (R-011, R-015, R-021) wirken über beide Symbole. Die Mitgliedsergebnisse weichen dadurch bewusst vom Standard-Backtest ab | vor Schritt 2 |
+| T2 | Platzgröße | 20 000 USDT je Platz, Reserveplatz in A | wie vorgeschlagen | vor Schritt 2 |
+| T3 | Regelauswahl für Stufe 2 | **R-010, R-013, R-014 (nur Exposure-Teil), R-015** · ohne R-014 | mit R-014: Konzentration in einem Asset über alle Strategien ist ein echtes Risiko | vor Schritt 2 |
+| T4 | Gruppen-Kill-Switch nach R-010 | Sperre aller Portfolios bis zur Freigabe nach 24 h · nur bis Tagesende UTC | 24 h, wie die bestehende Replay-Annahme | vor Schritt 2 |
+| T5 | Kostenstress P7 | **analytisch** auf denselben Trades · neu simuliert mit doppelten Kosten | analytisch, wie der v1-Kostenstress; die Neusimulation verdoppelt die Laufzeit | vor Schritt 3 |
+| T6 | Replay-Hülle | **Challenger-Schlüssel** · Champion-Schlüssel | Challenger: Der Pfad mit Research-Overrides ist erprobt; Regime-Exit ausdrücklich aus | vor Schritt 4 |
+| T7 | Bewertung vorab | **parallel vorab, gecacht** · in der Schleife | vorab: gleiche Ergebnisse, kürzere Laufzeit | vor Schritt 2 |
+| T8 | Standard-Gate-Version | beim Festschreiben auf v4 umstellen · v3 lassen und v4 nur für eigenständige Familien | umstellen: für alte Familien ohne Wirkung | Schritt 7 |
+| T9 | Konstanten | P4/P5 Faktor 0,5; Drawdown ≤ 10 %; Geometrie Faktor 2; Platz 20 000 USDT | wie vorgeschlagen | Schritt 7 |
+| T10 | Späterer Forward-Test | eigener registrierter Schlüssel + gesonderter Beschluss zur Freigabeliste | erst nach einem bestandenen v4, getrennt entscheiden | vor einem Forward-Test |
+
+## 12. Ablauf bis zum ersten Experiment
+
+1. **Prüfung dieser Fassung** und Entscheidung von T1–T4 und T7 durch den
+   Betreiber.
+2. **Implementierung** nach eigener Freigabe auf
    `claude/inspiring-noether-rjh92d`. Kein Merge nach `main`, kein VPS.
-3. **Gegenprobe auf gespeicherten Daten**, ohne neue Backtests und ohne KI:
-   - Der Portfolio-Weg wird auf die bekannten Kandidaten EVO-REG-0004 –
-     0010 angewendet, als wären sie eigenständig. Das sind sie nicht, deshalb
-     ist das nur zur Veranschaulichung.
-   - Erwartung: Alle scheitern an P8–P10, weil sie fast nur Challenger-Ertrag
-     sind.
-   - Zeigt die Probe eine Schwäche, wird **vor** dem Festschreiben verschärft,
-     nie gelockert. Probe und etwaige Änderungen werden dokumentiert.
-4. **Festschreiben:** endgültige Vorregistrierung von v4 und der Familie mit
-   Hashes und ADR 0019, committet vor jedem Experiment.
-5. **Stufe 1, Startgenom** nach eigener Freigabe: ohne KI-Kosten, N steigt um
-   1 bis 3.
-
-## 11. Offene Punkte zur Prüfung
-
-| Punkt | Vorschlag | Bemerkung |
-|---|---|---|
-| Obergrenze offenes Gesamtrisiko | 1,0 % | aus `maxDailyLossPct`; alternativ 0,75 % (strenger) |
-| Drawdown-Toleranz | ≤ 1,10 × und Rendite ÷ DD nicht schlechter | v3-Pfad B verlangte „nicht größer“, aber mit getrennten Konten, bei denen jedes neue Mitglied zusätzliches Kapital mitbringt und den Drawdown dämpft. Im gemeinsamen Pool erhöht jeder Zusatz das Risiko auf demselben Kapital |
-| Effizienzfaktor P4/P5 | 0,5 | 1,0 hieße „mindestens so effizient wie der Bestand“ und würde gute Diversifizierer ausschließen |
-| α-Anteil, R² | ≥ 50 %, ≤ 0,5 | Kern der Abwehr von Scheindiversifikation |
-| Geometrie-Faktor | 2 | gilt je Dimension; Trade-Toleranzen sind nur hart, wenn beide Dimensionen vergleichbar sind |
-| Reihenfolge bei Gleichstand | Bestand vor Kandidat | konservativ |
-| Standard-Gate-Version | beim Festschreiben auf v4 umstellen | für alte Familien ohne Wirkung; Manifeste tragen dann den v4-Hash |
-| Späterer Forward-Test | – | Ein Forward-Test der Familie bräuchte ihren Schlüssel in `APPROVED_LONG_STRATEGY_KEYS`. Das ändert die Identität der Risk-Policy, nicht ihre Regeln. Es verträgt sich daher nicht ohne Weiteres mit „Risk Engine unverändert“ und ist erst vor einem Forward-Test gesondert zu entscheiden |
-
-## 12. Einordnung
-
-- **v4 stellt die richtige Frage:** Verdient das Portfolio mit der neuen
-  Familie bei gleichem Kapital und gleichen Grenzen nachweisbar mehr, und
-  stammt dieser Mehrertrag aus eigener Quelle?
-- **Es ist keine bloße Lockerung von v3.** Die beiden Ähnlichkeitsmaße
-  (Korrelation ≤ 0,5, bespielte Einstiege) werden durch Wertmaße ersetzt.
-  Diese sind in vielem strenger:
-  - Netto-Zuwachs in beiden Fenstern;
-  - Drawdown;
-  - Risiko- und Kapitaleffizienz;
-  - α-Anteil und eigene Schwankung;
-  - Stabilität und Kostenstress des Zuwachses.
-- **Lockerer ist v4 an genau einer Stelle:** Eine Korrelation zwischen 0,5
-  und 0,71 wird zugelassen, wenn der Mehrwert belegt ist.
-- **Die höchste Hürde bleibt die Statistik.** Ein α mit t ≥ 2,82 ist mit
-  wenigen, kurzen Trades schwer zu erreichen. Das Startgenom hat auch unter
-  v4 eher geringe Aussichten. Ein Scheitern wäre aber erstmals eine
-  aussagekräftige Antwort auf die Frage, ob Einstiegs-Timing innerhalb des
-  Regimes etwas Eigenes verdient.
+3. **Gegenprobe auf bekannten Daten**, ohne KI und ohne neue Konfiguration.
+   - EVO-REG-0004 – 0010 werden als Referenzläufe in B gesetzt, als wären sie
+     eigenständig. Erwartet wird ein Scheitern an P8 und P9.
+   - Die Gegenprobe ist keine Bewertung dieser Kandidaten und zählt nicht
+     für N.
+   - Zeigt sie eine Schwäche, wird **vor** dem Festschreiben verschärft, nie
+     gelockert. Das wird dokumentiert.
+4. **Festschreiben:**
+   - endgültige Vorregistrierung von v4 und der Familie mit Hashes;
+   - ADR 0019;
+   - gepusht vor jedem Experiment.
+5. **Stufe 1, nur das Startgenom**, nach eigener Freigabe: ohne KI-Kosten, N
+   steigt um 1 bis 3.
