@@ -191,7 +191,7 @@ bewertet in der nächsten Stunde neu, wie live.
   | `grossExposure`, `assetExposure`, `correlatedExposure` | Summen über alle Portfolios, mit **denselben Formeln** wie in `evaluateRisk`: Marktwert der Positionen mit Exposure plus offene ENTRY-Reservierungen, nach Asset bzw. Korrelationsgruppe gefiltert |
   | `sizing` | das Stufe-1-Ergebnis mit **unveränderter Menge**; nur die drei Felder `postTrade…Exposure` werden auf Gesamtsicht + Notional des Trades umgerechnet |
   | `dailyPnl` | Tagesergebnis aller Portfolios |
-  | `assetAlreadyOpen` | `false` (Begründung unten) |
+  | `assetAlreadyOpen` | ob **das eigene Portfolio** des Kandidaten schon eine Position mit Exposure im Asset hält, berechnet wie in `evaluateRisk`. Nach einer Freigabe in Stufe 1 ist das nachweislich `false` (Abschnitt 4.6) |
   | übrige Felder | wie in Stufe 1; die vier Regeln lesen sie nicht |
 
 - **Wirkung:**
@@ -233,12 +233,9 @@ bewertet in der nächsten Stunde neu, wie live.
    **ein anderes** Portfolio dasselbe Asset hält. Genau das ist
    ausgeschlossen. Diese Regeln wirken vollständig in Stufe 1 für das eigene
    Portfolio, so wie live.
-3. **Zu `assetAlreadyOpen = false`.** `R-014` enthält vor der
-   Exposure-Grenze eine Duplikatsperre. Sie gehört zur Portfolio-Ebene und
-   ist in Stufe 1 bereits geprüft. In der Gesamtsicht zählt nur die
-   Exposure-Grenze. Der Wert `false` schaltet deshalb keine Prüfung des
-   eigenen Portfolios ab. Er verhindert nur, dass die Position einer anderen
-   Strategie als Duplikat gilt.
+3. **Zu `assetAlreadyOpen`.** `R-014` enthält vor der Exposure-Grenze eine
+   Duplikatsperre. Wie sie in der Gesamtsicht behandelt wird, beschreibt
+   Abschnitt 4.6.
 
 ### 4.5 Bewusst nicht enthalten
 
@@ -248,6 +245,61 @@ bewertet in der nächsten Stunde neu, wie live.
 - Mit den heutigen Größen werden die vier Gruppenregeln selten greifen: 0,25 %
   je Trade von 20 000 USDT entspricht 0,083 % des Gesamtkapitals. Die
   Simulation belegt das, statt es anzunehmen.
+
+### 4.6 R-014 und die Auswahl der Gruppenregeln (geprüft vor der Implementierung)
+
+Auf Wunsch des Betreibers wurden alle 26 Regelfunktionen in
+`packages/risk-engine/src/rules.ts` darauf geprüft, ob sie in der Gesamtsicht
+eine portfolioübergreifende Grenze durchsetzen oder eine Sperre enthalten, die
+nur innerhalb eines Portfolios Sinn ergibt.
+
+**`R-014-ASSET-EXPOSURE` (`ruleAssetExposure`) besteht aus zwei Teilen:**
+
+1. **Duplikatsperre:** Ist `ctx.assetAlreadyOpen` wahr, liefert die Regel
+   `FAIL` mit `DUPLICATE_ASSET_POSITION`, noch vor jeder Exposure-Prüfung.
+   `evaluateRisk` setzt den Wert, wenn **irgendeine** Position im Snapshot
+   dasselbe Asset hält.
+2. **Exposure-Grenze:** Exposure im Asset nach dem Trade ≤
+   `maxAssetExposurePct` × Equity (`exposureRule`).
+
+**Folgerung: Mit einem Gruppensnapshot ist R-014 unverändert nicht geeignet.**
+Würde man `assetAlreadyOpen` aus allen Portfolios ableiten, sperrte Teil 1
+jeden Einstieg, sobald ein **anderes** Strategie-Portfolio dasselbe Asset hält.
+Zwei unabhängige Portfolios könnten dasselbe Asset dann nie gleichzeitig halten.
+
+**Gewählte Lösung:**
+
+- Die Regelfunktion bleibt unverändert.
+- Das Feld `assetAlreadyOpen` erhält in der Gesamtsicht seine
+  portfolioeigene Bedeutung: Es zeigt an, ob **das Portfolio des Kandidaten
+  selbst** das Asset schon hält. Es wird aus den eigenen Positionen berechnet,
+  nicht als Konstante gesetzt.
+- Stufe 2 läuft nur nach `APPROVED` in Stufe 1. Dort hat dieselbe Regel R-014
+  das eigene Portfolio bereits geprüft, und R-022 hat zusätzlich offene
+  Positionen **und** offene Einstiegsorders im Asset ausgeschlossen. Deshalb
+  ist der Wert in Stufe 2 immer `false`.
+- R-014 erreicht damit in der Gesamtsicht immer Teil 2. Dieser prüft die
+  Asset-Exposure über **alle** Portfolios gegen 20 % der Gesamt-Equity, mit
+  genau der Rundung und dem Vergleich der Risk Engine.
+- Ein Test belegt das mit zwei Fällen:
+  - Zwei Portfolios halten dasselbe Asset unter der Grenze: Stufe 2 lässt den
+    Einstieg zu.
+  - Über der Grenze: Stufe 2 lehnt mit `MAX_ASSET_EXPOSURE` ab, nie mit
+    `DUPLICATE_ASSET_POSITION`.
+
+**Ergebnis der Prüfung aller Regeln:**
+
+| Regel | in Stufe 2? | Begründung |
+|---|---|---|
+| R-010 Tagesverlust | **ja** | reine Kapitalgrenze; mit Gesamt-Equity zum Tagesbeginn und Tagesergebnis aller Portfolios |
+| R-013 Brutto-Exposure | **ja** | nur `exposureRule` |
+| R-014 Asset-Exposure | **ja**, wie oben | Duplikatsperre portfoliobezogen, Exposure-Grenze portfolioübergreifend |
+| R-015 Korrelationsgruppe | **ja** | prüft nur Gruppe und Symbol und danach `exposureRule` |
+| R-009 Risiko je Trade | nein | bezieht sich auf die Equity des eigenen Portfolios; gegen die Gesamt-Equity wäre es immer erfüllt |
+| R-011 offene Positionen, R-012 Einstiege je Tag, R-021 Verlustserie, R-022 kein Aufstocken | nein | Ausführungsregeln je Strategie-Portfolio; über Portfolios hinweg würden sie unabhängige Strategien gegenseitig sperren |
+| R-001 – R-008, R-016 – R-020, R-023 – R-026 | nein | betreffen Modus, Sitzung, Ledger, Kandidat, Daten, Regime oder Version und sind für denselben Kandidaten in Stufe 1 bereits vollständig geprüft |
+
+Diese Auswahl ist T3 und wird Teil der Methodenkennung `group-risk-v1`.
 
 ## 5. Prüfregeln für Kandidaten eigenständiger Familien
 
@@ -542,15 +594,17 @@ Jeder Schritt ist für sich grün; es folgt kein Lauf.
 
 ## 11. Offene technische Entscheidungen
 
+✔ = vom Betreiber am 2026-10-15 wie empfohlen entschieden. T3 ist nach der Prüfung in Abschnitt 4.6 genauer gefasst.
+
 | # | Entscheidung | Optionen | Empfehlung | spätestens |
 |---|---|---|---|---|
-| T1 | Strategie-Portfolio in der Simulation | **a)** ein Portfolio je Strategie mit beiden Symbolen · b) zwei Konten je Strategie (wie im Standard-Backtest) | a): realistisch, Portfolioregeln (R-011, R-015, R-021) wirken über beide Symbole. Die Mitgliedsergebnisse weichen dadurch bewusst vom Standard-Backtest ab | vor Schritt 2 |
-| T2 | Platzgröße | 20 000 USDT je Platz, Reserveplatz in A | wie vorgeschlagen | vor Schritt 2 |
-| T3 | Regelauswahl für Stufe 2 | **R-010, R-013, R-014 (nur Exposure-Teil), R-015** · ohne R-014 | mit R-014: Konzentration in einem Asset über alle Strategien ist ein echtes Risiko | vor Schritt 2 |
-| T4 | Gruppen-Kill-Switch nach R-010 | Sperre aller Portfolios bis zur Freigabe nach 24 h · nur bis Tagesende UTC | 24 h, wie die bestehende Replay-Annahme | vor Schritt 2 |
+| T1 ✔ | Strategie-Portfolio in der Simulation | **a)** ein Portfolio je Strategie mit beiden Symbolen · b) zwei Konten je Strategie (wie im Standard-Backtest) | a): realistisch, Portfolioregeln (R-011, R-015, R-021) wirken über beide Symbole. Die Mitgliedsergebnisse weichen dadurch bewusst vom Standard-Backtest ab | vor Schritt 2 |
+| T2 ✔ | Platzgröße | 20 000 USDT je Platz, Reserveplatz in A | wie vorgeschlagen | vor Schritt 2 |
+| T3 ✔ | Regelauswahl für Stufe 2 | **R-010, R-013, R-014 (nur Exposure-Teil), R-015** · ohne R-014 | mit R-014: Konzentration in einem Asset über alle Strategien ist ein echtes Risiko | vor Schritt 2 |
+| T4 ✔ | Gruppen-Kill-Switch nach R-010 | Sperre aller Portfolios bis zur Freigabe nach 24 h · nur bis Tagesende UTC | 24 h, wie die bestehende Replay-Annahme | vor Schritt 2 |
 | T5 | Kostenstress P7 | **analytisch** auf denselben Trades · neu simuliert mit doppelten Kosten | analytisch, wie der v1-Kostenstress; die Neusimulation verdoppelt die Laufzeit | vor Schritt 3 |
 | T6 | Replay-Hülle | **Challenger-Schlüssel** · Champion-Schlüssel | Challenger: Der Pfad mit Research-Overrides ist erprobt; Regime-Exit ausdrücklich aus | vor Schritt 4 |
-| T7 | Bewertung vorab | **parallel vorab, gecacht** · in der Schleife | vorab: gleiche Ergebnisse, kürzere Laufzeit | vor Schritt 2 |
+| T7 ✔ | Bewertung vorab | **parallel vorab, gecacht** · in der Schleife | vorab: gleiche Ergebnisse, kürzere Laufzeit | vor Schritt 2 |
 | T8 | Standard-Gate-Version | beim Festschreiben auf v4 umstellen · v3 lassen und v4 nur für eigenständige Familien | umstellen: für alte Familien ohne Wirkung | Schritt 7 |
 | T9 | Konstanten | P4/P5 Faktor 0,5; Drawdown ≤ 10 %; Geometrie Faktor 2; Platz 20 000 USDT | wie vorgeschlagen | Schritt 7 |
 | T10 | Späterer Forward-Test | eigener registrierter Schlüssel + gesonderter Beschluss zur Freigabeliste | erst nach einem bestandenen v4, getrennt entscheiden | vor einem Forward-Test |
