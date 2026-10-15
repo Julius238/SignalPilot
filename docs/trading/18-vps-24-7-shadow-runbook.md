@@ -159,12 +159,21 @@ Danach die Konfiguration validieren:
 
 ```bash
 ./scripts/ops/prod-build.sh                   # alle Images, Dashboard mit Trading-UI
-./scripts/ops/prod-up.sh postgres redis
+docker compose --project-name signalpilot --env-file .env.production -f docker-compose.prod.yml --profile migration build migrate
 ./scripts/ops/prod-migrate-docker.sh          # 29 Migrationen, rein additiv
-./scripts/ops/prod-up.sh
+./scripts/ops/prod-up.sh --no-deps api dashboard worker-scheduler trading-worker
 ./scripts/ops/healthcheck.sh
 ./scripts/ops/trading-shadow.sh preflight     # genau ein trading-worker, Flags, DB-Zustand
 ```
+
+`prod-build.sh` baut das Migrations-Image nicht mit, weil es hinter dem
+Profil `migration` liegt. Deshalb steht der zweite Befehl extra.
+
+**Immer `--no-deps` mit expliziten Diensten.** Postgres und Redis lesen
+ebenfalls `.env.production`. Ein `up` ohne `--no-deps` erstellt sie nach
+jeder Env-Änderung neu; das ist ein unnötiger Datenbank-Neustart.
+Läuft Postgres noch nicht, startet `./scripts/ops/prod-up.sh postgres redis`
+es vorher.
 
 ## 5. Altbestand neutralisieren
 
@@ -290,6 +299,27 @@ wenn andere Alerts offen sind:
 ./scripts/ops/trading-shadow.sh alert-test
 ```
 
+## 11a. Dashboard über HTTPS (Traefik)
+
+Das Dashboard läuft hinter dem Traefik des n8n-Stacks (Resolver
+`mytlschallenge`, Netz `n8n_default`). Der n8n-Stack bleibt unverändert. Auf
+diesem VPS (seit 2026-10-15) gilt:
+
+- Host `signalpilot.srv1665708.hstgr.cloud`, über die Hostinger-Wildcard-DNS;
+- Port 3000 nur noch auf Loopback;
+- die API wie bisher nur über Loopback.
+
+```bash
+H=signalpilot.srv1665708.hstgr.cloud
+sed "s/signalpilot\.example\.org/$H/" docker-compose.prod.override.example.yml > docker-compose.prod.override.yml
+# in .env.production: DASHBOARD_ORIGIN=https://$H und AUTH_COOKIE_SECURE=true
+./scripts/ops/prod-up.sh --no-deps api dashboard
+```
+
+Die Ops-Skripte nehmen das Overlay automatisch mit. Es ist per
+`.gitignore` ausgeschlossen. Erst nach HTTPS einloggen, nie über
+`http://<IP>:3000`.
+
 ## 12. Restart- und Downtime-Test
 
 Am besten über eine volle Stunde hinweg, damit ein Pipeline-Lauf und ein
@@ -299,7 +329,7 @@ Scan-Tick ausfallen:
 ./scripts/ops/trading-shadow.sh consistency-snapshot /root/sp-before.json
 docker compose --project-name signalpilot --env-file .env.production -f docker-compose.prod.yml stop worker-scheduler trading-worker
 # 10 bis 15 Minuten warten, über eine volle Stunde
-./scripts/ops/prod-up.sh worker-scheduler trading-worker
+./scripts/ops/prod-up.sh --no-deps worker-scheduler trading-worker
 # nach dem nächsten Daten-Lauf (CRYPTO_PIPELINE_CRON) und dem Scan (alle 5 min)
 ./scripts/ops/trading-shadow.sh consistency-compare /root/sp-before.json
 ```
