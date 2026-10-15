@@ -519,8 +519,8 @@ export function lineageScreeningGates(input: LineageScreeningInput, gates: Evolu
       input.existing.length === 0
         ? "Keine bestehende Strategie zum Vergleich — Unabhängigkeit nicht prüfbar."
         : `${independent ? "Eigenständig" : "Nicht eigenständig"}: ${input.existing
-            .map((entry) => `${nameOf(entry.key)} Korrelation ${de(entry.correlation)}, gemeinsame Einstiege ${entry.signalOverlap === null ? "n/a" : pct(entry.signalOverlap)}`)
-            .join("; ")} (verlangt je Strategie Korrelation ≤ ${de(diversification.maxCorrelation)} und ≤ ${pct(diversification.maxSignalOverlap)} gemeinsame Einstiege binnen ±${diversification.signalWindowHours} h — eine Parametervariante mit anderen Ausstiegen bleibt eine Variante).`,
+            .map((entry) => `${nameOf(entry.key)} Korrelation ${de(entry.correlation)}, bespielte Einstiege ${entry.signalOverlap === null ? "n/a" : pct(entry.signalOverlap)}`)
+            .join("; ")} (verlangt je Strategie Korrelation ≤ ${de(diversification.maxCorrelation)} und höchstens ${pct(diversification.maxSignalOverlap)} Einstiege, bei denen sie binnen ±${diversification.signalWindowHours} h selbst einsteigt oder schon eine Position hält — eine Parametervariante mit anderen Ausstiegen bleibt eine Variante).`,
       input.existing.map((entry) => `${de(entry.correlation)}/${entry.signalOverlap === null ? "n/a" : de(entry.signalOverlap)}`).join("; "),
       `≤ ${de(diversification.maxCorrelation)}/≤ ${de(diversification.maxSignalOverlap)}`
     ),

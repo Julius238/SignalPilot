@@ -157,7 +157,7 @@ export function renderCandidateReport(input: {
           `| ${entry.key.replace(/^ROOT:/, "")} | ${entry.roles.map((role) => roles[role] ?? role).join(", ")} | ${n(entry.referenceSharpe)} | ${n(entry.candidateSharpe)} | ${n(entry.sharpeDelta)} | ${n(entry.discoverySharpeDelta)} / ${n(entry.validationSharpeDelta)} | ${n(entry.pairedT)} (${n(entry.threshold)}) | ${entry.deteriorations.join(", ").replace(/\|/g, "/") || "–"} |`
       ),
       "",
-      `Unabhängigkeit: ${l.existing.map((entry) => `${entry.key.replace(/^ROOT:/, "")} Korrelation ${n(entry.correlation)}, gemeinsame Einstiege ${entry.signalOverlap === null ? "–" : pct(entry.signalOverlap * 100, 0)}`).join("; ") || "–"}.`,
+      `Unabhängigkeit: ${l.existing.map((entry) => `${entry.key.replace(/^ROOT:/, "")} Korrelation ${n(entry.correlation)}, bespielte Einstiege ${entry.signalOverlap === null ? "–" : pct(entry.signalOverlap * 100, 0)}`).join("; ") || "–"}.`,
       "",
       `Portfolio ${l.portfolio.members.map((key) => key.replace(/^ROOT:/, "")).join(" + ") || "–"}: Sharpe mit Kandidat ${n(l.portfolio.sharpeWith)} gegenüber ${n(l.portfolio.sharpeWithout)} (Δ ${n(l.portfolio.sharpeDelta)}; Entdeckung ${n(l.portfolio.discoverySharpeDelta)}, Validierung ${n(l.portfolio.validationSharpeDelta)}), max. Drawdown ${n(l.portfolio.drawdownWith)} % gegenüber ${n(l.portfolio.drawdownWithout)} %; α gegenüber den bestehenden Strategien t = ${n(l.portfolio.alphaT)} (Schwelle ${n(l.portfolio.alphaThreshold)}, β ${(l.portfolio.betas ?? []).map((value) => n(value)).join("/") || "–"}, ${l.portfolio.months} Monate).`,
       "",

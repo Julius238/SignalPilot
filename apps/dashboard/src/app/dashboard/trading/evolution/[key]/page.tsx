@@ -198,12 +198,12 @@ function CandidateBody({ data }: { data: Detail }) {
               <li>
                 Eigenständigkeit:{" "}
                 {data.lineageCheck.existing
-                  .map((entry) => `${entry.key.replace(/^ROOT:/, "")} Korrelation ${fmt(entry.correlation)}, gemeinsame Einstiege ${entry.signalOverlap === null ? "—" : `${Math.round(entry.signalOverlap * 100)} %`}`)
+                  .map((entry) => `${entry.key.replace(/^ROOT:/, "")} Korrelation ${fmt(entry.correlation)}, bespielte Einstiege ${entry.signalOverlap === null ? "—" : `${Math.round(entry.signalOverlap * 100)} %`}`)
                   .join(" · ")}
               </li>
               <li>
                 Portfolio {data.lineageCheck.portfolio.members.map((key) => key.replace(/^ROOT:/, "")).join(" + ")}: Sharpe mit Kandidat {fmt(data.lineageCheck.portfolio.sharpeWith)} gegenüber{" "}
-                {fmt(data.lineageCheck.portfolio.sharpeWithout)} (Δ {fmtSigned(data.lineageCheck.portfolio.sharpeDelta)}), α gegenüber dem Portfolio t = {fmt(data.lineageCheck.portfolio.alphaT)} (Schwelle{" "}
+                {fmt(data.lineageCheck.portfolio.sharpeWithout)} (Δ {fmtSigned(data.lineageCheck.portfolio.sharpeDelta)}), α gegenüber den bestehenden Strategien t = {fmt(data.lineageCheck.portfolio.alphaT)} (Schwelle{" "}
                 {fmt(data.lineageCheck.portfolio.alphaThreshold)})
               </li>
               <li>
