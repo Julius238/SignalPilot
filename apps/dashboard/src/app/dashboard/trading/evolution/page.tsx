@@ -31,6 +31,7 @@ import {
 import { TRADING_DASHBOARD_ENABLED } from "../../../../lib/trading-flag";
 import { formatUtcDateTime, toneColor } from "../../../../lib/trading-format";
 
+const WINDOW_ORDER = ["DISCOVERY", "VALIDATION", "HOLDOUT"] as const;
 const SCREENED: ReadonlySet<string> = new Set(["REJECTED", "RESERVE", "PROPOSED", "APPROVED_FOR_FORWARD_TEST", "REJECTED_BY_OPERATOR"]);
 
 function Badge({ tone, children }: { tone: string; children: ReactNode }) {
@@ -398,7 +399,8 @@ function EvolutionBody({ data }: { data: EvolutionOverviewAvailable }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {Object.values(data.split.windows).map((window) => (
+                    {/* Fixed order: Postgres JSONB does not keep the key order of the manifest. */}
+                    {WINDOW_ORDER.map((key) => data.split!.windows[key]).filter((window) => window !== undefined).map((window) => (
                       <tr key={window.key}>
                         <td>
                           <strong>{WINDOW_LABEL[window.key] ?? window.key}</strong>

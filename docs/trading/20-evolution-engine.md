@@ -157,6 +157,14 @@ Zusammenfassung mit Haiku 5.5. Erwartet etwa 0,10–0,25 USD, schlechtester
 Fall 0,40 USD (vor jedem Aufruf reserviert). Wöchentlich unter 1 USD im
 Monat, täglich etwa 3–7 USD.
 
+## Gemessene Laufzeit
+
+Erster Lauf auf echten Daten (2026-10-15, lokal, 6 Prozesse): 9 min Wandzeit,
+38 CPU-Minuten, 12 Backtests; zweiter Lauf mit Referenzen aus dem Cache:
+4 min, 22 CPU-Minuten. Mit 0,75 CPU auf dem VPS entspricht das grob 50 bzw.
+30 Minuten je Durchlauf, bei 0,55 GB Spitzen-RAM je Backtest-Prozess.
+Protokoll: [research/2026-10-15-evolution-v1-e2e-mock.md](research/2026-10-15-evolution-v1-e2e-mock.md).
+
 ## Grenzen von V1
 
 - Nur zwei Familien und ein Parameterraster; neue Logik erst mit

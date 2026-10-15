@@ -68,7 +68,7 @@ const OPERATORS: readonly Operator[] = [
         observation: `Ausbrüche unter dem 200-Tage-Schnitt: ${below?.trades ?? 0} Trades, Ø ${fmtR(below?.averageR)}.`,
         rationale: "Falsche Ausbrüche häufen sich in schwachen Regimen; ein strengeres Regime-Gate sollte vor allem Verlierer entfernen.",
         effect: "Weniger Trades, höherer Erwartungswert je Trade, geringerer Drawdown.",
-        falsification: "Scheitert, wenn Ø R in der Entdeckung nicht steigt oder die Validierung negativ wird."
+        falsification: "Ø R in der Entdeckung nicht steigt oder die Validierung negativ wird."
       };
     }
   },
@@ -85,7 +85,7 @@ const OPERATORS: readonly Operator[] = [
         observation: `Challenger in Seitwärtsphasen: ${regime?.trades ?? 0} Trades, Ø ${fmtR(regime?.averageR)}.`,
         rationale: "Knappe Regime-Signale wechseln häufig; eine höhere Mindest-Konfidenz reduziert Ein- und Ausstiege mit vollen Kosten.",
         effect: "Weniger Round-Trips, geringere Kostenquote, kürzere aber sauberere Haltephasen.",
-        falsification: "Scheitert, wenn die Nettorendite nach Kosten sinkt oder weniger Marktphasen positiv sind."
+        falsification: "die Nettorendite nach Kosten sinkt oder weniger Marktphasen positiv sind."
       };
     }
   },
@@ -102,7 +102,7 @@ const OPERATORS: readonly Operator[] = [
         observation: `${Math.round(share * 100)} % der Champion-Trades enden am Stop.`,
         rationale: "Ein Stop im normalen Stunden-Rauschen beendet Trends zu früh; ein weiterer ATR-Stop lässt Trends laufen, die Positionsgröße sinkt automatisch.",
         effect: "Seltener ausgestoppt, höhere Trefferquote, ähnliche Kosten je Trade.",
-        falsification: "Scheitert, wenn der Profit Factor sinkt oder der Drawdown steigt."
+        falsification: "der Profit Factor sinkt oder der Drawdown steigt."
       };
     }
   },
@@ -119,7 +119,7 @@ const OPERATORS: readonly Operator[] = [
         observation: `${Math.round(share * 100)} % der Challenger-Trades enden am Schutz-Stop.`,
         rationale: "Der Regime-Exit soll die meisten Trades beenden; ein zu enger Tages-ATR-Stop beendet Haltephasen bei normalen Rücksetzern.",
         effect: "Weniger Stop-Ausstiege, mehr Regime-Ausstiege.",
-        falsification: "Scheitert, wenn der Drawdown deutlich steigt oder Ø R sinkt."
+        falsification: "der Drawdown deutlich steigt oder Ø R sinkt."
       };
     }
   },
@@ -136,7 +136,7 @@ const OPERATORS: readonly Operator[] = [
         observation: `Seitwärtsphasen: ${sideways?.trades ?? 0} Trades, Ø ${fmtR(sideways?.averageR)}.`,
         rationale: "Ein Ausbruch über ein längeres Hoch filtert kurzfristige Spitzen in Seitwärtsmärkten und lässt nur breitere Ausbrüche zu.",
         effect: "Weniger Fehlsignale in Seitwärtsphasen.",
-        falsification: "Scheitert, wenn Seitwärtsphasen weiter negativ bleiben oder die Tradezahl unter das Minimum fällt."
+        falsification: "Seitwärtsphasen weiter negativ bleiben oder die Tradezahl unter das Minimum fällt."
       };
     }
   },
@@ -152,7 +152,7 @@ const OPERATORS: readonly Operator[] = [
         observation: "Das Ziel begrenzt die Gewinne langer Regime-Phasen.",
         rationale: "Wenn das Regime die Haltephase steuert, sollte ein festes Ziel große Trends nicht vorzeitig beenden.",
         effect: "Größere Gewinner, unveränderte Verlierer.",
-        falsification: "Scheitert, wenn der Profit Factor nicht steigt."
+        falsification: "der Profit Factor nicht steigt."
       };
     }
   },
@@ -169,7 +169,7 @@ const OPERATORS: readonly Operator[] = [
         observation: `${Math.round(share * 100)} % der Champion-Trades enden durch den Zeit-Exit.`,
         rationale: "Trendfolger verdienen an wenigen großen Bewegungen; ein zu kurzes Zeitlimit schneidet sie ab, bevor das Ziel erreicht ist.",
         effect: "Mehr Ziel-Ausstiege, höherer Durchschnittsgewinn, längere Kapitalbindung.",
-        falsification: "Scheitert, wenn der Durchschnittsgewinn nicht steigt oder der Drawdown zunimmt."
+        falsification: "der Durchschnittsgewinn nicht steigt oder der Drawdown zunimmt."
       };
     }
   }

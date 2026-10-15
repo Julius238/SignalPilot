@@ -69,7 +69,9 @@ export interface GateResult {
   readonly limit: string | null;
 }
 
-const fmt = (value: number | null | undefined, digits = 2): string => (value === null || value === undefined ? "n/a" : value.toFixed(digits));
+/** German decimal comma: the messages are shown verbatim in the German dashboard and reports. */
+const fmt = (value: number | null | undefined, digits = 2): string =>
+  value === null || value === undefined ? "n/a" : value.toFixed(digits).replace(".", ",");
 const pass = (gate: GateId, stage: GateStage, reasonCode: string, message: string, actual: string | null = null, limit: string | null = null): GateResult => ({
   gate,
   stage,
