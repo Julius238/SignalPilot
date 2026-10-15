@@ -41,7 +41,6 @@ export interface SuccessorPolicy {
 }
 
 export type EvolutionGatesV2 = EvolutionGates & { readonly successor: SuccessorPolicy };
-export type EvolutionGateSet = EvolutionGates | EvolutionGatesV2;
 
 export const EVOLUTION_GATES_V2: EvolutionGatesV2 = Object.freeze({
   ...EVOLUTION_GATES_V1,
@@ -69,14 +68,8 @@ export const EVOLUTION_GATES_V2: EvolutionGatesV2 = Object.freeze({
 export const EVOLUTION_GATES_V1_HASH = canonicalHash(EVOLUTION_GATES_V1);
 export const EVOLUTION_GATES_V2_HASH = canonicalHash(EVOLUTION_GATES_V2);
 
-export type GateVersionKey = "v1" | "v2";
-export const EVOLUTION_GATE_VERSIONS: Readonly<Record<GateVersionKey, EvolutionGateSet>> = Object.freeze({
-  v1: EVOLUTION_GATES_V1,
-  v2: EVOLUTION_GATES_V2
-});
-
-export function isGatesV2(gates: EvolutionGateSet): gates is EvolutionGatesV2 {
-  return "successor" in gates && gates.successor !== undefined;
+export function isGatesV2(gates: EvolutionGates): gates is EvolutionGatesV2 {
+  return "successor" in gates && (gates as Partial<EvolutionGatesV2>).successor !== undefined;
 }
 
 // ───────────────────────────────────────────────────────────────────────────

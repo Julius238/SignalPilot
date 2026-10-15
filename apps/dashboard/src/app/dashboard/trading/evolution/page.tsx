@@ -12,6 +12,7 @@ import {
   GATE_LABEL,
   GATES_VERSION_LABEL,
   HYPOTHESIS_OUTCOME,
+  LINEAGE_PATH_LABEL,
   PROVIDER_LABEL,
   PURPOSE_LABEL,
   RUN_STATUS,
@@ -244,6 +245,7 @@ function EvolutionBody({ data }: { data: EvolutionOverviewAvailable }) {
                         <div className="muted small">
                           {FAMILY_LABEL[candidate.family] ?? candidate.family} · G{candidate.generation}
                           {candidate.successorOf ? ` · Nachfolger-Prüfung gegen ${candidate.successorOf}` : ""}
+                          {candidate.lineageChecked ? ` · Linienprüfung: ${candidate.lineagePath ? LINEAGE_PATH_LABEL[candidate.lineagePath] : "weder Mehrwert noch Diversifikation"}` : ""}
                         </div>
                       </td>
                       <td>

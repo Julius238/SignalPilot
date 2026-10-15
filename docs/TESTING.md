@@ -63,12 +63,13 @@ Ohne erreichbare Datenbank scheitern genau diese 16 Tests — alle anderen laufe
 ### Evolution Engine
 
 `apps/evolution-worker` testet Budget-Schutz, Lease, Audit-Kette, Freigaben und
-einen vollständigen Forschungszyklus (Mock-KI → Hypothese → Kandidat →
-Backtest → Bewertung → Persistenz) gegen echte PostgreSQL. Diese Tests laufen
+vollständige Forschungszyklen (Mock-KI → Hypothese → Kandidat → Backtest →
+Bewertung → Persistenz) unter Gates v1, v2 und v3 gegen echte PostgreSQL,
+einschließlich „keine rückwirkende Neubewertung“ und Familien-Monatsbudget. Diese Tests laufen
 nur, wenn der Datenbankname auf `_test` endet (`EVOLUTION_TEST_DATABASE_URL`
 oder `DATABASE_URL`), weil sie alle `Evolution*`-Zeilen löschen; sonst werden
 sie mit Begründung übersprungen. Die Dateien laufen nacheinander
-(`--test-concurrency=1`); der End-to-End-Zyklus dauert rund drei Minuten.
+(`--test-concurrency=1`); die End-to-End-Datei dauert rund zwölf Minuten.
 
 ## pnpm-Shim-Test ohne Netzwerk
 

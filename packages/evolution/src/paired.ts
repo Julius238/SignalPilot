@@ -154,3 +154,118 @@ export function pairedMonthlyTest(
     naiveTStat: estimate.iidStandardError > 1e-15 ? estimate.mean / estimate.iidStandardError : null
   };
 }
+
+export interface SpanningAlphaTest extends PairedMonthlyTest {
+  /** Slopes on each existing strategy, in input order (null when the regression is not identifiable). */
+  readonly betas: readonly number[] | null;
+}
+
+/** Solves A·x = b by Gaussian elimination with partial pivoting; null when A is (numerically) singular. */
+function solveLinear(matrix: readonly (readonly number[])[], vector: readonly number[]): number[] | null {
+  const n = vector.length;
+  const a = matrix.map((row, index) => [...row, vector[index]!]);
+  for (let column = 0; column < n; column += 1) {
+    let pivot = column;
+    for (let row = column + 1; row < n; row += 1) if (Math.abs(a[row]![column]!) > Math.abs(a[pivot]![column]!)) pivot = row;
+    const scale = Math.max(...a.map((row) => Math.abs(row[column]!)), 1e-300);
+    if (Math.abs(a[pivot]![column]!) <= 1e-12 * scale) return null;
+    [a[column], a[pivot]] = [a[pivot]!, a[column]!];
+    for (let row = column + 1; row < n; row += 1) {
+      const factor = a[row]![column]! / a[column]![column]!;
+      for (let k = column; k <= n; k += 1) a[row]![k]! -= factor * a[column]![k]!;
+    }
+  }
+  const x = new Array<number>(n).fill(0);
+  for (let row = n - 1; row >= 0; row -= 1) {
+    let sum = a[row]![n]!;
+    for (let k = row + 1; k < n; k += 1) sum -= a[row]![k]! * x[k]!;
+    x[row] = sum / a[row]![row]!;
+  }
+  return x;
+}
+
+function invert(matrix: readonly (readonly number[])[]): number[][] | null {
+  const n = matrix.length;
+  const columns: number[][] = [];
+  for (let index = 0; index < n; index += 1) {
+    const unit = Array.from({ length: n }, (_, k) => (k === index ? 1 : 0));
+    const column = solveLinear(matrix, unit);
+    if (column === null) return null;
+    columns.push(column);
+  }
+  return Array.from({ length: n }, (_, row) => columns.map((column) => column[row]!));
+}
+
+/**
+ * Does a candidate add something the existing strategies cannot already
+ * deliver (gates v3, diversification path)? Its monthly returns are regressed
+ * on the monthly returns of *each* existing strategy,
+ *
+ *   r_c = α + β₁·r₁ + … + β_K·r_K + ε,
+ *
+ * and the intercept α — return no combination of existing strategies explains
+ * — is tested against zero. A copy of any existing strategy (or of a mix of
+ * them) has α ≈ 0 however its correlation was lowered; a lower-return but
+ * independent strategy can show a clearly positive α. The standard error is
+ * max(iid, Newey–West sandwich) of the OLS intercept (Bartlett kernel, lag
+ * ⌊4·(n/100)^(2/9)⌋), the critical value the Student-t quantile with
+ * n − K − 1 degrees of freedom. "Informative" months are those in which the
+ * candidate's own return is not zero.
+ */
+export function spanningAlphaTest(candidate: readonly DailyEquityPoint[], factors: readonly (readonly DailyEquityPoint[])[], from: string, to: string): SpanningAlphaTest {
+  const factorMaps = factors.map((curve) => new Map(monthlyReturns(curve, from, to).map((entry) => [entry.month, entry.value] as const)));
+  const rows = monthlyReturns(candidate, from, to)
+    .filter((entry) => factorMaps.every((map) => map.has(entry.month)))
+    .map((entry) => ({ y: entry.value, x: [1, ...factorMaps.map((map) => map.get(entry.month)!)] }));
+  const n = rows.length;
+  const p = factors.length + 1;
+  const informativeMonths = rows.filter((row) => Math.abs(row.y) > 1e-12).length;
+  const lag = neweyWestLag(n);
+  const none = { months: n, informativeMonths, meanDifference: null, standardError: null, iidStandardError: null, hacStandardError: null, lag, tStat: null, criticalT: null, naiveTStat: null, betas: null };
+  if (n - p < 3) return none;
+  const xtx = Array.from({ length: p }, (_, i) => Array.from({ length: p }, (_, j) => rows.reduce((sum, row) => sum + row.x[i]! * row.x[j]!, 0)));
+  const xty = Array.from({ length: p }, (_, i) => rows.reduce((sum, row) => sum + row.x[i]! * row.y, 0));
+  const coefficients = solveLinear(xtx, xty);
+  const inverse = invert(xtx);
+  if (coefficients === null || inverse === null) return none;
+  const residuals = rows.map((row) => row.y - row.x.reduce((sum, value, k) => sum + value * coefficients[k]!, 0));
+  const rss = residuals.reduce((sum, value) => sum + value * value, 0);
+  const tss = rows.reduce((sum, row) => sum + row.y * row.y, 0);
+  const iidVariance = (rss / (n - p)) * inverse[0]![0]!;
+  // Newey–West meat: Σ e_t² x_t x_tᵀ + Σ_l w_l Σ_t e_t e_{t−l} (x_t x_{t−l}ᵀ + x_{t−l} x_tᵀ).
+  const effectiveLag = Math.min(lag, n - 1);
+  const meat = Array.from({ length: p }, () => new Array<number>(p).fill(0));
+  for (let t = 0; t < n; t += 1) {
+    for (let i = 0; i < p; i += 1) for (let j = 0; j < p; j += 1) meat[i]![j]! += residuals[t]! ** 2 * rows[t]!.x[i]! * rows[t]!.x[j]!;
+  }
+  for (let l = 1; l <= effectiveLag; l += 1) {
+    const weight = 1 - l / (effectiveLag + 1);
+    for (let t = l; t < n; t += 1) {
+      const product = residuals[t]! * residuals[t - l]!;
+      for (let i = 0; i < p; i += 1) {
+        for (let j = 0; j < p; j += 1) meat[i]![j]! += weight * product * (rows[t]!.x[i]! * rows[t - l]!.x[j]! + rows[t - l]!.x[i]! * rows[t]!.x[j]!);
+      }
+    }
+  }
+  let hacVariance = 0;
+  for (let i = 0; i < p; i += 1) for (let j = 0; j < p; j += 1) hacVariance += inverse[0]![i]! * meat[i]![j]! * inverse[j]![0]!;
+  const iidStandardError = Math.sqrt(Math.max(0, iidVariance));
+  const hacStandardError = Math.sqrt(Math.max(0, hacVariance));
+  const standardError = Math.max(iidStandardError, hacStandardError);
+  const alpha = coefficients[0]!;
+  // Nothing left to explain (an exact copy): α is not testable, never "infinitely significant".
+  const explained = rss <= 1e-18 * Math.max(tss, 1e-300);
+  return {
+    months: n,
+    informativeMonths,
+    meanDifference: alpha,
+    standardError,
+    iidStandardError,
+    hacStandardError,
+    lag: effectiveLag,
+    tStat: explained || standardError <= 1e-15 ? null : alpha / standardError,
+    criticalT: studentT975(n - p),
+    naiveTStat: explained || iidStandardError <= 1e-15 ? null : alpha / iidStandardError,
+    betas: coefficients.slice(1)
+  };
+}

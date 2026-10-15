@@ -61,7 +61,19 @@ export type GateId =
   | "SUCCESSOR_CONSISTENCY"
   | "SUCCESSOR_SIGNIFICANCE"
   | "SUCCESSOR_NO_DETERIORATION"
-  | "SUCCESSOR_HOLDOUT_GUARD";
+  | "SUCCESSOR_HOLDOUT_GUARD"
+  // Gates v3 (lineage and diversification, gates-v3.ts); v1 and v2 never produce these.
+  | "LINEAGE_BUDGET"
+  | "LINEAGE_DECISION"
+  | "VALUE_RISK_ADJUSTED"
+  | "VALUE_CONSISTENCY"
+  | "VALUE_SIGNIFICANCE"
+  | "VALUE_NO_MATERIAL_DETERIORATION"
+  | "DIVERSIFICATION_INDEPENDENCE"
+  | "DIVERSIFICATION_PORTFOLIO_GAIN"
+  | "DIVERSIFICATION_SIGNIFICANCE"
+  | "LINEAGE_HOLDOUT_GUARD"
+  | "PORTFOLIO_HOLDOUT_GUARD";
 
 export type GateStage = "SCREENING" | "FINAL";
 
@@ -69,11 +81,21 @@ export interface GateResult {
   readonly gate: GateId;
   readonly stage: GateStage;
   readonly passed: boolean;
+  /**
+   * Gates v3: an explanatory sub-check of an alternative path whose verdict is
+   * carried by a decision gate. Never blocks on its own; v1 and v2 never set it.
+   */
+  readonly informational?: boolean;
   readonly reasonCode: string;
   /** German, concrete, shown in the dashboard. */
   readonly message: string;
   readonly actual: string | null;
   readonly limit: string | null;
+}
+
+/** A gate that decides: failed and not merely informational. */
+export function isBlockingFailure(gate: GateResult): boolean {
+  return !gate.passed && gate.informational !== true;
 }
 
 /** German decimal comma: the messages are shown verbatim in the German dashboard and reports. */

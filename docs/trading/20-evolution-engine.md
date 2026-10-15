@@ -9,9 +9,11 @@ robustesten zur Prüfung vor. Trading Engine, Risk Engine und Arena bleiben
 die unabhängigen Instanzen für Ausführung und Leistungsbewertung.
 
 Entscheidungen: [ADR 0016](decisions/0016-evolution-engine-isolated-research.md),
-[ADR 0017](decisions/0017-evolution-gates-v2-successor-rule.md) (Gates v2) ·
+[ADR 0017](decisions/0017-evolution-gates-v2-successor-rule.md) (Gates v2),
+[ADR 0018](decisions/0018-evolution-gates-v3-lineage-rule.md) (Gates v3) ·
 Vorregistrierungen: [v1](research/2026-10-15-evolution-v1-preregistration.md),
-[Gates v2](research/2026-10-15-evolution-gates-v2-preregistration.md)
+[Gates v2](research/2026-10-15-evolution-gates-v2-preregistration.md),
+[Gates v3](research/2026-10-15-evolution-gates-v3-preregistration.md)
 
 ## Bausteine
 
@@ -71,11 +73,15 @@ Challenger, ihre Spezifikations-Hashes und Golden Fixtures sind unverändert.
 |---|---|---|
 | `evolution-gates-v1` | 2026-10-15 (`efe4df8`) | Screening- und Finalprüfungen; jede Fast-Kopie einer bestehenden Strategie ist redundant |
 | `evolution-gates-v2` | 2026-10-15 | v1 mit identischen Schwellen plus Nachfolger-Regel: eine Fast-Kopie nur der eigenen Wurzel muss diese deutlich, in beiden Zeiträumen, gepaart signifikant (Newey–West, Student-t, Mehrfachtest) und ohne Verschlechterung übertreffen; höchstens 8 Versuche je Wurzel und Monat, ein Nachfolger-Finalist je Durchlauf |
+| `evolution-gates-v3` | 2026-10-15 | v1 mit identischen Schwellen plus Linien- und Diversifikationsregel, ohne Korrelations-Schalter. Jeder Kandidat muss entweder Wurzel, Eltern und besten Familienvertreter je einzeln deutlich, in beiden Zeiträumen und gepaart signifikant übertreffen, ohne wesentliche Verschlechterung (Profit Factor, Drawdown, Kosten, Phasen, Kapitalbindung, Validierung, Stichprobe). Oder er ist echt eigenständig (Korrelation ≤ 0,5, ≤ 50 % bespielte Einstiege, Portfolio in beiden Zeiträumen besser, signifikantes α gegenüber jeder bestehenden Strategie). Höchstens 10 Validierungsprüfungen je Familie und Monat, ein Finalist je Familie und Durchlauf |
 
-Neue Durchläufe verwenden v2 (`EVOLUTION_GATES_VERSION`, Standard `v2`; `v1`
-bleibt für Reproduktionen wählbar). Beide Versionen sind per Hash
-festgenagelt; das Manifest jedes Durchlaufs enthält `gatesVersion` und
-`gatesHash`. Entscheidungen werden nie rückwirkend neu bewertet, und ein
+Neue Durchläufe verwenden v3 (`EVOLUTION_GATES_VERSION`, Standard `v3`; `v1`
+und `v2` bleiben für Reproduktionen wählbar). Alle Versionen sind per Hash
+festgenagelt (v3 einschließlich der Methodenkennungen); das Manifest jedes
+Durchlaufs enthält `gatesVersion` und `gatesHash`. Ein vom Betreiber
+abgelehnter Kandidat ist keine zulässige Elternstrategie mehr; freigegebene
+Kandidaten werden unter v3 Referenz ihrer Familie und Teil des
+Vergleichsportfolios. Entscheidungen werden nie rückwirkend neu bewertet, und ein
 bereits als Kandidat oder Nachbarvariante geprüftes Genom wird als Duplikat
 verworfen.
 

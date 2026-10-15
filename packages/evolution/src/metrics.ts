@@ -392,3 +392,51 @@ export function foldStability(folds: readonly FoldMetrics[], minTrades = 2): Fol
     worstFold: worst
   };
 }
+
+export interface CurveStats {
+  readonly netReturnPct: number | null;
+  readonly maxDrawdownPct: number | null;
+  readonly sharpe: number | null;
+}
+
+/** Return, drawdown and Sharpe of any equity curve inside [from, to] (portfolio comparisons, gates v3). */
+export function curveStats(curve: readonly DailyEquityPoint[], from: string, to: string): CurveStats {
+  const fromDay = from.slice(0, 10);
+  const toDay = to.slice(0, 10);
+  const sorted = [...curve].sort((a, b) => (a.day < b.day ? -1 : 1));
+  const before = [...sorted].reverse().find((point) => point.day < fromDay);
+  const inside = sorted.filter((point) => point.day >= fromDay && point.day <= toDay);
+  const window = before === undefined ? inside : [before, ...inside];
+  const start = window[0]?.equity ?? null;
+  const end = window.at(-1)?.equity ?? null;
+  return {
+    netReturnPct: start !== null && end !== null && start > 0 ? nullable((end / start - 1) * 100) : null,
+    maxDrawdownPct: nullable(maxDrawdownPct(window)),
+    sharpe: nullable(sharpe(dailyReturns(window).map((entry) => entry.value)), 4)
+  };
+}
+
+/**
+ * Share of the candidate's trades that act on an opportunity a reference
+ * strategy already acts on (gates v3, diversification path): same symbol and
+ * either the reference decided to enter within ±`windowHours`, or it already
+ * held a position at the candidate's decision. A parameter variant that only
+ * changes exits or holding time keeps entering where its parent is (or just
+ * was) in the market — a low daily-return correlation cannot hide that.
+ * Null without trades.
+ */
+export function signalOverlap(candidate: readonly CompactTrade[], reference: readonly CompactTrade[], windowHours: number): number | null {
+  if (candidate.length === 0) return null;
+  const window = windowHours * 3_600_000;
+  const bySymbol = new Map<string, { anchor: number; opened: number; closed: number }[]>();
+  for (const trade of reference) {
+    const list = bySymbol.get(trade.symbol) ?? [];
+    list.push({ anchor: Date.parse(trade.anchorAt), opened: Date.parse(trade.openedAt), closed: Date.parse(trade.closedAt) });
+    bySymbol.set(trade.symbol, list);
+  }
+  const shared = candidate.filter((trade) => {
+    const at = Date.parse(trade.anchorAt);
+    return (bySymbol.get(trade.symbol) ?? []).some((other) => Math.abs(other.anchor - at) <= window || (other.opened <= at && at <= other.closed));
+  }).length;
+  return round(shared / candidate.length, 4);
+}

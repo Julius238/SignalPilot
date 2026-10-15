@@ -70,13 +70,22 @@ interface GateDto {
   gate: string;
   stage: string;
   passed: boolean;
+  /** Gates v3: sub-check of the path that did not carry the decision — shown, never blocking. */
+  informational: boolean;
   reasonCode: string;
   message: string;
 }
 
 const gatesOf = (value: unknown): GateDto[] =>
   Array.isArray(value)
-    ? value.map((gate: Json) => ({ gate: String(gate.gate), stage: String(gate.stage), passed: gate.passed === true, reasonCode: String(gate.reasonCode), message: String(gate.message) }))
+    ? value.map((gate: Json) => ({
+        gate: String(gate.gate),
+        stage: String(gate.stage),
+        passed: gate.passed === true,
+        informational: gate.informational === true,
+        reasonCode: String(gate.reasonCode),
+        message: String(gate.message)
+      }))
     : [];
 
 function isMissingTable(error: unknown): boolean {
@@ -158,9 +167,12 @@ async function buildOverview(db: PrismaClient, now: Date) {
             },
       successorOf: ((m.successor as { rootKey?: string } | null | undefined)?.rootKey ?? null)?.replace(/^ROOT:/, "") ?? null,
       gateVersion: (m.gateVersion as string | undefined) ?? null,
-      gatesPassed: gates.filter((gate) => gate.passed).length,
-      gatesTotal: gates.length,
-      failedGates: gates.filter((gate) => !gate.passed)
+      // Gates v3: the path that carried the decision (VALUE / DIVERSIFICATION), null when neither held.
+      lineageChecked: m.lineage !== undefined && m.lineage !== null,
+      lineagePath: ((m.lineage as { path?: string | null } | null | undefined)?.path ?? null) as string | null,
+      gatesPassed: gates.filter((gate) => gate.passed && !gate.informational).length,
+      gatesTotal: gates.filter((gate) => !gate.informational).length,
+      failedGates: gates.filter((gate) => !gate.passed && !gate.informational)
     };
   });
 
@@ -300,6 +312,7 @@ export async function getEvolutionCandidate(db: PrismaClient, key: string) {
       correlations: m.correlations ?? [],
       walkForward: m.walkForward ?? null,
       successor: m.successor ?? null,
+      lineageCheck: m.lineage ?? null,
       // Candidates of v1 runs carry no version of their own; their run's manifest does.
       gateVersion: (m.gateVersion as string | undefined) ?? ((candidate.run.dataManifestJson as Json | null)?.gatesVersion as string | undefined) ?? null,
       neighbours: Array.isArray(m.neighbours) ? (m.neighbours as { key: string; inSample: unknown }[]).map((entry) => ({ key: entry.key, inSample: metrics(entry.inSample) })) : [],

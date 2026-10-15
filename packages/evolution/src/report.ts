@@ -8,6 +8,7 @@
 
 import type { EvidenceGrade, GateResult, ResearchScore } from "./gates.js";
 import type { ParameterDiff } from "./genome.js";
+import type { LineageAssessment } from "./gates-v3.js";
 import type { FoldMetrics, WindowMetrics } from "./metrics.js";
 import type { PairedMonthlyTest } from "./paired.js";
 import type { WalkForwardResult } from "./walk-forward.js";
@@ -80,6 +81,8 @@ export function renderCandidateReport(input: {
     readonly threshold: number;
     readonly trials: number;
   } | null;
+  /** Gates v3: lineage and diversification assessment. */
+  readonly lineageCheck?: LineageAssessment | null;
   readonly gateVersion?: string;
 }): string {
   const lines: string[] = [];
@@ -135,9 +138,36 @@ export function renderCandidateReport(input: {
       ""
     );
   }
+  if (input.lineageCheck) {
+    const l = input.lineageCheck;
+    const roles: Record<string, string> = { ROOT: "Wurzel", PARENT: "Eltern", FAMILY_BEST: "bester Familienvertreter" };
+    lines.push(
+      "## Linienprüfung (Gates v3)",
+      "",
+      l.path === "VALUE"
+        ? "Bestanden als **Mehrwert gegenüber der eigenen Linie** — unabhängig von der Korrelation geprüft."
+        : l.path === "DIVERSIFICATION"
+          ? "Bestanden als **eigenständige Diversifikation**: schwächer als die eigene Linie, verbessert aber das Portfolio nachweisbar."
+          : "**Weder Mehrwert gegenüber der eigenen Linie noch echte Diversifikation.**",
+      "",
+      "| Referenz | Rolle | Sharpe Referenz | Sharpe Kandidat | Δ | Δ Entdeckung / Validierung | gepaart t (Schwelle) | wesentlich schlechter in |",
+      "|---|---|---:|---:|---:|---|---|---|",
+      ...l.references.map(
+        (entry) =>
+          `| ${entry.key.replace(/^ROOT:/, "")} | ${entry.roles.map((role) => roles[role] ?? role).join(", ")} | ${n(entry.referenceSharpe)} | ${n(entry.candidateSharpe)} | ${n(entry.sharpeDelta)} | ${n(entry.discoverySharpeDelta)} / ${n(entry.validationSharpeDelta)} | ${n(entry.pairedT)} (${n(entry.threshold)}) | ${entry.deteriorations.join(", ").replace(/\|/g, "/") || "–"} |`
+      ),
+      "",
+      `Unabhängigkeit: ${l.existing.map((entry) => `${entry.key.replace(/^ROOT:/, "")} Korrelation ${n(entry.correlation)}, gemeinsame Einstiege ${entry.signalOverlap === null ? "–" : pct(entry.signalOverlap * 100, 0)}`).join("; ") || "–"}.`,
+      "",
+      `Portfolio ${l.portfolio.members.map((key) => key.replace(/^ROOT:/, "")).join(" + ") || "–"}: Sharpe mit Kandidat ${n(l.portfolio.sharpeWith)} gegenüber ${n(l.portfolio.sharpeWithout)} (Δ ${n(l.portfolio.sharpeDelta)}; Entdeckung ${n(l.portfolio.discoverySharpeDelta)}, Validierung ${n(l.portfolio.validationSharpeDelta)}), max. Drawdown ${n(l.portfolio.drawdownWith)} % gegenüber ${n(l.portfolio.drawdownWithout)} %; α gegenüber den bestehenden Strategien t = ${n(l.portfolio.alphaT)} (Schwelle ${n(l.portfolio.alphaThreshold)}, β ${(l.portfolio.betas ?? []).map((value) => n(value)).join("/") || "–"}, ${l.portfolio.months} Monate).`,
+      "",
+      `Mehrfachtest-Zähler N = ${l.trials}; Prüfung ${l.screeningsThisMonth} dieser Familie im laufenden Monat.`,
+      ""
+    );
+  }
   if (input.gateVersion) lines.push(`Entschieden nach ${input.gateVersion}.`, "");
   lines.push("## Prüfungen", "", "| Prüfung | Stufe | Ergebnis | Begründung |", "|---|---|---|---|");
-  for (const gate of input.gates) lines.push(`| ${gate.gate} | ${gate.stage} | ${gate.passed ? "bestanden" : "**nicht bestanden**"} | ${gate.message.replace(/\|/g, "/")} |`);
+  for (const gate of input.gates) lines.push(`| ${gate.gate} | ${gate.stage} | ${gate.passed ? "bestanden" : gate.informational === true ? "nicht bestanden (informativ)" : "**nicht bestanden**"} | ${gate.message.replace(/\|/g, "/")} |`);
   lines.push("");
   if (input.score !== null) lines.push(`Forschungs-Score: **${n(input.score.score, 1)}** / 100 (neutral 50, Komplexitätsabzug ${n(input.score.complexityPenalty, 0)}).`, "");
   if (input.evidence !== null) {

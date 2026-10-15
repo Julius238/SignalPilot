@@ -14,7 +14,7 @@
  * arena (docs/trading/20-evolution-engine.md, "Freigabe").
  */
 
-import type { GateResult } from "./gates.js";
+import { isBlockingFailure, type GateResult } from "./gates.js";
 
 export type CandidateStatus =
   | "GENERATED"
@@ -32,22 +32,25 @@ export const OPERATOR_DECISIONS = Object.freeze({
   REJECT: "REJECTED_BY_OPERATOR"
 } as const);
 
+/** Blocking failures only: informational sub-checks (gates v3) never decide on their own. */
 export function failedGates(results: readonly GateResult[]): GateResult[] {
-  return results.filter((result) => !result.passed);
+  return results.filter(isBlockingFailure);
 }
 
 /**
  * Candidates that passed screening, best research score first; ties broken
  * by key (never by luck). `maxSuccessors` (gates v2) caps how many
- * successor candidates may become finalists in one run.
+ * successor candidates may become finalists in one run; `maxPerGroup`
+ * (gates v3) caps the finalists of one family.
  */
 export function selectFinalists(
-  entries: readonly { readonly key: string; readonly score: number; readonly passedScreening: boolean; readonly successor?: boolean }[],
+  entries: readonly { readonly key: string; readonly score: number; readonly passedScreening: boolean; readonly successor?: boolean; readonly group?: string }[],
   maxFinalists: number,
-  options: { readonly maxSuccessors?: number } = {}
+  options: { readonly maxSuccessors?: number; readonly maxPerGroup?: number } = {}
 ): string[] {
   const selected: string[] = [];
   let successors = 0;
+  const perGroup = new Map<string, number>();
   for (const entry of entries
     .filter((candidate) => candidate.passedScreening)
     .sort((a, b) => (b.score !== a.score ? b.score - a.score : a.key.localeCompare(b.key)))) {
@@ -55,6 +58,11 @@ export function selectFinalists(
     if (entry.successor === true) {
       if (options.maxSuccessors !== undefined && successors >= options.maxSuccessors) continue;
       successors += 1;
+    }
+    if (options.maxPerGroup !== undefined && entry.group !== undefined) {
+      const used = perGroup.get(entry.group) ?? 0;
+      if (used >= options.maxPerGroup) continue;
+      perGroup.set(entry.group, used + 1);
     }
     selected.push(entry.key);
   }

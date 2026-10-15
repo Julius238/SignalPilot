@@ -5,7 +5,22 @@ import { EmptyState, ErrorState } from "../../../../../components/empty-state";
 import { MetricCard, PageHeader, PageIntro, SectionCard, TechnicalDetails } from "../../../../../components/ui";
 import { TradingDisabled } from "../../../../../components/trading/trading-disabled";
 import { fetchEvolutionCandidate, type EvolutionCandidateDetail, type EvolutionMetrics } from "../../../../../lib/evolution-api";
-import { EVIDENCE_LABEL, FAMILY_LABEL, GATE_LABEL, GATES_VERSION_LABEL, PROVIDER_LABEL, WINDOW_LABEL, candidateStatus, fmt, fmtPct, fmtR, fmtSigned, toneOf } from "../../../../../lib/evolution-labels";
+import {
+  EVIDENCE_LABEL,
+  FAMILY_LABEL,
+  GATE_LABEL,
+  GATES_VERSION_LABEL,
+  LINEAGE_PATH_LABEL,
+  LINEAGE_ROLE_LABEL,
+  PROVIDER_LABEL,
+  WINDOW_LABEL,
+  candidateStatus,
+  fmt,
+  fmtPct,
+  fmtR,
+  fmtSigned,
+  toneOf
+} from "../../../../../lib/evolution-labels";
 import { TRADING_DASHBOARD_ENABLED } from "../../../../../lib/trading-flag";
 import { formatUtcDateTime, toneColor } from "../../../../../lib/trading-format";
 
@@ -83,7 +98,8 @@ export default async function EvolutionCandidatePage({ params }: { params: Promi
 
 function CandidateBody({ data }: { data: Detail }) {
   const status = candidateStatus(data.status);
-  const failed = data.gates.filter((gate) => !gate.passed);
+  // Informational sub-checks (gates v3) are shown but never count as a failed decision.
+  const failed = data.gates.filter((gate) => !gate.passed && gate.informational !== true);
   const champion = Object.entries(data.benchmarks).find(([benchmark]) => benchmark.includes("TREND_CORE"))?.[1];
   const challenger = Object.entries(data.benchmarks).find(([benchmark]) => benchmark.includes("REGIME_LONG"))?.[1];
   return (
@@ -132,6 +148,66 @@ function CandidateBody({ data }: { data: Detail }) {
               </li>
               <li>
                 Nachfolger-Prüfung {data.successor.screeningsThisMonth} in diesem Monat für diese Wurzel
+              </li>
+            </ul>
+          </SectionCard>
+        </div>
+      ) : null}
+
+      {data.lineageCheck ? (
+        <div style={{ marginBottom: 16 }}>
+          <SectionCard
+            title={`Linienprüfung: ${data.lineageCheck.path ? LINEAGE_PATH_LABEL[data.lineageCheck.path] : "weder Mehrwert noch Diversifikation"}`}
+            subtitle="Gates v3: Vergleich mit Wurzel, Eltern und bestem Familienvertreter — unabhängig von der Korrelation; alternativ echte Diversifikation des Portfolios. Historische Simulation, kein Forward-Nachweis."
+          >
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Referenz</th>
+                    <th>Rolle</th>
+                    <th className="num">Sharpe Referenz</th>
+                    <th className="num">Sharpe Kandidat (Δ)</th>
+                    <th className="num">Δ Entdeckung / Validierung</th>
+                    <th className="num">gepaart t (Schwelle)</th>
+                    <th>wesentlich schlechter in</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.lineageCheck.references.map((reference) => (
+                    <tr key={reference.key}>
+                      <td className="nowrap">{reference.key.replace(/^ROOT:/, "")}</td>
+                      <td>{reference.roles.map((role) => LINEAGE_ROLE_LABEL[role] ?? role).join(", ")}</td>
+                      <td className="num">{fmt(reference.referenceSharpe)}</td>
+                      <td className="num">
+                        {fmt(reference.candidateSharpe)} ({fmtSigned(reference.sharpeDelta)})
+                      </td>
+                      <td className="num">
+                        {fmtSigned(reference.discoverySharpeDelta)} / {fmtSigned(reference.validationSharpeDelta)}
+                      </td>
+                      <td className="num">
+                        {fmt(reference.pairedT)} ({fmt(reference.threshold)})
+                      </td>
+                      <td>{reference.deteriorations.length === 0 ? "—" : reference.deteriorations.join(", ")}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <ul className="small" style={{ marginTop: 8 }}>
+              <li>
+                Eigenständigkeit:{" "}
+                {data.lineageCheck.existing
+                  .map((entry) => `${entry.key.replace(/^ROOT:/, "")} Korrelation ${fmt(entry.correlation)}, gemeinsame Einstiege ${entry.signalOverlap === null ? "—" : `${Math.round(entry.signalOverlap * 100)} %`}`)
+                  .join(" · ")}
+              </li>
+              <li>
+                Portfolio {data.lineageCheck.portfolio.members.map((key) => key.replace(/^ROOT:/, "")).join(" + ")}: Sharpe mit Kandidat {fmt(data.lineageCheck.portfolio.sharpeWith)} gegenüber{" "}
+                {fmt(data.lineageCheck.portfolio.sharpeWithout)} (Δ {fmtSigned(data.lineageCheck.portfolio.sharpeDelta)}), α gegenüber dem Portfolio t = {fmt(data.lineageCheck.portfolio.alphaT)} (Schwelle{" "}
+                {fmt(data.lineageCheck.portfolio.alphaThreshold)})
+              </li>
+              <li>
+                Mehrfachtest-Zähler N = {data.lineageCheck.trials} · Prüfung {data.lineageCheck.screeningsThisMonth} dieser Familie im laufenden Monat
               </li>
             </ul>
           </SectionCard>
@@ -189,14 +265,19 @@ function CandidateBody({ data }: { data: Detail }) {
             </table>
           </div>
         </SectionCard>
-        <SectionCard title="Prüfungen" subtitle={`${data.gates.filter((gate) => gate.passed).length} von ${data.gates.length} bestanden`}>
+        <SectionCard
+          title="Prüfungen"
+          subtitle={`${data.gates.filter((gate) => gate.passed && gate.informational !== true).length} von ${data.gates.filter((gate) => gate.informational !== true).length} entscheidenden bestanden`}
+        >
           {data.gates.length === 0 ? (
             <EmptyState title="Keine Prüfung erreicht." description={data.statusReasons.join(" · ")} />
           ) : (
             <ul className="small">
               {data.gates.map((gate) => (
                 <li key={`${gate.stage}-${gate.gate}`} style={{ marginBottom: 6 }}>
-                  <span className={`badge ${gate.passed ? "trading-good" : "trading-bad"}`}>{gate.passed ? "bestanden" : "nicht bestanden"}</span>{" "}
+                  <span className={`badge ${gate.passed ? "trading-good" : gate.informational === true ? "trading-neutral" : "trading-bad"}`}>
+                    {gate.passed ? "bestanden" : gate.informational === true ? "nicht bestanden (informativ)" : "nicht bestanden"}
+                  </span>{" "}
                   <strong>{GATE_LABEL[gate.gate] ?? gate.gate}</strong> <span className="muted">({gate.stage === "FINAL" ? "Finale" : "Screening"})</span> — {gate.message}
                 </li>
               ))}

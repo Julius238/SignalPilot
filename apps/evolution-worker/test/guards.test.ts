@@ -25,8 +25,9 @@ describe("configuration", () => {
     assert.equal(config.runBudgetUsd, 1);
     assert.deepEqual(config.models, { STANDARD: "claude-haiku-5-5", ADVANCED: "claude-opus-5-5" });
     assert.equal(config.backtestConcurrency, 1);
-    assert.equal(config.gatesVersion, "v2", "new candidates are decided by the pre-registered gates v2");
+    assert.equal(config.gatesVersion, "v3", "new candidates are decided by the pre-registered gates v3");
     assert.equal(loadEvolutionConfig({ EVOLUTION_GATES_VERSION: "v1" }).gatesVersion, "v1");
+    assert.equal(loadEvolutionConfig({ EVOLUTION_GATES_VERSION: "v2" }).gatesVersion, "v2");
   });
 
   it("fails closed", () => {
@@ -38,7 +39,7 @@ describe("configuration", () => {
       { EVOLUTION_AI_RUN_BUDGET_USD: "30" },
       { EVOLUTION_MAX_CONCURRENT_RUNS: "2" },
       { EVOLUTION_ENABLED: "yes" },
-      { EVOLUTION_GATES_VERSION: "v3" }
+      { EVOLUTION_GATES_VERSION: "v4" }
     ]) {
       assert.throws(() => loadEvolutionConfig(env), EvolutionConfigError, JSON.stringify(env));
     }

@@ -24,7 +24,7 @@ import { InProcessBacktestRunner } from "../src/backtest/pool.js";
 import { runResearchCycle, type CycleDeps } from "../src/cycle/researchCycle.js";
 import { setAgentStatus } from "../src/persistence/agentState.js";
 import { verifyEvolutionAuditChain } from "../src/persistence/audit.js";
-import { DB_SKIP_REASON, PERMISSIVE_GATES, PERMISSIVE_GATES_V2, SYNTHETIC_SPLIT, resetEvolutionTables, silentLog, syntheticMarket, testConfig, testDatabase } from "./support.js";
+import { DB_SKIP_REASON, PERMISSIVE_GATES, PERMISSIVE_GATES_V2, PERMISSIVE_GATES_V3, SYNTHETIC_SPLIT, resetEvolutionTables, silentLog, syntheticMarket, testConfig, testDatabase } from "./support.js";
 
 const db = testDatabase();
 
@@ -191,6 +191,100 @@ describe("research cycle end to end", { skip: db === null ? DB_SKIP_REASON : fal
       }
     }
     assert.ok(routed >= 1, "the mock's one-step regime refinements are near-copies of the challenger");
+  });
+
+  it("gates v3 measures every candidate against its lineage, includes approved strategies and never re-decides earlier candidates", async () => {
+    // An operator-approved candidate becomes an existing strategy: a lineage reference and a portfolio member.
+    const proposed = await db!.evolutionCandidate.findFirst({ where: { status: "PROPOSED" }, orderBy: { candidateKey: "asc" } });
+    if (proposed !== null) {
+      await db!.evolutionCandidate.update({ where: { id: proposed.id }, data: { status: "APPROVED_FOR_FORWARD_TEST", decidedBy: "test", decidedAt: new Date(clock), version: { increment: 1 } } });
+    }
+    const snapshot = async () =>
+      (await db!.evolutionCandidate.findMany({ orderBy: { candidateKey: "asc" } })).map((row) => ({
+        key: row.candidateKey,
+        status: row.status,
+        reasons: row.statusReasons,
+        gates: row.gatesJson,
+        metrics: row.metricsJson,
+        version: row.version
+      }));
+    const before = await snapshot();
+    const outcome = await runResearchCycle({ ...deps(), gates: PERMISSIVE_GATES_V3 }, { trigger: "MANUAL" });
+    assert.equal(outcome.status, "COMPLETED", outcome.reason ?? "");
+    const after = await snapshot();
+    assert.ok(after.length > before.length, "the v3 cycle added candidates");
+    for (const earlier of before) {
+      assert.deepEqual(after.find((row) => row.key === earlier.key), earlier, `earlier decision of ${earlier.key} is never re-evaluated`);
+    }
+
+    const run = await db!.evolutionRun.findFirstOrThrow({ orderBy: { startedAt: "desc" }, include: { candidates: true } });
+    assert.equal((run.dataManifestJson as { gatesVersion: string }).gatesVersion, "evolution-gates-test-v3");
+    let screened = 0;
+    for (const candidate of run.candidates.filter((entry) => entry.gatesJson !== null)) {
+      screened += 1;
+      const gates = candidate.gatesJson as { gate: string; reasonCode: string; passed: boolean; informational?: boolean }[];
+      const metrics = candidate.metricsJson as { lineage: { path: string | null; references: { key: string; roles: string[] }[]; existing: { key: string }[]; portfolio: { members: string[] } } | null };
+      assert.ok(metrics.lineage !== null, candidate.candidateKey);
+      const ids = gates.map((gate) => gate.gate);
+      for (const id of ["LINEAGE_BUDGET", "VALUE_RISK_ADJUSTED", "VALUE_CONSISTENCY", "VALUE_SIGNIFICANCE", "VALUE_NO_MATERIAL_DETERIORATION", "DIVERSIFICATION_INDEPENDENCE", "DIVERSIFICATION_PORTFOLIO_GAIN", "DIVERSIFICATION_SIGNIFICANCE", "LINEAGE_DECISION"]) {
+        assert.ok(ids.includes(id), `${candidate.candidateKey} misses ${id}`);
+      }
+      assert.equal(ids.some((id) => id.startsWith("SUCCESSOR_")), false, "v3 never routes by correlation");
+      assert.notEqual(gates.find((gate) => gate.gate === "REDUNDANCY")!.reasonCode, "ROUTED_TO_SUCCESSOR_CHECK");
+      // Every candidate is compared with its own root, whatever its correlation.
+      const root = metrics.lineage!.references.find((reference) => reference.key === `ROOT:${candidate.rootStrategyKey}`);
+      assert.ok(root !== undefined && root.roles.includes("ROOT"), candidate.candidateKey);
+      if (candidate.parentKey.startsWith("EVO-")) {
+        assert.ok(metrics.lineage!.references.some((reference) => reference.key === candidate.parentKey && reference.roles.includes("PARENT")));
+      }
+      if (proposed !== null) {
+        assert.ok(metrics.lineage!.existing.some((entry) => entry.key === proposed.candidateKey), "approved candidates are existing strategies");
+        assert.ok(metrics.lineage!.portfolio.members.includes(proposed.candidateKey));
+      }
+      // The compressed synthetic split has 4 months: neither paired test may decide on that.
+      assert.equal(metrics.lineage!.path, null);
+      assert.equal(candidate.status, "REJECTED");
+      assert.ok(candidate.statusReasons.includes("NO_VALUE_NO_DIVERSIFICATION"));
+      assert.ok(gates.filter((gate) => !gate.passed && gate.gate !== "LINEAGE_DECISION" && gate.gate !== "LINEAGE_BUDGET").every((gate) => gate.informational === true));
+      assert.ok(candidate.reportMarkdown!.includes("Linienprüfung (Gates v3)"));
+    }
+    assert.ok(screened >= 1);
+  });
+
+  it("gates v3 does not test hypotheses of a family whose monthly validation budget is used up", async () => {
+    const exhausted = { ...PERMISSIVE_GATES_V3, lineage: { ...PERMISSIVE_GATES_V3.lineage, maxScreeningsPerFamilyPerMonth: 0 } };
+    const scripted: ResearchAiProvider = {
+      name: "mock",
+      billable: false,
+      async complete(request: AiRequest) {
+        if (request.task !== "HYPOTHESIS_GENERATION") return new MockResearchProvider().complete(request);
+        assert.match(request.prompt, /REGIME_LONG 0/, "the AI is told that nothing is left this month");
+        const json = {
+          summary: "scripted",
+          hypotheses: [
+            {
+              title: "Längerer Zeit-Backstop über dem Limit",
+              marketObservation: "Test",
+              rationale: "Test",
+              family: "REGIME_LONG",
+              parentKey: "ROOT:CRYPTO_REGIME_LONG_V1",
+              changes: [{ parameter: "maxHoldHours", value: "1200" }],
+              expectedEffect: "Test",
+              falsificationCriterion: "Test"
+            }
+          ]
+        };
+        const usage = { inputTokens: 1, outputTokens: 1, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 };
+        return { servedModel: request.model, text: JSON.stringify(json), json, usage, usageByModel: [{ model: request.model, usage }], stopReason: "end_turn", requestId: null, attempts: 1 };
+      }
+    };
+    const exposures = await db!.evolutionDataExposure.count({ where: { windowKey: "VALIDATION", purpose: "SELECTION" } });
+    const outcome = await runResearchCycle({ ...deps(), provider: scripted, gates: exhausted }, { trigger: "MANUAL" });
+    assert.equal(outcome.status, "COMPLETED", outcome.reason ?? "");
+    assert.equal(outcome.candidates.length, 0);
+    const hypothesis = await db!.evolutionHypothesis.findFirstOrThrow({ where: { title: "Längerer Zeit-Backstop über dem Limit" } });
+    assert.equal(hypothesis.outcome, "LINEAGE_BUDGET_EXHAUSTED");
+    assert.equal(await db!.evolutionDataExposure.count({ where: { windowKey: "VALIDATION", purpose: "SELECTION" } }), exposures, "no validation data was used");
   });
 
   it("refuses a hypothesis whose genome was already evaluated as a neighbour variant", async () => {

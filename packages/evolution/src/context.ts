@@ -45,6 +45,8 @@ export interface HistoryEntry {
   /** Reason codes of failed SCREENING gates only. */
   readonly failedGates: readonly string[];
   readonly discovery: DiscoverySnapshot | null;
+  /** The operator's decision on a proposed candidate; an operator-rejected candidate is no parent. */
+  readonly operatorDecision?: "APPROVED_FOR_FORWARD_TEST" | "REJECTED_BY_OPERATOR";
 }
 
 export interface ResearchContext {
@@ -70,7 +72,7 @@ export interface ResearchContext {
   readonly request: { readonly hypotheses: number; readonly maxChangesPerHypothesis: number };
 }
 
-export const RESEARCH_CONTEXT_VERSION = "evolution-context-v1";
+export const RESEARCH_CONTEXT_VERSION = "evolution-context-v2";
 
 export function discoverySnapshot(metrics: WindowMetrics): DiscoverySnapshot {
   return {
@@ -102,6 +104,8 @@ export function buildResearchContext(input: {
   readonly maxChangesPerHypothesis?: number;
   /** Gates v2: refinements of the own root are allowed under the successor rule. */
   readonly successorRule?: boolean;
+  /** Gates v3: every candidate is measured against its lineage; remaining screenings per family this month. */
+  readonly lineageRule?: { readonly remainingScreenings: Readonly<Record<string, number>> };
 }): ResearchContext {
   return {
     contextVersion: RESEARCH_CONTEXT_VERSION,
@@ -118,6 +122,15 @@ export function buildResearchContext(input: {
       ...(input.successorRule === true
         ? [
             "Verfeinerungen der eigenen Wurzel (fast gleiche Tagesrenditen) sind zulässig, werden aber nur akzeptiert, wenn sie die Wurzel risikobereinigt deutlich, in beiden Zeiträumen und statistisch belastbar übertreffen, ohne irgendwo schlechter zu werden; die Zahl solcher Versuche je Wurzel ist monatlich begrenzt. Kleine Kosmetik an einer Wurzel scheitert."
+          ]
+        : []),
+      ...(input.lineageRule !== undefined
+        ? [
+            "Jeder Kandidat wird unabhängig von seiner Korrelation mit seiner eingefrorenen Wurzel, seiner Elternstrategie und dem besten bestehenden Vertreter seiner Familie verglichen. Er besteht nur, wenn er jede dieser Referenzen risikobereinigt deutlich, in beiden Zeiträumen und statistisch belastbar übertrifft, ohne in Profit Factor, Drawdown, Kosten, Marktphasen, Kapitalbindung oder Validierung wesentlich schlechter zu werden. Eine geringere Korrelation allein hilft nicht.",
+            "Alternativ kann eine wirklich eigenständige Strategie bestehen: Korrelation höchstens 0,5 und höchstens 50 % gemeinsame Einstiege mit jeder bestehenden Strategie, ein Portfolio der bestehenden Strategien wird mit ihr in beiden Zeiträumen besser, und ihr eigener Ertrag gegenüber diesem Portfolio ist statistisch belastbar. Eine Parametervariante mit nur anderen Ausstiegen behält ihre Einstiege und gilt nicht als eigenständig.",
+            `Verbleibende Prüfungen in diesem Monat: ${Object.entries(input.lineageRule.remainingScreenings)
+              .map(([family, remaining]) => `${family} ${remaining}`)
+              .join(", ")}. Hypothesen einer Familie ohne verbleibende Prüfungen werden ohne Test verworfen.`
           ]
         : [])
     ],
@@ -142,7 +155,7 @@ export function buildResearchContext(input: {
     history: input.history,
     allowedParents: [
       ...EVOLUTION_ROOTS.map((root) => root.key),
-      ...input.history.filter((entry) => entry.verdict === "PASSED_SCREENING").map((entry) => entry.candidateKey)
+      ...input.history.filter((entry) => entry.verdict === "PASSED_SCREENING" && entry.operatorDecision !== "REJECTED_BY_OPERATOR").map((entry) => entry.candidateKey)
     ],
     request: { hypotheses: input.hypotheses, maxChangesPerHypothesis: input.maxChangesPerHypothesis ?? 3 }
   };

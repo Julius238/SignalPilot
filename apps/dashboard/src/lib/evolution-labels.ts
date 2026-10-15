@@ -54,12 +54,35 @@ export const GATE_LABEL: Record<string, string> = {
   SUCCESSOR_CONSISTENCY: "Nachfolger: beide Zeiträume",
   SUCCESSOR_SIGNIFICANCE: "Nachfolger: gepaarte Signifikanz",
   SUCCESSOR_NO_DETERIORATION: "Nachfolger: keine Verschlechterung",
-  SUCCESSOR_HOLDOUT_GUARD: "Nachfolger: Holdout-Schutz"
+  SUCCESSOR_HOLDOUT_GUARD: "Nachfolger: Holdout-Schutz",
+  LINEAGE_BUDGET: "Familien-Monatslimit",
+  VALUE_RISK_ADJUSTED: "Linie: deutlich besser",
+  VALUE_CONSISTENCY: "Linie: beide Zeiträume",
+  VALUE_SIGNIFICANCE: "Linie: gepaarte Signifikanz",
+  VALUE_NO_MATERIAL_DETERIORATION: "Linie: keine wesentliche Verschlechterung",
+  DIVERSIFICATION_INDEPENDENCE: "Diversifikation: eigenständig",
+  DIVERSIFICATION_PORTFOLIO_GAIN: "Diversifikation: Portfolio besser",
+  DIVERSIFICATION_SIGNIFICANCE: "Diversifikation: α signifikant",
+  LINEAGE_DECISION: "Mehrwert oder Diversifikation",
+  LINEAGE_HOLDOUT_GUARD: "Linie: Holdout-Schutz",
+  PORTFOLIO_HOLDOUT_GUARD: "Portfolio: Holdout-Schutz"
+};
+
+export const LINEAGE_PATH_LABEL: Record<string, string> = {
+  VALUE: "Mehrwert gegenüber der eigenen Linie",
+  DIVERSIFICATION: "eigenständige Diversifikation"
+};
+
+export const LINEAGE_ROLE_LABEL: Record<string, string> = {
+  ROOT: "Wurzel",
+  PARENT: "Eltern",
+  FAMILY_BEST: "bester Familienvertreter"
 };
 
 export const GATES_VERSION_LABEL: Record<string, string> = {
   "evolution-gates-v1": "Gates v1",
-  "evolution-gates-v2": "Gates v2 (Nachfolger-Regel)"
+  "evolution-gates-v2": "Gates v2 (Nachfolger-Regel)",
+  "evolution-gates-v3": "Gates v3 (Linien- und Diversifikationsregel)"
 };
 
 export const EVIDENCE_LABEL: Record<string, { label: string; tone: Tone }> = {
@@ -72,7 +95,8 @@ export const EVIDENCE_LABEL: Record<string, { label: string; tone: Tone }> = {
 export const HYPOTHESIS_OUTCOME: Record<string, { label: string; tone: Tone }> = {
   ACCEPTED: { label: "Als Kandidat getestet", tone: "trading-good" },
   INVALID: { label: "Ungültig verworfen", tone: "trading-bad" },
-  DUPLICATE: { label: "Bereits getestet", tone: "trading-neutral" }
+  DUPLICATE: { label: "Bereits getestet", tone: "trading-neutral" },
+  LINEAGE_BUDGET_EXHAUSTED: { label: "Familien-Monatslimit erreicht, nicht getestet", tone: "trading-neutral" }
 };
 
 export const RUN_STATUS: Record<string, { label: string; tone: Tone }> = {

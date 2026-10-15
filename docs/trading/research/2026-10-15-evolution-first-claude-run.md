@@ -127,3 +127,29 @@ bestehenden Strategie derselben Familie bei Korrelation > 0,8).
 - Die Zusammenfassung durch Haiku sieht nur Screening-Urteile und nennt
   deshalb einzelne Prüfungen (Kostenstress, Mehrfachtest) als fehlend, die
   die Engine tatsächlich durchführt.
+
+## Nachtrag 2026-10-15: Betreiberentscheidung zu EVO-REG-0004
+
+Der Betreiber hat EVO-REG-0004 am 2026-10-15 um 15:51 UTC **nicht
+freigegeben**. Er ist dokumentiert als **formal bestandener, aber nach
+manueller Prüfung abgelehnter Kandidat**:
+
+- Status `REJECTED_BY_OPERATOR`, entschieden von `julius`, mit Begründung.
+- Audit-Ereignis `CANDIDATE_REJECTED_BY_OPERATOR`.
+
+Die oben stehende Empfehlung („bleibt `PROPOSED`“) beschreibt den Stand vor
+dieser Entscheidung.
+
+Die Ergebnisse wurden nicht verändert: Gate-Ergebnisse (13 von 13 bestanden
+nach Gates v2), Kennzahlen, Forschungs-Score 85,88, Bericht und Durchlauf
+sind byte-identisch. Prüfsummen vor und nach der Entscheidung:
+
+- `gatesJson`: md5 `625070aec21bfdafb2f780185effe74f`
+- `metricsJson`: md5 `47eb093c1db6333c826153d4936f79e7`
+
+Folgen:
+
+- Ein abgelehnter Kandidat ist keine Elternstrategie mehr.
+- Die erkannte Lücke schließt
+  [Gates v3](2026-10-15-evolution-gates-v3-preregistration.md), ohne
+  EVO-REG-0004 rückwirkend neu zu bewerten.

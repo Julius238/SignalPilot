@@ -45,8 +45,17 @@ import {
   evidenceGrade,
   finalGates,
   foldMetrics,
+  curveStats,
+  isBlockingFailure,
   isGatesV2,
+  isGatesV3,
+  lineageHoldoutGate,
+  lineageRedundancyGate,
+  lineageScreeningGates,
   pairedMonthlyTest,
+  portfolioComparison,
+  portfolioCurve,
+  signalOverlap,
   routedRedundancyGate,
   successorHoldoutGate,
   successorRoute,
@@ -75,11 +84,16 @@ import {
   type BacktestSummary,
   type CandidateGenome,
   type CandidateStatus,
+  type CompactTrade,
   type DailyBar,
+  type DailyEquityPoint,
   type EvolutionDataSplit,
   type EvolutionFamily,
   type EvolutionGateSet,
   type GateResult,
+  type LineageAssessment,
+  type LineageReference,
+  type LineageRole,
   type PairedMonthlyTest,
   type ParsedReview,
   type ResearchAiProvider,
@@ -100,6 +114,7 @@ import {
   backtestCacheKey,
   evaluatedConfigurations,
   evaluatedNeighbourGenomeHashes,
+  familyScreeningsThisMonth,
   findCachedBacktest,
   loadHistory,
   nextSequence,
@@ -184,6 +199,24 @@ interface WorkingCandidate {
     trials: number;
     screeningsThisMonth: number;
   } | null;
+  /** Gates v3: screening of this family on validation data this month, this candidate included. */
+  familyScreening: number;
+  /** Gates v3: lineage and diversification assessment, and the lineage references it was measured against. */
+  lineage: LineageAssessment | null;
+  lineageReferenceKeys: string[];
+}
+
+/** An existing strategy the cycle compares with: a frozen root or an operator-approved candidate. */
+interface ExistingStrategy {
+  key: string;
+  family: EvolutionFamily;
+  subject: BacktestSubject;
+  subjectHash: string;
+  backtests: BacktestSummary[];
+  metrics: { discovery: WindowMetrics; validation: WindowMetrics; inSample: WindowMetrics; folds: ReturnType<typeof foldMetrics>; stability: ReturnType<typeof foldStability> };
+  curve: DailyEquityPoint[];
+  startingCash: number;
+  trades: CompactTrade[];
 }
 
 const skipped = (reason: string): CycleOutcome => ({ status: "SKIPPED", reason, runKey: null, candidates: [], aiCostUsd: 0 });
@@ -369,6 +402,52 @@ export async function runResearchCycle(deps: CycleDeps, options: CycleOptions): 
     }
     const champion = EVOLUTION_ROOTS.find((root) => root.role === "CHAMPION")!;
 
+    // Existing strategies: the frozen roots; under gates v3 also every operator-approved
+    // candidate, replayed with the current code as a reference (BENCHMARK, never new evidence).
+    const strategyOf = (key: string, family: EvolutionFamily, subject: BacktestSubject, subjectHash: string, backtests: BacktestSummary[]): ExistingStrategy => ({
+      key,
+      family,
+      subject,
+      subjectHash,
+      backtests,
+      metrics: evaluate(backtests),
+      curve: combined(backtests),
+      startingCash: backtests.reduce((sum, entry) => sum + entry.startingCash, 0),
+      trades: backtests.flatMap((entry) => entry.trades)
+    });
+    const strategies = new Map<string, Promise<ExistingStrategy>>();
+    const referenceStrategy = (key: string, family: EvolutionFamily, subject: BacktestSubject, subjectHash: string): Promise<ExistingStrategy> => {
+      const cached = strategies.get(key);
+      if (cached !== undefined) return cached;
+      const loading = Promise.all(
+        split.symbols.map((symbol) => backtest({ subjectKey: key, subject, subjectHash, symbol, window: "DISCOVERY_VALIDATION", role: "BENCHMARK", candidateId: null }))
+      ).then((results) => {
+        const failed = results.find((result) => !result.ok);
+        if (failed !== undefined && !failed.ok) throw new Error(`Reference ${key} failed: ${failed.error}`);
+        return strategyOf(key, family, subject, subjectHash, results.map((result) => (result as { summary: BacktestSummary }).summary));
+      });
+      strategies.set(key, loading);
+      return loading;
+    };
+    for (const root of EVOLUTION_ROOTS) {
+      strategies.set(root.key, Promise.resolve(strategyOf(root.key, root.genome.family, { kind: "ROOT", rootKey: root.key }, root.specificationHash, roots[root.key]!.backtests)));
+    }
+    const candidateStrategy = async (key: string): Promise<ExistingStrategy | null> => {
+      if (strategies.has(key)) return strategies.get(key)!;
+      const row = await db.evolutionCandidate.findUnique({ where: { candidateKey: key } });
+      if (row === null) return null;
+      const genome = row.genomeJson as unknown as CandidateGenome;
+      return referenceStrategy(key, genome.family, { kind: "GENOME", genome }, genomeHash(genome));
+    };
+    const existing: ExistingStrategy[] = await Promise.all(EVOLUTION_ROOTS.map((root) => strategies.get(root.key)!));
+    if (isGatesV3(gates)) {
+      const approved = await db.evolutionCandidate.findMany({ where: { status: "APPROVED_FOR_FORWARD_TEST" }, orderBy: { candidateKey: "asc" }, select: { candidateKey: true } });
+      for (const row of approved) {
+        const strategy = await candidateStrategy(row.candidateKey);
+        if (strategy !== null) existing.push(strategy);
+      }
+    }
+
     // ── 2. Market conditions on discovery data (roots + recent candidates) ─
     const historyRows = await db.evolutionCandidate.findMany({
       where: { status: { in: ["REJECTED", "RESERVE", "PROPOSED", "APPROVED_FOR_FORWARD_TEST", "REJECTED_BY_OPERATOR"] } },
@@ -390,13 +469,19 @@ export async function runResearchCycle(deps: CycleDeps, options: CycleOptions): 
 
     // ── 3. Hypotheses from the AI (leak-checked context, budget-guarded) ───
     const history = await loadHistory(db);
+    // Gates v3: validation screenings per family this month (every gate version counts).
+    const familyUsed = isGatesV3(gates) ? await familyScreeningsThisMonth(db, startedAt) : new Map<string, number>();
+    const familyLimit = isGatesV3(gates) ? gates.lineage.maxScreeningsPerFamilyPerMonth : Number.POSITIVE_INFINITY;
     const context = buildResearchContext({
       split,
       benchmarks: EVOLUTION_ROOTS.map((root) => ({ key: root.key, label: root.label, discovery: roots[root.key]!.metrics.discovery })),
       analysis,
       history,
       hypotheses: config.hypothesesPerRun,
-      successorRule: isGatesV2(gates)
+      successorRule: isGatesV2(gates),
+      ...(isGatesV3(gates)
+        ? { lineageRule: { remainingScreenings: Object.fromEntries(Object.keys(FAMILY_SPECS).map((family) => [family, Math.max(0, familyLimit - (familyUsed.get(family) ?? 0))])) } }
+        : {})
     });
     assertContextLeakFree(context, split);
     const prompt = renderHypothesisPrompt(context);
@@ -478,10 +563,14 @@ export async function runResearchCycle(deps: CycleDeps, options: CycleOptions): 
                   ? "Genom bereits als Nachbarvariante geprüft — sein historisches Ergebnis ist bekannt und zählt nicht als neuer Nachweis."
                   : "Genom bereits getestet."
             );
+          } else if ((familyUsed.get(hypothesis.family) ?? 0) >= familyLimit) {
+            outcome = "LINEAGE_BUDGET_EXHAUSTED";
+            reasons.push(`Monatslimit von ${familyLimit} Prüfungen der Familie ${hypothesis.family} erreicht — nicht getestet, die Validierungsdaten werden geschont.`);
           } else {
             outcome = "ACCEPTED";
             genome = applied.genome;
             seenThisRun.add(hash);
+            familyUsed.set(hypothesis.family, (familyUsed.get(hypothesis.family) ?? 0) + 1);
           }
         }
       }
@@ -561,7 +650,10 @@ export async function runResearchCycle(deps: CycleDeps, options: CycleOptions): 
         neighbours: [],
         windowsSeen: new Set(),
         rootKey: `ROOT:${rootStrategyKey}`,
-        successor: null
+        successor: null,
+        familyScreening: familyUsed.get(hypothesis.family) ?? 0,
+        lineage: null,
+        lineageReferenceKeys: []
       });
     }
 
@@ -597,7 +689,7 @@ export async function runResearchCycle(deps: CycleDeps, options: CycleOptions): 
     );
 
     // ── 5b. Screening backtests on discovery + validation ──────────────────
-    const existingCurves = EVOLUTION_ROOTS.map((root) => ({ key: root.key, curve: combined(roots[root.key]!.backtests) }));
+    const existingCurves = existing.map((strategy) => ({ key: strategy.key, curve: strategy.curve }));
     await Promise.all(
       working
         .filter((candidate) => candidate.status === "GENERATED")
@@ -686,10 +778,74 @@ export async function runResearchCycle(deps: CycleDeps, options: CycleOptions): 
       }
     }
 
+    // ── 5d. Gates v3: every candidate against its lineage, or as a genuine diversifier ─
+    // Independent of correlation: root, parent and the best existing family representative,
+    // each compared separately. Sequential in key order, so references load deterministically.
+    if (isGatesV3(gates)) {
+      const trials =
+        split.priorExposure.filter((entry) => entry.role === "TRAINING").reduce((sum, entry) => sum + entry.configurationsTried, 0) + (await evaluatedConfigurations(db));
+      const diversification = gates.lineage.diversification;
+      for (const candidate of [...working].filter((entry) => entry.screening.length > 0).sort((a, b) => a.key.localeCompare(b.key))) {
+        const roles = new Map<string, LineageRole[]>();
+        const addRole = (key: string, role: LineageRole) => roles.set(key, [...(roles.get(key) ?? []), role]);
+        addRole(candidate.rootKey, "ROOT");
+        if (rootByKey(candidate.parentKey) !== null) addRole(candidate.parentKey, "PARENT");
+        else if ((await candidateStrategy(candidate.parentKey)) !== null) addRole(candidate.parentKey, "PARENT");
+        const family = existing
+          .filter((strategy) => strategy.family === candidate.family)
+          .sort((a, b) => (b.metrics.inSample.sharpe ?? Number.NEGATIVE_INFINITY) - (a.metrics.inSample.sharpe ?? Number.NEGATIVE_INFINITY) || a.key.localeCompare(b.key));
+        if (family[0] !== undefined) addRole(family[0].key, "FAMILY_BEST");
+        const candidateCurve = combined(candidate.backtests);
+        const references: LineageReference[] = [];
+        for (const [key, keyRoles] of [...roles.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+          const strategy = rootByKey(key) !== null ? await strategies.get(key)! : await candidateStrategy(key);
+          if (strategy === null || strategy === undefined) continue;
+          references.push({
+            key,
+            roles: keyRoles,
+            metrics: { discovery: strategy.metrics.discovery, validation: strategy.metrics.validation, inSample: strategy.metrics.inSample, folds: strategy.metrics.stability },
+            paired: pairedMonthlyTest(candidateCurve, strategy.curve, D.from, V.to)
+          });
+        }
+        const candidateTrades = candidate.backtests.flatMap((entry) => entry.trades);
+        const relations = existing.map((strategy) => ({
+          key: strategy.key,
+          correlation: candidate.correlations.find((entry) => entry.key === strategy.key)?.value ?? null,
+          signalOverlap: signalOverlap(candidateTrades, strategy.trades, diversification.signalWindowHours)
+        }));
+        const portfolio = portfolioComparison({
+          existing: existing.map((strategy) => ({ key: strategy.key, curve: strategy.curve, startingCash: strategy.startingCash })),
+          candidate: { key: candidate.key, curve: candidateCurve, startingCash: candidate.backtests.reduce((sum, entry) => sum + entry.startingCash, 0) },
+          windows: { discovery: D, validation: V }
+        });
+        const metrics = evaluate(candidate.backtests);
+        const assessed = lineageScreeningGates(
+          {
+            family: candidate.family,
+            candidate: { discovery: metrics.discovery, validation: metrics.validation, inSample: metrics.inSample, folds: metrics.stability },
+            references,
+            existing: relations,
+            portfolio,
+            trials,
+            screeningsThisMonth: candidate.familyScreening
+          },
+          gates
+        );
+        const lineageKeys = references.map((reference) => reference.key);
+        candidate.screening = [
+          ...candidate.screening.map((gate) => (gate.gate === "REDUNDANCY" ? lineageRedundancyGate({ correlations: candidate.correlations, lineageKeys }, gates) : gate)),
+          ...assessed.gates
+        ];
+        candidate.lineage = assessed.assessment;
+        candidate.lineageReferenceKeys = lineageKeys;
+      }
+    }
+
     // ── 6. Automatic rejection and finalist selection ───────────────────────
     const screened = working.filter((candidate) => candidate.screening.length > 0);
     for (const candidate of screened) {
-      const failedScreening = candidate.screening.filter((gate) => !gate.passed);
+      // Informational sub-checks (gates v3) never reject on their own.
+      const failedScreening = candidate.screening.filter(isBlockingFailure);
       if (failedScreening.length > 0) {
         candidate.status = "REJECTED";
         candidate.reasons.push(...failedScreening.map((gate) => gate.reasonCode));
@@ -697,9 +853,9 @@ export async function runResearchCycle(deps: CycleDeps, options: CycleOptions): 
     }
     const finalists = new Set(
       selectFinalists(
-        screened.map((candidate) => ({ key: candidate.key, score: candidate.score?.score ?? 0, passedScreening: candidate.status !== "REJECTED", successor: candidate.successor !== null })),
+        screened.map((candidate) => ({ key: candidate.key, score: candidate.score?.score ?? 0, passedScreening: candidate.status !== "REJECTED", successor: candidate.successor !== null, group: candidate.family })),
         gates.maxFinalists,
-        isGatesV2(gates) ? { maxSuccessors: gates.successor.maxFinalistsPerRun } : {}
+        isGatesV2(gates) ? { maxSuccessors: gates.successor.maxFinalistsPerRun } : isGatesV3(gates) ? { maxPerGroup: gates.lineage.maxFinalistsPerFamilyPerRun } : {}
       )
     );
     for (const candidate of screened) {
@@ -708,6 +864,28 @@ export async function runResearchCycle(deps: CycleDeps, options: CycleOptions): 
         candidate.reasons.push("NOT_SELECTED_AS_FINALIST");
       }
     }
+
+    // Holdout replays of existing strategies (reference data, BENCHMARK exposure), shared by all finalists.
+    const holdoutBacktests = new Map<string, BacktestSummary[]>();
+    const holdouts = new Map<string, Promise<{ metrics: WindowMetrics | null; curve: DailyEquityPoint[] | null; input: { key: string; curve: DailyEquityPoint[]; startingCash: number } | null }>>();
+    const holdoutOf = (strategy: ExistingStrategy) => {
+      const cached = holdouts.get(strategy.key);
+      if (cached !== undefined) return cached;
+      const loading = Promise.all(
+        split.symbols.map((symbol) => backtest({ subjectKey: strategy.key, subject: strategy.subject, subjectHash: strategy.subjectHash, symbol, window: "HOLDOUT", role: "BENCHMARK", candidateId: null }))
+      ).then((results) => {
+        if (!results.every((result) => result.ok)) return { metrics: null, curve: null, input: null };
+        const backtests = results.map((result) => (result as { summary: BacktestSummary }).summary);
+        const curve = combined(backtests);
+        return {
+          metrics: windowMetrics({ label: "Holdout", from: H.from, to: H.to, backtests, periodKey: "overall" }),
+          curve,
+          input: { key: strategy.key, curve, startingCash: backtests.reduce((sum, entry) => sum + entry.startingCash, 0) }
+        };
+      });
+      holdouts.set(strategy.key, loading);
+      return loading;
+    };
 
     // ── 7. Finalists: neighbours, walk-forward, holdout ─────────────────────
     // All final backtests are queued at once; the runner's concurrency limit
@@ -759,6 +937,7 @@ export async function runResearchCycle(deps: CycleDeps, options: CycleOptions): 
             if (results.every((result) => result.ok)) {
               const backtests = results.map((result) => (result as { summary: BacktestSummary }).summary);
               holdout = windowMetrics({ label: "Holdout", from: H.from, to: H.to, backtests, periodKey: "overall" });
+              holdoutBacktests.set(candidate.key, backtests);
               candidate.windowsSeen.add("HOLDOUT");
             }
           }
@@ -783,8 +962,31 @@ export async function runResearchCycle(deps: CycleDeps, options: CycleOptions): 
               : null;
             candidate.final = [...candidate.final, successorHoldoutGate({ rootKey: candidate.successor.rootKey, candidate: candidate.holdout, reference: referenceHoldout }, gates.successor)];
           }
+          if (candidate.lineage?.path != null && isGatesV3(gates)) {
+            // Holdouts of the references are reference data, not candidate evidence: recorded as BENCHMARK exposure.
+            if (candidate.lineage.path === "VALUE") {
+              const references = await Promise.all(
+                candidate.lineageReferenceKeys.map(async (key) => {
+                  const strategy = rootByKey(key) !== null ? await strategies.get(key)! : await candidateStrategy(key);
+                  return { key, holdout: strategy === null ? null : (await holdoutOf(strategy)).metrics };
+                })
+              );
+              candidate.final = [...candidate.final, lineageHoldoutGate({ path: "VALUE", candidate: candidate.holdout, references, portfolio: null }, gates)];
+            } else {
+              const members = await Promise.all(existing.map((strategy) => holdoutOf(strategy)));
+              const ownCurve = candidate.holdout === null ? null : combined(holdoutBacktests.get(candidate.key) ?? []);
+              const portfolio =
+                members.some((member) => member.curve === null) || ownCurve === null
+                  ? null
+                  : {
+                      sharpeWithout: curveStats(portfolioCurve(members.map((member) => member.input!)), H.from, H.to).sharpe,
+                      sharpeWith: curveStats(portfolioCurve([...members.map((member) => member.input!), { key: candidate.key, curve: ownCurve, startingCash: candidate.backtests.reduce((sum, entry) => sum + entry.startingCash, 0) }]), H.from, H.to).sharpe
+                    };
+              candidate.final = [...candidate.final, lineageHoldoutGate({ path: "DIVERSIFICATION", candidate: candidate.holdout, references: [], portfolio }, gates)];
+            }
+          }
           candidate.status = statusAfterFinal(candidate.screening, candidate.final);
-          candidate.reasons.push(...candidate.final.filter((gate) => !gate.passed).map((gate) => gate.reasonCode));
+          candidate.reasons.push(...candidate.final.filter(isBlockingFailure).map((gate) => gate.reasonCode));
         })
     );
 
@@ -814,6 +1016,7 @@ export async function runResearchCycle(deps: CycleDeps, options: CycleOptions): 
         walkForward: candidate.walkForward,
         correlations: candidate.correlations,
         successor: candidate.successor,
+        lineageCheck: candidate.lineage,
         gateVersion: gates.version
       });
       const metricsJson = {
@@ -830,6 +1033,7 @@ export async function runResearchCycle(deps: CycleDeps, options: CycleOptions): 
         evidence,
         technical: candidate.technical,
         successor: candidate.successor,
+        lineage: candidate.lineage,
         gateVersion: gates.version
       };
       await db.evolutionCandidate.update({
@@ -866,7 +1070,7 @@ export async function runResearchCycle(deps: CycleDeps, options: CycleOptions): 
     if (config.reviewEnabled && working.length > 0) {
       const lines = working.map(
         (candidate) =>
-          `- ${candidate.key} (${candidate.family}, Eltern ${candidate.parentKey}): ${candidate.hypothesisTitle}; Screening ${candidate.screening.length === 0 ? "nicht erreicht" : candidate.screening.every((gate) => gate.passed) ? "bestanden" : `gescheitert (${candidate.screening.filter((gate) => !gate.passed).map((gate) => gate.reasonCode).join(", ")})`}; Entdeckung ${candidate.discovery?.trades ?? 0} Trades, Ø ${candidate.discovery?.averageR?.toFixed(2) ?? "–"}R, PF ${candidate.discovery?.profitFactor?.toFixed(2) ?? "–"}`
+          `- ${candidate.key} (${candidate.family}, Eltern ${candidate.parentKey}): ${candidate.hypothesisTitle}; Screening ${candidate.screening.length === 0 ? "nicht erreicht" : !candidate.screening.some(isBlockingFailure) ? "bestanden" : `gescheitert (${candidate.screening.filter(isBlockingFailure).map((gate) => gate.reasonCode).join(", ")})`}; Entdeckung ${candidate.discovery?.trades ?? 0} Trades, Ø ${candidate.discovery?.averageR?.toFixed(2) ?? "–"}R, PF ${candidate.discovery?.profitFactor?.toFixed(2) ?? "–"}`
       );
       const reviewPrompt = ["Forschungsdurchlauf mit folgenden Kandidaten (nur Entdeckungsdaten und Screening-Urteile):", ...lines, "", `Bedingungsbefunde: ${analysis.findings.map((finding) => finding.sentence).join(" ") || "keine"}`].join("\n");
       assertContextLeakFree({ reviewPrompt }, split);
@@ -880,7 +1084,7 @@ export async function runResearchCycle(deps: CycleDeps, options: CycleOptions): 
 
     return await finish("COMPLETED", null, aiSummary, review);
   } catch (error) {
-    log.error({ error: errorText(error), runKey }, "research cycle failed");
+    log.error({ error: errorText(error), stack: error instanceof Error ? error.stack : undefined, runKey }, "research cycle failed");
     for (const candidate of working.filter((entry) => entry.status === "GENERATED")) {
       candidate.status = "TECHNICAL_FAILED";
       await db.evolutionCandidate.update({ where: { id: candidate.id }, data: { status: "TECHNICAL_FAILED", statusReasons: [`RUN_FAILED: ${errorText(error).slice(0, 300)}`] } });

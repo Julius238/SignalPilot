@@ -26,7 +26,51 @@ export type EvolutionMetrics = {
   tStatR: number | null;
 };
 
-export type EvolutionGate = { gate: string; stage: string; passed: boolean; reasonCode: string; message: string };
+/** `informational` (gates v3): sub-check of the path that did not carry the decision — shown, never blocking. */
+export type EvolutionGate = { gate: string; stage: string; passed: boolean; informational?: boolean; reasonCode: string; message: string };
+
+/** Gates v3: comparison with the own lineage and the diversification check (stored with the candidate). */
+export type EvolutionLineageAssessment = {
+  gateVersion: string;
+  path: "VALUE" | "DIVERSIFICATION" | null;
+  valuePassed: boolean;
+  diversificationPassed: boolean;
+  references: {
+    key: string;
+    roles: ("ROOT" | "PARENT" | "FAMILY_BEST")[];
+    referenceSharpe: number | null;
+    candidateSharpe: number | null;
+    sharpeDelta: number | null;
+    discoverySharpeDelta: number | null;
+    validationSharpeDelta: number | null;
+    improvement: boolean;
+    consistent: boolean;
+    significant: boolean;
+    pairedT: number | null;
+    threshold: number;
+    months: number;
+    informativeMonths: number;
+    deteriorations: string[];
+  }[];
+  existing: { key: string; correlation: number | null; signalOverlap: number | null }[];
+  portfolio: {
+    members: string[];
+    sharpeWithout: number | null;
+    sharpeWith: number | null;
+    sharpeDelta: number | null;
+    discoverySharpeDelta: number | null;
+    validationSharpeDelta: number | null;
+    drawdownWithout: number | null;
+    drawdownWith: number | null;
+    alphaT: number | null;
+    alphaThreshold: number;
+    betas: number[] | null;
+    months: number;
+    informativeMonths: number;
+  };
+  trials: number;
+  screeningsThisMonth: number;
+};
 
 export type EvolutionCandidateStatus =
   | "GENERATED"
@@ -66,6 +110,9 @@ export type EvolutionCandidateItem = {
   versusChampion: { sharpeDelta: number | null; averageRDelta: number | null; netReturnDeltaPct: number | null; maxDrawdownDeltaPct: number | null } | null;
   /** Gates v2: strategy key of the root this candidate was checked against as successor. */
   successorOf: string | null;
+  /** Gates v3: whether the lineage check ran, and the path that carried the decision. */
+  lineageChecked: boolean;
+  lineagePath: "VALUE" | "DIVERSIFICATION" | null;
   gateVersion: string | null;
   gatesPassed: number;
   gatesTotal: number;
@@ -204,6 +251,8 @@ export type EvolutionCandidateDetail =
         screeningsThisMonth: number;
         paired: { months: number; informativeMonths: number; meanDifference: number | null; tStat: number | null; naiveTStat: number | null; lag: number | null; criticalT: number | null };
       } | null;
+      /** Gates v3: lineage and diversification check (null before v3). */
+      lineageCheck: EvolutionLineageAssessment | null;
       gateVersion: string | null;
       technical: { deterministic: boolean; invariantViolations: number; cycles: number } | null;
       gates: EvolutionGate[];

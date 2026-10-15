@@ -107,7 +107,21 @@ function deployed() {
     run: { runKey: "EVO-RUN-1", providerName: "anthropic", billable: true, startedAt: run.startedAt, dataManifestJson: run.dataManifestJson },
     backtests: []
   });
-  const candidates = [candidate("EVO-BRK-0002", "PROPOSED", "EVO-BRK-0001", 0.3), candidate("EVO-BRK-0001", "REJECTED", "ROOT:CRYPTO_TREND_CORE_LONG_V1", -0.1)];
+  // Gates v3: passed through the value path; the diversification sub-checks failed informationally.
+  const v3 = candidate("EVO-REG-0010", "RESERVE", "ROOT:CRYPTO_REGIME_LONG_V1", 0.5);
+  const lineageCheck = { gateVersion: "evolution-gates-v3", path: "VALUE", references: [{ key: "ROOT:CRYPTO_REGIME_LONG_V1", roles: ["ROOT", "PARENT", "FAMILY_BEST"] }] };
+  const v3Candidate = {
+    ...v3,
+    family: "REGIME_LONG",
+    rootStrategyKey: "CRYPTO_REGIME_LONG_V1",
+    metricsJson: { ...v3.metricsJson, gateVersion: "evolution-gates-v3", successor: null, lineage: lineageCheck },
+    gatesJson: [
+      { gate: "VALUE_RISK_ADJUSTED", stage: "SCREENING", passed: true, reasonCode: "BEATS_LINEAGE_RISK_ADJUSTED", message: "ok" },
+      { gate: "DIVERSIFICATION_INDEPENDENCE", stage: "SCREENING", passed: false, informational: true, reasonCode: "NOT_INDEPENDENT_CORRELATED", message: "Nicht eigenständig" },
+      { gate: "LINEAGE_DECISION", stage: "SCREENING", passed: true, reasonCode: "VALUE_OVER_LINEAGE", message: "Mehrwert" }
+    ]
+  };
+  const candidates = [candidate("EVO-BRK-0002", "PROPOSED", "EVO-BRK-0001", 0.3), candidate("EVO-BRK-0001", "REJECTED", "ROOT:CRYPTO_TREND_CORE_LONG_V1", -0.1), v3Candidate];
   return {
     evolutionAgentState: model({
       findUnique: async () => ({ key: "EVOLUTION_V1", status: "ACTIVE", statusReason: "ok", pausedUntil: null, lastRunAt: run.finishedAt, nextRunAt: new Date("2026-10-26T01:15:00.000Z"), leaseOwner: null, leaseExpiresAt: null })
@@ -171,6 +185,27 @@ describe("evolution read model", () => {
     assert.deepEqual(detail.lineage, ["CRYPTO_TREND_CORE_LONG_V1", "EVO-BRK-0001", "EVO-BRK-0002"]);
     assert.equal(detail.reportMarkdown, "# Forschungsbericht EVO-BRK-0002");
     assert.equal(detail.gateVersion, "evolution-gates-v2");
+  });
+});
+
+describe("evolution read model under gates v3", () => {
+  it("never counts an informational sub-check as a failed gate and exposes the lineage check", async () => {
+    const overview = await getEvolutionOverview(deployed() as never, new Date("2026-10-20T00:00:00.000Z"));
+    assert.ok(overview.available);
+    if (!overview.available) return;
+    const v3 = overview.candidates.find((entry) => entry.key === "EVO-REG-0010")!;
+    assert.deepEqual(v3.failedGates, []);
+    assert.equal(v3.gatesPassed, 2);
+    assert.equal(v3.gatesTotal, 2);
+    assert.equal(v3.lineageChecked, true);
+    assert.equal(v3.lineagePath, "VALUE");
+    assert.equal(overview.candidates.find((entry) => entry.key === "EVO-BRK-0001")!.lineageChecked, false);
+    const detail = await getEvolutionCandidate(deployed() as never, "EVO-REG-0010");
+    assert.ok(detail !== null && detail.available);
+    if (detail === null || !detail.available) return;
+    assert.equal((detail.lineageCheck as { path: string }).path, "VALUE");
+    assert.equal(detail.gates.find((gate) => gate.gate === "DIVERSIFICATION_INDEPENDENCE")!.informational, true);
+    assert.deepEqual(detail.lineage, ["CRYPTO_REGIME_LONG_V1", "EVO-REG-0010"]);
   });
 });
 

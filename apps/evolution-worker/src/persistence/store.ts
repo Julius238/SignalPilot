@@ -9,6 +9,7 @@ import {
   EVOLUTION_COST_MODEL_V1,
   EVOLUTION_ENGINE_VERSION,
   genomeHash,
+  isBlockingFailure,
   type BacktestSummary,
   type CandidateGenome,
   type EvolutionFamily,
@@ -124,8 +125,11 @@ export async function loadHistory(db: EvolutionDb, limit = 40): Promise<HistoryE
   return rows.reverse().map((row) => {
     const gates = (row.gatesJson as unknown as GateResult[] | null) ?? [];
     const screening = gates.filter((gate) => gate.stage === "SCREENING");
-    const verdict: ScreeningVerdict =
-      screening.length === 0 ? "NOT_EVALUATED" : screening.every((gate) => gate.passed) ? "PASSED_SCREENING" : "FAILED_SCREENING";
+    // Informational sub-checks (gates v3) never decide; a failed lineage decision lists them as its reasons.
+    const blocking = screening.filter(isBlockingFailure);
+    const verdict: ScreeningVerdict = screening.length === 0 ? "NOT_EVALUATED" : blocking.length === 0 ? "PASSED_SCREENING" : "FAILED_SCREENING";
+    const lineageFailed = blocking.some((gate) => gate.gate === "LINEAGE_DECISION");
+    const failedCodes = [...blocking, ...(lineageFailed ? screening.filter((gate) => !gate.passed && gate.informational === true) : [])].map((gate) => gate.reasonCode);
     const metrics = (row.metricsJson as { discoverySnapshot?: DiscoverySnapshot } | null) ?? null;
     const genome = row.genomeJson as unknown as CandidateGenome;
     return {
@@ -137,8 +141,9 @@ export async function loadHistory(db: EvolutionDb, limit = 40): Promise<HistoryE
       changes: (row.changesJson as unknown as ParameterDiff[]) ?? [],
       parameters: genome.parameters,
       verdict: row.status === "TECHNICAL_FAILED" ? "FAILED_SCREENING" : verdict,
-      failedGates: row.status === "TECHNICAL_FAILED" ? ["TECHNICAL_TESTS_FAILED"] : screening.filter((gate) => !gate.passed).map((gate) => gate.reasonCode),
-      discovery: metrics?.discoverySnapshot ?? null
+      failedGates: row.status === "TECHNICAL_FAILED" ? ["TECHNICAL_TESTS_FAILED"] : failedCodes,
+      discovery: metrics?.discoverySnapshot ?? null,
+      ...(row.status === "APPROVED_FOR_FORWARD_TEST" || row.status === "REJECTED_BY_OPERATOR" ? { operatorDecision: row.status } : {})
     };
   });
 }
@@ -152,6 +157,26 @@ export async function evaluatedNeighbourGenomeHashes(db: EvolutionDb): Promise<S
     if (subject?.kind === "GENOME" && subject.genome !== undefined) hashes.add(genomeHash(subject.genome));
   }
   return hashes;
+}
+
+/**
+ * Candidates of each family screened on validation data in the calendar
+ * month (UTC) of `now`, across earlier runs and every gate version (gates v3
+ * lineage budget) — validation exposure is what wears the window out.
+ */
+export async function familyScreeningsThisMonth(db: EvolutionDb, now: Date): Promise<Map<string, number>> {
+  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const exposures = await db.evolutionDataExposure.findMany({
+    where: { windowKey: "VALIDATION", purpose: "SELECTION", occurredAt: { gte: monthStart }, candidateId: { not: null } },
+    select: { candidateId: true },
+    distinct: ["candidateId"]
+  });
+  const ids = exposures.map((entry) => entry.candidateId!).filter((id) => id.length > 0);
+  const counts = new Map<string, number>();
+  if (ids.length === 0) return counts;
+  const rows = await db.evolutionCandidate.findMany({ where: { id: { in: ids } }, select: { family: true } });
+  for (const row of rows) counts.set(row.family, (counts.get(row.family) ?? 0) + 1);
+  return counts;
 }
 
 /**
