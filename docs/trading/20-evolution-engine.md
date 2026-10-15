@@ -195,6 +195,11 @@ Erster Lauf auf echten Daten (2026-10-15, lokal, 6 Prozesse): 9 min Wandzeit,
 4 min, 22 CPU-Minuten. Mit 0,75 CPU auf dem VPS entspricht das grob 50 bzw.
 30 Minuten je Durchlauf, bei 0,55 GB Spitzen-RAM je Backtest-Prozess.
 Protokoll: [research/2026-10-15-evolution-v1-e2e-mock.md](research/2026-10-15-evolution-v1-e2e-mock.md).
+Echte Claude-Läufe: [erster Lauf unter Gates v2](research/2026-10-15-evolution-first-claude-run.md)
+(EVO-REG-0004 formal bestanden, vom Betreiber abgelehnt) und
+[drei Läufe unter Gates v3](research/2026-10-15-evolution-gates-v3-claude-runs.md)
+(0,60 USD, 9 Kandidaten, alle verworfen; Oktober-Validierungsbudget beider
+Familien ausgeschöpft).
 
 ## Grenzen von V1
 
