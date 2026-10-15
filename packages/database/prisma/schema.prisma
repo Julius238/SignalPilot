@@ -2483,3 +2483,270 @@ model ArenaPostMortem {
   @@index([participantId, createdAt])
   @@index([status])
 }
+
+// ── SignalPilot Evolution Engine (historical research only) ─────────────────
+// AI-assisted strategy research on historical data (docs/trading/20-evolution-engine.md,
+// ADR 0016). No table here references a portfolio, ledger, session, order,
+// strategy version or arena row, and nothing outside these tables references
+// them: research results stay physically separate from forward evidence. The
+// evolution worker's database role may write only these tables
+// (scripts/ops/evolution-db-role.sql).
+
+enum EvolutionAgentStatus {
+  ACTIVE
+  PAUSED
+  PAUSED_BUDGET
+  DISABLED
+}
+
+enum EvolutionRunStatus {
+  RUNNING
+  COMPLETED
+  FAILED
+  ABORTED
+}
+
+enum EvolutionCandidateStatus {
+  GENERATED
+  INVALID
+  DUPLICATE
+  TECHNICAL_FAILED
+  REJECTED
+  RESERVE
+  PROPOSED
+  APPROVED_FOR_FORWARD_TEST
+  REJECTED_BY_OPERATOR
+}
+
+enum EvolutionAiCallStatus {
+  SUCCEEDED
+  FAILED
+  REFUSED
+  BLOCKED_BUDGET
+}
+
+/// Singleton switch and lease of the research agent (key `EVOLUTION_V1`).
+model EvolutionAgentState {
+  id             String               @id @default(cuid())
+  key            String               @unique
+  status         EvolutionAgentStatus @default(PAUSED)
+  statusReason   String?
+  pausedUntil    DateTime?
+  lastRunAt      DateTime?
+  nextRunAt      DateTime?
+  leaseOwner     String?
+  leaseExpiresAt DateTime?
+  version        Int                  @default(0)
+  updatedBy      String
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+}
+
+/// One research cycle: analysis → hypotheses → candidates → backtests → decisions.
+model EvolutionRun {
+  id                  String                @id @default(cuid())
+  runKey              String                @unique
+  trigger             String
+  status              EvolutionRunStatus
+  providerName        String
+  billable            Boolean
+  engineVersion       String
+  codeVersion         String
+  splitKey            String
+  splitHash           String
+  dataManifestJson    Json
+  contextHash         String?
+  analysisJson        Json?
+  aiSummary           String?
+  reviewJson          Json?
+  reportMarkdown      String?
+  errorClass          String?
+  errorMessage        String?
+  hypothesesRequested Int                   @default(0)
+  candidatesGenerated Int                   @default(0)
+  candidatesRejected  Int                   @default(0)
+  candidatesProposed  Int                   @default(0)
+  aiInputTokens       Int                   @default(0)
+  aiOutputTokens      Int                   @default(0)
+  aiCacheReadTokens   Int                   @default(0)
+  aiCacheWriteTokens  Int                   @default(0)
+  aiCostUsd           Decimal               @default(0) @db.Decimal(18, 8)
+  backtestCount       Int                   @default(0)
+  backtestMs          Int                   @default(0)
+  startedAt           DateTime
+  finishedAt          DateTime?
+  createdAt           DateTime              @default(now())
+  aiCalls             EvolutionAiCall[]
+  hypotheses          EvolutionHypothesis[]
+  candidates          EvolutionCandidate[]
+
+  @@index([startedAt])
+  @@index([status, startedAt])
+}
+
+/// Every AI request with its actual token usage and cost — the budget's ledger.
+model EvolutionAiCall {
+  id               String                @id @default(cuid())
+  runId            String?
+  task             String
+  tier             String
+  provider         String
+  requestedModel   String
+  servedModel      String?
+  status           EvolutionAiCallStatus
+  billable         Boolean
+  budgetMonth      String
+  attempts         Int                   @default(1)
+  requestHash      String
+  promptChars      Int
+  inputTokens      Int                   @default(0)
+  outputTokens     Int                   @default(0)
+  cacheWriteTokens Int                   @default(0)
+  cacheReadTokens  Int                   @default(0)
+  costUsd          Decimal               @default(0) @db.Decimal(18, 8)
+  worstCaseUsd     Decimal               @default(0) @db.Decimal(18, 8)
+  usageJson        Json
+  pricingVersion   String
+  latencyMs        Int                   @default(0)
+  stopReason       String?
+  requestId        String?
+  errorKind        String?
+  errorMessage     String?
+  responseJson     Json?
+  createdAt        DateTime              @default(now())
+  run              EvolutionRun?         @relation(fields: [runId], references: [id], onDelete: Restrict)
+
+  @@index([budgetMonth, billable])
+  @@index([runId])
+  @@index([createdAt])
+}
+
+model EvolutionHypothesis {
+  id                     String              @id @default(cuid())
+  hypothesisKey          String              @unique
+  runId                  String
+  aiCallId               String?
+  title                  String
+  marketObservation      String
+  rationale              String
+  expectedEffect         String
+  falsificationCriterion String
+  family                 String
+  parentKey              String
+  changesJson            Json
+  outcome                String
+  outcomeReasons         String[]
+  createdAt              DateTime            @default(now())
+  run                    EvolutionRun        @relation(fields: [runId], references: [id], onDelete: Restrict)
+  candidate              EvolutionCandidate?
+
+  @@index([runId])
+}
+
+/// A versioned strategy candidate: closed parameter genome, lineage, results, decision.
+model EvolutionCandidate {
+  id                String                   @id @default(cuid())
+  candidateKey      String                   @unique
+  family            String
+  generation        Int
+  sequence          Int
+  parentKey         String
+  parentCandidateId String?
+  rootStrategyKey   String
+  runId             String
+  hypothesisId      String?                  @unique
+  genomeJson        Json
+  genomeHash        String                   @unique
+  changesJson       Json
+  status            EvolutionCandidateStatus
+  statusReasons     String[]
+  technicalJson     Json?
+  gatesJson         Json?
+  metricsJson       Json?
+  scoreJson         Json?
+  researchScore     Decimal?                 @db.Decimal(8, 2)
+  evidenceGrade     String?
+  windowsSeen       String[]
+  holdoutEvaluated  Boolean                  @default(false)
+  reportMarkdown    String?
+  proposedAt        DateTime?
+  decidedAt         DateTime?
+  decidedBy         String?
+  decisionNote      String?
+  version           Int                      @default(0)
+  createdAt         DateTime                 @default(now())
+  updatedAt         DateTime                 @updatedAt
+  run               EvolutionRun             @relation(fields: [runId], references: [id], onDelete: Restrict)
+  hypothesis        EvolutionHypothesis?     @relation(fields: [hypothesisId], references: [id], onDelete: Restrict)
+  parent            EvolutionCandidate?      @relation("EvolutionLineage", fields: [parentCandidateId], references: [id], onDelete: Restrict)
+  children          EvolutionCandidate[]     @relation("EvolutionLineage")
+  backtests         EvolutionBacktest[]
+
+  @@unique([family, sequence])
+  @@index([status, createdAt])
+  @@index([runId])
+}
+
+/// One replay of a subject (candidate, neighbour or frozen benchmark) on one symbol and window.
+model EvolutionBacktest {
+  id                  String              @id @default(cuid())
+  cacheKey            String              @unique
+  subjectKey          String
+  candidateId         String?
+  role                String
+  symbol              String
+  windowKey           String
+  fromAt              DateTime
+  toAt                DateTime
+  replayEngineVersion String
+  codeVersion         String
+  dataFingerprint     String
+  costModel           String
+  configJson          Json
+  summaryJson         Json
+  outputHash          String
+  invariantViolations Int
+  tradeCount          Int
+  durationMs          Int
+  createdAt           DateTime            @default(now())
+  candidate           EvolutionCandidate? @relation(fields: [candidateId], references: [id], onDelete: Restrict)
+
+  @@index([subjectKey, windowKey])
+  @@index([candidateId])
+}
+
+/// Which subject looked at which window for which purpose — the data-exposure ledger.
+model EvolutionDataExposure {
+  id          String   @id @default(cuid())
+  exposureKey String   @unique
+  windowKey   String
+  purpose     String
+  subjectKey  String
+  candidateId String?
+  runId       String?
+  symbol      String
+  occurredAt  DateTime
+
+  @@index([windowKey, purpose])
+  @@index([subjectKey])
+}
+
+/// Append-only, hash-chained audit trail of the research engine.
+model EvolutionAuditEvent {
+  id            String   @id @default(cuid())
+  sequence      Int      @unique
+  eventKey      String   @unique
+  eventType     String
+  aggregateType String
+  aggregateId   String
+  actorType     String
+  actorId       String?
+  payloadJson   Json
+  previousHash  String?
+  hash          String
+  occurredAt    DateTime
+  createdAt     DateTime @default(now())
+
+  @@index([aggregateType, aggregateId, occurredAt])
+  @@index([eventType, occurredAt])
+}

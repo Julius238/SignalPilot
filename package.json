@@ -59,6 +59,8 @@
     "trading-worker:shadow-retention": "scripts/pnpm --filter @signalpilot/trading-worker shadow:retention",
     "trading-worker:shadow-eligibility": "scripts/pnpm --filter @signalpilot/trading-worker shadow:eligibility",
     "trading-worker:scheduler": "scripts/pnpm --filter @signalpilot/trading-worker scheduler",
+    "evolution": "scripts/pnpm --filter @signalpilot/evolution-worker evolution",
+    "evolution-worker:scheduler": "scripts/pnpm --filter @signalpilot/evolution-worker scheduler",
     "worker:scheduler": "scripts/pnpm --filter @signalpilot/worker scheduler",
     "prisma:generate": "scripts/pnpm db:generate",
     "auth:hash-password": "tsx apps/api/scripts/hash-password.ts",

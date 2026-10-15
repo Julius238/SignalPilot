@@ -103,6 +103,20 @@ describe("shadow replay", () => {
     assert.ok(result.notes[0].includes("SYNTHETISCHE TESTDATEN"));
   });
 
+  it("lets a research regime exit replace the strategy's own exit rule", () => {
+    const specified = runShadowReplay(data, config(), { evaluate: everyThirdMorning });
+    assert.ok(specified.trades.every((trade) => trade.exitReason !== "INVALIDATION"));
+    const shut = runShadowReplay(data, config(), { evaluate: everyThirdMorning, regimeExit: { enabled: true, gateOpen: () => false } });
+    assert.ok(shut.trades.length > 0);
+    assert.ok(shut.trades.every((trade) => trade.exitReason === "INVALIDATION" || trade.exitReason === "STOP" || trade.exitReason === "TAKE_PROFIT"));
+    assert.ok(shut.trades.some((trade) => trade.exitReason === "INVALIDATION"));
+    const open = runShadowReplay(data, config(), { evaluate: everyThirdMorning, regimeExit: { enabled: true, gateOpen: () => true } });
+    assert.deepEqual(
+      open.trades.map((trade) => [trade.openedAt, trade.closedAt, trade.exitReason]),
+      specified.trades.map((trade) => [trade.openedAt, trade.closedAt, trade.exitReason])
+    );
+  });
+
   it("SPEC with the bootstrap cost profile (10/10/10 bps) rejects even a 2.2 % stop on the net 2R rule", () => {
     const result = runShadowReplay(
       data,

@@ -39,13 +39,51 @@ const PARAMS = CRYPTO_REGIME_LONG_V1_PARAMETERS;
 const ENTRY = StrategyCheckStage.ENTRY;
 const PRICE_PLAN = StrategyCheckStage.PRICE_PLAN;
 
-const STOP_ATR_MULTIPLE_1D = DecimalValue.fromString(PARAMS.stopAtrMultiple1d);
-const TAKE_PROFIT_R_MULTIPLE = DecimalValue.fromString(PARAMS.takeProfitRMultiple);
 const MINIMUM_REWARD_RISK = DecimalValue.fromString(PARAMS.minimumRewardRisk);
 const ENTRY_GAP_ATR_MULTIPLE = DecimalValue.fromString(PARAMS.entryGapAtrMultiple);
 
+/**
+ * RESEARCH ONLY: rule overrides of the regime strategy for historical replays
+ * (Evolution Engine, docs/trading/20-evolution-engine.md). Same contract as
+ * `BreakoutResearchOverrides`: an identity carrying them is never registered,
+ * never seeded as a StrategyVersion and therefore never executable by the
+ * live pipeline. Without overrides the evaluation is the specified one.
+ */
+export interface RegimeLongResearchOverrides {
+  readonly regimeMinimumConfidence?: number;
+  readonly stopAtrMultiple1d?: string;
+  readonly takeProfitRMultiple?: string;
+  readonly maxHoldHours?: number;
+}
+
+/** Regime identity; `regimeResearch` only ever exists inside a replay. */
+export interface RegimeLongIdentityV1 extends BreakoutIdentityV1 {
+  readonly regimeResearch?: RegimeLongResearchOverrides;
+}
+
+interface RegimeRules {
+  readonly regimeMinimumConfidence: number;
+  readonly stopAtrMultiple1d: string;
+  readonly stopAtrMultiple1dValue: DecimalValue;
+  readonly takeProfitRMultiple: DecimalValue;
+  readonly maxHoldHours: number;
+}
+
+function compileRegimeRules(overrides: RegimeLongResearchOverrides = {}): RegimeRules {
+  const stopAtrMultiple1d = overrides.stopAtrMultiple1d ?? PARAMS.stopAtrMultiple1d;
+  return {
+    regimeMinimumConfidence: overrides.regimeMinimumConfidence ?? PARAMS.regimeMinimumConfidence,
+    stopAtrMultiple1d,
+    stopAtrMultiple1dValue: DecimalValue.fromString(stopAtrMultiple1d),
+    takeProfitRMultiple: DecimalValue.fromString(overrides.takeProfitRMultiple ?? PARAMS.takeProfitRMultiple),
+    maxHoldHours: overrides.maxHoldHours ?? PARAMS.maxHoldHours
+  };
+}
+
+const SPECIFIED_REGIME_RULES = compileRegimeRules();
+
 /** Identity every result carries; the input validator checks the snapshot against it. */
-export const REGIME_LONG_V1_IDENTITY: BreakoutIdentityV1 = Object.freeze({
+export const REGIME_LONG_V1_IDENTITY: RegimeLongIdentityV1 = Object.freeze({
   key: CRYPTO_REGIME_LONG_V1_KEY,
   engineVersion: CRYPTO_REGIME_LONG_V1_ENGINE_VERSION,
   specificationHash: CRYPTO_REGIME_LONG_V1_SPECIFICATION_HASH,
@@ -56,23 +94,30 @@ export const REGIME_LONG_V1_IDENTITY: BreakoutIdentityV1 = Object.freeze({
 /**
  * Whether a regime report opens the long gate — the entry rule of this
  * strategy and, applied to the newest report while a position is open, its
- * exit rule (`REGIME_EXIT_POLICY`).
+ * exit rule (`REGIME_EXIT_POLICY`). `minimumConfidence` differs from the
+ * specified 60 only for a research identity inside a replay.
  */
-export function regimeGateOpen(regime: {
-  readonly cryptoRegime: string;
-  readonly riskMode: string;
-  readonly confidence: number;
-}): boolean {
+export function regimeGateOpen(
+  regime: {
+    readonly cryptoRegime: string;
+    readonly riskMode: string;
+    readonly confidence: number;
+  },
+  minimumConfidence: number = PARAMS.regimeMinimumConfidence
+): boolean {
   return (
     regime.cryptoRegime === PARAMS.regimeRequiredCryptoRegime &&
     !PARAMS.regimeForbiddenRiskModes.includes(regime.riskMode as never) &&
     Number.isFinite(regime.confidence) &&
-    regime.confidence >= PARAMS.regimeMinimumConfidence
+    regime.confidence >= minimumConfidence
   );
 }
 
-export function evaluateCryptoRegimeLongV1(snapshot: StrategyInputSnapshotV1): StrategyEvaluationResultV1 {
-  const identity = REGIME_LONG_V1_IDENTITY;
+export function evaluateCryptoRegimeLongV1(
+  snapshot: StrategyInputSnapshotV1,
+  identity: RegimeLongIdentityV1 = REGIME_LONG_V1_IDENTITY
+): StrategyEvaluationResultV1 {
+  const rules = identity.regimeResearch === undefined ? SPECIFIED_REGIME_RULES : compileRegimeRules(identity.regimeResearch);
   const inputHash = buildInputHash(snapshot);
   const evaluatedAt = typeof snapshot?.asOf === "string" ? snapshot.asOf : "1970-01-01T00:00:00.000Z";
 
@@ -89,13 +134,13 @@ export function evaluateCryptoRegimeLongV1(snapshot: StrategyInputSnapshotV1): S
     log.fail("REGIME", ENTRY, StrategyReasonCode.REGIME_NOT_RISK_ON, regime.cryptoRegime, PARAMS.regimeRequiredCryptoRegime);
   } else if (PARAMS.regimeForbiddenRiskModes.includes(regime.riskMode as never)) {
     log.fail("REGIME", ENTRY, StrategyReasonCode.REGIME_RISK_MODE_BLOCKED, regime.riskMode, `NOT ${PARAMS.regimeForbiddenRiskModes.join("/")}`);
-  } else if (regime.confidence < PARAMS.regimeMinimumConfidence) {
+  } else if (regime.confidence < rules.regimeMinimumConfidence) {
     log.fail(
       "REGIME",
       ENTRY,
       StrategyReasonCode.REGIME_CONFIDENCE_BELOW_MINIMUM,
       String(regime.confidence),
-      String(PARAMS.regimeMinimumConfidence)
+      String(rules.regimeMinimumConfidence)
     );
   } else {
     log.pass("REGIME", ENTRY, StrategyReasonCode.REGIME_RISK_ON, String(regime.confidence));
@@ -136,8 +181,8 @@ export function evaluateCryptoRegimeLongV1(snapshot: StrategyInputSnapshotV1): S
   if (atr1d === null || !atr1d.isPositive() || atr1h === null || !atr1h.isPositive()) {
     log.fail("ATR_1D", PRICE_PLAN, StrategyReasonCode.ATR_UNAVAILABLE);
   } else if (tick !== null) {
-    log.pass("ATR_1D", PRICE_PLAN, StrategyReasonCode.STOP_DISTANCE_ATR_APPLIED, atr1d.toString(), PARAMS.stopAtrMultiple1d);
-    stopPrice = alignStopToTick("LONG", referenceEntry.sub(STOP_ATR_MULTIPLE_1D.mul(atr1d, RoundingMode.CEIL)), tick);
+    log.pass("ATR_1D", PRICE_PLAN, StrategyReasonCode.STOP_DISTANCE_ATR_APPLIED, atr1d.toString(), rules.stopAtrMultiple1d);
+    stopPrice = alignStopToTick("LONG", referenceEntry.sub(rules.stopAtrMultiple1dValue.mul(atr1d, RoundingMode.CEIL)), tick);
     if (!stopPrice.isPositive()) {
       log.fail("STOP_PRICE", PRICE_PLAN, StrategyReasonCode.STOP_PRICE_NOT_POSITIVE, stopPrice.toString(), "0.000000000000");
     } else {
@@ -145,7 +190,7 @@ export function evaluateCryptoRegimeLongV1(snapshot: StrategyInputSnapshotV1): S
       const stopDistance = referenceEntry.sub(stopPrice);
       takeProfitPrice = alignTakeProfitToTick(
         "LONG",
-        referenceEntry.add(TAKE_PROFIT_R_MULTIPLE.mul(stopDistance, RoundingMode.FLOOR)),
+        referenceEntry.add(rules.takeProfitRMultiple.mul(stopDistance, RoundingMode.FLOOR)),
         tick
       );
       plannedRewardRisk = takeProfitPrice.sub(referenceEntry).div(stopDistance, RoundingMode.FLOOR);
@@ -219,7 +264,7 @@ export function evaluateCryptoRegimeLongV1(snapshot: StrategyInputSnapshotV1): S
     takeProfitPrice: takeProfitPrice.toString(),
     minimumRewardRisk: MINIMUM_REWARD_RISK.toString(),
     plannedRewardRisk: plannedRewardRisk.toString(),
-    maxHoldHours: PARAMS.maxHoldHours,
+    maxHoldHours: rules.maxHoldHours,
     indicators,
     evidence: buildEvidence(validated),
     reasonCodes,

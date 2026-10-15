@@ -60,6 +60,16 @@ lokale PostgreSQL-16-Instanz mit einer leeren Datenbank funktioniert genauso.
 
 Ohne erreichbare Datenbank scheitern genau diese 16 Tests — alle anderen laufen weiter.
 
+### Evolution Engine
+
+`apps/evolution-worker` testet Budget-Schutz, Lease, Audit-Kette, Freigaben und
+einen vollständigen Forschungszyklus (Mock-KI → Hypothese → Kandidat →
+Backtest → Bewertung → Persistenz) gegen echte PostgreSQL. Diese Tests laufen
+nur, wenn der Datenbankname auf `_test` endet (`EVOLUTION_TEST_DATABASE_URL`
+oder `DATABASE_URL`), weil sie alle `Evolution*`-Zeilen löschen; sonst werden
+sie mit Begründung übersprungen. Die Dateien laufen nacheinander
+(`--test-concurrency=1`); der End-to-End-Zyklus dauert rund drei Minuten.
+
 ## pnpm-Shim-Test ohne Netzwerk
 
 `scripts/pnpm` leitet die Root-Skripte an ein vorhandenes `pnpm` oder an `corepack pnpm`

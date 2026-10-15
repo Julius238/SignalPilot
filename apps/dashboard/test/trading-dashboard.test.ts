@@ -33,7 +33,10 @@ const TRADING_PAGES = [
   "src/app/dashboard/trading/performance/page.tsx",
   "src/app/dashboard/trading/risk/page.tsx",
   "src/app/dashboard/trading/audit/page.tsx",
-  "src/app/dashboard/trading/operations/page.tsx"
+  "src/app/dashboard/trading/operations/page.tsx",
+  "src/app/dashboard/trading/arena/page.tsx",
+  "src/app/dashboard/trading/evolution/page.tsx",
+  "src/app/dashboard/trading/evolution/[key]/page.tsx"
 ];
 
 describe("trading dashboard feature flag", () => {

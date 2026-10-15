@@ -11,8 +11,10 @@ import {
   CRYPTO_REGIME_LONG_V1_SPECIFICATION_HASH,
   CRYPTO_TREND_CORE_LONG_V1_SPECIFICATION_HASH,
   REGIME_EXIT_POLICY,
+  REGIME_LONG_V1_IDENTITY,
   StrategyReasonCode,
   averageTrueRange,
+  evaluateCryptoRegimeLongV1,
   evaluateStrategy,
   regimeGateOpen,
   type RegimeStrategyIndicatorSnapshotV1,
@@ -118,5 +120,48 @@ describe("CRYPTO_REGIME_LONG_V1", () => {
     assert.equal(regimeGateOpen({ cryptoRegime: "RISK_ON", riskMode: "DEFENSIVE", confidence: 90 }), false);
     assert.equal(regimeGateOpen({ cryptoRegime: "NEUTRAL", riskMode: "NORMAL", confidence: 90 }), false);
     assert.equal(regimeGateOpen({ cryptoRegime: "RISK_ON", riskMode: "NORMAL", confidence: Number.NaN }), false);
+  });
+});
+
+describe("CRYPTO_REGIME_LONG_V1 research overrides (replay only)", () => {
+  it("evaluates byte-identically without overrides", () => {
+    const snapshot = asRegimeLong(buildPassingSnapshot());
+    const registered = evaluateStrategy(snapshot);
+    assert.deepEqual(evaluateCryptoRegimeLongV1(snapshot, REGIME_LONG_V1_IDENTITY), registered);
+    assert.deepEqual(evaluateCryptoRegimeLongV1(snapshot, { ...REGIME_LONG_V1_IDENTITY, regimeResearch: {} }), registered);
+  });
+
+  it("applies stop, target and hold overrides under the unchanged identity", () => {
+    const snapshot = asRegimeLong(buildPassingSnapshot());
+    const result = evaluateCryptoRegimeLongV1(snapshot, {
+      ...REGIME_LONG_V1_IDENTITY,
+      regimeResearch: { stopAtrMultiple1d: "3", takeProfitRMultiple: "6", maxHoldHours: 336 }
+    });
+    assert.equal(result.outcome, "CANDIDATE", result.reasonCodes.join(","));
+    const { candidate } = result as StrategyCandidateResultV1;
+    assert.equal(candidate.strategyKey, CRYPTO_REGIME_LONG_V1_KEY);
+    assert.equal(candidate.specificationHash, CRYPTO_REGIME_LONG_V1_SPECIFICATION_HASH);
+    assert.equal(candidate.maxHoldHours, 336);
+    const indicators = candidate.indicators as RegimeStrategyIndicatorSnapshotV1;
+    const entry = dec(candidate.referenceEntryPrice);
+    const rawStop = entry.sub(dec("3").mul(dec(indicators.atr14_1d)));
+    assert.ok(dec(candidate.stopPrice).lte(rawStop));
+    assert.ok(rawStop.sub(dec(candidate.stopPrice)).lt(dec("0.01")));
+    const target = entry.add(dec("6").mul(dec(candidate.stopDistance)));
+    assert.ok(target.sub(dec(candidate.takeProfitPrice)).lt(dec("0.01")));
+  });
+
+  it("raises or lowers the confidence gate for entry and exit alike", () => {
+    const snapshot = asRegimeLong(buildPassingSnapshot());
+    snapshot.marketRegime = { ...snapshot.marketRegime!, confidence: 70 };
+    const strict = evaluateCryptoRegimeLongV1(snapshot, { ...REGIME_LONG_V1_IDENTITY, regimeResearch: { regimeMinimumConfidence: 75 } });
+    assert.equal(strict.outcome, "NO_CANDIDATE");
+    assert.ok(strict.reasonCodes.includes(StrategyReasonCode.REGIME_CONFIDENCE_BELOW_MINIMUM));
+    snapshot.marketRegime = { ...snapshot.marketRegime!, confidence: 55 };
+    assert.equal(evaluateStrategy(snapshot).outcome, "NO_CANDIDATE");
+    const loose = evaluateCryptoRegimeLongV1(snapshot, { ...REGIME_LONG_V1_IDENTITY, regimeResearch: { regimeMinimumConfidence: 50 } });
+    assert.equal(loose.outcome, "CANDIDATE", loose.reasonCodes.join(","));
+    assert.equal(regimeGateOpen({ cryptoRegime: "RISK_ON", riskMode: "NORMAL", confidence: 55 }), false);
+    assert.equal(regimeGateOpen({ cryptoRegime: "RISK_ON", riskMode: "NORMAL", confidence: 55 }, 50), true);
   });
 });

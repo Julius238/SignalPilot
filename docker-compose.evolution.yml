@@ -1,0 +1,63 @@
+# Evolution Engine V1 — optional overlay, NOT part of the default stack.
+#
+# Prepared for the VPS, not deployed. Started only deliberately, by name and
+# with --no-deps, never by a plain `up`:
+#
+#   docker compose -p signalpilot -f docker-compose.prod.yml -f docker-compose.evolution.yml \
+#     --profile evolution up -d --no-deps evolution-worker
+#
+# Isolation (docs/trading/20-evolution-engine.md, "VPS-Betrieb"):
+# - own container, own env file (.env.evolution: restricted DB role + API key),
+#   never .env.production — no production secret reaches this container;
+# - database role `signalpilot_evolution` may read and write only the
+#   Evolution* tables (scripts/ops/evolution-db-role.sql);
+# - non-root user, read-only root filesystem, no capabilities, no Docker socket;
+# - hard CPU/RAM/PID limits and low CPU weight, so trading, the data worker,
+#   n8n, Postgres and the dashboard always win under contention, and the OOM
+#   killer picks this container first;
+# - nothing in the trading worker depends on it: stopping, pausing or crashing
+#   it changes nothing for trading, position monitoring or the risk engine.
+services:
+  evolution-worker:
+    profiles: ["evolution"]
+    build:
+      context: .
+      dockerfile: apps/evolution-worker/Dockerfile
+      target: runtime
+    restart: unless-stopped
+    env_file:
+      - path: .env.evolution
+        required: true
+    environment:
+      NODE_ENV: production
+      EVOLUTION_SNAPSHOT_DIR: /data/market-snapshots
+      EVOLUTION_BACKTEST_CONCURRENCY: "1"
+      EVOLUTION_BACKTEST_MAX_OLD_SPACE_MB: "1024"
+    volumes:
+      # Historical snapshots up to 2026-10-14; the loader drops anything later.
+      - ./data/market-snapshots/real:/data/market-snapshots:ro
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m
+    user: "node"
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    cpus: "0.75"
+    cpu_shares: 256
+    mem_limit: 1536m
+    memswap_limit: 1536m
+    pids_limit: 64
+    oom_score_adj: 500
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD-SHELL", "find /tmp/evolution-worker-heartbeat -mmin -2 2>/dev/null | grep -q ."]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    networks:
+      - internal

@@ -178,10 +178,20 @@ export interface ReplayHooks {
   /** Diagnostics only — called with every strategy evaluation. */
   readonly onEvaluation?: (anchorCloseTime: string, evaluation: StrategyEvaluationResultV1) => void;
   /**
-   * Test seam: replaces the strategy evaluation (default: the registered
-   * production strategy). Everything downstream stays production code.
+   * Replaces the strategy evaluation (default: the registered production
+   * strategy). Used by tests and by research replays of unregistered rule
+   * variants (Evolution Engine); everything downstream stays production code.
    */
   readonly evaluate?: (snapshot: StrategyInputSnapshotV1) => StrategyEvaluationResultV1;
+  /**
+   * Research only: replaces the regime exit of the strategy (default: exit on a
+   * closed gate exactly when the strategy declares `REGIME_EXIT_POLICY`, with
+   * the specified gate). Lets a regime research variant exit on its own gate.
+   */
+  readonly regimeExit?: {
+    readonly enabled: boolean;
+    readonly gateOpen: (regime: { readonly cryptoRegime: string; readonly riskMode: string; readonly confidence: number }) => boolean;
+  };
 }
 
 export function runShadowReplay(market: ReplayMarketData, config: ReplayConfig, hooks: ReplayHooks = {}): ReplayResult {
@@ -197,7 +207,9 @@ export function runShadowReplay(market: ReplayMarketData, config: ReplayConfig, 
   const profile = buildProfile(config);
   const evaluate = hooks.evaluate ?? variantEvaluator(config);
   // Like the live monitor: only a strategy that declares the policy exits on a shut regime gate.
-  const exitOnRegimeGate = (definition.parameters as { exitPolicy?: unknown }).exitPolicy === REGIME_EXIT_POLICY;
+  const exitOnRegimeGate =
+    hooks.regimeExit?.enabled ?? (definition.parameters as { exitPolicy?: unknown }).exitPolicy === REGIME_EXIT_POLICY;
+  const exitGateOpen = hooks.regimeExit?.gateOpen ?? regimeGateOpen;
   const simProfile: ExecutionProfileSnapshotV1 = {
     id: profile.id,
     tickSize: profile.tickSize,
@@ -472,7 +484,7 @@ export function runShadowReplay(market: ReplayMarketData, config: ReplayConfig, 
           exit = { trigger: resolution.trigger, referencePrice: resolution.referencePrice };
         } else if (position.forceClose) {
           exit = { trigger: "MANUAL_RISK_CLOSE", referencePrice: anchorSnapshot.close };
-        } else if (exitOnRegimeGate && (regimeReport === null || !regimeGateOpen(regimeReport))) {
+        } else if (exitOnRegimeGate && (regimeReport === null || !exitGateOpen(regimeReport))) {
           // The report known at this candle's close: derived at an earlier
           // pipeline time (step 4 runs after monitoring), never a later one.
           exit = { trigger: "INVALIDATION", referencePrice: anchorSnapshot.close };

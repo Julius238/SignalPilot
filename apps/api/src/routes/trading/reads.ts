@@ -73,6 +73,7 @@ import {
   listPositions,
   getPositionById
 } from "../../services/trading/executionService.js";
+import { getEvolutionCandidate, getEvolutionOverview } from "../../services/evolution/evolutionService.js";
 import { getOverview } from "../../services/trading/overviewService.js";
 import { listPerformance } from "../../services/trading/performanceService.js";
 import {
@@ -559,6 +560,22 @@ export async function registerTradingReadRoutes(server: FastifyInstance) {
    * recommendations are never applied by a read.
    */
   server.get("/trading/arena", async () => getArenaOverview(database));
+
+  /**
+   * Evolution Engine (historical AI research): agent state, budget and AI
+   * costs, runs, hypotheses, candidates with gate reasons, lineage. Reads
+   * only the Evolution* tables — research results never mix with forward
+   * evidence. `available: false` where the evolution migration is absent.
+   */
+  server.get("/trading/evolution", async () => getEvolutionOverview(database));
+
+  server.get("/trading/evolution/candidates/:key", async (request, reply) => {
+    const { key } = request.params as { key: string };
+    if (!/^EVO-(BRK|REG)-\d{4,}$/.test(key)) return badRequest(reply, "Invalid candidate key.");
+    const candidate = await getEvolutionCandidate(database, key);
+    if (candidate === null) return notFound(reply, "Evolution candidate not found.");
+    return candidate;
+  });
 
   /**
    * 24/7 operating health from persisted state: market data freshness and
