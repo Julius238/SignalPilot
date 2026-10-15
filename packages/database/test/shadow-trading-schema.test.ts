@@ -839,7 +839,12 @@ describe("shadow performance and alert outbox schema (P8)", () => {
         "POSITION_WITHOUT_SAFE_EXIT",
         "RECONCILIATION_FAILED",
         "SESSION_ERROR_LOCKED",
-        "WORKER_HEARTBEAT_STALE"
+        "WORKER_HEARTBEAT_STALE",
+        // 24/7 operations monitoring (commit 49f6185) — operations events, never a trade or candidate notification.
+        "MARKET_DATA_STALE",
+        "SCHEDULED_JOB_STALE",
+        "WORKER_RESTARTED",
+        "OPS_TEST"
       ].sort(),
       "no ordinary candidate or trade notification may enter the catalogue"
     );
