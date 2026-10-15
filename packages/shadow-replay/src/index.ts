@@ -7,5 +7,7 @@
 export * from "./contracts.js";
 export * from "./research.js";
 export * from "./replay.js";
+export * from "./portfolio-replay.js";
+export * from "./group-risk.js";
 export * from "./synthetic.js";
 export * from "./variants.js";

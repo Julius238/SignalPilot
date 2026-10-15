@@ -604,7 +604,7 @@ Jeder Schritt ist für sich grün; es folgt kein Lauf.
 | T4 ✔ | Gruppen-Kill-Switch nach R-010 | Sperre aller Portfolios bis zur Freigabe nach 24 h · nur bis Tagesende UTC | 24 h, wie die bestehende Replay-Annahme | vor Schritt 2 |
 | T5 | Kostenstress P7 | **analytisch** auf denselben Trades · neu simuliert mit doppelten Kosten | analytisch, wie der v1-Kostenstress; die Neusimulation verdoppelt die Laufzeit | vor Schritt 3 |
 | T6 | Replay-Hülle | **Challenger-Schlüssel** · Champion-Schlüssel | Challenger: Der Pfad mit Research-Overrides ist erprobt; Regime-Exit ausdrücklich aus | vor Schritt 4 |
-| T7 ✔ | Bewertung vorab | **parallel vorab, gecacht** · in der Schleife | vorab: gleiche Ergebnisse, kürzere Laufzeit | vor Schritt 2 |
+| T7 ✔ | Bewertung vorab | **parallel vorab, gecacht** · in der Schleife | vorab: gleiche Ergebnisse, kürzere Laufzeit. Stand: Der reine Baustein bewertet in der Schleife; der parallele Vorab-Cache gehört zu den Kindprozessen des Workers (Schritt 5) | Schritt 5 |
 | T8 | Standard-Gate-Version | beim Festschreiben auf v4 umstellen · v3 lassen und v4 nur für eigenständige Familien | umstellen: für alte Familien ohne Wirkung | Schritt 7 |
 | T9 | Konstanten | P4/P5 Faktor 0,5; Drawdown ≤ 10 %; Geometrie Faktor 2; Platz 20 000 USDT | wie vorgeschlagen | Schritt 7 |
 | T10 | Späterer Forward-Test | eigener registrierter Schlüssel + gesonderter Beschluss zur Freigabeliste | erst nach einem bestandenen v4, getrennt entscheiden | vor einem Forward-Test |
@@ -628,3 +628,94 @@ Jeder Schritt ist für sich grün; es folgt kein Lauf.
    - gepusht vor jedem Experiment.
 5. **Stufe 1, nur das Startgenom**, nach eigener Freigabe: ohne KI-Kosten, N
    steigt um 1 bis 3.
+
+## 13. Umsetzungsstand der Simulation (Schritte 1–2)
+
+Umgesetzt auf `claude/inspiring-noether-rjh92d`, ausschließlich im Paket
+`packages/shadow-replay`. Die Risk Engine ist unverändert; es gibt keinen Lauf
+auf echten Daten und keine Evolution-Integration.
+
+| Baustein | Inhalt |
+|---|---|
+| `src/replay-core.ts` | das Portfolio-Buch: Ledger, Kasse und Reservierungen, Orders, Positionen, Bewertung, Tagesbeginn, Kill-Switch, Fill, Überwachung, Risk-Engine-Schritt. Aus `replay.ts` verschoben und für mehrere Symbole je Portfolio verallgemeinert |
+| `src/replay.ts` | `runShadowReplay` nutzt das Buch, mit identischen Ergebnissen |
+| `src/portfolio-replay.ts` | `runPortfolioReplay` (`portfolio-replay-v1/1.0.0`), `comparisonPortfolios` (feste Plätze, Reserve in A), `portfolioTotalCapital` |
+| `src/group-risk.ts` | `buildGroupRiskContext`, `evaluateGroupRisk` (`group-risk-v1/1.0.0`) mit den unveränderten Regelfunktionen R-010, R-013, R-014 und R-015 |
+
+**Nachweise (Tests):**
+
+- **Bestehende Ergebnisse unverändert.** Zehn Einzel-Replays wurden **vor**
+  dem Umbau aufgezeichnet: Signal-Edge, Risk Engine, Kill-Switch,
+  Regime-Exit, ETH-Profil, registrierte Regime- und Trend-Core-Strategie,
+  Variante, Zeitfenster mit Split, nur Ablehnungen. `outputHash` und Hash des
+  Gesamtergebnisses sind danach identisch.
+- **Ein Portfolio = Einzel-Replay.** In fünf Fällen sind Trades, Trichter,
+  Tageskurve und `outputHash` gleich, mit eingeschalteter Gruppenprüfung,
+  einschließlich Kill-Switch, Regime-Exit und ETH.
+- **Treuetest Stufe 2.** Bei einem Portfolio liefern alle vier Gruppenregeln
+  dieselben Ergebnisse, Eingabewerte und Grenzwerte wie Stufe 1.
+- **R-014 über Portfolios.**
+  - Zwei Portfolios halten dasselbe Asset zur selben Stunde.
+  - Über der Grenze lehnt Stufe 2 mit `MAX_ASSET_EXPOSURE` ab, nie mit
+    `DUPLICATE_ASSET_POSITION`.
+  - Die Duplikatsperre greift nur über das eigene Portfolio.
+- **Regeln je Portfolio bleiben je Portfolio.**
+  - Ein Portfolio kann BTC und ETH gleichzeitig halten.
+  - Ein zweiter Einstieg im selben Asset desselben Portfolios scheitert in
+    Stufe 1 (R-014/R-022).
+  - Der Kill-Switch eines Portfolios lässt ein anderes unberührt.
+- **Stufe 2 begrenzt nur.**
+  - Sie wird nur nach einer Freigabe aufgerufen und nie mit anderer Menge.
+  - Eine Stufe 2, die alles ablehnt, erzeugt keinen einzigen Trade.
+  - Eine Stufe 2, die alles zulässt, ergibt dasselbe wie keine Stufe 2.
+  - Der Gruppen-Kill-Switch sperrt alle Portfolios 24 h; danach starten
+    Einstiege neu.
+- **Keine Umgehung.**
+  - Eine Identität außerhalb der Freigabeliste erhält keinen einzigen
+    Einstieg (R-005), und Stufe 2 wird nie aufgerufen.
+  - Unbekannte Strategien, doppelte Portfolios und unbekannte Symbole werden
+    abgewiesen.
+- **Vergleichsrahmen.**
+  - Gleiches Gesamtkapital, gleich große Plätze.
+  - Ein zur Laufzeit eingeschmuggeltes Gewicht wird ignoriert.
+  - Die bestehende Strategie ist in A und B identisch.
+  - Die Zuordnung erfolgt über das Portfolio.
+- **Determinismus und Neustart.** Gleicher Lauf, gleicher Hash. Ein kürzeres
+  Zeitfenster liefert dieselben früheren Entscheidungen.
+
+**Befund zur Wirkung der Gruppengrenzen:**
+
+- **Exposure-Regeln.** Die Gruppe nutzt dieselben Prozentgrenzen wie jedes
+  Portfolio, und ihre Equity ist die Summe der Portfolios plus Reserve.
+  - Stufe 1 hält jedes Portfolio beim Einstieg unter 20 % (Asset), 30 %
+    (BTC + ETH) und 40 % (brutto) seiner eigenen Equity.
+  - Damit liegt auch die Summe beim Einstieg unter diesen Anteilen der
+    Gruppen-Equity.
+  - R-013, R-014 und R-015 der Gruppe können deshalb nur greifen, wenn
+    bestehende Positionen **nach** ihrem Einstieg im Wert gestiegen sind
+    (Kursdrift).
+- **R-010 der Gruppe** greift erst, wenn der durchschnittliche Tagesverlust
+  1 % erreicht. Das setzt praktisch voraus, dass einzelne Portfolios mehr als
+  1 % verlieren, also durch Kurslücken über den Stop hinaus.
+- **Folge:** Unter den heutigen Grenzen liefert die gemeinsame Simulation fast
+  immer dasselbe wie unabhängige Portfolios. Sie belegt das jetzt durch die
+  Simulation selbst, statt es anzunehmen.
+  - Der Vergleich A/B misst damit im Kern den Beitrag des Kandidaten.
+  - Die Gruppenprüfung bleibt eine Absicherung für Extremfälle.
+  - Eine wirksamere gemeinsame Grenze wäre eine **neue** Grenze (zum Beispiel
+    ein Gruppen-Limit unter der Summe der Portfolio-Limits). Sie ist nicht
+    Teil dieser Umsetzung und bräuchte eine eigene Entscheidung.
+
+**Laufzeit:**
+
+- Im Test (synthetisch, etwa 45 Handelstage nach 200 Tagen Vorlauf) braucht
+  ein Portfolio mit einem Symbol rund 2,8 s, wie der Einzel-Replay.
+- Die Kosten wachsen etwa linear mit Portfolios × Symbolen. Auf echten Daten
+  (5,75 Jahre) ergibt das grob 14 CPU-Minuten je Simulation mit drei
+  Portfolios und zwei Symbolen.
+- Der parallele Vorab-Cache der Bewertungen (T7) folgt mit der
+  Worker-Integration.
+
+**Noch nicht umgesetzt:** Schritte 3–7 (Gates v4, Familie, Worker,
+Dashboard, Festschreiben).
+
