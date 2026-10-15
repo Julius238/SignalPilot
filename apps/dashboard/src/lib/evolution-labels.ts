@@ -48,7 +48,18 @@ export const GATE_LABEL: Record<string, string> = {
   BENCHMARK: "Gegen Champion",
   PARAMETER_ROBUSTNESS: "Nachbarvarianten",
   WALK_FORWARD: "Walk-Forward",
-  HOLDOUT: "Holdout"
+  HOLDOUT: "Holdout",
+  SUCCESSOR_BUDGET: "Nachfolger-Monatslimit",
+  SUCCESSOR_IMPROVEMENT: "Nachfolger: deutliche Verbesserung",
+  SUCCESSOR_CONSISTENCY: "Nachfolger: beide Zeiträume",
+  SUCCESSOR_SIGNIFICANCE: "Nachfolger: gepaarte Signifikanz",
+  SUCCESSOR_NO_DETERIORATION: "Nachfolger: keine Verschlechterung",
+  SUCCESSOR_HOLDOUT_GUARD: "Nachfolger: Holdout-Schutz"
+};
+
+export const GATES_VERSION_LABEL: Record<string, string> = {
+  "evolution-gates-v1": "Gates v1",
+  "evolution-gates-v2": "Gates v2 (Nachfolger-Regel)"
 };
 
 export const EVIDENCE_LABEL: Record<string, { label: string; tone: Tone }> = {

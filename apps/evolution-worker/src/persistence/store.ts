@@ -8,6 +8,7 @@ import { createHash } from "node:crypto";
 import {
   EVOLUTION_COST_MODEL_V1,
   EVOLUTION_ENGINE_VERSION,
+  genomeHash,
   type BacktestSummary,
   type CandidateGenome,
   type EvolutionFamily,
@@ -140,4 +141,25 @@ export async function loadHistory(db: EvolutionDb, limit = 40): Promise<HistoryE
       discovery: metrics?.discoverySnapshot ?? null
     };
   });
+}
+
+/** Genome hashes of every neighbour variant evaluated so far (any gate version). */
+export async function evaluatedNeighbourGenomeHashes(db: EvolutionDb): Promise<Set<string>> {
+  const rows = await db.evolutionBacktest.findMany({ where: { role: "NEIGHBOUR" }, select: { configJson: true } });
+  const hashes = new Set<string>();
+  for (const row of rows) {
+    const subject = (row.configJson as { subject?: { kind?: string; genome?: CandidateGenome } } | null)?.subject;
+    if (subject?.kind === "GENOME" && subject.genome !== undefined) hashes.add(genomeHash(subject.genome));
+  }
+  return hashes;
+}
+
+/**
+ * Successor screenings of a root in the calendar month (UTC) of `now`,
+ * across earlier runs — the current run counts its own on top.
+ */
+export async function successorScreeningsThisMonth(db: EvolutionDb, rootStrategyKey: string, now: Date): Promise<number> {
+  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const rows = await db.evolutionCandidate.findMany({ where: { rootStrategyKey, createdAt: { gte: monthStart } }, select: { gatesJson: true } });
+  return rows.filter((row) => ((row.gatesJson as unknown as GateResult[] | null) ?? []).some((gate) => gate.reasonCode === "ROUTED_TO_SUCCESSOR_CHECK")).length;
 }

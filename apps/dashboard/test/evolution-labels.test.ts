@@ -1,13 +1,21 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { buildLineageTrees, candidateStatus, fmtPct, fmtR, fmtUsd } from "../src/lib/evolution-labels";
+import { GATES_VERSION_LABEL, GATE_LABEL, buildLineageTrees, candidateStatus, fmtPct, fmtR, fmtUsd } from "../src/lib/evolution-labels";
 
 describe("evolution labels", () => {
   it("never shows a raw enum for known statuses and falls back to the raw value otherwise", () => {
     assert.equal(candidateStatus("PROPOSED").label, "Zur Prüfung vorgeschlagen");
     assert.equal(candidateStatus("REJECTED").tone, "trading-bad");
     assert.equal(candidateStatus("SOMETHING_NEW").label, "SOMETHING_NEW");
+  });
+
+  it("labels every v2 successor gate and both gate versions", () => {
+    for (const gate of ["SUCCESSOR_BUDGET", "SUCCESSOR_IMPROVEMENT", "SUCCESSOR_CONSISTENCY", "SUCCESSOR_SIGNIFICANCE", "SUCCESSOR_NO_DETERIORATION", "SUCCESSOR_HOLDOUT_GUARD"]) {
+      assert.ok(GATE_LABEL[gate]?.startsWith("Nachfolger"), gate);
+    }
+    assert.equal(GATES_VERSION_LABEL["evolution-gates-v1"], "Gates v1");
+    assert.match(GATES_VERSION_LABEL["evolution-gates-v2"]!, /Nachfolger/);
   });
 
   it("formats R, percent and USD in German and shows a dash for unknown values", () => {

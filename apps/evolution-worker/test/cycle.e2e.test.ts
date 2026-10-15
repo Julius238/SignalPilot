@@ -8,13 +8,23 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 
-import { HYPOTHESIS_RESPONSE_SCHEMA, MockResearchProvider, assertContextLeakFree, extractResearchContext, type AiRequest, type ResearchAiProvider } from "@signalpilot/evolution";
+import {
+  EVOLUTION_GATES_V2,
+  HYPOTHESIS_RESPONSE_SCHEMA,
+  MockResearchProvider,
+  assertContextLeakFree,
+  diffGenomes,
+  extractResearchContext,
+  type AiRequest,
+  type CandidateGenome,
+  type ResearchAiProvider
+} from "@signalpilot/evolution";
 
 import { InProcessBacktestRunner } from "../src/backtest/pool.js";
 import { runResearchCycle, type CycleDeps } from "../src/cycle/researchCycle.js";
 import { setAgentStatus } from "../src/persistence/agentState.js";
 import { verifyEvolutionAuditChain } from "../src/persistence/audit.js";
-import { DB_SKIP_REASON, PERMISSIVE_GATES, SYNTHETIC_SPLIT, resetEvolutionTables, silentLog, syntheticMarket, testConfig, testDatabase } from "./support.js";
+import { DB_SKIP_REASON, PERMISSIVE_GATES, PERMISSIVE_GATES_V2, SYNTHETIC_SPLIT, resetEvolutionTables, silentLog, syntheticMarket, testConfig, testDatabase } from "./support.js";
 
 const db = testDatabase();
 
@@ -133,6 +143,92 @@ describe("research cycle end to end", { skip: db === null ? DB_SKIP_REASON : fal
       }
     }
     assert.equal((await verifyEvolutionAuditChain(db!)).ok, true);
+  });
+
+  it("gates v2 routes near-copies of the own root to the successor rule and never re-decides earlier candidates", async () => {
+    const snapshot = async () =>
+      (await db!.evolutionCandidate.findMany({ orderBy: { candidateKey: "asc" } })).map((row) => ({
+        key: row.candidateKey,
+        status: row.status,
+        reasons: row.statusReasons,
+        gates: row.gatesJson,
+        version: row.version,
+        updatedAt: row.updatedAt.toISOString()
+      }));
+    const before = await snapshot();
+    const outcome = await runResearchCycle({ ...deps(), gates: PERMISSIVE_GATES_V2 }, { trigger: "MANUAL" });
+    assert.equal(outcome.status, "COMPLETED", outcome.reason ?? "");
+    const after = await snapshot();
+    assert.ok(after.length > before.length, "the v2 cycle added candidates");
+    for (const earlier of before) {
+      assert.deepEqual(after.find((row) => row.key === earlier.key), earlier, `earlier decision of ${earlier.key} is never re-evaluated`);
+    }
+
+    const run = await db!.evolutionRun.findFirstOrThrow({ orderBy: { startedAt: "desc" }, include: { candidates: true } });
+    const manifest = run.dataManifestJson as { gatesVersion: string; gatesHash: string };
+    assert.equal(manifest.gatesVersion, "evolution-gates-test-v2");
+    assert.equal(manifest.gatesHash.length, 64);
+    const trigger = EVOLUTION_GATES_V2.successor.correlationTrigger;
+    let routed = 0;
+    for (const candidate of run.candidates.filter((entry) => entry.gatesJson !== null)) {
+      const metrics = candidate.metricsJson as { correlations: { key: string; value: number | null }[]; successor: unknown };
+      const ownRoot = `ROOT:${candidate.rootStrategyKey}`;
+      const near = metrics.correlations.filter((entry) => entry.value !== null && entry.value > trigger);
+      const shouldRoute = near.some((entry) => entry.key === ownRoot) && near.every((entry) => entry.key === ownRoot);
+      const gates = candidate.gatesJson as { gate: string; reasonCode: string }[];
+      const successorGates = gates.filter((gate) => gate.gate.startsWith("SUCCESSOR_")).map((gate) => gate.gate);
+      if (shouldRoute) {
+        routed += 1;
+        assert.equal(gates.find((gate) => gate.gate === "REDUNDANCY")!.reasonCode, "ROUTED_TO_SUCCESSOR_CHECK");
+        assert.deepEqual(successorGates.slice(0, 5), ["SUCCESSOR_BUDGET", "SUCCESSOR_IMPROVEMENT", "SUCCESSOR_CONSISTENCY", "SUCCESSOR_SIGNIFICANCE", "SUCCESSOR_NO_DETERIORATION"]);
+        assert.ok(metrics.successor !== null);
+        // The compressed synthetic split has 4 months: the paired test must refuse to decide on that.
+        assert.ok(gates.some((gate) => gate.reasonCode === "INSUFFICIENT_PAIRED_SAMPLE"));
+        assert.equal(candidate.status, "REJECTED");
+        assert.ok(candidate.reportMarkdown!.includes("Nachfolger-Prüfung (Gates v2)"));
+      } else {
+        assert.deepEqual(successorGates, [], candidate.candidateKey);
+      }
+    }
+    assert.ok(routed >= 1, "the mock's one-step regime refinements are near-copies of the challenger");
+  });
+
+  it("refuses a hypothesis whose genome was already evaluated as a neighbour variant", async () => {
+    const neighbour = await db!.evolutionBacktest.findFirstOrThrow({ where: { role: "NEIGHBOUR" }, include: { candidate: true } });
+    const parent = neighbour.candidate!;
+    const parentGenome = parent.genomeJson as unknown as CandidateGenome;
+    const neighbourGenome = (neighbour.configJson as unknown as { subject: { genome: CandidateGenome } }).subject.genome;
+    const changes = diffGenomes(parentGenome, neighbourGenome).map((diff) => ({ parameter: diff.parameter, value: String(diff.to) }));
+    const scripted: ResearchAiProvider = {
+      name: "mock",
+      billable: false,
+      async complete(request: AiRequest) {
+        if (request.task !== "HYPOTHESIS_GENERATION") return new MockResearchProvider().complete(request);
+        const json = {
+          summary: "scripted",
+          hypotheses: [
+            {
+              title: "Nachbarvariante erneut einreichen",
+              marketObservation: "Test",
+              rationale: "Test",
+              family: parentGenome.family,
+              parentKey: parent.candidateKey,
+              changes,
+              expectedEffect: "Test",
+              falsificationCriterion: "Test"
+            }
+          ]
+        };
+        const usage = { inputTokens: 1, outputTokens: 1, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 };
+        return { servedModel: request.model, text: JSON.stringify(json), json, usage, usageByModel: [{ model: request.model, usage }], stopReason: "end_turn", requestId: null, attempts: 1 };
+      }
+    };
+    const outcome = await runResearchCycle({ ...deps(), provider: scripted }, { trigger: "MANUAL" });
+    assert.equal(outcome.status, "COMPLETED", outcome.reason ?? "");
+    assert.equal(outcome.candidates.length, 0);
+    const hypothesis = await db!.evolutionHypothesis.findFirstOrThrow({ where: { title: "Nachbarvariante erneut einreichen" } });
+    assert.equal(hypothesis.outcome, "DUPLICATE");
+    assert.match(hypothesis.outcomeReasons.join(" "), /Nachbarvariante/);
   });
 
   it("stops before backtesting when a billable provider has no budget left", async () => {

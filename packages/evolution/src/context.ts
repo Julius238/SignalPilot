@@ -100,6 +100,8 @@ export function buildResearchContext(input: {
   readonly history: readonly HistoryEntry[];
   readonly hypotheses: number;
   readonly maxChangesPerHypothesis?: number;
+  /** Gates v2: refinements of the own root are allowed under the successor rule. */
+  readonly successorRule?: boolean;
 }): ResearchContext {
   return {
     contextVersion: RESEARCH_CONTEXT_VERSION,
@@ -112,7 +114,12 @@ export function buildResearchContext(input: {
       "Jede Hypothese ändert höchstens die angegebene Zahl von Parametern gegenüber genau einer Elternstrategie aus allowedParents.",
       "Bereits getestete Genome werden verworfen; wiederhole keine Kombination aus history.",
       "Bewertet wird zuerst auf Entdeckungsdaten, dann auf getrennten Validierungsdaten (nur das Urteil wird zurückgemeldet), danach auf weiteren nie gezeigten Daten.",
-      "Wenige, ökonomisch begründete Änderungen sind besser als viele feine Anpassungen: jede zusätzliche Änderung erhöht das Risiko der Überanpassung."
+      "Wenige, ökonomisch begründete Änderungen sind besser als viele feine Anpassungen: jede zusätzliche Änderung erhöht das Risiko der Überanpassung.",
+      ...(input.successorRule === true
+        ? [
+            "Verfeinerungen der eigenen Wurzel (fast gleiche Tagesrenditen) sind zulässig, werden aber nur akzeptiert, wenn sie die Wurzel risikobereinigt deutlich, in beiden Zeiträumen und statistisch belastbar übertreffen, ohne irgendwo schlechter zu werden; die Zahl solcher Versuche je Wurzel ist monatlich begrenzt. Kleine Kosmetik an einer Wurzel scheitert."
+          ]
+        : [])
     ],
     families: Object.values(FAMILY_SPECS).map((spec) => ({
       family: spec.family,

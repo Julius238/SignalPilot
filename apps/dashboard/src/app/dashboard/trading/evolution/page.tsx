@@ -10,6 +10,7 @@ import {
   EVIDENCE_LABEL,
   FAMILY_LABEL,
   GATE_LABEL,
+  GATES_VERSION_LABEL,
   HYPOTHESIS_OUTCOME,
   PROVIDER_LABEL,
   PURPOSE_LABEL,
@@ -242,6 +243,7 @@ function EvolutionBody({ data }: { data: EvolutionOverviewAvailable }) {
                         </Link>
                         <div className="muted small">
                           {FAMILY_LABEL[candidate.family] ?? candidate.family} · G{candidate.generation}
+                          {candidate.successorOf ? ` · Nachfolger-Prüfung gegen ${candidate.successorOf}` : ""}
                         </div>
                       </td>
                       <td>
@@ -450,6 +452,7 @@ function EvolutionBody({ data }: { data: EvolutionOverviewAvailable }) {
                       <th>Durchlauf</th>
                       <th>Status</th>
                       <th>KI</th>
+                      <th>Gates</th>
                       <th>Dauer</th>
                       <th>Hypothesen</th>
                       <th>Kandidaten</th>
@@ -472,6 +475,7 @@ function EvolutionBody({ data }: { data: EvolutionOverviewAvailable }) {
                           {run.errorMessage ? <div className="muted small">{run.errorMessage}</div> : null}
                         </td>
                         <td className="small">{PROVIDER_LABEL[run.provider] ?? run.provider}</td>
+                        <td className="small">{run.gatesVersion ? (GATES_VERSION_LABEL[run.gatesVersion] ?? run.gatesVersion) : "—"}</td>
                         <td>{fmtDuration(run.durationMs)}</td>
                         <td>{run.hypothesesRequested}</td>
                         <td className="small">

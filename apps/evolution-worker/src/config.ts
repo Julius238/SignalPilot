@@ -7,7 +7,7 @@
  * it is never logged, stored or returned by `describeConfig`.
  */
 
-import { AI_MODEL_PRICING, assertStrategyCodeGenerationDisabled, type AiEffort } from "@signalpilot/evolution";
+import { AI_MODEL_PRICING, assertStrategyCodeGenerationDisabled, type AiEffort, type GateVersionKey } from "@signalpilot/evolution";
 
 export type ProviderMode = "anthropic" | "mock";
 
@@ -33,6 +33,8 @@ export interface EvolutionWorkerConfig {
   readonly backtestTimeoutMs: number;
   readonly backtestMaxOldSpaceMb: number;
   readonly holdoutEnabled: boolean;
+  /** Pre-registered gate version deciding new candidates (v2 since 2026-10-15; v1 stays selectable for reproduction). */
+  readonly gatesVersion: GateVersionKey;
   readonly heartbeatFile: string;
   readonly leaseMs: number;
 }
@@ -89,6 +91,8 @@ export function loadEvolutionConfig(env: NodeJS.ProcessEnv = process.env): Evolu
   if (runBudgetUsd > monthlyBudgetUsd) throw new EvolutionConfigError("EVOLUTION_AI_RUN_BUDGET_USD must not exceed the monthly budget.");
   const fallback = (env.EVOLUTION_AI_REFUSAL_FALLBACK ?? "default").trim();
   if (fallback !== "default" && fallback !== "off") throw new EvolutionConfigError("EVOLUTION_AI_REFUSAL_FALLBACK must be default or off.");
+  const gatesVersion = (env.EVOLUTION_GATES_VERSION ?? "v2").trim();
+  if (gatesVersion !== "v1" && gatesVersion !== "v2") throw new EvolutionConfigError("EVOLUTION_GATES_VERSION must be v1 or v2.");
   const maxConcurrentRuns = number(env, "EVOLUTION_MAX_CONCURRENT_RUNS", 1, { min: 1, max: 1, integer: true });
   void maxConcurrentRuns;
   return {
@@ -122,6 +126,7 @@ export function loadEvolutionConfig(env: NodeJS.ProcessEnv = process.env): Evolu
     backtestTimeoutMs: number(env, "EVOLUTION_BACKTEST_TIMEOUT_MS", 30 * 60_000, { min: 60_000, max: 4 * 3_600_000, integer: true }),
     backtestMaxOldSpaceMb: number(env, "EVOLUTION_BACKTEST_MAX_OLD_SPACE_MB", 1536, { min: 256, max: 8192, integer: true }),
     holdoutEnabled: bool(env, "EVOLUTION_HOLDOUT_ENABLED", true),
+    gatesVersion,
     heartbeatFile: env.EVOLUTION_HEARTBEAT_FILE?.trim() || "/tmp/evolution-worker-heartbeat",
     leaseMs: number(env, "EVOLUTION_LEASE_MS", 6 * 3_600_000, { min: 60_000, max: 24 * 3_600_000, integer: true })
   };

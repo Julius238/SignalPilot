@@ -8,8 +8,10 @@ historischen Daten, testet sie mit dem bestehenden Backtest und schlägt die
 robustesten zur Prüfung vor. Trading Engine, Risk Engine und Arena bleiben
 die unabhängigen Instanzen für Ausführung und Leistungsbewertung.
 
-Entscheidung: [ADR 0016](decisions/0016-evolution-engine-isolated-research.md) ·
-Vorregistrierung: [research/2026-10-15-evolution-v1-preregistration.md](research/2026-10-15-evolution-v1-preregistration.md)
+Entscheidungen: [ADR 0016](decisions/0016-evolution-engine-isolated-research.md),
+[ADR 0017](decisions/0017-evolution-gates-v2-successor-rule.md) (Gates v2) ·
+Vorregistrierungen: [v1](research/2026-10-15-evolution-v1-preregistration.md),
+[Gates v2](research/2026-10-15-evolution-gates-v2-preregistration.md)
 
 ## Bausteine
 
@@ -62,6 +64,20 @@ Challenger, ihre Spezifikations-Hashes und Golden Fixtures sind unverändert.
 - **Unrealistisches fällt automatisch**: Kosten, Ausführung, Größe, Risk-Regeln
   und Hebel sind nicht änderbar; unmögliche Kosten-Geometrie und
   inkonsistente Grenzen werden vor dem Backtest verworfen.
+
+## Gate-Versionen
+
+| Version | Seit | Inhalt |
+|---|---|---|
+| `evolution-gates-v1` | 2026-10-15 (`efe4df8`) | Screening- und Finalprüfungen; jede Fast-Kopie einer bestehenden Strategie ist redundant |
+| `evolution-gates-v2` | 2026-10-15 | v1 mit identischen Schwellen plus Nachfolger-Regel: eine Fast-Kopie nur der eigenen Wurzel muss diese deutlich, in beiden Zeiträumen, gepaart signifikant (Newey–West, Student-t, Mehrfachtest) und ohne Verschlechterung übertreffen; höchstens 8 Versuche je Wurzel und Monat, ein Nachfolger-Finalist je Durchlauf |
+
+Neue Durchläufe verwenden v2 (`EVOLUTION_GATES_VERSION`, Standard `v2`; `v1`
+bleibt für Reproduktionen wählbar). Beide Versionen sind per Hash
+festgenagelt; das Manifest jedes Durchlaufs enthält `gatesVersion` und
+`gatesHash`. Entscheidungen werden nie rückwirkend neu bewertet, und ein
+bereits als Kandidat oder Nachbarvariante geprüftes Genom wird als Duplikat
+verworfen.
 
 ## Bewertung
 

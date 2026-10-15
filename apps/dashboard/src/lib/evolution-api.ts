@@ -64,6 +64,9 @@ export type EvolutionCandidateItem = {
   inSample: EvolutionMetrics | null;
   holdout: EvolutionMetrics | null;
   versusChampion: { sharpeDelta: number | null; averageRDelta: number | null; netReturnDeltaPct: number | null; maxDrawdownDeltaPct: number | null } | null;
+  /** Gates v2: strategy key of the root this candidate was checked against as successor. */
+  successorOf: string | null;
+  gateVersion: string | null;
   gatesPassed: number;
   gatesTotal: number;
   failedGates: EvolutionGate[];
@@ -111,6 +114,7 @@ export type EvolutionOverviewAvailable = {
     runKey: string;
     trigger: string;
     status: string;
+    gatesVersion: string | null;
     provider: string;
     billable: boolean;
     startedAt: string;
@@ -190,6 +194,17 @@ export type EvolutionCandidateDetail =
         candidateSelectedShare: number | null;
       } | null;
       neighbours: { key: string; inSample: EvolutionMetrics | null }[];
+      successor: {
+        rootKey: string;
+        correlation: number | null;
+        candidateSharpe: number | null;
+        referenceSharpe: number | null;
+        threshold: number;
+        trials: number;
+        screeningsThisMonth: number;
+        paired: { months: number; informativeMonths: number; meanDifference: number | null; tStat: number | null; naiveTStat: number | null; lag: number | null; criticalT: number | null };
+      } | null;
+      gateVersion: string | null;
       technical: { deterministic: boolean; invariantViolations: number; cycles: number } | null;
       gates: EvolutionGate[];
       backtests: { subjectKey: string; role: string; symbol: string; windowKey: string; tradeCount: number; outputHash: string; durationMs: number; createdAt: string }[];

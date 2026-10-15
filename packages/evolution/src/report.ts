@@ -9,6 +9,7 @@
 import type { EvidenceGrade, GateResult, ResearchScore } from "./gates.js";
 import type { ParameterDiff } from "./genome.js";
 import type { FoldMetrics, WindowMetrics } from "./metrics.js";
+import type { PairedMonthlyTest } from "./paired.js";
 import type { WalkForwardResult } from "./walk-forward.js";
 
 const n = (value: number | null | undefined, digits = 2): string => (value === null || value === undefined ? "–" : value.toFixed(digits));
@@ -69,6 +70,17 @@ export function renderCandidateReport(input: {
   readonly evidence: { readonly grade: EvidenceGrade; readonly threshold: number; readonly trials: number; readonly tStat: number | null } | null;
   readonly walkForward: WalkForwardResult | null;
   readonly correlations: readonly { readonly key: string; readonly value: number | null }[];
+  /** Gates v2: present when the candidate went through the successor rule. */
+  readonly successor?: {
+    readonly rootKey: string;
+    readonly correlation: number | null;
+    readonly candidateSharpe: number | null;
+    readonly referenceSharpe: number | null;
+    readonly paired: PairedMonthlyTest;
+    readonly threshold: number;
+    readonly trials: number;
+  } | null;
+  readonly gateVersion?: string;
 }): string {
   const lines: string[] = [];
   lines.push(`# Forschungsbericht ${input.candidateKey}`, "");
@@ -112,6 +124,18 @@ export function renderCandidateReport(input: {
   if (input.correlations.length > 0) {
     lines.push("## Korrelation zu bestehenden Strategien", "", ...input.correlations.map((entry) => `- ${entry.key}: ${n(entry.value)}`), "");
   }
+  if (input.successor) {
+    const s = input.successor;
+    lines.push(
+      "## Nachfolger-Prüfung (Gates v2)",
+      "",
+      `Fast-Kopie der eigenen Wurzel ${s.rootKey.replace(/^ROOT:/, "")} (Korrelation ${n(s.correlation)}). Sharpe Entdeckung + Validierung ${n(s.candidateSharpe)} gegenüber ${n(s.referenceSharpe)}.`,
+      "",
+      `Gepaarter Monatsvergleich: ${s.paired.months} Monate (${s.paired.informativeMonths} mit Unterschied), Ø Differenz ${n(s.paired.meanDifference === null ? null : s.paired.meanDifference * 100, 3)} %-Punkte je Monat, t = ${n(s.paired.tStat)} mit Newey–West-Standardfehler (Lag ${s.paired.lag ?? "–"}; ohne Korrektur t = ${n(s.paired.naiveTStat)}), Schwelle ${n(s.threshold)} bei N = ${s.trials} geprüften Konfigurationen.`,
+      ""
+    );
+  }
+  if (input.gateVersion) lines.push(`Entschieden nach ${input.gateVersion}.`, "");
   lines.push("## Prüfungen", "", "| Prüfung | Stufe | Ergebnis | Begründung |", "|---|---|---|---|");
   for (const gate of input.gates) lines.push(`| ${gate.gate} | ${gate.stage} | ${gate.passed ? "bestanden" : "**nicht bestanden**"} | ${gate.message.replace(/\|/g, "/")} |`);
   lines.push("");

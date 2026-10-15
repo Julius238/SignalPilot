@@ -156,6 +156,8 @@ async function buildOverview(db: PrismaClient, now: Date) {
               netReturnDeltaPct: inSample.netReturnPct === null || championInSample.netReturnPct === null ? null : inSample.netReturnPct - championInSample.netReturnPct,
               maxDrawdownDeltaPct: inSample.maxDrawdownPct === null || championInSample.maxDrawdownPct === null ? null : inSample.maxDrawdownPct - championInSample.maxDrawdownPct
             },
+      successorOf: ((m.successor as { rootKey?: string } | null | undefined)?.rootKey ?? null)?.replace(/^ROOT:/, "") ?? null,
+      gateVersion: (m.gateVersion as string | undefined) ?? null,
       gatesPassed: gates.filter((gate) => gate.passed).length,
       gatesTotal: gates.length,
       failedGates: gates.filter((gate) => !gate.passed)
@@ -203,6 +205,7 @@ async function buildOverview(db: PrismaClient, now: Date) {
       runKey: run.runKey,
       trigger: run.trigger,
       status: run.status,
+      gatesVersion: ((run.dataManifestJson as Json | null)?.gatesVersion as string | undefined) ?? null,
       provider: run.providerName,
       billable: run.billable,
       startedAt: run.startedAt.toISOString(),
@@ -249,7 +252,7 @@ export async function getEvolutionCandidate(db: PrismaClient, key: string) {
   try {
     const candidate = await db.evolutionCandidate.findUnique({
       where: { candidateKey: key },
-      include: { hypothesis: true, run: { select: { runKey: true, providerName: true, billable: true, startedAt: true } }, backtests: { select: { subjectKey: true, role: true, symbol: true, windowKey: true, tradeCount: true, outputHash: true, durationMs: true, createdAt: true } } }
+      include: { hypothesis: true, run: { select: { runKey: true, providerName: true, billable: true, startedAt: true, dataManifestJson: true } }, backtests: { select: { subjectKey: true, role: true, symbol: true, windowKey: true, tradeCount: true, outputHash: true, durationMs: true, createdAt: true } } }
     });
     if (candidate === null) return null;
     const chain: string[] = [candidate.candidateKey];
@@ -296,6 +299,9 @@ export async function getEvolutionCandidate(db: PrismaClient, key: string) {
       folds: m.folds ?? [],
       correlations: m.correlations ?? [],
       walkForward: m.walkForward ?? null,
+      successor: m.successor ?? null,
+      // Candidates of v1 runs carry no version of their own; their run's manifest does.
+      gateVersion: (m.gateVersion as string | undefined) ?? ((candidate.run.dataManifestJson as Json | null)?.gatesVersion as string | undefined) ?? null,
       neighbours: Array.isArray(m.neighbours) ? (m.neighbours as { key: string; inSample: unknown }[]).map((entry) => ({ key: entry.key, inSample: metrics(entry.inSample) })) : [],
       technical: candidate.technicalJson,
       gates: gatesOf(candidate.gatesJson),

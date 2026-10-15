@@ -36,16 +36,29 @@ export function failedGates(results: readonly GateResult[]): GateResult[] {
   return results.filter((result) => !result.passed);
 }
 
-/** Candidates that passed screening, best research score first; ties broken by key (never by luck). */
+/**
+ * Candidates that passed screening, best research score first; ties broken
+ * by key (never by luck). `maxSuccessors` (gates v2) caps how many
+ * successor candidates may become finalists in one run.
+ */
 export function selectFinalists(
-  entries: readonly { readonly key: string; readonly score: number; readonly passedScreening: boolean }[],
-  maxFinalists: number
+  entries: readonly { readonly key: string; readonly score: number; readonly passedScreening: boolean; readonly successor?: boolean }[],
+  maxFinalists: number,
+  options: { readonly maxSuccessors?: number } = {}
 ): string[] {
-  return entries
-    .filter((entry) => entry.passedScreening)
-    .sort((a, b) => (b.score !== a.score ? b.score - a.score : a.key.localeCompare(b.key)))
-    .slice(0, Math.max(0, maxFinalists))
-    .map((entry) => entry.key);
+  const selected: string[] = [];
+  let successors = 0;
+  for (const entry of entries
+    .filter((candidate) => candidate.passedScreening)
+    .sort((a, b) => (b.score !== a.score ? b.score - a.score : a.key.localeCompare(b.key)))) {
+    if (selected.length >= Math.max(0, maxFinalists)) break;
+    if (entry.successor === true) {
+      if (options.maxSuccessors !== undefined && successors >= options.maxSuccessors) continue;
+      successors += 1;
+    }
+    selected.push(entry.key);
+  }
+  return selected;
 }
 
 export function statusAfterFinal(screening: readonly GateResult[], final: readonly GateResult[]): CandidateStatus {

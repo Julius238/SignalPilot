@@ -54,7 +54,14 @@ export type GateId =
   | "BENCHMARK"
   | "PARAMETER_ROBUSTNESS"
   | "WALK_FORWARD"
-  | "HOLDOUT";
+  | "HOLDOUT"
+  // Gates v2 (successor rule, gates-v2.ts); v1 never produces these.
+  | "SUCCESSOR_BUDGET"
+  | "SUCCESSOR_IMPROVEMENT"
+  | "SUCCESSOR_CONSISTENCY"
+  | "SUCCESSOR_SIGNIFICANCE"
+  | "SUCCESSOR_NO_DETERIORATION"
+  | "SUCCESSOR_HOLDOUT_GUARD";
 
 export type GateStage = "SCREENING" | "FINAL";
 

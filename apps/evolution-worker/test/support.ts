@@ -1,5 +1,5 @@
 import { generateSyntheticSeries, type ReplayMarketData } from "@signalpilot/shadow-replay";
-import { EVOLUTION_GATES_V1, type DailyBar, type EvolutionDataSplit, type EvolutionGates } from "@signalpilot/evolution";
+import { EVOLUTION_GATES_V1, EVOLUTION_GATES_V2, type DailyBar, type EvolutionDataSplit, type EvolutionGates, type EvolutionGatesV2 } from "@signalpilot/evolution";
 
 import { loadEvolutionConfig, type EvolutionWorkerConfig } from "../src/config.js";
 import { createEvolutionDatabase, type EvolutionDb } from "../src/database.js";
@@ -88,6 +88,9 @@ export const PERMISSIVE_GATES: EvolutionGates = {
   maxFinalists: 1,
   neighbourCount: 1
 };
+
+/** Permissive v1 thresholds plus the real, pre-registered successor policy of v2. */
+export const PERMISSIVE_GATES_V2: EvolutionGatesV2 = { ...PERMISSIVE_GATES, version: "evolution-gates-test-v2", successor: EVOLUTION_GATES_V2.successor };
 
 export function syntheticMarket(split: EvolutionDataSplit = SYNTHETIC_SPLIT): { market: ReplayMarketData; fingerprint: string; discoveryBars: Record<string, DailyBar[]> } {
   const start = Date.UTC(2023, 0, 1);

@@ -23,7 +23,7 @@ import {
   EVOLUTION_DATA_SPLIT_V1,
   EVOLUTION_DATA_SPLIT_V1_HASH,
   EVOLUTION_ENGINE_VERSION,
-  EVOLUTION_GATES_V1,
+  EVOLUTION_GATE_VERSIONS,
   EVOLUTION_ROOTS,
   FAMILY_SPECS,
   HYPOTHESIS_RESPONSE_SCHEMA,
@@ -45,6 +45,13 @@ import {
   evidenceGrade,
   finalGates,
   foldMetrics,
+  isGatesV2,
+  pairedMonthlyTest,
+  routedRedundancyGate,
+  successorHoldoutGate,
+  successorRoute,
+  successorScreeningGates,
+  successorTThreshold,
   foldStability,
   genomeHash,
   lineageChain,
@@ -71,8 +78,9 @@ import {
   type DailyBar,
   type EvolutionDataSplit,
   type EvolutionFamily,
-  type EvolutionGates,
+  type EvolutionGateSet,
   type GateResult,
+  type PairedMonthlyTest,
   type ParsedReview,
   type ResearchAiProvider,
   type WindowMetrics
@@ -91,11 +99,13 @@ import { recordAuditEvent } from "../persistence/audit.js";
 import {
   backtestCacheKey,
   evaluatedConfigurations,
+  evaluatedNeighbourGenomeHashes,
   findCachedBacktest,
   loadHistory,
   nextSequence,
   recordExposure,
   saveBacktest,
+  successorScreeningsThisMonth,
   type BacktestRole
 } from "../persistence/store.js";
 
@@ -117,8 +127,8 @@ export interface CycleDeps {
   readonly log: Pick<Logger, "info" | "warn" | "error">;
   readonly now: () => Date;
   readonly split?: EvolutionDataSplit;
-  /** Pre-registered gates; tests may inject lower thresholds to exercise the final stage. */
-  readonly gates?: EvolutionGates;
+  /** Pre-registered gates (default: the configured version); tests may inject lower thresholds to exercise the final stage. */
+  readonly gates?: EvolutionGateSet;
 }
 
 export interface CycleOptions {
@@ -162,6 +172,18 @@ interface WorkingCandidate {
   walkForward: ReturnType<typeof rollingWalkForward> | null;
   neighbours: { key: string; inSample: WindowMetrics }[];
   windowsSeen: Set<string>;
+  /** `ROOT:<strategy key>` of the frozen root this lineage descends from. */
+  rootKey: string;
+  successor: {
+    rootKey: string;
+    correlation: number | null;
+    candidateSharpe: number | null;
+    referenceSharpe: number | null;
+    paired: PairedMonthlyTest;
+    threshold: number;
+    trials: number;
+    screeningsThisMonth: number;
+  } | null;
 }
 
 const skipped = (reason: string): CycleOutcome => ({ status: "SKIPPED", reason, runKey: null, candidates: [], aiCostUsd: 0 });
@@ -170,7 +192,8 @@ const errorText = (error: unknown) => (error instanceof Error ? error.message : 
 export async function runResearchCycle(deps: CycleDeps, options: CycleOptions): Promise<CycleOutcome> {
   const { db, config, provider, log } = deps;
   const split = deps.split ?? EVOLUTION_DATA_SPLIT_V1;
-  const gates = deps.gates ?? EVOLUTION_GATES_V1;
+  const gates = deps.gates ?? EVOLUTION_GATE_VERSIONS[config.gatesVersion];
+  const gatesHash = canonicalHash(gates);
   const splitHash = split === EVOLUTION_DATA_SPLIT_V1 ? EVOLUTION_DATA_SPLIT_V1_HASH : canonicalHash(split);
   const startedAt = deps.now();
 
@@ -206,6 +229,7 @@ export async function runResearchCycle(deps: CycleDeps, options: CycleOptions): 
     engineVersion: EVOLUTION_ENGINE_VERSION,
     promptVersion: PROMPT_VERSION,
     gatesVersion: gates.version,
+    gatesHash,
     split: { key: split.key, hash: splitHash, windows: split.windows, forwardFrom: split.forwardFrom, folds: split.folds, priorExposure: split.priorExposure },
     budget: { monthlyBudgetUsd: config.monthlyBudgetUsd, perRunBudgetUsd: config.runBudgetUsd },
     costModel: EVOLUTION_COST_MODEL_V1,
@@ -301,7 +325,7 @@ export async function runResearchCycle(deps: CycleDeps, options: CycleOptions): 
     const occurredAt = deps.now();
     const purposes: [string, "SEARCH" | "SELECTION" | "HOLDOUT_CHECK" | "BENCHMARK"][] =
       input.window === "HOLDOUT"
-        ? [["HOLDOUT", "HOLDOUT_CHECK"]]
+        ? [["HOLDOUT", input.role === "BENCHMARK" ? "BENCHMARK" : "HOLDOUT_CHECK"]]
         : input.role === "BENCHMARK"
           ? [["DISCOVERY", "BENCHMARK"], ["VALIDATION", "BENCHMARK"]]
           : [["DISCOVERY", "SEARCH"], ["VALIDATION", "SELECTION"]];
@@ -371,7 +395,8 @@ export async function runResearchCycle(deps: CycleDeps, options: CycleOptions): 
       benchmarks: EVOLUTION_ROOTS.map((root) => ({ key: root.key, label: root.label, discovery: roots[root.key]!.metrics.discovery })),
       analysis,
       history,
-      hypotheses: config.hypothesesPerRun
+      hypotheses: config.hypothesesPerRun,
+      successorRule: isGatesV2(gates)
     });
     assertContextLeakFree(context, split);
     const prompt = renderHypothesisPrompt(context);
@@ -401,6 +426,9 @@ export async function runResearchCycle(deps: CycleDeps, options: CycleOptions): 
     // ── 4. Hypotheses → versioned candidates (or refusals) ─────────────────
     const allowedParents = new Set(context.allowedParents);
     const rootHashes = new Set(EVOLUTION_ROOTS.map((root) => genomeHash(root.genome)));
+    // Genomes already evaluated as neighbour variants: their discovery + validation result is known, so
+    // they can never come back as a "new" candidate whose result would count as independent evidence.
+    const neighbourHashes = await evaluatedNeighbourGenomeHashes(db);
     const seenThisRun = new Set<string>();
     let index = 0;
     for (const hypothesis of parsed.hypotheses) {
@@ -441,9 +469,15 @@ export async function runResearchCycle(deps: CycleDeps, options: CycleOptions): 
         if (reasons.length === 0) {
           const hash = genomeHash(applied.genome);
           const existing = await db.evolutionCandidate.findUnique({ where: { genomeHash: hash } });
-          if (rootHashes.has(hash) || existing !== null || seenThisRun.has(hash)) {
+          if (rootHashes.has(hash) || existing !== null || seenThisRun.has(hash) || neighbourHashes.has(hash)) {
             outcome = "DUPLICATE";
-            reasons.push(`Genom bereits getestet${existing === null ? "" : ` als ${existing.candidateKey}`}.`);
+            reasons.push(
+              existing !== null
+                ? `Genom bereits getestet als ${existing.candidateKey}.`
+                : neighbourHashes.has(hash)
+                  ? "Genom bereits als Nachbarvariante geprüft — sein historisches Ergebnis ist bekannt und zählt nicht als neuer Nachweis."
+                  : "Genom bereits getestet."
+            );
           } else {
             outcome = "ACCEPTED";
             genome = applied.genome;
@@ -525,7 +559,9 @@ export async function runResearchCycle(deps: CycleDeps, options: CycleOptions): 
         folds: [],
         walkForward: null,
         neighbours: [],
-        windowsSeen: new Set()
+        windowsSeen: new Set(),
+        rootKey: `ROOT:${rootStrategyKey}`,
+        successor: null
       });
     }
 
@@ -607,6 +643,49 @@ export async function runResearchCycle(deps: CycleDeps, options: CycleOptions): 
         })
     );
 
+    // ── 5c. Gates v2: near-copies of the own root go through the successor rule ─
+    // Sequential and in key order, so the monthly attempt limit is deterministic.
+    if (isGatesV2(gates)) {
+      const policy = gates.successor;
+      const trials =
+        split.priorExposure.filter((entry) => entry.role === "TRAINING").reduce((sum, entry) => sum + entry.configurationsTried, 0) + (await evaluatedConfigurations(db));
+      const attempts = new Map<string, number>();
+      for (const candidate of [...working].filter((entry) => entry.screening.length > 0).sort((a, b) => a.key.localeCompare(b.key))) {
+        const route = successorRoute({ rootKey: candidate.rootKey, correlations: candidate.correlations, policy });
+        if (!route.routed || roots[route.rootKey] === undefined) continue;
+        const reference = roots[route.rootKey]!.metrics;
+        if (!attempts.has(route.rootKey)) attempts.set(route.rootKey, await successorScreeningsThisMonth(db, route.rootKey.replace(/^ROOT:/, ""), deps.now()));
+        const screeningsThisMonth = attempts.get(route.rootKey)! + 1;
+        attempts.set(route.rootKey, screeningsThisMonth);
+        const paired = pairedMonthlyTest(combined(candidate.backtests), combined(roots[route.rootKey]!.backtests), D.from, V.to);
+        candidate.screening = [
+          ...candidate.screening.map((gate) => (gate.gate === "REDUNDANCY" ? routedRedundancyGate(route) : gate)),
+          ...successorScreeningGates(
+            {
+              rootKey: route.rootKey,
+              correlation: route.correlation!,
+              candidate: { discovery: candidate.discovery!, validation: candidate.validation!, inSample: candidate.inSample! },
+              reference: { discovery: reference.discovery, validation: reference.validation, inSample: reference.inSample },
+              paired,
+              trials,
+              screeningsThisMonth
+            },
+            policy
+          )
+        ];
+        candidate.successor = {
+          rootKey: route.rootKey,
+          correlation: route.correlation,
+          candidateSharpe: candidate.inSample?.sharpe ?? null,
+          referenceSharpe: reference.inSample.sharpe,
+          paired,
+          threshold: successorTThreshold(policy, trials, paired.criticalT),
+          trials,
+          screeningsThisMonth
+        };
+      }
+    }
+
     // ── 6. Automatic rejection and finalist selection ───────────────────────
     const screened = working.filter((candidate) => candidate.screening.length > 0);
     for (const candidate of screened) {
@@ -618,8 +697,9 @@ export async function runResearchCycle(deps: CycleDeps, options: CycleOptions): 
     }
     const finalists = new Set(
       selectFinalists(
-        screened.map((candidate) => ({ key: candidate.key, score: candidate.score?.score ?? 0, passedScreening: candidate.status !== "REJECTED" })),
-        gates.maxFinalists
+        screened.map((candidate) => ({ key: candidate.key, score: candidate.score?.score ?? 0, passedScreening: candidate.status !== "REJECTED", successor: candidate.successor !== null })),
+        gates.maxFinalists,
+        isGatesV2(gates) ? { maxSuccessors: gates.successor.maxFinalistsPerRun } : {}
       )
     );
     for (const candidate of screened) {
@@ -690,6 +770,19 @@ export async function runResearchCycle(deps: CycleDeps, options: CycleOptions): 
                   { gate: "HOLDOUT", stage: "FINAL", passed: false, reasonCode: "HOLDOUT_NOT_EVALUATED", message: "Holdout wurde nicht ausgewertet; ohne ihn wird kein Kandidat vorgeschlagen.", actual: null, limit: null }
                 ]
               : finalGates({ neighbours: candidate.neighbours, walkForward: candidate.walkForward, holdout }, gates);
+          if (candidate.successor !== null && isGatesV2(gates)) {
+            // The root's holdout is reference data, not candidate evidence: recorded as BENCHMARK exposure.
+            const rootHoldout = await Promise.all(
+              split.symbols.map((symbol) => {
+                const root = rootByKey(candidate.successor!.rootKey)!;
+                return backtest({ subjectKey: root.key, subject: { kind: "ROOT", rootKey: root.key }, subjectHash: root.specificationHash, symbol, window: "HOLDOUT", role: "BENCHMARK", candidateId: null });
+              })
+            );
+            const referenceHoldout = rootHoldout.every((entry) => entry.ok)
+              ? windowMetrics({ label: "Holdout", from: H.from, to: H.to, backtests: rootHoldout.map((entry) => (entry as { summary: BacktestSummary }).summary), periodKey: "overall" })
+              : null;
+            candidate.final = [...candidate.final, successorHoldoutGate({ rootKey: candidate.successor.rootKey, candidate: candidate.holdout, reference: referenceHoldout }, gates.successor)];
+          }
           candidate.status = statusAfterFinal(candidate.screening, candidate.final);
           candidate.reasons.push(...candidate.final.filter((gate) => !gate.passed).map((gate) => gate.reasonCode));
         })
@@ -719,7 +812,9 @@ export async function runResearchCycle(deps: CycleDeps, options: CycleOptions): 
         score: candidate.score,
         evidence,
         walkForward: candidate.walkForward,
-        correlations: candidate.correlations
+        correlations: candidate.correlations,
+        successor: candidate.successor,
+        gateVersion: gates.version
       });
       const metricsJson = {
         discovery: candidate.discovery,
@@ -733,7 +828,9 @@ export async function runResearchCycle(deps: CycleDeps, options: CycleOptions): 
         discoverySnapshot: candidate.discovery === null ? null : discoverySnapshot(candidate.discovery),
         benchmarks: Object.fromEntries(EVOLUTION_ROOTS.map((root) => [root.key, { inSample: roots[root.key]!.metrics.inSample, discovery: roots[root.key]!.metrics.discovery, validation: roots[root.key]!.metrics.validation }])),
         evidence,
-        technical: candidate.technical
+        technical: candidate.technical,
+        successor: candidate.successor,
+        gateVersion: gates.version
       };
       await db.evolutionCandidate.update({
         where: { id: candidate.id },

@@ -5,7 +5,7 @@ import { EmptyState, ErrorState } from "../../../../../components/empty-state";
 import { MetricCard, PageHeader, PageIntro, SectionCard, TechnicalDetails } from "../../../../../components/ui";
 import { TradingDisabled } from "../../../../../components/trading/trading-disabled";
 import { fetchEvolutionCandidate, type EvolutionCandidateDetail, type EvolutionMetrics } from "../../../../../lib/evolution-api";
-import { EVIDENCE_LABEL, FAMILY_LABEL, GATE_LABEL, PROVIDER_LABEL, WINDOW_LABEL, candidateStatus, fmt, fmtPct, fmtR, fmtSigned, toneOf } from "../../../../../lib/evolution-labels";
+import { EVIDENCE_LABEL, FAMILY_LABEL, GATE_LABEL, GATES_VERSION_LABEL, PROVIDER_LABEL, WINDOW_LABEL, candidateStatus, fmt, fmtPct, fmtR, fmtSigned, toneOf } from "../../../../../lib/evolution-labels";
 import { TRADING_DASHBOARD_ENABLED } from "../../../../../lib/trading-flag";
 import { formatUtcDateTime, toneColor } from "../../../../../lib/trading-format";
 
@@ -114,7 +114,31 @@ function CandidateBody({ data }: { data: Detail }) {
         <MetricCard label="Forschungsdurchlauf" value={data.run.runKey} sub={`${PROVIDER_LABEL[data.run.provider] ?? data.run.provider} · ${formatUtcDateTime(data.run.startedAt)}`} />
       </div>
 
-      <SectionCard title="Abstammung">
+      {data.successor ? (
+        <div style={{ marginBottom: 16 }}>
+          <SectionCard
+            title={`Nachfolger-Prüfung gegen ${data.successor.rootKey.replace(/^ROOT:/, "")}`}
+            subtitle="Gates v2: eine Fast-Kopie der eigenen Wurzel muss sie deutlich, in beiden Zeiträumen, gepaart signifikant und ohne Verschlechterung übertreffen. Historische Simulation, kein Forward-Nachweis."
+          >
+            <ul className="small">
+              <li>
+                Korrelation der Tagesrenditen {fmt(data.successor.correlation)} · Sharpe {fmt(data.successor.candidateSharpe)} gegenüber {fmt(data.successor.referenceSharpe)} (Δ{" "}
+                {fmtSigned(data.successor.candidateSharpe !== null && data.successor.referenceSharpe !== null ? data.successor.candidateSharpe - data.successor.referenceSharpe : null)})
+              </li>
+              <li>
+                Gepaarter Monatsvergleich: {data.successor.paired.months} Monate ({data.successor.paired.informativeMonths} mit Unterschied), t = {fmt(data.successor.paired.tStat)} mit
+                Newey–West-Korrektur (Lag {data.successor.paired.lag ?? "—"}; ohne Korrektur {fmt(data.successor.paired.naiveTStat)}), Schwelle {fmt(data.successor.threshold)} bei{" "}
+                {data.successor.trials} geprüften Konfigurationen
+              </li>
+              <li>
+                Nachfolger-Prüfung {data.successor.screeningsThisMonth} in diesem Monat für diese Wurzel
+              </li>
+            </ul>
+          </SectionCard>
+        </div>
+      ) : null}
+
+      <SectionCard title="Abstammung" subtitle={data.gateVersion ? `Entschieden nach ${GATES_VERSION_LABEL[data.gateVersion] ?? data.gateVersion}` : undefined}>
         <p>
           {data.lineage.map((entry, index) => (
             <span key={entry}>

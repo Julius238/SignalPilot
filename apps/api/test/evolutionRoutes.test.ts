@@ -63,7 +63,7 @@ function deployed() {
     backtestMs: 900_000,
     errorMessage: null,
     aiSummary: "Zusammenfassung",
-    dataManifestJson: { budget: { monthlyBudgetUsd: 20, perRunBudgetUsd: 1 }, models: { ADVANCED: "claude-opus-5-5" }, split: { key: "evolution-split-v1" } },
+    dataManifestJson: { budget: { monthlyBudgetUsd: 20, perRunBudgetUsd: 1 }, models: { ADVANCED: "claude-opus-5-5" }, split: { key: "evolution-split-v1" }, gatesVersion: "evolution-gates-v2" },
     analysisJson: {
       findings: [{ sentence: "Trendphase BULL begünstigt" }],
       benchmarks: { "ROOT:CRYPTO_TREND_CORE_LONG_V1": { label: "Champion", role: "CHAMPION", strategyKey: "CRYPTO_TREND_CORE_LONG_V1", inSample: metrics(0.1, 0.5, 4, 3) } }
@@ -87,7 +87,13 @@ function deployed() {
     proposedAt: status === "PROPOSED" ? new Date("2026-10-19T01:44:00.000Z") : null,
     decidedAt: null,
     decidedBy: null,
-    metricsJson: { inSample: metrics(averageR, 0.8, 6, 2.5), discovery: metrics(averageR, 0.9, 5, 2), validation: metrics(averageR, 0.6, 1, 1.5) },
+    metricsJson: {
+      inSample: metrics(averageR, 0.8, 6, 2.5),
+      discovery: metrics(averageR, 0.9, 5, 2),
+      validation: metrics(averageR, 0.6, 1, 1.5),
+      gateVersion: "evolution-gates-v2",
+      successor: status === "PROPOSED" ? { rootKey: "ROOT:CRYPTO_TREND_CORE_LONG_V1", correlation: 0.95 } : null
+    },
     gatesJson: [
       { gate: "MIN_TRADES", stage: "SCREENING", passed: true, reasonCode: "ENOUGH_TRADES", message: "ok" },
       { gate: "VALIDATION_EDGE", stage: "SCREENING", passed: status !== "REJECTED", reasonCode: status === "REJECTED" ? "VALIDATION_FAILED" : "VALIDATION_EDGE_AFTER_COSTS", message: "Hält in der Validierung nicht" }
@@ -98,7 +104,7 @@ function deployed() {
     scoreJson: null,
     reportMarkdown: `# Forschungsbericht ${key}`,
     decisionNote: null,
-    run: { runKey: "EVO-RUN-1", providerName: "anthropic", billable: true, startedAt: run.startedAt },
+    run: { runKey: "EVO-RUN-1", providerName: "anthropic", billable: true, startedAt: run.startedAt, dataManifestJson: run.dataManifestJson },
     backtests: []
   });
   const candidates = [candidate("EVO-BRK-0002", "PROPOSED", "EVO-BRK-0001", 0.3), candidate("EVO-BRK-0001", "REJECTED", "ROOT:CRYPTO_TREND_CORE_LONG_V1", -0.1)];
@@ -152,6 +158,10 @@ describe("evolution read model", () => {
     assert.equal(overview.exposure.HOLDOUT!.HOLDOUT_CHECK, 2);
     assert.match(overview.notice, /Kein Forward-Ergebnis/);
     assert.deepEqual(overview.runs[0]!.findings, ["Trendphase BULL begünstigt"]);
+    assert.equal(overview.runs[0]!.gatesVersion, "evolution-gates-v2");
+    assert.equal(proposed.successorOf, "CRYPTO_TREND_CORE_LONG_V1");
+    assert.equal(proposed.gateVersion, "evolution-gates-v2");
+    assert.equal(rejected.successorOf, null);
   });
 
   it("reads a candidate with its lineage back to the frozen root", async () => {
@@ -160,6 +170,7 @@ describe("evolution read model", () => {
     if (detail === null || !detail.available) return;
     assert.deepEqual(detail.lineage, ["CRYPTO_TREND_CORE_LONG_V1", "EVO-BRK-0001", "EVO-BRK-0002"]);
     assert.equal(detail.reportMarkdown, "# Forschungsbericht EVO-BRK-0002");
+    assert.equal(detail.gateVersion, "evolution-gates-v2");
   });
 });
 
