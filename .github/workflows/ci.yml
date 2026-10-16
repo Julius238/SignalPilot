@@ -27,9 +27,9 @@ jobs:
   build-and-test:
     name: Build, Lint & Test
     runs-on: ubuntu-24.04
-    # Der Testschritt braucht 18 min (2026-10-16, mit dem Ende-zu-Ende-Test der
-    # Evolution-Familie), auf langsameren Läufern bis 1,5-mal so lange. 45 min
-    # lassen Luft, ohne einen hängenden Job endlos laufen zu lassen.
+    # Der Testschritt brauchte mit dem Evolution-Worker 14–18 min (2026-10-16),
+    # auf langsameren Läufern fast doppelt so lange. 45 min lassen Luft, ohne
+    # einen hängenden Job endlos laufen zu lassen.
     timeout-minutes: 45
 
     services:
@@ -99,16 +99,84 @@ jobs:
       # geht zusätzlich in eine Datei für die Zusammenfassung pro Paket.
       # --no-sort: Gebaut ist schon, die Tests brauchen keine topologische
       # Reihenfolge. Sortiert startet pnpm jede Abhängigkeitsstufe erst nach
-      # dem Ende der vorigen; der Evolution-Worker (längste Suite, letzte
-      # Stufe) wartete so auf alle anderen Pakete. Ohne Sortierung laufen alle
-      # Pakete in einer Stufe (je 4 gleichzeitig, nach Pfad; apps/* zuerst).
-      # Die Datenbank-Tests kollidieren dabei nicht: Evolution-Worker und
-      # Trading-Worker nutzen getrennte Tabellen, die übrigen Pakete Mocks.
+      # dem Ende der vorigen; ohne Sortierung laufen alle Pakete in einer
+      # Stufe (je 4 gleichzeitig, nach Pfad). Der Evolution-Worker läuft im
+      # eigenen Job unten.
       - name: Test
         shell: bash
-        run: pnpm -r --no-sort --no-bail --if-present test 2>&1 | tee "$RUNNER_TEMP/test-output.log"
+        run: pnpm -r --no-sort --no-bail --if-present --filter '!@signalpilot/evolution-worker' test 2>&1 | tee "$RUNNER_TEMP/test-output.log"
 
       # Tabelle pro Paket im Log und auf der Run-Seite (Job Summary).
+      - name: Test summary
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          [ -f "$RUNNER_TEMP/test-output.log" ] || exit 0
+          scripts/ci/test-summary.sh "$RUNNER_TEMP/test-output.log" | tee -a "$GITHUB_STEP_SUMMARY"
+
+  # Die längste Suite (Forschungszyklen mit Replays, nacheinander wegen der
+  # gemeinsamen Evolution*-Tabellen) auf einem eigenen Läufer. Im Hauptjob
+  # teilte sie sich 4 vCPU mit allen anderen Paketen; der Testschritt brauchte
+  # so 14 min, lokal braucht die Suite allein rund 4 min. Eigene Datenbank,
+  # gleiche Sicherheitsgrenzen.
+  evolution-worker-test:
+    name: Evolution worker tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: signalpilot_test
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d signalpilot_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      DATABASE_URL: postgresql://postgres@localhost:5432/signalpilot_test?schema=public
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Node.js 22
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: pnpm via Corepack
+        run: |
+          corepack enable
+          pnpm --version
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm db:generate
+
+      - name: Apply migrations to the test database
+        run: pnpm db:migrate:deploy
+
+      # Nur der Worker und seine Abhängigkeiten (Suffix `...`, wie im Dockerfile);
+      # der Hauptjob baut und lintet alles.
+      - name: Build
+        run: pnpm --filter "@signalpilot/evolution-worker..." build
+
+      # --stream: mit Paket-Präfix wie im Hauptjob, sonst findet die
+      # Zusammenfassung bei nur einem Paket keine Zeilen.
+      - name: Test
+        shell: bash
+        run: pnpm -r --stream --filter @signalpilot/evolution-worker test 2>&1 | tee "$RUNNER_TEMP/test-output.log"
+
       - name: Test summary
         if: ${{ !cancelled() }}
         shell: bash

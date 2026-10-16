@@ -102,8 +102,8 @@ damit der echte Weg dort immer geprüft wird.
 ## CI-Pipeline
 
 `.github/workflows/ci.yml` läuft bei jedem Push auf jeden Branch, bei Pull Requests und
-manuell. Ein Job auf `ubuntu-24.04` mit Node 22 und einem PostgreSQL-16-Service-Container
-(`signalpilot_test`, ohne Passwort, nur vom Runner erreichbar):
+manuell. Der Hauptjob („Build, Lint & Test“) läuft auf `ubuntu-24.04` mit Node 22 und einem
+PostgreSQL-16-Service-Container (`signalpilot_test`, ohne Passwort, nur vom Runner erreichbar):
 
 1. Checkout, Node 22, pnpm über Corepack (füllt zugleich den Corepack-Cache)
 2. `pnpm install --frozen-lockfile`
@@ -113,14 +113,21 @@ manuell. Ein Job auf `ubuntu-24.04` mit Node 22 und einem PostgreSQL-16-Service-
 5. `pnpm build` (Pakete, Apps, Next.js mit `NEXT_PUBLIC_TRADING_DASHBOARD_ENABLED=false`)
 6. `pnpm lint`
 7. `pnpm ops:test:scripts` (auf dem Runner mit shellcheck, Schwelle `warning`)
-8. `pnpm -r --no-sort --no-bail --if-present test` — ohne topologische Sortierung (gebaut ist
-   schon). Sortiert startet pnpm jede Abhängigkeitsstufe erst nach dem Ende der vorigen, und
-   der Evolution-Worker als längste Suite in der letzten Stufe wartete auf alle anderen
-   Pakete. So laufen alle Pakete in einer Stufe, je 4 gleichzeitig. Die Datenbank-Tests
-   kollidieren nicht: Evolution- und Trading-Worker nutzen getrennte Tabellen.
+8. `pnpm -r --no-sort --no-bail --if-present --filter '!@signalpilot/evolution-worker' test` —
+   alle Pakete außer dem Evolution-Worker, ohne topologische Sortierung (gebaut ist schon).
+   Sortiert startet pnpm jede Abhängigkeitsstufe erst nach dem Ende der vorigen; ohne
+   Sortierung laufen alle Pakete in einer Stufe, je 4 gleichzeitig.
 9. Zusammenfassung pro Paket (`scripts/ci/test-summary.sh`): Tabelle mit Tests, bestanden,
    fehlgeschlagen und übersprungen — im Log und als Job Summary auf der Run-Seite. Der
    Schritt schlägt fehl, wenn ein Test fehlschlug oder keine Ergebnisse gefunden wurden.
+
+Parallel dazu testet ein zweiter Job („Evolution worker tests“) auf einem eigenen Läufer mit
+eigener Testdatenbank nur `apps/evolution-worker`: Schritte 1–4, dann
+`pnpm --filter "@signalpilot/evolution-worker..." build` (nur der Worker und seine
+Abhängigkeiten), `pnpm -r --stream --filter @signalpilot/evolution-worker test` und dieselbe
+Zusammenfassung. Die Suite ist die längste und läuft nacheinander. Im gemeinsamen Job teilte
+sie sich 4 vCPU mit allen anderen Paketen; der Testschritt brauchte so 14 min, lokal braucht
+die Suite allein rund 4 min.
 
 Die Pipeline verwendet keine Secrets, hat nur Leserechte am Repository und startet weder
 Worker, Scheduler noch Trading-Prozesse.
