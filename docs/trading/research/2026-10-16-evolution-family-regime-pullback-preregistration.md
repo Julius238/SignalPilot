@@ -291,7 +291,9 @@ Tests:
   - Finale mit den vorregistrierten Nachbarn und Holdout-Schutz;
   - Stufe 2 nur mit Freigabe und unter v4, dann eine KI-Hypothese über
     Replay bis zur v4-Entscheidung.
-  - Weil der Testmarkt nur fünf Monate hat (`OWN_ALPHA` verlangt 36), erzwingt
-    ein Test das Screening-Urteil über eine nur in Tests vorhandene Injektion,
-    um das Finale zu erreichen. In Produktion entscheiden immer die echten
+  - Der Testmarkt umfasst nur rund einen Monat, weil jede
+    Portfolio-Simulation jede Stunde ihres Fensters bewertet und die CI-Zeit
+    begrenzt ist. `OWN_ALPHA` verlangt 36 Monate. Deshalb erzwingt ein Test das
+    Screening-Urteil über eine nur in Tests vorhandene Injektion, um das
+    Finale zu erreichen. In Produktion entscheiden immer die echten
     Funktionen.

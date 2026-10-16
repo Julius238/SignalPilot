@@ -3,8 +3,9 @@
  * pre-registered hypothesis (seed) or AI hypothesis → candidate → technical
  * test → own backtests → chronological portfolio replays A/B → v4 decision →
  * persisted gates, manifest, identity and report, against real PostgreSQL.
- * The market is synthetic and the split compressed: the test proves the
- * machinery, never a strategy.
+ * The market is synthetic and the split compressed to a few weeks (every
+ * portfolio replay evaluates every hour of its window, so the window length
+ * sets the run time): the test proves the machinery, never a strategy.
  */
 
 import assert from "node:assert/strict";
@@ -20,6 +21,7 @@ import {
   REGIME_PULLBACK_LONG_V1_PREREGISTRATION_HASH,
   genomeHash,
   type AiRequest,
+  type EvolutionDataSplit,
   type EvolutionGateSet,
   type GateResult,
   type PortfolioCheckRecord,
@@ -36,6 +38,23 @@ import { verifyEvolutionAuditChain } from "../src/persistence/audit.js";
 import { DB_SKIP_REASON, PERMISSIVE_GATES_V4, SYNTHETIC_SPLIT, resetEvolutionTables, silentLog, syntheticMarket, testConfig, testDatabase } from "./support.js";
 
 const db = testDatabase();
+
+/** Three weeks of discovery, ten days of validation, one week of holdout. */
+const SPLIT: EvolutionDataSplit = {
+  ...SYNTHETIC_SPLIT,
+  key: "evolution-split-test-pullback",
+  windows: {
+    DISCOVERY: { ...SYNTHETIC_SPLIT.windows.DISCOVERY, from: "2023-10-01T00:00:00.000Z", to: "2023-10-21T23:59:59.999Z" },
+    VALIDATION: { ...SYNTHETIC_SPLIT.windows.VALIDATION, from: "2023-10-22T00:00:00.000Z", to: "2023-10-31T23:59:59.999Z" },
+    HOLDOUT: { ...SYNTHETIC_SPLIT.windows.HOLDOUT, from: "2023-11-01T00:00:00.000Z", to: "2023-11-07T23:59:59.999Z" }
+  },
+  forwardFrom: "2023-11-08T00:00:00.000Z",
+  folds: [
+    { key: "2023-10a", window: "DISCOVERY", from: "2023-10-01T00:00:00.000Z", to: "2023-10-10T23:59:59.999Z" },
+    { key: "2023-10b", window: "DISCOVERY", from: "2023-10-11T00:00:00.000Z", to: "2023-10-21T23:59:59.999Z" },
+    { key: "2023-10c", window: "VALIDATION", from: "2023-10-22T00:00:00.000Z", to: "2023-10-31T23:59:59.999Z" }
+  ]
+};
 const seed = EVOLUTION_FAMILY_SEEDS.REGIME_PULLBACK_LONG!;
 const RESEARCH = "RESEARCH:REGIME_PULLBACK_LONG_V1";
 const V4_SCREENING = [
@@ -55,14 +74,13 @@ const V4_SCREENING = [
 ];
 
 describe("REGIME_PULLBACK_LONG end to end (gates v4)", { skip: db === null ? DB_SKIP_REASON : false, timeout: 1_800_000 }, () => {
-  const { market, fingerprint, discoveryBars } = syntheticMarket();
   // A synthetic market on which the seed is profitable enough for the permissive v1 base gates (final-stage test).
-  const profitable = syntheticMarket(SYNTHETIC_SPLIT, { btc: 12, eth: 112 });
+  const { market, fingerprint, discoveryBars } = syntheticMarket(SPLIT, { btc: 23, eth: 123 });
   let clock = Date.parse("2026-10-16T09:00:00.000Z");
   const jobs: string[] = [];
   const prompts: string[] = [];
-  const runner = (data = { market, fingerprint }): BacktestRunner => {
-    const inner = new InProcessBacktestRunner(data.market, data.fingerprint);
+  const runner = (): BacktestRunner => {
+    const inner = new InProcessBacktestRunner(market, fingerprint);
     return {
       run: (job: EvolutionJob) => {
         jobs.push(job.kind === "PORTFOLIO" ? `${job.spec.comparison}@${job.spec.from.slice(0, 10)}${job.spec.candidate === undefined ? "" : `:${job.spec.candidate.key}`}` : `${job.kind}:${job.subjectKey}`);
@@ -76,19 +94,13 @@ describe("REGIME_PULLBACK_LONG end to end (gates v4)", { skip: db === null ? DB_
     config: testConfig(),
     provider: NO_AI_PROVIDER,
     runner: runner(),
-    market: { dir: "synthetic", fingerprint, cutoffAt: SYNTHETIC_SPLIT.forwardFrom, files: [], discoveryBars },
+    market: { dir: "synthetic", fingerprint, cutoffAt: SPLIT.forwardFrom, files: [], discoveryBars },
     log: silentLog,
     now: () => new Date((clock += 1000)),
-    split: SYNTHETIC_SPLIT,
+    split: SPLIT,
     gates: EVOLUTION_GATES_V4,
     ...overrides
   });
-  const profitableDeps = (overrides: Partial<CycleDeps> = {}): CycleDeps =>
-    deps({
-      runner: runner(profitable),
-      market: { dir: "synthetic", fingerprint: profitable.fingerprint, cutoffAt: SYNTHETIC_SPLIT.forwardFrom, files: [], discoveryBars: profitable.discoveryBars },
-      ...overrides
-    });
   /** An AI that proposes one hypothesis inside the family (or, with `family`, another one). */
   const scripted = (parentKey: string, changes: { parameter: string; value: string }[], title: string): ResearchAiProvider => ({
     name: "mock",
@@ -141,7 +153,7 @@ describe("REGIME_PULLBACK_LONG end to end (gates v4)", { skip: db === null ? DB_
   });
 
   it("prepares evaluate-seed: a clean preflight under the pre-registered gates v4, with the multiple-testing counter", async () => {
-    const preflight = await seedPreflight(db!, { family: "REGIME_PULLBACK_LONG", gates: EVOLUTION_GATES_V4, config: testConfig(), now: new Date(clock), split: SYNTHETIC_SPLIT });
+    const preflight = await seedPreflight(db!, { family: "REGIME_PULLBACK_LONG", gates: EVOLUTION_GATES_V4, config: testConfig(), now: new Date(clock), split: SPLIT });
     assert.deepEqual(preflight.problems, []);
     assert.equal(preflight.ok, true);
     assert.equal(preflight.preregistration.intact, true);
@@ -208,7 +220,7 @@ describe("REGIME_PULLBACK_LONG end to end (gates v4)", { skip: db === null ? DB_
     assert.equal(structural.passed, true);
     assert.ok(structural.message.includes(REGIME_PULLBACK_LONG_V1_PREREGISTRATION_HASH.slice(0, 12)));
     assert.equal(gates.find((gate) => gate.gate === ("LINEAGE_BUDGET" as string))!.actual, "1");
-    // Five months of synthetic data cannot carry an own α (36 months required): the seed is rejected, nothing is proposed.
+    // A month of synthetic data cannot carry an own α (36 months required): the seed is rejected, nothing is proposed.
     assert.equal(gates.find((gate) => gate.gate === ("OWN_ALPHA" as string))!.passed, false);
     assert.equal(candidate.status, "REJECTED");
     assert.ok(candidate.statusReasons.includes("NO_ROBUST_PORTFOLIO_VALUE"));
@@ -248,8 +260,8 @@ describe("REGIME_PULLBACK_LONG end to end (gates v4)", { skip: db === null ? DB_
     assert.ok(portfolio.assessment.existing.some((relation) => relation.key === "ROOT:CRYPTO_REGIME_LONG_V1"));
 
     // Comparison A once, comparison B once, both over discovery + validation.
-    assert.deepEqual(jobs.filter((job) => job.startsWith("BASELINE")), [`BASELINE@${SYNTHETIC_SPLIT.windows.DISCOVERY.from.slice(0, 10)}`]);
-    assert.deepEqual(jobs.filter((job) => job.startsWith("WITH_CANDIDATE")), [`WITH_CANDIDATE@${SYNTHETIC_SPLIT.windows.DISCOVERY.from.slice(0, 10)}:EVO-RPB-0001`]);
+    assert.deepEqual(jobs.filter((job) => job.startsWith("BASELINE")), [`BASELINE@${SPLIT.windows.DISCOVERY.from.slice(0, 10)}`]);
+    assert.deepEqual(jobs.filter((job) => job.startsWith("WITH_CANDIDATE")), [`WITH_CANDIDATE@${SPLIT.windows.DISCOVERY.from.slice(0, 10)}:EVO-RPB-0001`]);
 
     // Exposure: A as reference data, the candidate's validation use counts for the family budget.
     assert.equal(await db!.evolutionDataExposure.count({ where: { subjectKey: "PORTFOLIO:A", purpose: "BENCHMARK" } }), 4);
@@ -299,7 +311,7 @@ describe("REGIME_PULLBACK_LONG end to end (gates v4)", { skip: db === null ? DB_
       const result = await screenIndependentCandidate(context, input);
       return { ...result, gates: result.gates.map((gate) => ({ ...gate, passed: true })), decision: { ...result.decision, passed: true, failed: [] } };
     };
-    const seedOutcome = await runResearchCycle(profitableDeps({ gates: PERMISSIVE_GATES_V4, portfolioPath: { screen: forced } }), { trigger: "MANUAL", seed: "REGIME_PULLBACK_LONG" });
+    const seedOutcome = await runResearchCycle(deps({ gates: PERMISSIVE_GATES_V4, portfolioPath: { screen: forced } }), { trigger: "MANUAL", seed: "REGIME_PULLBACK_LONG" });
     assert.equal(seedOutcome.status, "COMPLETED", seedOutcome.reason ?? "");
     const seeded = await db!.evolutionCandidate.findUniqueOrThrow({ where: { candidateKey: "EVO-RPB-0001" } });
     const final = gatesOf(seeded).filter((gate) => gate.stage === "FINAL").map((gate) => gate.gate as string);
@@ -313,8 +325,8 @@ describe("REGIME_PULLBACK_LONG end to end (gates v4)", { skip: db === null ? DB_
     assert.deepEqual(neighbourGenomes, ["1.25", "1.75"]);
     assert.ok(portfolio.holdout !== null && portfolio.holdout.key === "HOLDOUT");
     // Comparison A once per window (in-sample, holdout); B for the seed, both neighbours and the holdout.
-    const from = SYNTHETIC_SPLIT.windows.DISCOVERY.from.slice(0, 10);
-    const holdoutFrom = SYNTHETIC_SPLIT.windows.HOLDOUT.from.slice(0, 10);
+    const from = SPLIT.windows.DISCOVERY.from.slice(0, 10);
+    const holdoutFrom = SPLIT.windows.HOLDOUT.from.slice(0, 10);
     assert.deepEqual(jobs.filter((job) => job.startsWith("BASELINE")).sort(), [`BASELINE@${from}`, `BASELINE@${holdoutFrom}`].sort());
     assert.deepEqual(
       jobs.filter((job) => job.startsWith("WITH_CANDIDATE")).sort(),
@@ -324,7 +336,7 @@ describe("REGIME_PULLBACK_LONG end to end (gates v4)", { skip: db === null ? DB_
     assert.ok(["PROPOSED", "REJECTED"].includes(seeded.status));
 
     // Stage 2 needs the operator: without EVOLUTION_INDEPENDENT_FAMILY_SEARCH the family stays closed.
-    const closed = await runResearchCycle(profitableDeps({ gates: PERMISSIVE_GATES_V4, provider: scripted("EVO-RPB-0001", [{ parameter: "pullbackLookbackHours", value: "48" }], "Ohne Freigabe") }), { trigger: "MANUAL", force: true });
+    const closed = await runResearchCycle(deps({ gates: PERMISSIVE_GATES_V4, provider: scripted("EVO-RPB-0001", [{ parameter: "pullbackLookbackHours", value: "48" }], "Ohne Freigabe") }), { trigger: "MANUAL", force: true });
     assert.equal(closed.candidates.length, 0);
     assert.equal((await db!.evolutionHypothesis.findFirstOrThrow({ where: { title: "Ohne Freigabe" } })).outcome, "FAMILY_STAGE_CLOSED");
 
@@ -332,7 +344,7 @@ describe("REGIME_PULLBACK_LONG end to end (gates v4)", { skip: db === null ? DB_
     const opened = testConfig({ independentFamilySearch: ["REGIME_PULLBACK_LONG"] });
     const candidateBacktests = () => db!.evolutionBacktest.count({ where: { role: { in: ["CANDIDATE", "NEIGHBOUR"] } } });
     const before = await candidateBacktests();
-    const underV3 = await runResearchCycle(profitableDeps({ config: opened, gates: EVOLUTION_GATES_V3, provider: scripted("EVO-RPB-0001", [{ parameter: "pullbackLookbackHours", value: "48" }], "Unter Gates v3") }), { trigger: "MANUAL", force: true });
+    const underV3 = await runResearchCycle(deps({ config: opened, gates: EVOLUTION_GATES_V3, provider: scripted("EVO-RPB-0001", [{ parameter: "pullbackLookbackHours", value: "48" }], "Unter Gates v3") }), { trigger: "MANUAL", force: true });
     assert.equal(underV3.candidates.length, 0);
     assert.equal((await db!.evolutionHypothesis.findFirstOrThrow({ where: { title: "Unter Gates v3" } })).outcome, "GATES_VERSION_UNSUITABLE");
     assert.equal(await candidateBacktests(), before, "refused without a backtest");
@@ -341,7 +353,7 @@ describe("REGIME_PULLBACK_LONG end to end (gates v4)", { skip: db === null ? DB_
     jobs.length = 0;
     prompts.length = 0;
     const stage2 = await runResearchCycle(
-      profitableDeps({ config: opened, gates: PERMISSIVE_GATES_V4, provider: scripted("EVO-RPB-0001", [{ parameter: "pullbackLookbackHours", value: "48" }], "Kürzeres Rücksetzer-Fenster") }),
+      deps({ config: opened, gates: PERMISSIVE_GATES_V4, provider: scripted("EVO-RPB-0001", [{ parameter: "pullbackLookbackHours", value: "48" }], "Kürzeres Rücksetzer-Fenster") }),
       { trigger: "MANUAL", force: true }
     );
     assert.equal(stage2.status, "COMPLETED", stage2.reason ?? "");
