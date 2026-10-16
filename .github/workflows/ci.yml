@@ -27,10 +27,10 @@ jobs:
   build-and-test:
     name: Build, Lint & Test
     runs-on: ubuntu-24.04
-    # Der Testschritt brauchte mit dem Evolution-Worker 14–18 min (2026-10-16),
-    # auf langsameren Läufern fast doppelt so lange. 45 min lassen Luft, ohne
-    # einen hängenden Job endlos laufen zu lassen.
-    timeout-minutes: 45
+    # Der Job braucht knapp 8 min, davon 5 min Tests (2026-10-16, ohne den
+    # Evolution-Worker). Langsame Läufer brauchten bisher bis zu doppelt so
+    # lange; 30 min lassen Luft, ohne einen hängenden Job endlos laufen zu lassen.
+    timeout-minutes: 30
 
     services:
       postgres:
@@ -122,6 +122,7 @@ jobs:
   evolution-worker-test:
     name: Evolution worker tests
     runs-on: ubuntu-24.04
+    # Gut 6 min, davon 5 min Tests (2026-10-16).
     timeout-minutes: 30
 
     services:
