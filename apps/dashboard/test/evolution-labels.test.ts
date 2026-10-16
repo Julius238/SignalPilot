@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { GATES_VERSION_LABEL, GATE_LABEL, buildLineageTrees, candidateStatus, fmtPct, fmtR, fmtUsd } from "../src/lib/evolution-labels";
+import { FAMILY_LABEL, GATES_VERSION_LABEL, GATE_LABEL, HYPOTHESIS_OUTCOME, buildLineageTrees, candidateStatus, fmtPct, fmtR, fmtUsd, isResearchIdentity, rootLabel } from "../src/lib/evolution-labels";
 
 describe("evolution labels", () => {
   it("never shows a raw enum for known statuses and falls back to the raw value otherwise", () => {
@@ -16,6 +16,35 @@ describe("evolution labels", () => {
     }
     assert.equal(GATES_VERSION_LABEL["evolution-gates-v1"], "Gates v1");
     assert.match(GATES_VERSION_LABEL["evolution-gates-v2"]!, /Nachfolger/);
+  });
+
+  it("labels every gates-v4 gate, the independent family and its hypothesis outcomes", () => {
+    for (const gate of [
+      "LINEAGE_BUDGET",
+      "INDEPENDENT_FAMILY",
+      "TRADE_GEOMETRY",
+      "PORTFOLIO_NET_GAIN",
+      "PORTFOLIO_SHARPE_GAIN",
+      "PORTFOLIO_DRAWDOWN",
+      "PORTFOLIO_RISK_EFFICIENCY",
+      "PORTFOLIO_CAPITAL_EFFICIENCY",
+      "INCREMENT_STABILITY",
+      "INCREMENT_COST_STRESS",
+      "OWN_ALPHA",
+      "INCREMENT_SIGNIFICANCE",
+      "PORTFOLIO_DECISION",
+      "PORTFOLIO_NEIGHBOURS",
+      "PORTFOLIO_HOLDOUT_GUARD"
+    ]) {
+      assert.ok(GATE_LABEL[gate] !== undefined && GATE_LABEL[gate] !== gate, gate);
+    }
+    assert.match(GATES_VERSION_LABEL["evolution-gates-v4"]!, /Portfolio/);
+    assert.match(FAMILY_LABEL.REGIME_PULLBACK_LONG!, /Rücksetzer/);
+    for (const outcome of ["PREREGISTERED_SEED", "FAMILY_STAGE_CLOSED", "FAMILY_PREREGISTRATION_LIMIT", "GATES_VERSION_UNSUITABLE"]) assert.ok(HYPOTHESIS_OUTCOME[outcome], outcome);
+    assert.equal(rootLabel("SEED:REGIME_PULLBACK_LONG_V1"), "Startgenom REGIME_PULLBACK_LONG_V1");
+    assert.equal(rootLabel("ROOT:CRYPTO_REGIME_LONG_V1"), "CRYPTO_REGIME_LONG_V1");
+    assert.equal(isResearchIdentity("RESEARCH:REGIME_PULLBACK_LONG_V1"), true);
+    assert.equal(isResearchIdentity("CRYPTO_REGIME_LONG_V1"), false);
   });
 
   it("formats R, percent and USD in German and shows a dash for unknown values", () => {

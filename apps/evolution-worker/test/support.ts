@@ -3,11 +3,13 @@ import {
   EVOLUTION_GATES_V1,
   EVOLUTION_GATES_V2,
   EVOLUTION_GATES_V3,
+  EVOLUTION_GATES_V4,
   type DailyBar,
   type EvolutionDataSplit,
   type EvolutionGates,
   type EvolutionGatesV2,
-  type EvolutionGatesV3
+  type EvolutionGatesV3,
+  type EvolutionGatesV4
 } from "@signalpilot/evolution";
 
 import { loadEvolutionConfig, type EvolutionWorkerConfig } from "../src/config.js";
@@ -108,13 +110,23 @@ export const PERMISSIVE_GATES_V3: EvolutionGatesV3 = {
   lineage: { ...EVOLUTION_GATES_V3.lineage, maxScreeningsPerFamilyPerMonth: 1000 }
 };
 
-export function syntheticMarket(split: EvolutionDataSplit = SYNTHETIC_SPLIT): { market: ReplayMarketData; fingerprint: string; discoveryBars: Record<string, DailyBar[]> } {
+/** Permissive v1 thresholds, the v3 lineage policy (budget lifted) and the real, pre-registered portfolio policy of v4. */
+export const PERMISSIVE_GATES_V4: EvolutionGatesV4 = {
+  ...PERMISSIVE_GATES_V3,
+  version: "evolution-gates-test-v4",
+  independentFamily: EVOLUTION_GATES_V4.independentFamily
+};
+
+export function syntheticMarket(
+  split: EvolutionDataSplit = SYNTHETIC_SPLIT,
+  seeds: { readonly btc: number; readonly eth: number } = { btc: 3, eth: 5 }
+): { market: ReplayMarketData; fingerprint: string; discoveryBars: Record<string, DailyBar[]> } {
   const start = Date.UTC(2023, 0, 1);
   const cutoff = Date.parse(split.forwardFrom);
   const hours = Math.floor((cutoff - start) / 3_600_000);
   const raw = [
-    generateSyntheticSeries({ symbol: "BTCUSDT", startMs: start, hours, startPrice: 30000, seed: 3, baseVolume: 900 }),
-    generateSyntheticSeries({ symbol: "ETHUSDT", startMs: start, hours, startPrice: 1800, seed: 5, baseVolume: 9000 })
+    generateSyntheticSeries({ symbol: "BTCUSDT", startMs: start, hours, startPrice: 30000, seed: seeds.btc, baseVolume: 900 }),
+    generateSyntheticSeries({ symbol: "ETHUSDT", startMs: start, hours, startPrice: 1800, seed: seeds.eth, baseVolume: 9000 })
   ];
   const series = raw.map((entry) => ({
     ...entry,
@@ -129,7 +141,8 @@ export function syntheticMarket(split: EvolutionDataSplit = SYNTHETIC_SPLIT): { 
         .filter((bar) => bar.day <= lastDay)
     ])
   );
-  return { market: { origin: "SYNTHETIC", synthetic: true, series }, fingerprint: "synthetic-fingerprint", discoveryBars };
+  const fingerprint = seeds.btc === 3 && seeds.eth === 5 ? "synthetic-fingerprint" : `synthetic-fingerprint-${seeds.btc}-${seeds.eth}`;
+  return { market: { origin: "SYNTHETIC", synthetic: true, series }, fingerprint, discoveryBars };
 }
 
 export const silentLog = { info: () => undefined, warn: () => undefined, error: () => undefined };

@@ -188,3 +188,34 @@ export async function successorScreeningsThisMonth(db: EvolutionDb, rootStrategy
   const rows = await db.evolutionCandidate.findMany({ where: { rootStrategyKey, createdAt: { gte: monthStart } }, select: { gatesJson: true } });
   return rows.filter((row) => ((row.gatesJson as unknown as GateResult[] | null) ?? []).some((gate) => gate.reasonCode === "ROUTED_TO_SUCCESSOR_CHECK")).length;
 }
+
+/**
+ * Validation screenings of one family (distinct candidates with validation
+ * exposure for selection): in the calendar month (UTC) of `now` and in total.
+ * Independent families carry stricter pre-registered limits than the gates
+ * version's monthly family limit.
+ */
+export async function familyScreeningCounts(db: EvolutionDb, family: string, now: Date): Promise<{ month: number; total: number }> {
+  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const ids = (await db.evolutionCandidate.findMany({ where: { family }, select: { id: true } })).map((row) => row.id);
+  if (ids.length === 0) return { month: 0, total: 0 };
+  const rows = await db.evolutionDataExposure.findMany({
+    where: { windowKey: "VALIDATION", purpose: "SELECTION", candidateId: { in: ids } },
+    select: { candidateId: true, occurredAt: true }
+  });
+  const total = new Set(rows.map((row) => row.candidateId));
+  const month = new Set(rows.filter((row) => row.occurredAt >= monthStart).map((row) => row.candidateId));
+  return { month: month.size, total: total.size };
+}
+
+/** The stored evaluation of a pre-registered seed genome, if any. */
+export async function seedEvaluation(
+  db: EvolutionDb,
+  genome: CandidateGenome
+): Promise<{ readonly candidateKey: string; readonly status: string; readonly passedScreening: boolean } | null> {
+  const row = await db.evolutionCandidate.findUnique({ where: { genomeHash: genomeHash(genome) }, select: { candidateKey: true, status: true, gatesJson: true } });
+  if (row === null) return null;
+  const screening = ((row.gatesJson as unknown as GateResult[] | null) ?? []).filter((gate) => gate.stage === "SCREENING");
+  const passedScreening = row.status !== "TECHNICAL_FAILED" && screening.length > 0 && !screening.some(isBlockingFailure);
+  return { candidateKey: row.candidateKey, status: row.status, passedScreening };
+}

@@ -10,9 +10,10 @@
  * added up from separate backtests. The measures and the decision come from
  * `@signalpilot/evolution` (`portfolio-metrics.ts`, `gates-v4.ts`).
  *
- * The research cycle calls this only for families that declare independence
- * (`FamilySpec.independence`); until such a family exists the existing
- * families keep the unchanged v3 path.
+ * The research cycle (step 5d) calls this for every candidate of a family
+ * that declares independence (`FamilySpec.independence`, first:
+ * REGIME_PULLBACK_LONG) and only under gates v4; the families of the roots
+ * keep the unchanged v3 path.
  */
 
 import {
@@ -29,7 +30,8 @@ import {
   type PortfolioAssessment,
   type PortfolioComparisonKind,
   type PortfolioMemberSpec,
-  type PortfolioSummary
+  type PortfolioSummary,
+  type PortfolioWindowComparison
 } from "@signalpilot/evolution";
 
 import type { BacktestRunner } from "../backtest/pool.js";
@@ -134,7 +136,13 @@ export async function screenIndependentCandidate(
 export async function finalIndependentCandidate(
   context: PortfolioRunContext,
   input: { readonly candidate: PortfolioMemberSpec; readonly neighbours: readonly PortfolioMemberSpec[]; readonly gates: EvolutionGatesV4 }
-): Promise<{ readonly gates: readonly GateResultV4[]; readonly neighbours: readonly NeighbourPortfolioResult[] }> {
+): Promise<{
+  readonly gates: readonly GateResultV4[];
+  readonly neighbours: readonly NeighbourPortfolioResult[];
+  readonly holdout: PortfolioWindowComparison;
+  readonly holdoutPair: { readonly baseline: PortfolioSummary; readonly withCandidate: PortfolioSummary; readonly dataFingerprint: string };
+  readonly neighbourFingerprints: readonly string[];
+}> {
   const inSample = { from: context.split.windows.DISCOVERY.from, to: context.split.windows.VALIDATION.to };
   const neighbours = await Promise.all(
     input.neighbours.map(async (neighbour) => {
@@ -148,11 +156,18 @@ export async function finalIndependentCandidate(
         costMultiplier: input.gates.independentFamily.thresholds.costStressMultiplier,
         minFoldTrades: input.gates.independentFamily.thresholds.minFoldTrades
       });
-      return { key: neighbour.key, netReturnDelta: assessment.windows.IN_SAMPLE.netReturnDelta, sharpeDelta: assessment.windows.IN_SAMPLE.sharpeDelta };
+      return { result: { key: neighbour.key, netReturnDelta: assessment.windows.IN_SAMPLE.netReturnDelta, sharpeDelta: assessment.windows.IN_SAMPLE.sharpeDelta }, dataFingerprint: pair.dataFingerprint };
     })
   );
   const holdoutWindow = { from: context.split.windows.HOLDOUT.from, to: context.split.windows.HOLDOUT.to };
   const holdoutPair = await comparisonPair(context, input.candidate, holdoutWindow);
   const holdout = holdoutGuardMeasures(holdoutPair.baseline, holdoutPair.withCandidate, input.candidate.key, context.split);
-  return { gates: independentFamilyFinalGates({ neighbours, holdout }, input.gates), neighbours };
+  const results = neighbours.map((entry) => entry.result);
+  return {
+    gates: independentFamilyFinalGates({ neighbours: results, holdout }, input.gates),
+    neighbours: results,
+    holdout,
+    holdoutPair,
+    neighbourFingerprints: neighbours.map((entry) => entry.dataFingerprint)
+  };
 }

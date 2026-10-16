@@ -32,7 +32,8 @@ export const AGENT_STATUS: Record<string, { label: string; tone: Tone; explanati
 
 export const FAMILY_LABEL: Record<string, string> = {
   BREAKOUT_LONG: "Ausbruch",
-  REGIME_LONG: "Regime-Halten"
+  REGIME_LONG: "Regime-Halten",
+  REGIME_PULLBACK_LONG: "Regime-Rücksetzer (eigenständig)"
 };
 
 export const GATE_LABEL: Record<string, string> = {
@@ -65,6 +66,20 @@ export const GATE_LABEL: Record<string, string> = {
   DIVERSIFICATION_SIGNIFICANCE: "Diversifikation: α signifikant",
   LINEAGE_DECISION: "Mehrwert oder Diversifikation",
   LINEAGE_HOLDOUT_GUARD: "Linie: Holdout-Schutz",
+  // Gates v4 (portfolio path of an independent family); LINEAGE_BUDGET and PORTFOLIO_HOLDOUT_GUARD above are shared.
+  INDEPENDENT_FAMILY: "Eigenständige Familie (Vorregistrierung)",
+  TRADE_GEOMETRY: "Trade-Geometrie",
+  PORTFOLIO_NET_GAIN: "Portfolio: Nettozuwachs",
+  PORTFOLIO_SHARPE_GAIN: "Portfolio: Sharpe-Zuwachs",
+  PORTFOLIO_DRAWDOWN: "Portfolio: Rendite je Drawdown",
+  PORTFOLIO_RISK_EFFICIENCY: "Portfolio: Risiko verzinst",
+  PORTFOLIO_CAPITAL_EFFICIENCY: "Portfolio: Kapitalbindung verzinst",
+  INCREMENT_STABILITY: "Zuwachs über Marktphasen",
+  INCREMENT_COST_STRESS: "Zuwachs bei doppelten Kosten",
+  OWN_ALPHA: "Eigenes α",
+  INCREMENT_SIGNIFICANCE: "Zuwachs signifikant",
+  PORTFOLIO_DECISION: "Portfolio-Mehrwert",
+  PORTFOLIO_NEIGHBOURS: "Portfolio: Nachbarvarianten",
   PORTFOLIO_HOLDOUT_GUARD: "Portfolio: Holdout-Schutz"
 };
 
@@ -97,7 +112,11 @@ export const HYPOTHESIS_OUTCOME: Record<string, { label: string; tone: Tone }> =
   ACCEPTED: { label: "Als Kandidat getestet", tone: "trading-good" },
   INVALID: { label: "Ungültig verworfen", tone: "trading-bad" },
   DUPLICATE: { label: "Bereits getestet", tone: "trading-neutral" },
-  LINEAGE_BUDGET_EXHAUSTED: { label: "Familien-Monatslimit erreicht, nicht getestet", tone: "trading-neutral" }
+  LINEAGE_BUDGET_EXHAUSTED: { label: "Familien-Monatslimit erreicht, nicht getestet", tone: "trading-neutral" },
+  PREREGISTERED_SEED: { label: "Vorregistriertes Startgenom, ohne KI getestet", tone: "trading-good" },
+  FAMILY_STAGE_CLOSED: { label: "Familie für die KI-Suche geschlossen, nicht getestet", tone: "trading-neutral" },
+  FAMILY_PREREGISTRATION_LIMIT: { label: "Grenze der Vorregistrierung erreicht, nicht getestet", tone: "trading-neutral" },
+  GATES_VERSION_UNSUITABLE: { label: "Nur nach Gates v4 prüfbar, nicht getestet", tone: "trading-neutral" }
 };
 
 export const RUN_STATUS: Record<string, { label: string; tone: Tone }> = {
@@ -128,7 +147,8 @@ export const PURPOSE_LABEL: Record<string, string> = {
 
 export const PROVIDER_LABEL: Record<string, string> = {
   anthropic: "Claude (Anthropic API)",
-  mock: "Mock (regelbasiert, ohne API)"
+  mock: "Mock (regelbasiert, ohne API)",
+  none: "ohne KI (vorregistriertes Startgenom)"
 };
 
 const de = (value: number, digits: number) =>
@@ -166,7 +186,11 @@ export function toneOf(value: number | null | undefined): "good" | "bad" | "neut
   return value > 0 ? "good" : "bad";
 }
 
-export const rootLabel = (key: string) => key.replace(/^ROOT:/, "");
+/** Frozen roots by their strategy key; the pre-registered start of an independent family as such. */
+export const rootLabel = (key: string) => (key.startsWith("SEED:") ? `Startgenom ${key.slice("SEED:".length)}` : key.replace(/^ROOT:/, ""));
+
+/** A research identity is never a registered strategy: its replay hull is technical and no forward approval. */
+export const isResearchIdentity = (key: string | null | undefined): boolean => typeof key === "string" && key.startsWith("RESEARCH:");
 
 export interface LineageNode {
   key: string;

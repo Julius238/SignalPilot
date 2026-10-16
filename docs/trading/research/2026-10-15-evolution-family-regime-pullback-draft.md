@@ -1,5 +1,10 @@
 # Entwurf: Vorregistrierung der Strategiefamilie REGIME_PULLBACK_LONG („Regime-Rücksetzer“)
 
+> **Festgeschrieben am 2026-10-16** in der
+> [Vorregistrierung REGIME_PULLBACK_LONG](2026-10-16-evolution-family-regime-pullback-preregistration.md)
+> (Hash `b96bcc97…`), F1–F6 wie empfohlen. Dieser Entwurf bleibt als
+> Herleitung unverändert stehen.
+
 > **Entwurf zur Prüfung durch den Betreiber, noch nicht festgeschrieben.**
 > Stand 2026-10-15, dritte Fassung. Es gibt keinen Code, keinen Backtest,
 > keinen KI-Lauf und keine Freigabe. Champion, Challenger, Risk Engine

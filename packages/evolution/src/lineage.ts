@@ -5,14 +5,17 @@
  * generation and exactly one parent: either another candidate or one of the
  * frozen generation-0 roots (champion / challenger). A lineage is read by
  * walking parent links back to the root, e.g.
- * CRYPTO_TREND_CORE_LONG_V1 → EVO-BRK-0002 → EVO-BRK-0007.
+ * CRYPTO_TREND_CORE_LONG_V1 → EVO-BRK-0002 → EVO-BRK-0007. An independent
+ * family has no root: its lineage starts at the pre-registered seed, e.g.
+ * SEED:REGIME_PULLBACK_LONG_V1 → EVO-RPB-0001 (generation 1).
  */
 
 import { FAMILY_SPECS, rootByKey, type EvolutionFamily } from "./genome.js";
 
 export const FAMILY_CODES: Readonly<Record<EvolutionFamily, string>> = Object.freeze({
   BREAKOUT_LONG: "BRK",
-  REGIME_LONG: "REG"
+  REGIME_LONG: "REG",
+  REGIME_PULLBACK_LONG: "RPB"
 });
 
 export function candidateKeyFor(family: EvolutionFamily, sequence: number): string {
@@ -20,7 +23,7 @@ export function candidateKeyFor(family: EvolutionFamily, sequence: number): stri
   return `EVO-${FAMILY_CODES[family]}-${String(sequence).padStart(4, "0")}`;
 }
 
-const KEY_PATTERN = /^EVO-(BRK|REG)-(\d{4,})$/;
+const KEY_PATTERN = /^EVO-(BRK|REG|RPB)-(\d{4,})$/;
 
 export function parseCandidateKey(key: string): { family: EvolutionFamily; sequence: number } | null {
   const match = KEY_PATTERN.exec(key);

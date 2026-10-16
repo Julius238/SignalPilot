@@ -7,7 +7,7 @@
  * it is never logged, stored or returned by `describeConfig`.
  */
 
-import { AI_MODEL_PRICING, assertStrategyCodeGenerationDisabled, isGateVersionKey, type AiEffort, type GateVersionKey } from "@signalpilot/evolution";
+import { AI_MODEL_PRICING, FAMILY_SPECS, assertStrategyCodeGenerationDisabled, isGateVersionKey, type AiEffort, type EvolutionFamily, type GateVersionKey } from "@signalpilot/evolution";
 
 export type ProviderMode = "anthropic" | "mock";
 
@@ -35,6 +35,13 @@ export interface EvolutionWorkerConfig {
   readonly holdoutEnabled: boolean;
   /** Pre-registered gate version deciding new candidates (v3 since 2026-10-15; v1 and v2 stay selectable for reproduction). */
   readonly gatesVersion: GateVersionKey;
+  /**
+   * Independent families whose AI search (stage 2 of their pre-registration)
+   * the operator opened; empty by default. Even then a family is searched only
+   * after its seed passed screening, only under gates v4 and only within its
+   * pre-registered budget.
+   */
+  readonly independentFamilySearch: readonly EvolutionFamily[];
   readonly heartbeatFile: string;
   readonly leaseMs: number;
 }
@@ -93,6 +100,15 @@ export function loadEvolutionConfig(env: NodeJS.ProcessEnv = process.env): Evolu
   if (fallback !== "default" && fallback !== "off") throw new EvolutionConfigError("EVOLUTION_AI_REFUSAL_FALLBACK must be default or off.");
   const gatesVersion = (env.EVOLUTION_GATES_VERSION ?? "v3").trim();
   if (!isGateVersionKey(gatesVersion)) throw new EvolutionConfigError("EVOLUTION_GATES_VERSION must be v1, v2, v3 or v4.");
+  const independentFamilySearch = (env.EVOLUTION_INDEPENDENT_FAMILY_SEARCH ?? "")
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry !== "");
+  for (const family of independentFamilySearch) {
+    if (FAMILY_SPECS[family as EvolutionFamily]?.independence === undefined) {
+      throw new EvolutionConfigError(`EVOLUTION_INDEPENDENT_FAMILY_SEARCH: ${family} is not an independent family.`);
+    }
+  }
   const maxConcurrentRuns = number(env, "EVOLUTION_MAX_CONCURRENT_RUNS", 1, { min: 1, max: 1, integer: true });
   void maxConcurrentRuns;
   return {
@@ -127,6 +143,7 @@ export function loadEvolutionConfig(env: NodeJS.ProcessEnv = process.env): Evolu
     backtestMaxOldSpaceMb: number(env, "EVOLUTION_BACKTEST_MAX_OLD_SPACE_MB", 1536, { min: 256, max: 8192, integer: true }),
     holdoutEnabled: bool(env, "EVOLUTION_HOLDOUT_ENABLED", true),
     gatesVersion,
+    independentFamilySearch: Object.freeze([...new Set(independentFamilySearch)] as EvolutionFamily[]),
     heartbeatFile: env.EVOLUTION_HEARTBEAT_FILE?.trim() || "/tmp/evolution-worker-heartbeat",
     leaseMs: number(env, "EVOLUTION_LEASE_MS", 6 * 3_600_000, { min: 60_000, max: 24 * 3_600_000, integer: true })
   };

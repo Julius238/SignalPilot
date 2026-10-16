@@ -22,6 +22,7 @@ export * from "./gates.js";
 export * from "./gates-v2.js";
 export * from "./gates-v3.js";
 export * from "./gates-v4.js";
+export * from "./family-regime-pullback.js";
 export * from "./genome.js";
 export * from "./lineage.js";
 export * from "./metrics.js";

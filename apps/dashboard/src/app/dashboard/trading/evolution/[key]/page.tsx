@@ -19,6 +19,8 @@ import {
   fmtPct,
   fmtR,
   fmtSigned,
+  isResearchIdentity,
+  rootLabel,
   toneOf
 } from "../../../../../lib/evolution-labels";
 import { TRADING_DASHBOARD_ENABLED } from "../../../../../lib/trading-flag";
@@ -118,7 +120,15 @@ function CandidateBody({ data }: { data: Detail }) {
 
       <div className="grid metrics">
         <MetricCard label="Status" value={<span className={`badge ${status.tone}`}>{status.label}</span>} sub={data.decision.decidedAt ? `entschieden von ${data.decision.decidedBy} am ${formatUtcDateTime(data.decision.decidedAt)}` : undefined} />
-        <MetricCard label="Familie / Generation" value={`${FAMILY_LABEL[data.family] ?? data.family} · G${data.generation}`} sub={`Eltern ${data.parentKey.replace(/^ROOT:/, "")}`} />
+        <MetricCard label="Familie / Generation" value={`${FAMILY_LABEL[data.family] ?? data.family} · G${data.generation}`} sub={`Eltern ${rootLabel(data.parentKey)}`} />
+        {isResearchIdentity(data.rootStrategyKey) ? (
+          <MetricCard
+            label="Forschungsidentität"
+            value={data.rootStrategyKey}
+            sub="eigener Einstiegs-Evaluator, nach Gates v4 im Portfolio geprüft"
+            hint="Der Replay läuft technisch unter einem registrierten Schlüssel (Replay-Hülle, nur für Registry und R-005). Das ist weder eine Zuordnung zu jener Strategie noch eine Freigabe für einen Forward-Test."
+          />
+        ) : null}
         <MetricCard label="Forschungs-Score" value={fmt(data.researchScore, 1)} sub="0–100, neutral 50, nur historisch" hint="Gewichtete Robustheit: Validierung, Risikobereinigung, Kostenstress, Marktphasen, Drawdown, Stichprobe, Diversifikation; Abzug für viele geänderte Parameter." />
         <MetricCard
           label="Evidenz nach Mehrfachtest"

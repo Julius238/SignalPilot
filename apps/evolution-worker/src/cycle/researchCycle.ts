@@ -10,6 +10,15 @@
  *  7. finalists: neighbour robustness, rolling walk-forward, holdout; propose
  *     the survivors with full results and a report.
  *
+ * Candidates of an independent family (gates v4, `FamilySpec.independence`)
+ * are decided in step 5d by the portfolio path: comparison A (existing
+ * strategies plus a cash reserve slot) once per run and window, comparison B
+ * (the candidate on that slot) per candidate, both chronological portfolio
+ * replays. Such a family needs gates v4; under v1–v3 it is refused. Its
+ * pre-registered seed is evaluated by a cycle in seed mode (`options.seed`,
+ * `evolution evaluate-seed`): no AI call, the seed instead of hypotheses,
+ * every later step identical.
+ *
  * The cycle never touches a trading, portfolio, session or arena table, and
  * never replays data from the official forward period.
  */
@@ -23,6 +32,7 @@ import {
   EVOLUTION_DATA_SPLIT_V1,
   EVOLUTION_DATA_SPLIT_V1_HASH,
   EVOLUTION_ENGINE_VERSION,
+  EVOLUTION_FAMILY_SEEDS,
   EVOLUTION_GATE_VERSIONS,
   EVOLUTION_ROOTS,
   FAMILY_SPECS,
@@ -40,9 +50,11 @@ import {
   combineDailyEquity,
   correlationOfDailyReturns,
   diffGenomes,
+  digestPortfolioSummary,
   discoverySnapshot,
   estimateInputTokens,
   evidenceGrade,
+  familyResearchIdentity,
   finalGates,
   foldMetrics,
   curveStats,
@@ -63,6 +75,10 @@ import {
   successorTThreshold,
   foldStability,
   genomeHash,
+  genomeReplayPlan,
+  independentFamilyStructure,
+  isGatesV4,
+  isIndependentFamily,
   lineageChain,
   neighbourGenomes,
   parseHypothesisResponse,
@@ -90,12 +106,17 @@ import {
   type EvolutionDataSplit,
   type EvolutionFamily,
   type EvolutionGateSet,
+  type FamilySeed,
   type GateResult,
+  type GateResultV4,
   type LineageAssessment,
   type LineageReference,
   type LineageRole,
   type PairedMonthlyTest,
   type ParsedReview,
+  type PortfolioCheckRecord,
+  type PortfolioMemberSpec,
+  type PortfolioSummary,
   type ResearchAiProvider,
   type WindowMetrics
 } from "@signalpilot/evolution";
@@ -110,6 +131,8 @@ import type { EvolutionDb } from "../database.js";
 import type { Logger } from "../logger.js";
 import { acquireRunLease, ensureAgentState, releaseExpiredBudgetPause, releaseRunLease, setAgentStatus } from "../persistence/agentState.js";
 import { recordAuditEvent } from "../persistence/audit.js";
+import { finalIndependentCandidate, screenIndependentCandidate, type PortfolioRunContext } from "./portfolioAssessment.js";
+import { familySeed, independentSearchStatus, priorTrainingConfigurations, seedPreflight, type IndependentSearchStatus } from "./seed.js";
 import {
   backtestCacheKey,
   evaluatedConfigurations,
@@ -121,7 +144,8 @@ import {
   recordExposure,
   saveBacktest,
   successorScreeningsThisMonth,
-  type BacktestRole
+  type BacktestRole,
+  type ExposurePurpose
 } from "../persistence/store.js";
 
 export interface MarketInfo {
@@ -144,6 +168,12 @@ export interface CycleDeps {
   readonly split?: EvolutionDataSplit;
   /** Pre-registered gates (default: the configured version); tests may inject lower thresholds to exercise the final stage. */
   readonly gates?: EvolutionGateSet;
+  /**
+   * Tests only: wraps the gates-v4 portfolio path, e.g. to force a screening
+   * verdict so a short synthetic market can walk through the final stage
+   * (whose OWN_ALPHA needs 36 months). Production always uses the real functions.
+   */
+  readonly portfolioPath?: { readonly screen?: typeof screenIndependentCandidate; readonly final?: typeof finalIndependentCandidate };
 }
 
 export interface CycleOptions {
@@ -151,6 +181,12 @@ export interface CycleOptions {
   /** Run although the agent is PAUSED (never past a budget pause with a billable provider). */
   readonly force?: boolean;
   readonly nextRunAt?: Date | null;
+  /**
+   * Stage 1 of an independent family: evaluate its pre-registered seed
+   * instead of asking the AI (`evolution evaluate-seed`). Runs while the agent
+   * is paused, never with a billable provider, only under gates v4, once.
+   */
+  readonly seed?: EvolutionFamily;
 }
 
 export interface CycleOutcome {
@@ -204,6 +240,10 @@ interface WorkingCandidate {
   /** Gates v3: lineage and diversification assessment, and the lineage references it was measured against. */
   lineage: LineageAssessment | null;
   lineageReferenceKeys: string[];
+  /** The pre-registered seed of an independent family (stage 1). */
+  isSeed: boolean;
+  /** Gates v4: the portfolio path of an independent family. */
+  portfolio: PortfolioCheckRecord | null;
 }
 
 /** An existing strategy the cycle compares with: a frozen root or an operator-approved candidate. */
@@ -220,6 +260,9 @@ interface ExistingStrategy {
 }
 
 const skipped = (reason: string): CycleOutcome => ({ status: "SKIPPED", reason, runKey: null, candidates: [], aiCostUsd: 0 });
+/** Gate results of v4 share `GateResult`'s shape; only the identifier union differs (v1's `GateId` stays unchanged). */
+const asGateResults = (gates: readonly GateResultV4[]): GateResult[] => gates as unknown as GateResult[];
+const PORTFOLIO_BASELINE_SUBJECT = "PORTFOLIO:A";
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 export async function runResearchCycle(deps: CycleDeps, options: CycleOptions): Promise<CycleOutcome> {
@@ -229,12 +272,20 @@ export async function runResearchCycle(deps: CycleDeps, options: CycleOptions): 
   const gatesHash = canonicalHash(gates);
   const splitHash = split === EVOLUTION_DATA_SPLIT_V1 ? EVOLUTION_DATA_SPLIT_V1_HASH : canonicalHash(split);
   const startedAt = deps.now();
+  const seed: FamilySeed | null = options.seed === undefined ? null : familySeed(options.seed);
+  if (options.seed !== undefined && seed === null) return skipped(`${options.seed} hat kein vorregistriertes Startgenom.`);
 
   await releaseExpiredBudgetPause(db, startedAt);
   const state = await ensureAgentState(db);
   if (state.status === "DISABLED") return skipped("Agent ist deaktiviert.");
   if (state.status === "PAUSED_BUDGET" && provider.billable) return skipped(state.statusReason ?? "Monatsbudget ausgeschöpft.");
-  if (state.status === "PAUSED" && options.force !== true) return skipped("Agent ist pausiert.");
+  // The seed evaluation is an operator command without AI: it runs while the agent is paused.
+  if (state.status === "PAUSED" && options.force !== true && seed === null) return skipped("Agent ist pausiert.");
+  if (seed !== null) {
+    if (provider.billable) return skipped("Ein Startgenom wird ohne KI bewertet; ein abrechenbarer Anbieter ist nicht zulässig.");
+    const preflight = await seedPreflight(db, { family: seed.family, gates, config, now: startedAt, split, requirePreregisteredGates: deps.gates === undefined });
+    if (!preflight.ok) return skipped(`Startgenom ${seed.key} wird nicht bewertet: ${preflight.problems.join(" ")}`);
+  }
 
   if (provider.billable) {
     // Do not even start the backtests of a cycle whose hypothesis call could not be paid.
@@ -270,7 +321,27 @@ export async function runResearchCycle(deps: CycleDeps, options: CycleOptions): 
     forwardDataUsed: false,
     provider: provider.name,
     billable: provider.billable,
-    models: config.models
+    models: seed === null ? config.models : null,
+    mode: seed === null ? "AI_HYPOTHESES" : "PREREGISTERED_SEED",
+    ...(seed === null
+      ? {}
+      : { seed: { family: seed.family, key: seed.key, genomeHash: genomeHash(seed.genome), parameters: seed.genome.parameters, preregistrationHash: seed.preregistrationHash, pinnedPreregistrationHash: seed.pinnedPreregistrationHash } }),
+    // Every independent family the code knows, with the pre-registration hash it is decided under.
+    independentFamilies: Object.fromEntries(
+      Object.values(FAMILY_SPECS)
+        .filter((spec) => spec.independence !== undefined)
+        .map((spec) => [
+          spec.family,
+          {
+            researchIdentity: spec.independence!.researchIdentity,
+            entryEvaluator: spec.independence!.entryEvaluator,
+            preregistrationHash: spec.independence!.preregistrationHash,
+            frozenExits: spec.independence!.frozenExits,
+            replayHull: spec.replayStrategyKey,
+            portfolioPath: isGatesV4(gates)
+          }
+        ])
+    )
   };
   const run = await db.evolutionRun.create({
     data: {
@@ -284,7 +355,7 @@ export async function runResearchCycle(deps: CycleDeps, options: CycleOptions): 
       splitKey: split.key,
       splitHash,
       dataManifestJson: manifest as never,
-      hypothesesRequested: config.hypothesesPerRun,
+      hypothesesRequested: seed === null ? config.hypothesesPerRun : 1,
       startedAt
     }
   });
@@ -295,7 +366,7 @@ export async function runResearchCycle(deps: CycleDeps, options: CycleOptions): 
     aggregateId: run.id,
     actorType: "SYSTEM",
     actorId: owner,
-    payload: { runKey, trigger: options.trigger, dataFingerprint: deps.market.fingerprint, provider: provider.name },
+    payload: { runKey, trigger: options.trigger, dataFingerprint: deps.market.fingerprint, provider: provider.name, mode: manifest.mode, seed: seed?.key ?? null },
     occurredAt: startedAt
   });
   log.info({ runKey, provider: provider.name }, "research cycle started");
@@ -472,142 +543,42 @@ export async function runResearchCycle(deps: CycleDeps, options: CycleOptions): 
     // Gates v3: validation screenings per family this month (every gate version counts).
     const familyUsed = isGatesV3(gates) ? await familyScreeningsThisMonth(db, startedAt) : new Map<string, number>();
     const familyLimit = isGatesV3(gates) ? gates.lineage.maxScreeningsPerFamilyPerMonth : Number.POSITIVE_INFINITY;
-    const context = buildResearchContext({
-      split,
-      benchmarks: EVOLUTION_ROOTS.map((root) => ({ key: root.key, label: root.label, discovery: roots[root.key]!.metrics.discovery })),
-      analysis,
-      history,
-      hypotheses: config.hypothesesPerRun,
-      successorRule: isGatesV2(gates),
-      ...(isGatesV3(gates)
-        ? { lineageRule: { remainingScreenings: Object.fromEntries(Object.keys(FAMILY_SPECS).map((family) => [family, Math.max(0, familyLimit - (familyUsed.get(family) ?? 0))])) } }
-        : {})
-    });
-    assertContextLeakFree(context, split);
-    const prompt = renderHypothesisPrompt(context);
-    const contextHash = createHash("sha256").update(prompt).digest("hex");
     const benchmarks = Object.fromEntries(
       EVOLUTION_ROOTS.map((root) => [
         root.key,
         { label: root.label, role: root.role, strategyKey: root.strategyKey, discovery: roots[root.key]!.metrics.discovery, validation: roots[root.key]!.metrics.validation, inSample: roots[root.key]!.metrics.inSample, folds: roots[root.key]!.metrics.folds }
       ])
     );
-    await db.evolutionRun.update({ where: { id: run.id }, data: { contextHash, analysisJson: JSON.parse(JSON.stringify({ ...analysis, benchmarks })) as never } });
 
-    const aiRequest = (task: AiTask, system: string, text: string, schema: Readonly<Record<string, unknown>>): AiRequest => {
-      const tier = AI_TASK_TIER[task];
-      return { task, tier, model: config.models[tier], system, prompt: text, jsonSchema: schema, maxOutputTokens: config.maxOutputTokens[tier], effort: config.effort[tier] };
-    };
-    const hypothesisCall = await callResearchAi(
-      { db, provider, config, now: deps.now, log },
-      { runId: run.id, request: aiRequest("HYPOTHESIS_GENERATION", HYPOTHESIS_SYSTEM_PROMPT, prompt, HYPOTHESIS_RESPONSE_SCHEMA) }
-    );
-    if (!hypothesisCall.ok) {
-      return await finish("ABORTED", `KI-Aufruf vom Budget blockiert: ${hypothesisCall.decision.reason}.`, null, null);
-    }
-    const parsed = parseHypothesisResponse(hypothesisCall.response.json, config.hypothesesPerRun);
-    const aiSummary = parsed.summary || null;
-
-    // ── 4. Hypotheses → versioned candidates (or refusals) ─────────────────
-    const allowedParents = new Set(context.allowedParents);
-    const rootHashes = new Set(EVOLUTION_ROOTS.map((root) => genomeHash(root.genome)));
-    // Genomes already evaluated as neighbour variants: their discovery + validation result is known, so
-    // they can never come back as a "new" candidate whose result would count as independent evidence.
-    const neighbourHashes = await evaluatedNeighbourGenomeHashes(db);
-    const seenThisRun = new Set<string>();
-    let index = 0;
-    for (const hypothesis of parsed.hypotheses) {
-      index += 1;
-      const hypothesisKey = `${runKey}:H${index}`;
-      const reasons: string[] = [];
-      let parentGenome: CandidateGenome | null = null;
-      let parentGeneration = 0;
-      let parentCandidateId: string | null = null;
-      let rootStrategyKey = "";
-      const root = rootByKey(hypothesis.parentKey);
-      if (!allowedParents.has(hypothesis.parentKey)) {
-        reasons.push(`Elternstrategie ${hypothesis.parentKey} ist nicht zugelassen (nur Wurzeln und bestandene Kandidaten).`);
-      } else if (root !== null) {
-        parentGenome = root.genome;
-        rootStrategyKey = root.strategyKey;
-      } else {
-        const parent = await db.evolutionCandidate.findUnique({ where: { candidateKey: hypothesis.parentKey } });
-        if (parent === null) reasons.push(`Elternstrategie ${hypothesis.parentKey} existiert nicht.`);
-        else {
-          parentGenome = parent.genomeJson as unknown as CandidateGenome;
-          parentGeneration = parent.generation;
-          parentCandidateId = parent.id;
-          rootStrategyKey = parent.rootStrategyKey;
-        }
-      }
-      if (parentGenome !== null && parentGenome.family !== hypothesis.family) {
-        reasons.push(`Familie ${hypothesis.family} passt nicht zur Elternstrategie (${parentGenome.family}).`);
-      }
-      let outcome = "INVALID";
-      let genome: CandidateGenome | null = null;
-      if (reasons.length === 0 && parentGenome !== null) {
-        const applied = applyChanges(parentGenome, hypothesis.changes);
-        reasons.push(...applied.issues.map((issue) => `${issue.code}: ${issue.message}`));
-        if (applied.applied.length > context.request.maxChangesPerHypothesis) {
-          reasons.push(`TOO_MANY_CHANGES: ${applied.applied.length} Änderungen, erlaubt sind ${context.request.maxChangesPerHypothesis}.`);
-        }
-        if (reasons.length === 0) {
-          const hash = genomeHash(applied.genome);
-          const existing = await db.evolutionCandidate.findUnique({ where: { genomeHash: hash } });
-          if (rootHashes.has(hash) || existing !== null || seenThisRun.has(hash) || neighbourHashes.has(hash)) {
-            outcome = "DUPLICATE";
-            reasons.push(
-              existing !== null
-                ? `Genom bereits getestet als ${existing.candidateKey}.`
-                : neighbourHashes.has(hash)
-                  ? "Genom bereits als Nachbarvariante geprüft — sein historisches Ergebnis ist bekannt und zählt nicht als neuer Nachweis."
-                  : "Genom bereits getestet."
-            );
-          } else if ((familyUsed.get(hypothesis.family) ?? 0) >= familyLimit) {
-            outcome = "LINEAGE_BUDGET_EXHAUSTED";
-            reasons.push(`Monatslimit von ${familyLimit} Prüfungen der Familie ${hypothesis.family} erreicht — nicht getestet, die Validierungsdaten werden geschont.`);
-          } else {
-            outcome = "ACCEPTED";
-            genome = applied.genome;
-            seenThisRun.add(hash);
-            familyUsed.set(hypothesis.family, (familyUsed.get(hypothesis.family) ?? 0) + 1);
-          }
-        }
-      }
-      const hypothesisRow = await db.evolutionHypothesis.create({
-        data: {
-          hypothesisKey,
-          runId: run.id,
-          aiCallId: hypothesisCall.callId,
-          title: hypothesis.title,
-          marketObservation: hypothesis.marketObservation,
-          rationale: hypothesis.rationale,
-          expectedEffect: hypothesis.expectedEffect,
-          falsificationCriterion: hypothesis.falsificationCriterion,
-          family: hypothesis.family,
-          parentKey: hypothesis.parentKey,
-          changesJson: hypothesis.changes as never,
-          outcome,
-          outcomeReasons: reasons
-        }
-      });
-      if (genome === null) continue;
-      const sequence = await nextSequence(db, hypothesis.family);
-      const key = candidateKeyFor(hypothesis.family, sequence);
-      const changes = diffGenomes(parentGenome, genome);
+    // One place creates every candidate row, from a hypothesis or from the pre-registered seed.
+    async function admitCandidate(input: {
+      family: EvolutionFamily;
+      generation: number;
+      parentKey: string;
+      parentCandidateId: string | null;
+      rootStrategyKey: string;
+      parentGenome: CandidateGenome;
+      genome: CandidateGenome;
+      hypothesisId: string;
+      hypothesis: WorkingCandidate["hypothesis"];
+      isSeed: boolean;
+    }): Promise<void> {
+      const sequence = await nextSequence(db, input.family);
+      const key = candidateKeyFor(input.family, sequence);
+      const changes = diffGenomes(input.parentGenome, input.genome);
       const row = await db.evolutionCandidate.create({
         data: {
           candidateKey: key,
-          family: hypothesis.family,
-          generation: parentGeneration + 1,
+          family: input.family,
+          generation: input.generation,
           sequence,
-          parentKey: hypothesis.parentKey,
-          parentCandidateId,
-          rootStrategyKey,
+          parentKey: input.parentKey,
+          parentCandidateId: input.parentCandidateId,
+          rootStrategyKey: input.rootStrategyKey,
           runId: run.id,
-          hypothesisId: hypothesisRow.id,
-          genomeJson: genome as never,
-          genomeHash: genomeHash(genome),
+          hypothesisId: input.hypothesisId,
+          genomeJson: input.genome as never,
+          genomeHash: genomeHash(input.genome),
           changesJson: changes as never,
           status: "GENERATED",
           statusReasons: [],
@@ -620,18 +591,26 @@ export async function runResearchCycle(deps: CycleDeps, options: CycleOptions): 
         aggregateType: "EvolutionCandidate",
         aggregateId: row.id,
         actorType: "SYSTEM",
-        payload: { runKey, key, parentKey: hypothesis.parentKey, generation: parentGeneration + 1, genomeHash: genomeHash(genome), changes },
+        payload: {
+          runKey,
+          key,
+          parentKey: input.parentKey,
+          generation: input.generation,
+          genomeHash: genomeHash(input.genome),
+          changes,
+          ...(isIndependentFamily(input.family) ? { researchIdentity: familyResearchIdentity(input.family), seed: input.isSeed } : {})
+        },
         occurredAt: deps.now()
       });
       working.push({
         id: row.id,
         key,
-        family: hypothesis.family,
-        generation: parentGeneration + 1,
-        parentKey: hypothesis.parentKey,
-        genome,
-        hypothesisTitle: hypothesis.title,
-        hypothesis,
+        family: input.family,
+        generation: input.generation,
+        parentKey: input.parentKey,
+        genome: input.genome,
+        hypothesisTitle: input.hypothesis.title,
+        hypothesis: input.hypothesis,
         changes,
         status: "GENERATED",
         reasons: [],
@@ -649,12 +628,225 @@ export async function runResearchCycle(deps: CycleDeps, options: CycleOptions): 
         walkForward: null,
         neighbours: [],
         windowsSeen: new Set(),
-        rootKey: `ROOT:${rootStrategyKey}`,
+        // An independent family has no root: its lineage starts at the pre-registered seed.
+        rootKey: EVOLUTION_FAMILY_SEEDS[input.family]?.key ?? `ROOT:${input.rootStrategyKey}`,
         successor: null,
-        familyScreening: familyUsed.get(hypothesis.family) ?? 0,
+        familyScreening: familyUsed.get(input.family) ?? 0,
         lineage: null,
-        lineageReferenceKeys: []
+        lineageReferenceKeys: [],
+        isSeed: input.isSeed,
+        portfolio: null
       });
+    }
+
+    let aiSummary: string | null = null;
+    // The review call exists only after an AI hypothesis step; a seed evaluation has neither.
+    let reviewRequest: ((text: string) => AiRequest) | null = null;
+    if (seed !== null) {
+      // ── 3–4 in seed mode: the pre-registered seed instead of AI hypotheses ──
+      await db.evolutionRun.update({ where: { id: run.id }, data: { analysisJson: JSON.parse(JSON.stringify({ ...analysis, benchmarks })) as never } });
+      const hypothesisRow = await db.evolutionHypothesis.create({
+        data: {
+          hypothesisKey: `${runKey}:SEED`,
+          runId: run.id,
+          aiCallId: null,
+          ...seed.hypothesis,
+          family: seed.family,
+          parentKey: seed.key,
+          changesJson: [] as never,
+          outcome: "PREREGISTERED_SEED",
+          outcomeReasons: [`Vorregistrierung ${seed.preregistrationHash}`]
+        }
+      });
+      familyUsed.set(seed.family, (familyUsed.get(seed.family) ?? 0) + 1);
+      await admitCandidate({
+        family: seed.family,
+        generation: 1,
+        parentKey: seed.key,
+        parentCandidateId: null,
+        rootStrategyKey: familyResearchIdentity(seed.family)!,
+        parentGenome: seed.genome,
+        genome: seed.genome,
+        hypothesisId: hypothesisRow.id,
+        hypothesis: { ...seed.hypothesis },
+        isSeed: true
+      });
+    } else {
+      // Stage 2 of every independent family: open only after its seed passed screening and the operator's approval.
+      const independentStatus = new Map<EvolutionFamily, IndependentSearchStatus>();
+      for (const spec of Object.values(FAMILY_SPECS).filter((entry) => entry.independence !== undefined)) {
+        independentStatus.set(spec.family, await independentSearchStatus(db, { family: spec.family, gates, config, now: startedAt, requirePreregisteredGates: deps.gates === undefined }));
+      }
+      const openIndependent = [...independentStatus.values()].filter((status) => status.open);
+      const context = buildResearchContext({
+        split,
+        benchmarks: EVOLUTION_ROOTS.map((root) => ({ key: root.key, label: root.label, discovery: roots[root.key]!.metrics.discovery })),
+        analysis,
+        history,
+        hypotheses: config.hypothesesPerRun,
+        successorRule: isGatesV2(gates),
+        ...(isGatesV3(gates)
+          ? {
+              lineageRule: {
+                remainingScreenings: Object.fromEntries(
+                  Object.values(FAMILY_SPECS)
+                    .filter((spec) => spec.independence === undefined)
+                    .map((spec) => [spec.family, Math.max(0, familyLimit - (familyUsed.get(spec.family) ?? 0))])
+                )
+              }
+            }
+          : {}),
+        ...(openIndependent.length > 0
+          ? {
+              independentFamilies: Object.fromEntries(
+                openIndependent.map((status) => [
+                  status.family,
+                  {
+                    remainingThisMonth: Math.min(status.remainingThisMonth, Math.max(0, familyLimit - (familyUsed.get(status.family) ?? 0))),
+                    remainingTotal: status.remainingTotal,
+                    maxHypothesesPerRun: status.maxHypothesesPerRun
+                  }
+                ])
+              )
+            }
+          : {})
+      });
+      assertContextLeakFree(context, split);
+      const prompt = renderHypothesisPrompt(context);
+      const contextHash = createHash("sha256").update(prompt).digest("hex");
+      await db.evolutionRun.update({ where: { id: run.id }, data: { contextHash, analysisJson: JSON.parse(JSON.stringify({ ...analysis, benchmarks })) as never } });
+
+      const aiRequest = (task: AiTask, system: string, text: string, schema: Readonly<Record<string, unknown>>): AiRequest => {
+        const tier = AI_TASK_TIER[task];
+        return { task, tier, model: config.models[tier], system, prompt: text, jsonSchema: schema, maxOutputTokens: config.maxOutputTokens[tier], effort: config.effort[tier] };
+      };
+      reviewRequest = (text: string) => aiRequest("RESULT_REVIEW", REVIEW_SYSTEM_PROMPT, text, REVIEW_RESPONSE_SCHEMA);
+      const hypothesisCall = await callResearchAi(
+        { db, provider, config, now: deps.now, log },
+        { runId: run.id, request: aiRequest("HYPOTHESIS_GENERATION", HYPOTHESIS_SYSTEM_PROMPT, prompt, HYPOTHESIS_RESPONSE_SCHEMA) }
+      );
+      if (!hypothesisCall.ok) {
+        return await finish("ABORTED", `KI-Aufruf vom Budget blockiert: ${hypothesisCall.decision.reason}.`, null, null);
+      }
+      const parsed = parseHypothesisResponse(hypothesisCall.response.json, config.hypothesesPerRun);
+      aiSummary = parsed.summary || null;
+
+      // ── 4. Hypotheses → versioned candidates (or refusals) ─────────────────
+      const allowedParents = new Set(context.allowedParents);
+      const rootHashes = new Set(EVOLUTION_ROOTS.map((root) => genomeHash(root.genome)));
+      // Genomes already evaluated as neighbour variants: their discovery + validation result is known, so
+      // they can never come back as a "new" candidate whose result would count as independent evidence.
+      const neighbourHashes = await evaluatedNeighbourGenomeHashes(db);
+      const seenThisRun = new Set<string>();
+      const independentAccepted = new Map<EvolutionFamily, number>();
+      // An independent family is tested only under gates v4, in stage 2 and within its pre-registered budget.
+      const independentRefusal = (family: EvolutionFamily): { outcome: string; reason: string } | null => {
+        if (!isIndependentFamily(family)) return null;
+        if (!isGatesV4(gates)) return { outcome: "GATES_VERSION_UNSUITABLE", reason: `Eigenständige Familie ${family} wird nur nach Gates v4 im Portfolio geprüft; ${gates.version} lehnt sie ohne Test ab.` };
+        const status = independentStatus.get(family);
+        if (status === undefined || !status.open) return { outcome: "FAMILY_STAGE_CLOSED", reason: `${family}: ${status?.reason ?? "Stufe 2 ist nicht offen."} Nicht getestet.` };
+        const accepted = independentAccepted.get(family) ?? 0;
+        const limit = Math.min(status.maxHypothesesPerRun, status.remainingThisMonth, status.remainingTotal);
+        if (accepted >= limit) {
+          return { outcome: "FAMILY_PREREGISTRATION_LIMIT", reason: `${family}: Grenze der Vorregistrierung erreicht (höchstens ${status.maxHypothesesPerRun} je Durchlauf, verbleibend ${status.remainingThisMonth} im Monat und ${status.remainingTotal} insgesamt) — nicht getestet.` };
+        }
+        return null;
+      };
+      let index = 0;
+      for (const hypothesis of parsed.hypotheses) {
+        index += 1;
+        const hypothesisKey = `${runKey}:H${index}`;
+        const reasons: string[] = [];
+        let outcome = "INVALID";
+        let parentGenome: CandidateGenome | null = null;
+        let parentGeneration = 0;
+        let parentCandidateId: string | null = null;
+        let rootStrategyKey = "";
+        const root = rootByKey(hypothesis.parentKey);
+        const refusal = independentRefusal(hypothesis.family);
+        if (refusal !== null) {
+          outcome = refusal.outcome;
+          reasons.push(refusal.reason);
+        } else if (!allowedParents.has(hypothesis.parentKey)) {
+          reasons.push(`Elternstrategie ${hypothesis.parentKey} ist nicht zugelassen (nur Wurzeln und bestandene Kandidaten).`);
+        } else if (root !== null) {
+          parentGenome = root.genome;
+          rootStrategyKey = root.strategyKey;
+        } else {
+          const parent = await db.evolutionCandidate.findUnique({ where: { candidateKey: hypothesis.parentKey } });
+          if (parent === null) reasons.push(`Elternstrategie ${hypothesis.parentKey} existiert nicht.`);
+          else {
+            parentGenome = parent.genomeJson as unknown as CandidateGenome;
+            parentGeneration = parent.generation;
+            parentCandidateId = parent.id;
+            rootStrategyKey = parent.rootStrategyKey;
+          }
+        }
+        if (parentGenome !== null && parentGenome.family !== hypothesis.family) {
+          reasons.push(`Familie ${hypothesis.family} passt nicht zur Elternstrategie (${parentGenome.family}).`);
+        }
+        let genome: CandidateGenome | null = null;
+        if (reasons.length === 0 && parentGenome !== null) {
+          const applied = applyChanges(parentGenome, hypothesis.changes);
+          reasons.push(...applied.issues.map((issue) => `${issue.code}: ${issue.message}`));
+          if (applied.applied.length > context.request.maxChangesPerHypothesis) {
+            reasons.push(`TOO_MANY_CHANGES: ${applied.applied.length} Änderungen, erlaubt sind ${context.request.maxChangesPerHypothesis}.`);
+          }
+          if (reasons.length === 0) {
+            const hash = genomeHash(applied.genome);
+            const existing = await db.evolutionCandidate.findUnique({ where: { genomeHash: hash } });
+            if (rootHashes.has(hash) || existing !== null || seenThisRun.has(hash) || neighbourHashes.has(hash)) {
+              outcome = "DUPLICATE";
+              reasons.push(
+                existing !== null
+                  ? `Genom bereits getestet als ${existing.candidateKey}.`
+                  : neighbourHashes.has(hash)
+                    ? "Genom bereits als Nachbarvariante geprüft — sein historisches Ergebnis ist bekannt und zählt nicht als neuer Nachweis."
+                    : "Genom bereits getestet."
+              );
+            } else if ((familyUsed.get(hypothesis.family) ?? 0) >= familyLimit) {
+              outcome = "LINEAGE_BUDGET_EXHAUSTED";
+              reasons.push(`Monatslimit von ${familyLimit} Prüfungen der Familie ${hypothesis.family} erreicht — nicht getestet, die Validierungsdaten werden geschont.`);
+            } else {
+              outcome = "ACCEPTED";
+              genome = applied.genome;
+              seenThisRun.add(hash);
+              familyUsed.set(hypothesis.family, (familyUsed.get(hypothesis.family) ?? 0) + 1);
+              if (isIndependentFamily(hypothesis.family)) independentAccepted.set(hypothesis.family, (independentAccepted.get(hypothesis.family) ?? 0) + 1);
+            }
+          }
+        }
+        const hypothesisRow = await db.evolutionHypothesis.create({
+          data: {
+            hypothesisKey,
+            runId: run.id,
+            aiCallId: hypothesisCall.callId,
+            title: hypothesis.title,
+            marketObservation: hypothesis.marketObservation,
+            rationale: hypothesis.rationale,
+            expectedEffect: hypothesis.expectedEffect,
+            falsificationCriterion: hypothesis.falsificationCriterion,
+            family: hypothesis.family,
+            parentKey: hypothesis.parentKey,
+            changesJson: hypothesis.changes as never,
+            outcome,
+            outcomeReasons: reasons
+          }
+        });
+        if (genome === null || parentGenome === null) continue;
+        await admitCandidate({
+          family: hypothesis.family,
+          generation: parentGeneration + 1,
+          parentKey: hypothesis.parentKey,
+          parentCandidateId,
+          rootStrategyKey,
+          parentGenome,
+          genome,
+          hypothesisId: hypothesisRow.id,
+          hypothesis,
+          isSeed: false
+        });
+      }
     }
 
     // ── 5a. Technical tests ─────────────────────────────────────────────────
@@ -742,7 +934,7 @@ export async function runResearchCycle(deps: CycleDeps, options: CycleOptions): 
       const trials =
         split.priorExposure.filter((entry) => entry.role === "TRAINING").reduce((sum, entry) => sum + entry.configurationsTried, 0) + (await evaluatedConfigurations(db));
       const attempts = new Map<string, number>();
-      for (const candidate of [...working].filter((entry) => entry.screening.length > 0).sort((a, b) => a.key.localeCompare(b.key))) {
+      for (const candidate of [...working].filter((entry) => entry.screening.length > 0 && !isIndependentFamily(entry.family)).sort((a, b) => a.key.localeCompare(b.key))) {
         const route = successorRoute({ rootKey: candidate.rootKey, correlations: candidate.correlations, policy });
         if (!route.routed || roots[route.rootKey] === undefined) continue;
         const reference = roots[route.rootKey]!.metrics;
@@ -781,11 +973,12 @@ export async function runResearchCycle(deps: CycleDeps, options: CycleOptions): 
     // ── 5d. Gates v3: every candidate against its lineage, or as a genuine diversifier ─
     // Independent of correlation: root, parent and the best existing family representative,
     // each compared separately. Sequential in key order, so references load deterministically.
+    // Candidates of an independent family are decided by the gates-v4 portfolio path below instead.
     if (isGatesV3(gates)) {
       const trials =
         split.priorExposure.filter((entry) => entry.role === "TRAINING").reduce((sum, entry) => sum + entry.configurationsTried, 0) + (await evaluatedConfigurations(db));
       const diversification = gates.lineage.diversification;
-      for (const candidate of [...working].filter((entry) => entry.screening.length > 0).sort((a, b) => a.key.localeCompare(b.key))) {
+      for (const candidate of [...working].filter((entry) => entry.screening.length > 0 && !isIndependentFamily(entry.family)).sort((a, b) => a.key.localeCompare(b.key))) {
         const roles = new Map<string, LineageRole[]>();
         const addRole = (key: string, role: LineageRole) => roles.set(key, [...(roles.get(key) ?? []), role]);
         addRole(candidate.rootKey, "ROOT");
@@ -841,8 +1034,109 @@ export async function runResearchCycle(deps: CycleDeps, options: CycleOptions): 
       }
     }
 
+    // ── 5d. Gates v4: independent families are decided by the portfolio path ─
+    // Comparison A (the existing strategies plus a cash reserve slot) runs once per
+    // window and run and comes from the cache; comparison B puts the candidate on the
+    // reserve slot. Same total capital, unchanged risk engine, chronological replay.
+    // Sequential in key order, so the result never depends on timing.
+    const portfolioContext: PortfolioRunContext = {
+      runner: deps.runner,
+      existing: existing.map((strategy): PortfolioMemberSpec => ({ key: strategy.key, subject: strategy.subject })),
+      codeVersion: config.codeVersion,
+      split,
+      baselineCache: new Map(),
+      jobId: (label) => `${runKey}:${label}:${randomUUID().slice(0, 8)}`
+    };
+    const independentMember = (candidate: WorkingCandidate, key = candidate.key, genome = candidate.genome): PortfolioMemberSpec => ({
+      key,
+      subject: { kind: "GENOME", genome },
+      researchIdentity: familyResearchIdentity(candidate.family)!
+    });
+    const portfolioIntegrity = (summary: PortfolioSummary, window: { from: string; to: string }, fingerprint: string): string[] => {
+      const problems: string[] = [];
+      if (fingerprint !== deps.market.fingerprint) problems.push("Datenstand der Portfolio-Simulation weicht vom Durchlauf ab");
+      if (summary.lastAnchorAt !== null && Date.parse(summary.lastAnchorAt) >= Date.parse(split.forwardFrom)) problems.push("Portfolio-Simulation enthält Forward-Daten");
+      if (summary.firstAnchorAt !== null && Date.parse(summary.firstAnchorAt) < Date.parse(window.from)) problems.push("Portfolio-Simulation beginnt vor ihrem Fenster");
+      if (summary.lastAnchorAt !== null && Date.parse(summary.lastAnchorAt) > Date.parse(window.to)) problems.push("Portfolio-Simulation endet nach ihrem Fenster");
+      if (summary.members.some((member) => member.trades.some((trade) => Date.parse(trade.anchorAt) < Date.parse(window.from) || Date.parse(trade.anchorAt) > Date.parse(window.to)))) {
+        problems.push("Portfolio-Trade außerhalb des Fensters");
+      }
+      if (summary.members.some((member) => member.invariantViolations > 0)) problems.push("Portfolio-Invarianten verletzt");
+      return problems;
+    };
+    const recordPortfolioExposure = async (subjectKey: string, candidateId: string | null, entries: readonly (readonly [string, ExposurePurpose])[]) => {
+      const occurredAt = deps.now();
+      for (const symbol of split.symbols) {
+        for (const [windowKey, purpose] of entries) await recordExposure(db, { runId: run.id, windowKey, purpose, subjectKey, candidateId, symbol, occurredAt });
+      }
+    };
+    const independentCandidates = [...working].filter((entry) => entry.screening.length > 0 && isIndependentFamily(entry.family)).sort((a, b) => a.key.localeCompare(b.key));
+    if (independentCandidates.length > 0 && !isGatesV4(gates)) {
+      // Defence in depth: hypotheses of such a family are refused before any backtest under v1–v3.
+      for (const candidate of independentCandidates) {
+        candidate.screening = [
+          ...candidate.screening,
+          ...asGateResults([
+            {
+              gate: "INDEPENDENT_FAMILY",
+              stage: "SCREENING",
+              passed: false,
+              reasonCode: "INDEPENDENT_FAMILY_REQUIRES_GATES_V4",
+              message: `Familie ${candidate.family} ist eigenständig und wird nur nach Gates v4 im Portfolio geprüft; ${gates.version} lehnt sie ab.`,
+              actual: gates.version,
+              limit: "evolution-gates-v4"
+            }
+          ])
+        ];
+      }
+    } else if (independentCandidates.length > 0 && isGatesV4(gates)) {
+      const trials = priorTrainingConfigurations(split) + (await evaluatedConfigurations(db));
+      const inSampleWindow = { from: D.from, to: V.to };
+      for (const candidate of independentCandidates) {
+        const spec = FAMILY_SPECS[candidate.family];
+        const structure = independentFamilyStructure(spec);
+        try {
+          const result = await (deps.portfolioPath?.screen ?? screenIndependentCandidate)(portfolioContext, {
+            family: candidate.family,
+            candidate: independentMember(candidate),
+            structure,
+            gates,
+            trials,
+            screeningsThisMonth: candidate.familyScreening
+          });
+          const problems = [...portfolioIntegrity(result.baseline, inSampleWindow, result.dataFingerprint), ...portfolioIntegrity(result.withCandidate, inSampleWindow, result.dataFingerprint)];
+          await recordPortfolioExposure(PORTFOLIO_BASELINE_SUBJECT, null, [["DISCOVERY", "BENCHMARK"], ["VALIDATION", "BENCHMARK"]]);
+          await recordPortfolioExposure(candidate.key, candidate.id, [["DISCOVERY", "SEARCH"], ["VALIDATION", "SELECTION"]]);
+          if (problems.length > 0) {
+            candidate.status = "TECHNICAL_FAILED";
+            candidate.reasons.push(`DATA_INTEGRITY: ${[...new Set(problems)].join("; ")}`);
+            continue;
+          }
+          candidate.screening = [...candidate.screening, ...asGateResults(result.gates)];
+          candidate.portfolio = {
+            gatesVersion: gates.version,
+            gatesHash,
+            preregistrationHash: structure.preregistrationHash,
+            researchIdentity: familyResearchIdentity(candidate.family)!,
+            replayHull: spec.replayStrategyKey,
+            dataFingerprint: result.dataFingerprint,
+            baseline: digestPortfolioSummary(result.baseline),
+            withCandidate: digestPortfolioSummary(result.withCandidate),
+            assessment: result.assessment,
+            decision: result.decision,
+            neighbours: null,
+            holdout: null
+          };
+        } catch (error) {
+          candidate.status = "TECHNICAL_FAILED";
+          candidate.reasons.push(`TECHNICAL_TESTS_FAILED: Portfolio-Simulation: ${errorText(error).slice(0, 300)}`);
+        }
+      }
+    }
+
     // ── 6. Automatic rejection and finalist selection ───────────────────────
-    const screened = working.filter((candidate) => candidate.screening.length > 0);
+    // A candidate whose portfolio simulation failed technically is not screened.
+    const screened = working.filter((candidate) => candidate.screening.length > 0 && candidate.status !== "TECHNICAL_FAILED");
     for (const candidate of screened) {
       // Informational sub-checks (gates v3) never reject on their own.
       const failedScreening = candidate.screening.filter(isBlockingFailure);
@@ -897,7 +1191,10 @@ export async function runResearchCycle(deps: CycleDeps, options: CycleOptions): 
         .map(async (candidate) => {
           const spec = FAMILY_SPECS[candidate.family];
           const preferred = [...candidate.changes.map((change) => change.parameter), ...spec.parameters.filter((parameter) => parameter.kind !== "boolean").map((parameter) => parameter.name)];
-          const neighbours = neighbourGenomes(candidate.genome, [...new Set(preferred)], gates.neighbourCount);
+          // The seed's neighbours are pre-registered; every other candidate moves its changed parameters first.
+          const neighbours = candidate.isSeed
+            ? [...(EVOLUTION_FAMILY_SEEDS[candidate.family]?.neighbours ?? [])]
+            : neighbourGenomes(candidate.genome, [...new Set(preferred)], gates.neighbourCount);
           const neighbourRuns = neighbours.map((neighbour, index) => {
             const neighbourKey = `${candidate.key}~N${index + 1}`;
             return {
@@ -985,6 +1282,38 @@ export async function runResearchCycle(deps: CycleDeps, options: CycleOptions): 
               candidate.final = [...candidate.final, lineageHoldoutGate({ path: "DIVERSIFICATION", candidate: candidate.holdout, references: [], portfolio }, gates)];
             }
           }
+          if (candidate.portfolio !== null && isGatesV4(gates)) {
+            // Gates v4 final stage: every one-step neighbour must add to the portfolio too; the holdout can only stop.
+            const failedFinal = (reasonCode: string, message: string): GateResult[] =>
+              asGateResults([{ gate: "PORTFOLIO_HOLDOUT_GUARD", stage: "FINAL", passed: false, reasonCode, message, actual: null, limit: null }]);
+            if (holdoutResults === null) {
+              candidate.final = [...candidate.final, ...failedFinal("HOLDOUT_NOT_EVALUATED", "Holdout wurde nicht ausgewertet; ohne Portfolio-Holdout-Schutz wird kein Kandidat vorgeschlagen.")];
+            } else {
+              const neighbourMembers = neighbourRuns
+                .filter((_, index) => neighbourResults[index]!.every((result) => result.ok))
+                .map((entry) => independentMember(candidate, entry.neighbourKey, entry.neighbour));
+              try {
+                const finals = await (deps.portfolioPath?.final ?? finalIndependentCandidate)(portfolioContext, { candidate: independentMember(candidate), neighbours: neighbourMembers, gates });
+                const holdoutWindow = { from: H.from, to: H.to };
+                const problems = [
+                  ...portfolioIntegrity(finals.holdoutPair.baseline, holdoutWindow, finals.holdoutPair.dataFingerprint),
+                  ...portfolioIntegrity(finals.holdoutPair.withCandidate, holdoutWindow, finals.holdoutPair.dataFingerprint),
+                  ...(finals.neighbourFingerprints.some((fingerprint) => fingerprint !== deps.market.fingerprint) ? ["Datenstand der Nachbar-Simulation weicht vom Durchlauf ab"] : [])
+                ];
+                // The holdout of comparison A is reference data; the candidate's holdout check and the neighbours were recorded with their backtests.
+                await recordPortfolioExposure(PORTFOLIO_BASELINE_SUBJECT, null, [["HOLDOUT", "BENCHMARK"]]);
+                await recordPortfolioExposure(candidate.key, candidate.id, [["HOLDOUT", "HOLDOUT_CHECK"]]);
+                for (const member of neighbourMembers) await recordPortfolioExposure(member.key, candidate.id, [["DISCOVERY", "SEARCH"], ["VALIDATION", "SELECTION"]]);
+                candidate.final = [
+                  ...candidate.final,
+                  ...(problems.length > 0 ? failedFinal("DATA_INTEGRITY", `Portfolio-Finale verworfen: ${[...new Set(problems)].join("; ")}.`) : asGateResults(finals.gates))
+                ];
+                candidate.portfolio = { ...candidate.portfolio, neighbours: finals.neighbours, holdout: finals.holdout };
+              } catch (error) {
+                candidate.final = [...candidate.final, ...failedFinal("PORTFOLIO_FINAL_FAILED", `Portfolio-Finale technisch gescheitert: ${errorText(error).slice(0, 300)}`)];
+              }
+            }
+          }
           candidate.status = statusAfterFinal(candidate.screening, candidate.final);
           candidate.reasons.push(...candidate.final.filter(isBlockingFailure).map((gate) => gate.reasonCode));
         })
@@ -995,6 +1324,19 @@ export async function runResearchCycle(deps: CycleDeps, options: CycleOptions): 
     const parents = new Map((await db.evolutionCandidate.findMany({ select: { candidateKey: true, parentKey: true } })).map((row) => [row.candidateKey, row.parentKey] as const));
     for (const candidate of working) {
       const evidence = candidate.inSample === null ? null : { ...evidenceGrade(candidate.inSample.tStatR, trials), tStat: candidate.inSample.tStatR };
+      // Independent family: every stored row names the research identity; the registered key it ran under is only the replay hull.
+      const research = isIndependentFamily(candidate.family) ? genomeReplayPlan(candidate.genome).researchIdentity ?? null : null;
+      const identity =
+        research === null
+          ? null
+          : {
+              researchIdentity: research.key,
+              engineVersion: research.engineVersion,
+              specificationHash: research.specificationHash,
+              preregistrationHash: FAMILY_SPECS[candidate.family].independence!.preregistrationHash,
+              seed: candidate.isSeed,
+              replayHull: { strategyKey: FAMILY_SPECS[candidate.family].replayStrategyKey, role: "technisch (Registry, R-005); keine Zuordnung, keine Forward-Freigabe" }
+            };
       const lineage = lineageChain(candidate.key, (key) => (parents.has(key) ? { key, parentKey: parents.get(key)! } : null));
       const report = renderCandidateReport({
         candidateKey: candidate.key,
@@ -1017,6 +1359,7 @@ export async function runResearchCycle(deps: CycleDeps, options: CycleOptions): 
         correlations: candidate.correlations,
         successor: candidate.successor,
         lineageCheck: candidate.lineage,
+        portfolioCheck: candidate.portfolio,
         gateVersion: gates.version
       });
       const metricsJson = {
@@ -1034,6 +1377,8 @@ export async function runResearchCycle(deps: CycleDeps, options: CycleOptions): 
         technical: candidate.technical,
         successor: candidate.successor,
         lineage: candidate.lineage,
+        identity,
+        portfolio: candidate.portfolio,
         gateVersion: gates.version
       };
       await db.evolutionCandidate.update({
@@ -1060,14 +1405,23 @@ export async function runResearchCycle(deps: CycleDeps, options: CycleOptions): 
         aggregateType: "EvolutionCandidate",
         aggregateId: candidate.id,
         actorType: "SYSTEM",
-        payload: { runKey, key: candidate.key, status: candidate.status, reasons: candidate.reasons, score: candidate.score?.score ?? null, evidence: evidence?.grade ?? null },
+        payload: {
+          runKey,
+          key: candidate.key,
+          status: candidate.status,
+          reasons: candidate.reasons,
+          score: candidate.score?.score ?? null,
+          evidence: evidence?.grade ?? null,
+          ...(identity === null ? {} : { researchIdentity: identity.researchIdentity, portfolioDecision: candidate.portfolio?.decision.passed ?? null })
+        },
         occurredAt: deps.now()
       });
     }
 
     // ── Review by the cheap model (leak-free, optional) ─────────────────────
     let review: ParsedReview | null = null;
-    if (config.reviewEnabled && working.length > 0) {
+    if (config.reviewEnabled && working.length > 0 && reviewRequest !== null) {
+      const request = reviewRequest;
       const lines = working.map(
         (candidate) =>
           `- ${candidate.key} (${candidate.family}, Eltern ${candidate.parentKey}): ${candidate.hypothesisTitle}; Screening ${candidate.screening.length === 0 ? "nicht erreicht" : !candidate.screening.some(isBlockingFailure) ? "bestanden" : `gescheitert (${candidate.screening.filter(isBlockingFailure).map((gate) => gate.reasonCode).join(", ")})`}; Entdeckung ${candidate.discovery?.trades ?? 0} Trades, Ø ${candidate.discovery?.averageR?.toFixed(2) ?? "–"}R, PF ${candidate.discovery?.profitFactor?.toFixed(2) ?? "–"}`
@@ -1075,7 +1429,7 @@ export async function runResearchCycle(deps: CycleDeps, options: CycleOptions): 
       const reviewPrompt = ["Forschungsdurchlauf mit folgenden Kandidaten (nur Entdeckungsdaten und Screening-Urteile):", ...lines, "", `Bedingungsbefunde: ${analysis.findings.map((finding) => finding.sentence).join(" ") || "keine"}`].join("\n");
       assertContextLeakFree({ reviewPrompt }, split);
       try {
-        const reviewCall = await callResearchAi({ db, provider, config, now: deps.now, log }, { runId: run.id, request: aiRequest("RESULT_REVIEW", REVIEW_SYSTEM_PROMPT, reviewPrompt, REVIEW_RESPONSE_SCHEMA) });
+        const reviewCall = await callResearchAi({ db, provider, config, now: deps.now, log }, { runId: run.id, request: request(reviewPrompt) });
         if (reviewCall.ok) review = parseReviewResponse(reviewCall.response.json);
       } catch (error) {
         log.warn({ error: errorText(error) }, "review call failed; the cycle result stands without it");
@@ -1103,7 +1457,7 @@ export async function runResearchCycle(deps: CycleDeps, options: CycleOptions): 
       startedAt: startedAt.toISOString(),
       finishedAt: finishedAt.toISOString(),
       provider: provider.name,
-      models: [config.models.ADVANCED, config.models.STANDARD],
+      models: seed === null ? [config.models.ADVANCED, config.models.STANDARD] : [],
       dataManifest: { split: split.key, splitHash, dataFingerprint: deps.market.fingerprint, cutoffAt: deps.market.cutoffAt, forwardDataUsed: false },
       findings: ((current.analysisJson as { findings?: { sentence: string }[] } | null)?.findings ?? []).map((finding) => finding.sentence),
       aiSummary,

@@ -299,6 +299,31 @@ export interface RegimeStrategyIndicatorSnapshotV1 {
   readonly regimeSource: string;
 }
 
+/**
+ * Indicator snapshot of the regime-pullback research evaluator
+ * (`RESEARCH:REGIME_PULLBACK_LONG_V1`, replay only): the values of its entry
+ * rules E1–E3 and its price plan, plus the research identity that decided.
+ * The candidate's strategy key is the registered replay hull; these fields
+ * say which evaluator produced it.
+ */
+export interface PullbackResearchIndicatorSnapshotV1 {
+  readonly close1h: DecimalString;
+  readonly open1h: DecimalString;
+  readonly previousClose1h: DecimalString;
+  readonly atr14_1h: DecimalString;
+  readonly close1d: DecimalString;
+  readonly atr14_1d: DecimalString;
+  readonly pullbackLookbackHours: number;
+  readonly pullbackHigh_1h: DecimalString;
+  /** (pullbackHigh − close) ÷ ATR(14, 1d). */
+  readonly pullbackDepthAtr1d: DecimalString;
+  /** Highest relative volume of the last 6 closed 1h candles; null when no average is available. */
+  readonly peakRelativeVolume6_1h: DecimalString | null;
+  readonly researchKey: string;
+  readonly researchEngineVersion: string;
+  readonly researchSpecificationHash: string;
+}
+
 export interface StrategyIndicatorSnapshotV1 {
   readonly close1h: DecimalString;
   readonly sma20_1h: DecimalString;
@@ -368,7 +393,7 @@ export interface TradeCandidateDraftV1 {
   readonly minimumRewardRisk: DecimalString;
   readonly plannedRewardRisk: DecimalString;
   readonly maxHoldHours: number;
-  readonly indicators: StrategyIndicatorSnapshotV1 | RegimeStrategyIndicatorSnapshotV1;
+  readonly indicators: StrategyIndicatorSnapshotV1 | RegimeStrategyIndicatorSnapshotV1 | PullbackResearchIndicatorSnapshotV1;
   readonly evidence: readonly StrategyEvidenceDraftV1[];
   readonly reasonCodes: readonly StrategyReasonCode[];
   readonly engineVersion: string;

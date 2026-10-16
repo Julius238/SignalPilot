@@ -116,10 +116,15 @@ export interface PortfolioSummary {
 function memberConfig(spec: PortfolioMemberSpec): Omit<PortfolioMemberConfig, "startingCash"> {
   if (spec.subject.kind === "ROOT" && rootByKey(spec.subject.rootKey) === null) throw new Error(`Unknown evolution root ${spec.subject.rootKey}.`);
   const plan = replayPlanFor(spec.subject.kind === "ROOT" ? { rootKey: spec.subject.rootKey } : { genome: spec.subject.genome });
+  // An independent family's portfolio always carries its own research identity, never only the replay hull's key.
+  if (plan.researchIdentity !== undefined && spec.researchIdentity !== undefined && spec.researchIdentity !== plan.researchIdentity.key) {
+    throw new Error(`Portfolio ${spec.key} is labelled ${spec.researchIdentity}, but its genome belongs to ${plan.researchIdentity.key}.`);
+  }
+  const researchIdentity = spec.researchIdentity ?? plan.researchIdentity?.key;
   return {
     key: spec.key,
     strategyKey: plan.strategyKey,
-    ...(spec.researchIdentity === undefined ? {} : { researchIdentity: spec.researchIdentity }),
+    ...(researchIdentity === undefined ? {} : { researchIdentity }),
     symbols: EVOLUTION_DATA_SPLIT_V1.symbols.map((symbol) => ({ symbol, executionProfile: evolutionExecutionProfile(symbol) })),
     hooks: plan.hooks
   };
@@ -233,4 +238,68 @@ export function runPortfolioComparison(market: ReplayMarketData, spec: Portfolio
   const started = clock();
   const result = runPortfolioReplay(market, config);
   return summarizePortfolioReplay(spec.comparison, result, clock() - started);
+}
+
+/**
+ * Storage view of one comparison run: group and member statistics without
+ * trades and daily curves. A member of an independent family is stored under
+ * its research identity; the registered key it ran under appears only as
+ * `replayHull`, so no stored row attributes its trades to that strategy.
+ */
+export interface PortfolioSummaryDigest {
+  readonly comparison: PortfolioComparisonKind;
+  readonly engineVersion: string;
+  readonly groupRiskVersion: string | null;
+  readonly from: string;
+  readonly to: string;
+  readonly reserveCash: number;
+  readonly outputHash: string;
+  readonly durationMs: number;
+  readonly group: Omit<PortfolioGroupSummary, "dailyEquity">;
+  readonly members: readonly {
+    readonly key: string;
+    readonly strategyKey: string;
+    readonly replayHull: string | null;
+    readonly startingCash: number;
+    readonly finalEquity: number;
+    readonly trades: number;
+    readonly netPnl: number;
+    readonly killSwitchEngagements: number;
+    readonly groupRejected: number;
+    readonly groupRejections: Readonly<Record<string, number>>;
+    readonly invariantViolations: number;
+    readonly funnel: PortfolioMemberSummary["funnel"];
+    readonly outputHash: string;
+  }[];
+}
+
+export function digestPortfolioSummary(summary: PortfolioSummary): PortfolioSummaryDigest {
+  const { dailyEquity: _curve, ...group } = summary.group;
+  void _curve;
+  return {
+    comparison: summary.comparison,
+    engineVersion: summary.engineVersion,
+    groupRiskVersion: summary.groupRiskVersion,
+    from: summary.from,
+    to: summary.to,
+    reserveCash: summary.reserveCash,
+    outputHash: summary.outputHash,
+    durationMs: summary.durationMs,
+    group,
+    members: summary.members.map((member) => ({
+      key: member.key,
+      strategyKey: member.researchIdentity ?? member.strategyKey,
+      replayHull: member.researchIdentity === null ? null : member.strategyKey,
+      startingCash: member.startingCash,
+      finalEquity: member.finalEquity,
+      trades: member.trades.length,
+      netPnl: Math.round(member.trades.reduce((sum, trade) => sum + trade.netPnl, 0) * 100) / 100,
+      killSwitchEngagements: member.killSwitchEngagements,
+      groupRejected: member.groupRejected,
+      groupRejections: member.groupRejections,
+      invariantViolations: member.invariantViolations,
+      funnel: member.funnel,
+      outputHash: member.outputHash
+    }))
+  };
 }

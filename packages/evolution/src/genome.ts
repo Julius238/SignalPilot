@@ -8,6 +8,11 @@
  * identity of an already registered evaluator (the same research-override
  * mechanism the 2026-10-14 replay research used), so a candidate is always
  * executable by the existing backtest and never by the live pipeline.
+ *
+ * An independent family (gates v4, `FamilySpec.independence`) brings its own
+ * entry evaluator instead: the registered strategy is only the replay hull
+ * (registry lookup, R-005), its evaluator is never called and its regime exit
+ * is switched off; the research identity labels every result.
  */
 
 import {
@@ -21,11 +26,15 @@ import {
   CRYPTO_TREND_CORE_LONG_V1_SPECIFICATION_HASH,
   LONG_V1_BREAKOUT_IDENTITY,
   REGIME_LONG_V1_IDENTITY,
+  REGIME_PULLBACK_RESEARCH_V1_ENGINE_VERSION,
+  REGIME_PULLBACK_RESEARCH_V1_KEY,
   TREND_CORE_LONG_V1_BREAKOUT_IDENTITY,
   evaluateCryptoMtfBreakoutV1,
   evaluateCryptoRegimeLongV1,
+  evaluateRegimePullbackResearchV1,
   regimeGateOpen,
   type BreakoutResearchOverrides,
+  type RegimePullbackResearchIdentityV1,
   type StrategyEvaluationResultV1,
   type StrategyInputSnapshotV1
 } from "@signalpilot/strategy-engine";
@@ -33,9 +42,22 @@ import type { RegimePolicy, ReplayHooks, ReplayMode } from "@signalpilot/shadow-
 import { canonicalHash } from "@signalpilot/trading-domain";
 
 import { minimumStopDistanceForNet2R } from "./costs.js";
+import {
+  REGIME_PULLBACK_BUDGET,
+  REGIME_PULLBACK_FROZEN_EXITS,
+  REGIME_PULLBACK_LONG_V1_PREREGISTRATION,
+  REGIME_PULLBACK_LONG_V1_PREREGISTRATION_HASH,
+  REGIME_PULLBACK_LONG_V1_PREREGISTRATION_PINNED_HASH,
+  REGIME_PULLBACK_PARAMETERS,
+  REGIME_PULLBACK_SEED_HYPOTHESIS,
+  REGIME_PULLBACK_SEED_KEY,
+  REGIME_PULLBACK_SEED_NEIGHBOUR_PARAMETERS,
+  REGIME_PULLBACK_SEED_PARAMETERS,
+  regimePullbackSpecificationHash
+} from "./family-regime-pullback.js";
 
-export type EvolutionFamily = "BREAKOUT_LONG" | "REGIME_LONG";
-export const EVOLUTION_FAMILIES: readonly EvolutionFamily[] = Object.freeze(["BREAKOUT_LONG", "REGIME_LONG"]);
+export type EvolutionFamily = "BREAKOUT_LONG" | "REGIME_LONG" | "REGIME_PULLBACK_LONG";
+export const EVOLUTION_FAMILIES: readonly EvolutionFamily[] = Object.freeze(["BREAKOUT_LONG", "REGIME_LONG", "REGIME_PULLBACK_LONG"]);
 
 export type ParameterValue = string | number | boolean;
 
@@ -55,7 +77,7 @@ export interface ParameterSpec {
  * Declaration of an independent family (gates v4): its own entry evaluator,
  * entry parameters only, exits fixed in the family, its own research identity
  * and pre-registration. A family without it is decided by the v3 lineage
- * rule; none of the current families declares it.
+ * rule; REGIME_PULLBACK_LONG is the first family that declares it.
  */
 export interface FamilyIndependence {
   /** Engine version of the family's own entry evaluator. */
@@ -157,6 +179,21 @@ export const FAMILY_SPECS: Readonly<Record<EvolutionFamily, FamilySpec>> = Objec
       integer("maxHoldHours", "Zeit-Backstop in Stunden.", 168, 1440, 24),
       boolean("exitOnRegimeGateClosed", "Position schließen, sobald das Regime-Gate schließt.")
     ])
+  }),
+  REGIME_PULLBACK_LONG: Object.freeze({
+    family: "REGIME_PULLBACK_LONG",
+    label: "Regime-Rücksetzer",
+    description:
+      "Eigenständige Familie: kauft einen Rücksetzer von mindestens N × ATR(14, 1d) unter dem Hoch der letzten Stunden-Kerzen, optional mit Umkehrkerze und Kapitulationsvolumen; eigener Einstiegs-Evaluator ohne Regime-Regel (nur R-020 der Risk Engine). Feste Ausstiege: Stop 2 × ATR(1d), Ziel 4R, 72 h, kein Regime-Exit. Nur Einstiegsparameter sind veränderbar.",
+    // Replay hull only (registry lookup, R-005); its evaluator and regime exit are never used.
+    replayStrategyKey: CRYPTO_REGIME_LONG_V1_KEY,
+    parameters: REGIME_PULLBACK_PARAMETERS,
+    independence: Object.freeze({
+      entryEvaluator: REGIME_PULLBACK_RESEARCH_V1_ENGINE_VERSION,
+      researchIdentity: REGIME_PULLBACK_RESEARCH_V1_KEY,
+      frozenExits: REGIME_PULLBACK_FROZEN_EXITS,
+      preregistrationHash: REGIME_PULLBACK_LONG_V1_PREREGISTRATION_HASH
+    })
   })
 });
 
@@ -247,6 +284,54 @@ export const EVOLUTION_ROOTS: readonly EvolutionRoot[] = Object.freeze([
 export function rootByKey(key: string): EvolutionRoot | null {
   return EVOLUTION_ROOTS.find((root) => root.key === key) ?? null;
 }
+
+/**
+ * The pre-registered start of an independent family: evaluated once as
+ * generation 1 without AI (`evaluate-seed`), never part of the existing
+ * strategies and never a root.
+ */
+export interface FamilySeed {
+  readonly key: string;
+  readonly family: EvolutionFamily;
+  readonly genome: CandidateGenome;
+  /** Pre-registered one-step neighbours for the final stage. */
+  readonly neighbours: readonly CandidateGenome[];
+  readonly hypothesis: { readonly title: string; readonly marketObservation: string; readonly rationale: string; readonly expectedEffect: string; readonly falsificationCriterion: string };
+  /** Stricter than the gate version's family limit. */
+  readonly budget: { readonly maxScreeningsPerMonth: number; readonly maxScreeningsTotal: number; readonly maxHypothesesPerRun: number; readonly maxAiRunsPerMonth: number };
+  readonly preregistrationHash: string;
+  /** Value pinned at the pre-registration; a run refuses when the code no longer matches it. */
+  readonly pinnedPreregistrationHash: string;
+  /** The pre-registered gate version and hash the family is decided by. */
+  readonly gates: { readonly version: string; readonly hash: string };
+}
+
+const pullbackGenome = (parameters: Readonly<Record<string, ParameterValue>>): CandidateGenome => Object.freeze({ family: "REGIME_PULLBACK_LONG", parameters: Object.freeze({ ...parameters }) });
+
+export const EVOLUTION_FAMILY_SEEDS: Readonly<Partial<Record<EvolutionFamily, FamilySeed>>> = Object.freeze({
+  REGIME_PULLBACK_LONG: Object.freeze({
+    key: REGIME_PULLBACK_SEED_KEY,
+    family: "REGIME_PULLBACK_LONG",
+    genome: pullbackGenome(REGIME_PULLBACK_SEED_PARAMETERS),
+    neighbours: Object.freeze(REGIME_PULLBACK_SEED_NEIGHBOUR_PARAMETERS.map(pullbackGenome)),
+    hypothesis: REGIME_PULLBACK_SEED_HYPOTHESIS,
+    budget: REGIME_PULLBACK_BUDGET,
+    preregistrationHash: REGIME_PULLBACK_LONG_V1_PREREGISTRATION_HASH,
+    pinnedPreregistrationHash: REGIME_PULLBACK_LONG_V1_PREREGISTRATION_PINNED_HASH,
+    gates: REGIME_PULLBACK_LONG_V1_PREREGISTRATION.gates
+  })
+});
+
+export function seedByKey(key: string): FamilySeed | null {
+  return Object.values(EVOLUTION_FAMILY_SEEDS).find((seed) => seed.key === key) ?? null;
+}
+
+/** Research identity of an independent family (stored on every row), null for the families of the roots. */
+export function familyResearchIdentity(family: EvolutionFamily): string | null {
+  return FAMILY_SPECS[family]?.independence?.researchIdentity ?? null;
+}
+
+export const isIndependentFamily = (family: EvolutionFamily): boolean => FAMILY_SPECS[family]?.independence !== undefined;
 
 // ───────────────────────────────────────────────────────────────────────────
 // Normalisation and validation
@@ -408,10 +493,14 @@ export function diffGenomes(parent: CandidateGenome | null, child: CandidateGeno
     .map((name) => ({ parameter: name, from: parent?.parameters[name] ?? null, to: child.parameters[name]! }));
 }
 
-/** Parameters changed against the generation-0 root — the complexity the evidence has to carry. */
+/**
+ * Parameters changed against the generation-0 root — the complexity the
+ * evidence has to carry. A family with a pre-registered seed has no root and
+ * is measured against its seed.
+ */
 export function distanceFromRoot(genome: CandidateGenome): number {
-  const root = EVOLUTION_ROOTS.find((candidate) => candidate.genome.family === genome.family)!;
-  return diffGenomes(root.genome, genome).length;
+  const start = EVOLUTION_FAMILY_SEEDS[genome.family]?.genome ?? EVOLUTION_ROOTS.find((candidate) => candidate.genome.family === genome.family)!.genome;
+  return diffGenomes(start, genome).length;
 }
 
 /**
@@ -451,10 +540,13 @@ export function neighbourGenomes(genome: CandidateGenome, parameters: readonly s
 // ───────────────────────────────────────────────────────────────────────────
 
 export interface ReplayPlan {
+  /** Registered strategy the replay runs under; for an independent family only the technical replay hull. */
   readonly strategyKey: string;
   readonly regimePolicy: RegimePolicy;
   readonly mode: ReplayMode;
   readonly hooks: ReplayHooks;
+  /** Independent family: the identity the results belong to (never the hull's). */
+  readonly researchIdentity?: { readonly key: string; readonly engineVersion: string; readonly specificationHash: string };
 }
 
 /** The research regime every V1 backtest uses: the crypto-native one the champion and challenger run on. */
@@ -496,6 +588,35 @@ export function genomeReplayPlan(genome: CandidateGenome): ReplayPlan {
       regimePolicy: EVOLUTION_REGIME_POLICY,
       mode: EVOLUTION_REPLAY_MODE,
       hooks: { evaluate: (snapshot: StrategyInputSnapshotV1): StrategyEvaluationResultV1 => evaluateCryptoMtfBreakoutV1(snapshot, identity) }
+    };
+  }
+  if (genome.family === "REGIME_PULLBACK_LONG") {
+    const researchIdentity = {
+      key: REGIME_PULLBACK_RESEARCH_V1_KEY,
+      engineVersion: REGIME_PULLBACK_RESEARCH_V1_ENGINE_VERSION,
+      specificationHash: regimePullbackSpecificationHash(p)
+    };
+    // The challenger's identity is only the replay hull the registered snapshot is validated against.
+    const identity: RegimePullbackResearchIdentityV1 = {
+      ...REGIME_LONG_V1_IDENTITY,
+      pullbackResearch: {
+        pullbackLookbackHours: num(p.pullbackLookbackHours),
+        pullbackDepthAtr1d: String(p.pullbackDepthAtr1d),
+        requireReversalCandle: p.requireReversalCandle === true,
+        capitulationVolumeMinimum: String(p.capitulationVolumeMinimum)
+      },
+      researchIdentity
+    };
+    return {
+      strategyKey: CRYPTO_REGIME_LONG_V1_KEY,
+      regimePolicy: EVOLUTION_REGIME_POLICY,
+      mode: EVOLUTION_REPLAY_MODE,
+      researchIdentity,
+      hooks: {
+        evaluate: (snapshot: StrategyInputSnapshotV1): StrategyEvaluationResultV1 => evaluateRegimePullbackResearchV1(snapshot, identity),
+        // The hull declares the challenger's regime exit; the family has none (exits: stop, target, 72 h).
+        regimeExit: { enabled: false, gateOpen: () => true }
+      }
     };
   }
   const minimumConfidence = num(p.regimeMinimumConfidence);

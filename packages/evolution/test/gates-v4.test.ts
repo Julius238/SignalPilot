@@ -226,7 +226,7 @@ describe("gates v4 — versioning", () => {
 
 describe("gates v4 — independent families", () => {
   it("leaves both existing families on the v3 lineage rule", () => {
-    for (const spec of Object.values(FAMILY_SPECS)) {
+    for (const spec of [FAMILY_SPECS.BREAKOUT_LONG, FAMILY_SPECS.REGIME_LONG]) {
       assert.equal(spec.independence, undefined, spec.family);
       assert.equal(independentFamilyStructure(spec).declaredIndependent, false, spec.family);
     }

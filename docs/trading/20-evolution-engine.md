@@ -15,7 +15,8 @@ Entscheidungen: [ADR 0016](decisions/0016-evolution-engine-isolated-research.md)
 Vorregistrierungen: [v1](research/2026-10-15-evolution-v1-preregistration.md),
 [Gates v2](research/2026-10-15-evolution-gates-v2-preregistration.md),
 [Gates v3](research/2026-10-15-evolution-gates-v3-preregistration.md),
-[Gates v4](research/2026-10-16-evolution-gates-v4-preregistration.md)
+[Gates v4](research/2026-10-16-evolution-gates-v4-preregistration.md),
+[Familie REGIME_PULLBACK_LONG](research/2026-10-16-evolution-family-regime-pullback-preregistration.md)
 
 ## Bausteine
 
@@ -81,8 +82,8 @@ Challenger, ihre Spezifikations-Hashes und Golden Fixtures sind unverändert.
 
 Neue Durchläufe verwenden v3 (`EVOLUTION_GATES_VERSION`, Standard `v3`; `v1`
 und `v2` bleiben für Reproduktionen wählbar). `v4` ist wählbar und für die
-bestehenden Familien gleichwertig mit v3. Es ist Pflicht, sobald eine
-eigenständige Familie existiert; bisher gibt es keine. Alle Versionen sind per Hash
+bestehenden Familien gleichwertig mit v3. Für eine eigenständige Familie ist
+es Pflicht: Unter v1–v3 wird sie ohne Backtest abgelehnt. Alle Versionen sind per Hash
 festgenagelt (v3 einschließlich der Methodenkennungen); das Manifest jedes
 Durchlaufs enthält `gatesVersion` und `gatesHash`. Ein vom Betreiber
 abgelehnter Kandidat ist keine zulässige Elternstrategie mehr; freigegebene
@@ -90,6 +91,36 @@ Kandidaten werden unter v3 Referenz ihrer Familie und Teil des
 Vergleichsportfolios. Entscheidungen werden nie rückwirkend neu bewertet, und ein
 bereits als Kandidat oder Nachbarvariante geprüftes Genom wird als Duplikat
 verworfen.
+
+## Eigenständige Familien (Gates v4)
+
+Die erste eigenständige Familie ist **REGIME_PULLBACK_LONG** („Regime-Rücksetzer“,
+[Vorregistrierung](research/2026-10-16-evolution-family-regime-pullback-preregistration.md),
+Hash `b96bcc97…`).
+
+- **Einstieg:** eigener Evaluator `crypto-regime-pullback-research-v1/1.0.0`,
+  Forschungsidentität `RESEARCH:REGIME_PULLBACK_LONG_V1`. Er kauft einen
+  Rücksetzer von mindestens N × ATR(14, 1d), optional mit Umkehrkerze und
+  Kapitulationsvolumen. Eine Regime-Regel hat er nicht; R-020 der Risk
+  Engine wirkt allein.
+- **Ausstieg fest:** 2 × ATR(1d) Stop, 4R, 72 h, kein Regime-Exit. Das Genom
+  enthält nur Einstiegsparameter (240 Konfigurationen).
+- **Replay-Hülle:** Der Replay läuft technisch unter `CRYPTO_REGIME_LONG_V1`
+  (Registry, R-005). Gespeichert wird die Forschungsidentität; der Hülle
+  wird nichts zugeordnet, und sie ist keine Forward-Freigabe.
+- **Prüfung:** Im Forschungszyklus (Schritt 5d) gehen ihre Kandidaten durch
+  den Portfolio-Weg. Vergleich A wird je Lauf und Fenster aus dem Cache
+  genommen, Vergleich B je Kandidat gerechnet; nie die v3-Linienregel.
+- **Stufe 1:** nur das Startgenom, ohne KI, genau einmal:
+  `corepack pnpm evolution evaluate-seed --family=REGIME_PULLBACK_LONG [--check]`
+  mit `EVOLUTION_GATES_VERSION=v4` (Befehl und Dauer: Vorregistrierung,
+  Abschnitt 10). Scheitert es im Screening, ist die Familie geschlossen (F4).
+- **Stufe 2:** die KI-Suche, erst nach bestandenem Screening und Freigabe
+  (`EVOLUTION_INDEPENDENT_FAMILY_SEARCH=REGIME_PULLBACK_LONG`). Höchstens 2
+  Hypothesen je Lauf, 4 Prüfungen je Monat, 9 insgesamt.
+- **T7** (Vorab-Cache der Bestandsbewertungen) ist für Stufe 1 lokal nicht
+  nötig, vor regelmäßigen Läufen von Stufe 2 auf dem VPS aber Voraussetzung
+  (Vorregistrierung, Abschnitt 11).
 
 ## Bewertung
 
@@ -158,6 +189,7 @@ Die Arena V1 bleibt unverändert und bewertet ausschließlich Forward-Daten.
 corepack pnpm evolution status
 corepack pnpm evolution resume --actor=julius
 corepack pnpm evolution run-cycle --force
+EVOLUTION_GATES_VERSION=v4 corepack pnpm evolution evaluate-seed --family=REGIME_PULLBACK_LONG --check
 corepack pnpm evolution report --candidate=EVO-BRK-0001
 corepack pnpm evolution approve --candidate=EVO-BRK-0001 --actor=julius --note="…"
 corepack pnpm evolution verify-audit
@@ -209,8 +241,9 @@ Familien ausgeschöpft).
 
 ## Grenzen von V1
 
-- Nur zwei Familien und ein Parameterraster; neue Logik erst mit
-  Code-Erweiterung oder menschlichem Evaluator.
+- Neue Logik nur mit Code-Erweiterung oder menschlichem Evaluator: zwei
+  Familien der Wurzeln und eine eigenständige Familie (REGIME_PULLBACK_LONG),
+  jede mit geschlossenem Parameterraster.
 - Kein unberührter historischer Zeitraum: Beweiskraft nur durch Forward-Tests.
 - Kostenstress analytisch (gleiche Trades); zusätzliche Risk-Ablehnungen
   bei höheren Kosten würden nur Trades entfernen.

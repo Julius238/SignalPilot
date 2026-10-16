@@ -106,14 +106,24 @@ export function buildResearchContext(input: {
   readonly successorRule?: boolean;
   /** Gates v3: every candidate is measured against its lineage; remaining screenings per family this month. */
   readonly lineageRule?: { readonly remainingScreenings: Readonly<Record<string, number>> };
+  /**
+   * Independent families (gates v4) the AI may work on, with their remaining
+   * pre-registered budget. An independent family is only listed once its
+   * seed passed screening and the operator opened stage 2; by default the AI
+   * sees the families of the roots only.
+   */
+  readonly independentFamilies?: Readonly<Partial<Record<EvolutionFamily, { readonly remainingThisMonth: number; readonly remainingTotal: number; readonly maxHypothesesPerRun: number }>>>;
 }): ResearchContext {
+  const independent = input.independentFamilies ?? {};
+  const open = (family: EvolutionFamily): boolean => FAMILY_SPECS[family].independence === undefined || independent[family] !== undefined;
+  const families = Object.values(FAMILY_SPECS).filter((spec) => open(spec.family));
   return {
     contextVersion: RESEARCH_CONTEXT_VERSION,
     splitKey: input.split.key,
     objective:
       "Langfristig möglichst hohe risikobereinigte Nettorendite nach allen Handelskosten (Gebühren, Spread, Slippage) für BTCUSDT und ETHUSDT Spot, Long-only, 1h-Entscheidungen. Robuste, über Marktphasen stabile Ergebnisse haben Vorrang vor hohen Einzelwerten.",
     constraints: [
-      "Nur die aufgeführten Parameter der beiden Familien sind veränderbar; Kosten, Ausführung, Positionsgröße (0,25 % Risiko je Trade), Risk Engine und Datenzeiträume sind fest.",
+      `Nur die aufgeführten Parameter der ${families.length === 2 ? "beiden" : "aufgeführten"} Familien sind veränderbar; Kosten, Ausführung, Positionsgröße (0,25 % Risiko je Trade), Risk Engine und Datenzeiträume sind fest.`,
       "Kein Hebel, keine Leerverkäufe, keine Derivate, keine zukünftigen Daten.",
       "Jede Hypothese ändert höchstens die angegebene Zahl von Parametern gegenüber genau einer Elternstrategie aus allowedParents.",
       "Bereits getestete Genome werden verworfen; wiederhole keine Kombination aus history.",
@@ -132,9 +142,13 @@ export function buildResearchContext(input: {
               .map(([family, remaining]) => `${family} ${remaining}`)
               .join(", ")}. Hypothesen einer Familie ohne verbleibende Prüfungen werden ohne Test verworfen.`
           ]
-        : [])
+        : []),
+      ...Object.entries(independent).map(
+        ([family, budget]) =>
+          `Eigenständige Familie ${family}: nur Einstiegsparameter sind veränderbar; Stop, Ziel und Haltedauer sind fest, einen Regime-Exit gibt es nicht. Sie wird nicht gegen die Wurzeln, sondern im Portfolio bewertet: Champion, Challenger und freigegebene Strategien mit und ohne sie, bei gleichem Kapital, nach Kosten und unter unveränderten Risk-Regeln; ihr Ertrag muss ein eigenes, statistisch belastbares α sein. Elternstrategien sind nur Kandidaten dieser Familie. Verbleibend: ${budget!.remainingThisMonth} Prüfungen in diesem Monat, ${budget!.remainingTotal} insgesamt, höchstens ${budget!.maxHypothesesPerRun} Hypothesen je Durchlauf.`
+      )
     ],
-    families: Object.values(FAMILY_SPECS).map((spec) => ({
+    families: families.map((spec) => ({
       family: spec.family,
       label: spec.label,
       description: spec.description,
@@ -145,17 +159,20 @@ export function buildResearchContext(input: {
         values: describeValues(parameter)
       }))
     })),
-    roots: EVOLUTION_ROOTS.map((root) => ({ key: root.key, label: root.label, family: root.genome.family, parameters: root.genome.parameters })),
+    roots: EVOLUTION_ROOTS.filter((root) => open(root.genome.family)).map((root) => ({ key: root.key, label: root.label, family: root.genome.family, parameters: root.genome.parameters })),
     benchmarks: input.benchmarks.map((benchmark) => ({ key: benchmark.key, label: benchmark.label, discovery: discoverySnapshot(benchmark.discovery) })),
     market: {
       segments: input.analysis.segments,
       findings: input.analysis.findings.map((finding) => finding.sentence),
       buckets: input.analysis.buckets.filter((bucket) => bucket.trades >= 3)
     },
-    history: input.history,
+    // A closed independent family stays out of the AI's view entirely.
+    history: input.history.filter((entry) => open(entry.family)),
     allowedParents: [
-      ...EVOLUTION_ROOTS.map((root) => root.key),
-      ...input.history.filter((entry) => entry.verdict === "PASSED_SCREENING" && entry.operatorDecision !== "REJECTED_BY_OPERATOR").map((entry) => entry.candidateKey)
+      ...EVOLUTION_ROOTS.filter((root) => open(root.genome.family)).map((root) => root.key),
+      ...input.history
+        .filter((entry) => entry.verdict === "PASSED_SCREENING" && entry.operatorDecision !== "REJECTED_BY_OPERATOR" && open(entry.family))
+        .map((entry) => entry.candidateKey)
     ],
     request: { hypotheses: input.hypotheses, maxChangesPerHypothesis: input.maxChangesPerHypothesis ?? 3 }
   };

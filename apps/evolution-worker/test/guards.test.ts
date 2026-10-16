@@ -17,6 +17,13 @@ import { recordAuditEvent, verifyEvolutionAuditChain } from "../src/persistence/
 import { DB_SKIP_REASON, resetEvolutionTables, silentLog, testDatabase } from "./support.js";
 
 describe("configuration", () => {
+  it("keeps the AI search of an independent family closed unless the operator opens it", () => {
+    assert.deepEqual(loadEvolutionConfig({}).independentFamilySearch, []);
+    assert.deepEqual(loadEvolutionConfig({ EVOLUTION_INDEPENDENT_FAMILY_SEARCH: "REGIME_PULLBACK_LONG" }).independentFamilySearch, ["REGIME_PULLBACK_LONG"]);
+    assert.throws(() => loadEvolutionConfig({ EVOLUTION_INDEPENDENT_FAMILY_SEARCH: "REGIME_LONG" }), /not an independent family/);
+    assert.throws(() => loadEvolutionConfig({ EVOLUTION_INDEPENDENT_FAMILY_SEARCH: "SOMETHING" }), /not an independent family/);
+  });
+
   it("defaults to the mock provider, 20 USD a month, 1 USD a run, idle", () => {
     const config = loadEvolutionConfig({});
     assert.equal(config.provider, "mock");

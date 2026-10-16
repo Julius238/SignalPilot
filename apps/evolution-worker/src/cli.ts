@@ -4,6 +4,10 @@
  *   evolution status
  *   evolution ai-smoke [--tier=STANDARD|ADVANCED]   tiny budget-guarded connection test
  *   evolution run-cycle [--force]           one research cycle now
+ *   evolution evaluate-seed --family=REGIME_PULLBACK_LONG [--check]
+ *                                           stage 1 of an independent family: its pre-registered
+ *                                           seed under gates v4, without AI, exactly once;
+ *                                           --check only prints the preflight (no backtest, no write)
  *   evolution pause   --actor=<name> [--reason=…]
  *   evolution resume  --actor=<name>
  *   evolution approve --candidate=EVO-BRK-0003 --actor=<name> [--note=…]
@@ -19,12 +23,13 @@
 
 import "dotenv/config";
 
-import { checkOperatorDecision, OPERATOR_DECISIONS, type AiTier, type CandidateStatus } from "@signalpilot/evolution";
+import { checkOperatorDecision, EVOLUTION_GATE_VERSIONS, OPERATOR_DECISIONS, type AiTier, type CandidateStatus, type EvolutionFamily } from "@signalpilot/evolution";
 
 import { budgetStatus } from "./ai/budgetedAi.js";
 import { runAiSmoke } from "./ai/smoke.js";
 import { EvolutionConfigError, describeConfig, loadEvolutionConfig } from "./config.js";
 import { runResearchCycle } from "./cycle/researchCycle.js";
+import { NO_AI_PROVIDER, seedPreflight } from "./cycle/seed.js";
 import { createEvolutionDatabase, type EvolutionDb } from "./database.js";
 import { logger } from "./logger.js";
 import { AGENT_KEY, ensureAgentState, setAgentStatus } from "./persistence/agentState.js";
@@ -102,6 +107,35 @@ async function main(): Promise<void> {
           const market = await loadMarketInfo(config);
           const outcome = await runResearchCycle({ db, config, provider, runner, market, log: logger, now }, { trigger: "MANUAL", force: flags.force === true });
           console.log(JSON.stringify(outcome, null, 2));
+        } finally {
+          await runner.close();
+        }
+        return;
+      }
+      case "evaluate-seed": {
+        const family = requireFlag(flags, "family");
+        const gates = EVOLUTION_GATE_VERSIONS[config.gatesVersion];
+        const preflight = await seedPreflight(db, { family, gates, config, now: now() });
+        let market: Awaited<ReturnType<typeof loadMarketInfo>> | null = null;
+        const marketProblems: string[] = [];
+        try {
+          market = await loadMarketInfo(config);
+        } catch (error) {
+          marketProblems.push(`Marktdaten nicht lesbar (${config.snapshotDir}): ${error instanceof Error ? error.message : String(error)}`);
+        }
+        const ok = preflight.ok && marketProblems.length === 0;
+        if (flags.check === true || !ok) {
+          const view = { ...preflight, ok, problems: [...preflight.problems, ...marketProblems], market: market && { dir: market.dir, fingerprint: market.fingerprint, cutoffAt: market.cutoffAt } };
+          console.log(JSON.stringify({ command: "evaluate-seed", executed: false, preflight: view }, null, 2));
+          if (!ok) process.exitCode = 1;
+          return;
+        }
+        // No AI provider exists in this command: the seed is pre-registered, and any AI call would fail.
+        const runner = createBacktestPool(config);
+        try {
+          const outcome = await runResearchCycle({ db, config, provider: NO_AI_PROVIDER, runner, market: market!, log: logger, now }, { trigger: "MANUAL", seed: family as EvolutionFamily });
+          console.log(JSON.stringify(outcome, null, 2));
+          if (outcome.status !== "COMPLETED") process.exitCode = 1;
         } finally {
           await runner.close();
         }

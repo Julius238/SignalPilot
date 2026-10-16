@@ -9,8 +9,11 @@
 import type { EvidenceGrade, GateResult, ResearchScore } from "./gates.js";
 import type { ParameterDiff } from "./genome.js";
 import type { LineageAssessment } from "./gates-v3.js";
+import type { GateResultV4, IndependentFamilyDecision, NeighbourPortfolioResult } from "./gates-v4.js";
 import type { FoldMetrics, WindowMetrics } from "./metrics.js";
 import type { PairedMonthlyTest } from "./paired.js";
+import type { PortfolioSummaryDigest } from "./portfolio.js";
+import type { PortfolioAssessment, PortfolioWindowComparison } from "./portfolio-metrics.js";
 import type { WalkForwardResult } from "./walk-forward.js";
 
 const n = (value: number | null | undefined, digits = 2): string => (value === null || value === undefined ? "–" : value.toFixed(digits));
@@ -25,6 +28,67 @@ export const EVIDENCE_LABEL_DE: Readonly<Record<EvidenceGrade, string>> = Object
 
 export const HISTORICAL_DISCLAIMER =
   "Historische Simulation mit eingefrorenem Kostenmodell (BINANCE_SPOT_VIP0_ESTIMATE_V1). Kein Forward-Ergebnis, keine Prognose, keine Handelsempfehlung. Der Holdout 2024–2026 wurde bereits in der Forschung vom 14.10.2026 analysiert und ist kein unberührter Out-of-Sample-Beweis.";
+
+/** Gates v4: what the portfolio path of an independent-family candidate stored (metricsJson.portfolio). */
+export interface PortfolioCheckRecord {
+  readonly gatesVersion: string;
+  readonly gatesHash: string;
+  readonly preregistrationHash: string | null;
+  readonly researchIdentity: string;
+  /** Registered key the replay ran under — technical only, never an attribution. */
+  readonly replayHull: string;
+  readonly dataFingerprint: string;
+  readonly baseline: PortfolioSummaryDigest;
+  readonly withCandidate: PortfolioSummaryDigest;
+  readonly assessment: PortfolioAssessment;
+  readonly decision: IndependentFamilyDecision;
+  readonly neighbours: readonly NeighbourPortfolioResult[] | null;
+  readonly holdout: PortfolioWindowComparison | null;
+}
+
+const WINDOW_DE: Readonly<Record<string, string>> = { IN_SAMPLE: "Entdeckung + Validierung", DISCOVERY: "Entdeckung", VALIDATION: "Validierung", HOLDOUT: "Holdout*" };
+const stripRoot = (key: string) => key.replace(/^ROOT:/, "");
+
+function portfolioSection(p: PortfolioCheckRecord): string[] {
+  const a = p.assessment;
+  const windows = [a.windows.IN_SAMPLE, a.windows.DISCOVERY, a.windows.VALIDATION, ...(p.holdout === null ? [] : [p.holdout])];
+  const members = (digest: PortfolioSummaryDigest) => new Map(digest.members.map((member) => [member.key, member] as const));
+  const inA = members(p.baseline);
+  const inB = members(p.withCandidate);
+  return [
+    "## Portfolio-Prüfung (Gates v4)",
+    "",
+    `Forschungsidentität **${p.researchIdentity}** (Vorregistrierung ${p.preregistrationHash === null ? "–" : `\`${p.preregistrationHash.slice(0, 12)}…\``}). Die Replay-Hülle ${p.replayHull} ist nur technisch (Registry, R-005): Ihr Evaluator wird nie aufgerufen, ihr Regime-Exit ist abgeschaltet, kein Trade wird ihr zugeordnet, und sie ist keine Forward-Freigabe.`,
+    "",
+    `Chronologische Simulation ${p.withCandidate.engineVersion} mit Gruppenprüfung ${p.withCandidate.groupRiskVersion ?? "–"}, ein Portfolio je Strategie mit BTCUSDT und ETHUSDT, feste Plätze à ${n(p.withCandidate.members[0]?.startingCash ?? null, 0)} USDT, Gesamtkapital ${n(a.totalCapital, 0)} USDT in beiden Vergleichen. Vergleich A: ${a.existingKeys.map(stripRoot).join(", ")} und ein Reserveplatz als Kasse. Vergleich B: der Kandidat auf dem Reserveplatz. Andere Gewichte werden nie gerechnet.`,
+    "",
+    "| Fenster | Netto A | Netto B | Δ | Sharpe A | Sharpe B | Δ | Max. DD A | Max. DD B |",
+    "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
+    ...windows.map(
+      (w) =>
+        `| ${WINDOW_DE[w.key] ?? w.key} | ${pct(w.baseline.netReturnPct)} | ${pct(w.withCandidate.netReturnPct)} | ${n(w.netReturnDelta)} | ${n(w.baseline.sharpe)} | ${n(w.withCandidate.sharpe)} | ${n(w.sharpeDelta)} | ${pct(w.baseline.maxDrawdownPct)} | ${pct(w.withCandidate.maxDrawdownPct)} |`
+    ),
+    "",
+    "| Portfolio | Trades A | Trades B | Netto A (USDT) | Netto B (USDT) | Kill-Switch A / B | Gruppenablehnungen B |",
+    "|---|---:|---:|---:|---:|---|---:|",
+    ...p.withCandidate.members.map((member) => {
+      const before = inA.get(member.key);
+      return `| ${stripRoot(member.key)}${member.replayHull === null ? "" : ` (${member.strategyKey})`} | ${before?.trades ?? "–"} | ${member.trades} | ${n(before?.netPnl ?? null)} | ${n(member.netPnl)} | ${before?.killSwitchEngagements ?? "–"} / ${inB.get(member.key)?.killSwitchEngagements ?? "–"} | ${member.groupRejected} |`;
+    }),
+    "",
+    `Gleichzeitiges Risiko Ø ${n(a.openRisk.baselineAverage, 3)} % → ${n(a.openRisk.withCandidateAverage, 3)} %, Kapitalbindung Ø ${n(a.capitalBound.baselineAverage, 3)} % → ${n(a.capitalBound.withCandidateAverage, 3)} % des Gesamtkapitals. Die Verlustserien-Regel (R-021) wirkt je Portfolio über BTC und ETH zusammen, in A und B gleich.`,
+    "",
+    `Eigenes α gegenüber ${a.existingKeys.map(stripRoot).join(", ")}: t = ${n(a.alpha.tStat)} (Schwelle ${n(p.decision.alphaThreshold)}), ${a.alpha.months} Monate, R² ${n(a.rSquared)}, β ${(a.alpha.betas ?? []).map((beta) => n(beta)).join("/") || "–"}. Zuwachs des Gesamtportfolios: t = ${n(a.incrementTest.tStat)} (Schwelle ${n(p.decision.incrementThreshold)}). Mehrfachtest N = ${p.decision.trials}.`,
+    "",
+    ...(p.neighbours === null ? [] : [`Nachbarvarianten im Portfolio (Δ Netto / Δ Sharpe): ${p.neighbours.map((entry) => `${entry.key} ${n(entry.netReturnDelta)}/${n(entry.sharpeDelta)}`).join(", ") || "–"}.`, ""]),
+    p.decision.passed
+      ? "**Portfolio-Entscheidung: bestanden** — das Gesamtportfolio wird bei gleichem Kapital, nach Kosten und unter unveränderten Risk-Regeln besser, mit eigenem, belastbarem Ertrag."
+      : `**Portfolio-Entscheidung: nicht bestanden** (${p.decision.failed.join(", ")}). Kein nachgewiesener zusätzlicher Portfolio-Nutzen.`,
+    "",
+    `Entschieden nach ${p.gatesVersion} (\`${p.gatesHash.slice(0, 12)}…\`), Datenstand \`${p.dataFingerprint.slice(0, 12)}…\`.`,
+    ""
+  ];
+}
 
 export function metricsTable(columns: readonly { readonly label: string; readonly metrics: WindowMetrics | null }[]): string {
   const rows: [string, (metrics: WindowMetrics) => string][] = [
@@ -66,7 +130,7 @@ export function renderCandidateReport(input: {
   readonly champion: WindowMetrics | null;
   readonly challenger: WindowMetrics | null;
   readonly folds: readonly FoldMetrics[];
-  readonly gates: readonly GateResult[];
+  readonly gates: readonly (GateResult | GateResultV4)[];
   readonly score: ResearchScore | null;
   readonly evidence: { readonly grade: EvidenceGrade; readonly threshold: number; readonly trials: number; readonly tStat: number | null } | null;
   readonly walkForward: WalkForwardResult | null;
@@ -83,6 +147,8 @@ export function renderCandidateReport(input: {
   } | null;
   /** Gates v3: lineage and diversification assessment. */
   readonly lineageCheck?: LineageAssessment | null;
+  /** Gates v4: the portfolio path of an independent family. */
+  readonly portfolioCheck?: PortfolioCheckRecord | null;
   readonly gateVersion?: string;
 }): string {
   const lines: string[] = [];
@@ -165,6 +231,7 @@ export function renderCandidateReport(input: {
       ""
     );
   }
+  if (input.portfolioCheck) lines.push(...portfolioSection(input.portfolioCheck));
   if (input.gateVersion) lines.push(`Entschieden nach ${input.gateVersion}.`, "");
   lines.push("## Prüfungen", "", "| Prüfung | Stufe | Ergebnis | Begründung |", "|---|---|---|---|");
   for (const gate of input.gates) lines.push(`| ${gate.gate} | ${gate.stage} | ${gate.passed ? "bestanden" : gate.informational === true ? "nicht bestanden (informativ)" : "**nicht bestanden**"} | ${gate.message.replace(/\|/g, "/")} |`);
