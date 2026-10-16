@@ -102,6 +102,8 @@ Hash `b96bcc97…`).
 Gesamtportfolio zwar leicht verbessert (+0,51 pp, Sharpe +0,04 bei gleichem
 Kapital). Der Zuwachs war aber kein eigener Ertrag (α t = −0,34) und nicht
 signifikant (t = 0,75); [Bericht](research/2026-10-16-regime-pullback-seed-evaluation.md).
+Einordnung und nächste Forschungsrichtungen außerhalb der Long/`RISK_ON`/BTC-ETH-Grenzen:
+[Analyse](research/2026-10-16-research-directions-profitability.md).
 
 - **Einstieg:** eigener Evaluator `crypto-regime-pullback-research-v1/1.0.0`,
   Forschungsidentität `RESEARCH:REGIME_PULLBACK_LONG_V1`. Er kauft einen
