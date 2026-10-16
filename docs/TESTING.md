@@ -64,12 +64,20 @@ Ohne erreichbare Datenbank scheitern genau diese 16 Tests — alle anderen laufe
 
 `apps/evolution-worker` testet Budget-Schutz, Lease, Audit-Kette, Freigaben und
 vollständige Forschungszyklen (Mock-KI → Hypothese → Kandidat → Backtest →
-Bewertung → Persistenz) unter Gates v1, v2 und v3 gegen echte PostgreSQL,
+Bewertung → Persistenz) unter Gates v1 bis v4 gegen echte PostgreSQL,
 einschließlich „keine rückwirkende Neubewertung“ und Familien-Monatsbudget. Diese Tests laufen
 nur, wenn der Datenbankname auf `_test` endet (`EVOLUTION_TEST_DATABASE_URL`
 oder `DATABASE_URL`), weil sie alle `Evolution*`-Zeilen löschen; sonst werden
 sie mit Begründung übersprungen. Die Dateien laufen nacheinander
-(`--test-concurrency=1`); die End-to-End-Datei dauert rund zwölf Minuten.
+(`--test-concurrency=1`).
+
+Jeder Replay rechnet jede Stunde seines Fensters; die Fensterlänge bestimmt also die Laufzeit
+(ein Portfolio-Vergleich über zwei Symbole und einen Monat dauert lokal rund 10 s). Die Tests
+nutzen deshalb einen synthetischen Split von wenigen Wochen (`SYNTHETIC_SPLIT` in
+`test/support.ts`: drei Wochen Entdeckung, zehn Tage Validierung, eine Woche Holdout) und
+Markt-Seeds, auf denen jedes Fenster handelt. Wiederholt ein Test denselben Replay über mehrere
+Zyklen, rechnet `memoizedRunner` ihn nur einmal; die Zyklen senden trotzdem jeden Job. Die
+ganze Suite braucht lokal rund vier Minuten (2026-10-16, vorher 9,5).
 
 ## pnpm-Shim-Test ohne Netzwerk
 

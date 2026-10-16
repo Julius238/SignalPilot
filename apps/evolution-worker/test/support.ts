@@ -12,6 +12,8 @@ import {
   type EvolutionGatesV4
 } from "@signalpilot/evolution";
 
+import type { BacktestJobResult } from "../src/backtest/execute.js";
+import type { BacktestRunner } from "../src/backtest/pool.js";
 import { loadEvolutionConfig, type EvolutionWorkerConfig } from "../src/config.js";
 import { createEvolutionDatabase, type EvolutionDb } from "../src/database.js";
 
@@ -52,23 +54,26 @@ export function testConfig(overrides: Partial<EvolutionWorkerConfig> = {}): Evol
 
 /**
  * A compressed split over a synthetic market (all candles synthetic — the
- * test proves the machinery, never real performance).
+ * test proves the machinery, never real performance): three weeks of
+ * discovery, ten days of validation, one week of holdout. Every replay
+ * evaluates every hour of its window, so the window length sets the run
+ * time. 31 in-sample days are the least that still yields a daily-return
+ * correlation (30 returns), which the redundancy and successor checks need.
  */
 export const SYNTHETIC_SPLIT: EvolutionDataSplit = {
   key: "evolution-split-test",
   preregisteredOn: "2026-10-15",
   symbols: ["BTCUSDT", "ETHUSDT"],
   windows: {
-    DISCOVERY: { key: "DISCOVERY", label: "Entdeckung", from: "2023-08-01T00:00:00.000Z", to: "2023-10-31T23:59:59.999Z", role: "SEARCH", aiVisibility: "METRICS", integrity: "IN_SAMPLE" },
-    VALIDATION: { key: "VALIDATION", label: "Validierung", from: "2023-11-01T00:00:00.000Z", to: "2023-11-30T23:59:59.999Z", role: "SELECTION", aiVisibility: "VERDICT_ONLY", integrity: "IN_SAMPLE" },
-    HOLDOUT: { key: "HOLDOUT", label: "Holdout", from: "2023-12-01T00:00:00.000Z", to: "2023-12-31T23:59:59.999Z", role: "CONFIRMATION", aiVisibility: "NEVER", integrity: "PREVIOUSLY_ANALYZED" }
+    DISCOVERY: { key: "DISCOVERY", label: "Entdeckung", from: "2023-10-01T00:00:00.000Z", to: "2023-10-21T23:59:59.999Z", role: "SEARCH", aiVisibility: "METRICS", integrity: "IN_SAMPLE" },
+    VALIDATION: { key: "VALIDATION", label: "Validierung", from: "2023-10-22T00:00:00.000Z", to: "2023-10-31T23:59:59.999Z", role: "SELECTION", aiVisibility: "VERDICT_ONLY", integrity: "IN_SAMPLE" },
+    HOLDOUT: { key: "HOLDOUT", label: "Holdout", from: "2023-11-01T00:00:00.000Z", to: "2023-11-07T23:59:59.999Z", role: "CONFIRMATION", aiVisibility: "NEVER", integrity: "PREVIOUSLY_ANALYZED" }
   },
-  forwardFrom: "2024-01-01T00:00:00.000Z",
+  forwardFrom: "2023-11-08T00:00:00.000Z",
   folds: [
-    { key: "2023-08", window: "DISCOVERY", from: "2023-08-01T00:00:00.000Z", to: "2023-08-31T23:59:59.999Z" },
-    { key: "2023-09", window: "DISCOVERY", from: "2023-09-01T00:00:00.000Z", to: "2023-09-30T23:59:59.999Z" },
-    { key: "2023-10", window: "DISCOVERY", from: "2023-10-01T00:00:00.000Z", to: "2023-10-31T23:59:59.999Z" },
-    { key: "2023-11", window: "VALIDATION", from: "2023-11-01T00:00:00.000Z", to: "2023-11-30T23:59:59.999Z" }
+    { key: "2023-10a", window: "DISCOVERY", from: "2023-10-01T00:00:00.000Z", to: "2023-10-10T23:59:59.999Z" },
+    { key: "2023-10b", window: "DISCOVERY", from: "2023-10-11T00:00:00.000Z", to: "2023-10-21T23:59:59.999Z" },
+    { key: "2023-10c", window: "VALIDATION", from: "2023-10-22T00:00:00.000Z", to: "2023-10-31T23:59:59.999Z" }
   ],
   priorExposure: []
 };
@@ -117,9 +122,15 @@ export const PERMISSIVE_GATES_V4: EvolutionGatesV4 = {
   independentFamily: EVOLUTION_GATES_V4.independentFamily
 };
 
+/**
+ * Synthetic candles from 2023-01-01 up to the split's forward cut-off. On
+ * the default seeds the roots and the mock's candidates trade in every window
+ * of the compressed split, so cycles with permissive gates reach the final
+ * stage, and the mock still finds new hypotheses in later cycles.
+ */
 export function syntheticMarket(
   split: EvolutionDataSplit = SYNTHETIC_SPLIT,
-  seeds: { readonly btc: number; readonly eth: number } = { btc: 3, eth: 5 }
+  seeds: { readonly btc: number; readonly eth: number } = { btc: 11, eth: 13 }
 ): { market: ReplayMarketData; fingerprint: string; discoveryBars: Record<string, DailyBar[]> } {
   const start = Date.UTC(2023, 0, 1);
   const cutoff = Date.parse(split.forwardFrom);
@@ -141,8 +152,33 @@ export function syntheticMarket(
         .filter((bar) => bar.day <= lastDay)
     ])
   );
-  const fingerprint = seeds.btc === 3 && seeds.eth === 5 ? "synthetic-fingerprint" : `synthetic-fingerprint-${seeds.btc}-${seeds.eth}`;
+  const fingerprint = `synthetic-fingerprint-${seeds.btc}-${seeds.eth}`;
   return { market: { origin: "SYNTHETIC", synthetic: true, series }, fingerprint, discoveryBars };
+}
+
+/**
+ * Computes each distinct job once. The replay is deterministic (the technical
+ * check proves it for every candidate): the same job — subject, symbol,
+ * window and code version, whatever its id — gives the same result on the
+ * same market. The cycles still send every job and their own caches still
+ * decide what they send; a test that repeats a replay (comparison A of every
+ * run, benchmarks after clearing the tables) only skips computing it again.
+ */
+export function memoizedRunner(inner: BacktestRunner): BacktestRunner {
+  const results = new Map<string, Promise<BacktestJobResult>>();
+  return {
+    run: (job) => {
+      const { jobId, ...content } = job;
+      const key = JSON.stringify(content);
+      let result = results.get(key);
+      if (result === undefined) {
+        result = inner.run(job);
+        results.set(key, result);
+      }
+      return result.then((value) => ({ ...structuredClone(value), jobId }));
+    },
+    close: () => inner.close()
+  };
 }
 
 export const silentLog = { info: () => undefined, warn: () => undefined, error: () => undefined };

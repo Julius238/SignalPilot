@@ -50,6 +50,7 @@ describe("gates v4 portfolio path in the worker", { timeout: 900_000 }, () => {
 
     // A copy trades exactly like the challenger and adds no own return.
     const challengerInB = first.withCandidate.members.find((member) => member.key === challenger.key)!;
+    assert.ok(challengerInB.trades.length > 0, "the challenger trades in the window, so the copy's trades are compared, not two empty lists");
     assert.deepEqual(first.withCandidate.members.at(-1)!.trades, challengerInB.trades);
     assert.ok(first.assessment.existing.every((relation) => relation.identicalInBothComparisons));
     assert.equal(first.decision.passed, false);

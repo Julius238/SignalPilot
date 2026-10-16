@@ -85,7 +85,8 @@ describe("research cycle end to end", { skip: db === null ? DB_SKIP_REASON : fal
     // The AI context held discovery information only.
     const context = extractResearchContext(prompts[0]!)!;
     assertContextLeakFree(context, SYNTHETIC_SPLIT);
-    assert.ok(!prompts.join("\n").includes("2023-12"), "no holdout date ever reaches the AI");
+    // Holdout and forward data share the month after validation: no date of it reaches the AI.
+    assert.ok(!prompts.join("\n").includes(SYNTHETIC_SPLIT.windows.HOLDOUT.from.slice(0, 7)), "no holdout date ever reaches the AI");
 
     for (const candidate of run.candidates) {
       assert.match(candidate.candidateKey, /^EVO-(BRK|REG)-\d{4}$/);
@@ -182,7 +183,7 @@ describe("research cycle end to end", { skip: db === null ? DB_SKIP_REASON : fal
         assert.equal(gates.find((gate) => gate.gate === "REDUNDANCY")!.reasonCode, "ROUTED_TO_SUCCESSOR_CHECK");
         assert.deepEqual(successorGates.slice(0, 5), ["SUCCESSOR_BUDGET", "SUCCESSOR_IMPROVEMENT", "SUCCESSOR_CONSISTENCY", "SUCCESSOR_SIGNIFICANCE", "SUCCESSOR_NO_DETERIORATION"]);
         assert.ok(metrics.successor !== null);
-        // The compressed synthetic split has 4 months: the paired test must refuse to decide on that.
+        // The compressed synthetic split has one month: the paired test must refuse to decide on that.
         assert.ok(gates.some((gate) => gate.reasonCode === "INSUFFICIENT_PAIRED_SAMPLE"));
         assert.equal(candidate.status, "REJECTED");
         assert.ok(candidate.reportMarkdown!.includes("Nachfolger-Prüfung (Gates v2)"));
@@ -241,7 +242,7 @@ describe("research cycle end to end", { skip: db === null ? DB_SKIP_REASON : fal
         assert.ok(metrics.lineage!.existing.some((entry) => entry.key === proposed.candidateKey), "approved candidates are existing strategies");
         assert.ok(metrics.lineage!.portfolio.members.includes(proposed.candidateKey));
       }
-      // The compressed synthetic split has 4 months: neither paired test may decide on that.
+      // The compressed synthetic split has one month: neither paired test may decide on that.
       assert.equal(metrics.lineage!.path, null);
       assert.equal(candidate.status, "REJECTED");
       assert.ok(candidate.statusReasons.includes("NO_VALUE_NO_DIVERSIFICATION"));

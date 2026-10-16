@@ -35,7 +35,7 @@ import { screenIndependentCandidate } from "../src/cycle/portfolioAssessment.js"
 import { runResearchCycle, type CycleDeps } from "../src/cycle/researchCycle.js";
 import { NO_AI_PROVIDER, independentSearchStatus, seedPreflight } from "../src/cycle/seed.js";
 import { verifyEvolutionAuditChain } from "../src/persistence/audit.js";
-import { DB_SKIP_REASON, PERMISSIVE_GATES_V4, SYNTHETIC_SPLIT, resetEvolutionTables, silentLog, syntheticMarket, testConfig, testDatabase } from "./support.js";
+import { DB_SKIP_REASON, PERMISSIVE_GATES_V4, SYNTHETIC_SPLIT, memoizedRunner, resetEvolutionTables, silentLog, syntheticMarket, testConfig, testDatabase } from "./support.js";
 
 const db = testDatabase();
 
@@ -79,16 +79,16 @@ describe("REGIME_PULLBACK_LONG end to end (gates v4)", { skip: db === null ? DB_
   let clock = Date.parse("2026-10-16T09:00:00.000Z");
   const jobs: string[] = [];
   const prompts: string[] = [];
-  const runner = (): BacktestRunner => {
-    const inner = new InProcessBacktestRunner(market, fingerprint);
-    return {
-      run: (job: EvolutionJob) => {
-        jobs.push(job.kind === "PORTFOLIO" ? `${job.spec.comparison}@${job.spec.from.slice(0, 10)}${job.spec.candidate === undefined ? "" : `:${job.spec.candidate.key}`}` : `${job.kind}:${job.subjectKey}`);
-        return inner.run(job);
-      },
-      close: () => inner.close()
-    };
-  };
+  // Shared by every cycle: a replay repeated across cycles (comparison A of each run, the seed's replays
+  // after the forced-pass test clears the tables) is computed once.
+  const replays = memoizedRunner(new InProcessBacktestRunner(market, fingerprint));
+  const runner = (): BacktestRunner => ({
+    run: (job: EvolutionJob) => {
+      jobs.push(job.kind === "PORTFOLIO" ? `${job.spec.comparison}@${job.spec.from.slice(0, 10)}${job.spec.candidate === undefined ? "" : `:${job.spec.candidate.key}`}` : `${job.kind}:${job.subjectKey}`);
+      return replays.run(job);
+    },
+    close: () => replays.close()
+  });
   const deps = (overrides: Partial<CycleDeps> = {}): CycleDeps => ({
     db: db!,
     config: testConfig(),
