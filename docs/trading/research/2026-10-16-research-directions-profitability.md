@@ -569,6 +569,10 @@ erstem Schritt.**
 | 2 | Nur bei bestandener Phase 1 und nach Betreiberbeschluss: ADRs für das Perp-Instrument im Shadow mit **gemessenem** Funding (Abgrenzung zu ADR 0012, das nur *erfundene* Raten ausschließt), abgesichertes Paar als Ausnahme zu ADR 0013, eigener Risk-Regelsatz für Carry, Bewertungsprotokoll (Gates v5) | Bauaufwand | ja, per ADR |
 | 3 | Eigener Shadow-Forward-Teilnehmer, strikt getrennt von `OFFICIAL_V1` | – | – |
 
+Phase 0 liegt vor:
+[Vorregistrierung der Machbarkeitsstudie](2026-10-16-funding-carry-feasibility-preregistration.md)
+(2026-10-16, zur Freigabe durch den Betreiber).
+
 ### Was die Empfehlung ändern würde
 
 - **Phase 1 zeigt nach Kosten keinen tragfähigen Carry**, etwa wegen
