@@ -120,7 +120,7 @@ describe("gate versions", () => {
     assert.equal(version, "evolution-gates-v2");
     assert.notEqual(version, v1Version);
     assert.equal(successor.correlationTrigger, EVOLUTION_GATES_V1.maxCorrelationWithExisting);
-    assert.deepEqual(Object.keys(EVOLUTION_GATE_VERSIONS), ["v1", "v2", "v3"]);
+    assert.deepEqual(Object.keys(EVOLUTION_GATE_VERSIONS), ["v1", "v2", "v3", "v4"]);
     assert.equal(Object.isFrozen(EVOLUTION_GATES_V2.successor), true);
   });
 

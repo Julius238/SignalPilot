@@ -8,12 +8,15 @@
 import {
   evolutionExecutionProfile,
   replayPlanFor,
+  runPortfolioComparison,
   type BacktestSummary,
   type BacktestWindowKey,
   type CandidateGenome,
   type CompactTrade,
   type DailyEquityPoint,
-  type PeriodBenchmark
+  type PeriodBenchmark,
+  type PortfolioRunSpec,
+  type PortfolioSummary
 } from "@signalpilot/evolution";
 import { runShadowReplay, type ReplayMarketData, type ReplayPeriodMetrics, type ReplayResult } from "@signalpilot/shadow-replay";
 
@@ -33,6 +36,15 @@ export interface BacktestJob {
   readonly codeVersion: string;
 }
 
+/** One comparison of the gates-v4 frame: the chronological multi-strategy portfolio replay. */
+export interface PortfolioJob {
+  readonly jobId: string;
+  readonly kind: "PORTFOLIO";
+  readonly spec: PortfolioRunSpec;
+}
+
+export type EvolutionJob = BacktestJob | PortfolioJob;
+
 export interface TechnicalResult {
   readonly deterministic: boolean;
   readonly invariantViolations: number;
@@ -42,7 +54,14 @@ export interface TechnicalResult {
 }
 
 export type BacktestJobResult =
-  | { readonly jobId: string; readonly ok: true; readonly dataFingerprint: string; readonly summary?: BacktestSummary; readonly technical?: TechnicalResult }
+  | {
+      readonly jobId: string;
+      readonly ok: true;
+      readonly dataFingerprint: string;
+      readonly summary?: BacktestSummary;
+      readonly technical?: TechnicalResult;
+      readonly portfolio?: PortfolioSummary;
+    }
   | { readonly jobId: string; readonly ok: false; readonly error: string };
 
 export const BACKTEST_STARTING_CASH = 10_000;
@@ -169,4 +188,8 @@ export function executeTechnicalCheck(market: ReplayMarketData, job: BacktestJob
     invalidInput: first.funnel.invalidInput,
     outputHashes: [first.outputHash, second.outputHash]
   };
+}
+
+export function executePortfolioJob(market: ReplayMarketData, job: PortfolioJob): PortfolioSummary {
+  return runPortfolioComparison(market, job.spec, () => Date.now());
 }

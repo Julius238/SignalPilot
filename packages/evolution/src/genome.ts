@@ -51,6 +51,23 @@ export interface ParameterSpec {
   readonly allowed?: readonly number[];
 }
 
+/**
+ * Declaration of an independent family (gates v4): its own entry evaluator,
+ * entry parameters only, exits fixed in the family, its own research identity
+ * and pre-registration. A family without it is decided by the v3 lineage
+ * rule; none of the current families declares it.
+ */
+export interface FamilyIndependence {
+  /** Engine version of the family's own entry evaluator. */
+  readonly entryEvaluator: string;
+  /** The identity every stored row carries (the replay hull is recorded separately). */
+  readonly researchIdentity: string;
+  /** Stop, target and holding time, fixed for the whole family. */
+  readonly frozenExits: Readonly<Record<string, string | number | boolean>>;
+  /** Hash of the family's pre-registration document. */
+  readonly preregistrationHash: string;
+}
+
 export interface FamilySpec {
   readonly family: EvolutionFamily;
   readonly label: string;
@@ -58,6 +75,37 @@ export interface FamilySpec {
   /** Registered evaluator the genome runs under as a research identity. */
   readonly replayStrategyKey: string;
   readonly parameters: readonly ParameterSpec[];
+  /** Present only for an independent family (gates v4 portfolio path). */
+  readonly independence?: FamilyIndependence;
+}
+
+/** Parameter names that change exits; an independent family may not search them. */
+export const EXIT_PARAMETER_NAMES: ReadonlySet<string> = new Set([
+  "stopAtrMultiple",
+  "stopAtrMultiple1d",
+  "stopDistanceFloorPct",
+  "stopDistanceCapPct",
+  "takeProfitRMultiple",
+  "maxHoldHours",
+  "exitOnRegimeGateClosed"
+]);
+
+/** The structural facts gates v4 checks (`INDEPENDENT_FAMILY`), read from the family specification. */
+export function independentFamilyStructure(spec: FamilySpec): {
+  readonly declaredIndependent: boolean;
+  readonly entryParametersOnly: boolean;
+  readonly exitsFrozen: boolean;
+  readonly ownEntryEvaluator: boolean;
+  readonly preregistrationHash: string | null;
+} {
+  const independence = spec.independence;
+  return {
+    declaredIndependent: independence !== undefined,
+    entryParametersOnly: independence !== undefined && spec.parameters.every((parameter) => !EXIT_PARAMETER_NAMES.has(parameter.name)),
+    exitsFrozen: independence !== undefined && Object.keys(independence.frozenExits).length > 0,
+    ownEntryEvaluator: independence !== undefined && independence.entryEvaluator.trim() !== "",
+    preregistrationHash: independence?.preregistrationHash ?? null
+  };
 }
 
 const decimal = (name: string, description: string, min: number, max: number, step: number): ParameterSpec =>

@@ -28,6 +28,7 @@ describe("configuration", () => {
     assert.equal(config.gatesVersion, "v3", "new candidates are decided by the pre-registered gates v3");
     assert.equal(loadEvolutionConfig({ EVOLUTION_GATES_VERSION: "v1" }).gatesVersion, "v1");
     assert.equal(loadEvolutionConfig({ EVOLUTION_GATES_VERSION: "v2" }).gatesVersion, "v2");
+    assert.equal(loadEvolutionConfig({ EVOLUTION_GATES_VERSION: "v4" }).gatesVersion, "v4");
   });
 
   it("fails closed", () => {
@@ -39,7 +40,7 @@ describe("configuration", () => {
       { EVOLUTION_AI_RUN_BUDGET_USD: "30" },
       { EVOLUTION_MAX_CONCURRENT_RUNS: "2" },
       { EVOLUTION_ENABLED: "yes" },
-      { EVOLUTION_GATES_VERSION: "v4" }
+      { EVOLUTION_GATES_VERSION: "v5" }
     ]) {
       assert.throws(() => loadEvolutionConfig(env), EvolutionConfigError, JSON.stringify(env));
     }

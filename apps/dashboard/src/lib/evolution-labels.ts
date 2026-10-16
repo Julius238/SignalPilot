@@ -82,7 +82,8 @@ export const LINEAGE_ROLE_LABEL: Record<string, string> = {
 export const GATES_VERSION_LABEL: Record<string, string> = {
   "evolution-gates-v1": "Gates v1",
   "evolution-gates-v2": "Gates v2 (Nachfolger-Regel)",
-  "evolution-gates-v3": "Gates v3 (Linien- und Diversifikationsregel)"
+  "evolution-gates-v3": "Gates v3 (Linien- und Diversifikationsregel)",
+  "evolution-gates-v4": "Gates v4 (Portfolio-Mehrwert)"
 };
 
 export const EVIDENCE_LABEL: Record<string, { label: string; tone: Tone }> = {

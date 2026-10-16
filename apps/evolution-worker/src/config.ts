@@ -92,7 +92,7 @@ export function loadEvolutionConfig(env: NodeJS.ProcessEnv = process.env): Evolu
   const fallback = (env.EVOLUTION_AI_REFUSAL_FALLBACK ?? "default").trim();
   if (fallback !== "default" && fallback !== "off") throw new EvolutionConfigError("EVOLUTION_AI_REFUSAL_FALLBACK must be default or off.");
   const gatesVersion = (env.EVOLUTION_GATES_VERSION ?? "v3").trim();
-  if (!isGateVersionKey(gatesVersion)) throw new EvolutionConfigError("EVOLUTION_GATES_VERSION must be v1, v2 or v3.");
+  if (!isGateVersionKey(gatesVersion)) throw new EvolutionConfigError("EVOLUTION_GATES_VERSION must be v1, v2, v3 or v4.");
   const maxConcurrentRuns = number(env, "EVOLUTION_MAX_CONCURRENT_RUNS", 1, { min: 1, max: 1, integer: true });
   void maxConcurrentRuns;
   return {

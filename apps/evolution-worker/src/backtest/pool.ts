@@ -12,10 +12,10 @@ import { fileURLToPath } from "node:url";
 
 import type { ReplayMarketData } from "@signalpilot/shadow-replay";
 
-import { executeBacktest, executeTechnicalCheck, type BacktestJob, type BacktestJobResult } from "./execute.js";
+import { executeBacktest, executePortfolioJob, executeTechnicalCheck, type BacktestJobResult, type EvolutionJob } from "./execute.js";
 
 export interface BacktestRunner {
-  run(job: BacktestJob): Promise<BacktestJobResult>;
+  run(job: EvolutionJob): Promise<BacktestJobResult>;
   close(): Promise<void>;
 }
 
@@ -26,8 +26,9 @@ export class InProcessBacktestRunner implements BacktestRunner {
     private readonly fingerprint: string
   ) {}
 
-  async run(job: BacktestJob): Promise<BacktestJobResult> {
+  async run(job: EvolutionJob): Promise<BacktestJobResult> {
     try {
+      if (job.kind === "PORTFOLIO") return { jobId: job.jobId, ok: true, dataFingerprint: this.fingerprint, portfolio: executePortfolioJob(this.market, job) };
       if (job.kind === "TECHNICAL") return { jobId: job.jobId, ok: true, dataFingerprint: this.fingerprint, technical: executeTechnicalCheck(this.market, job) };
       return { jobId: job.jobId, ok: true, dataFingerprint: this.fingerprint, summary: executeBacktest(this.market, job) };
     } catch (error) {
@@ -108,7 +109,7 @@ export class ChildProcessBacktestPool implements BacktestRunner {
     this.waiting.shift()?.();
   }
 
-  async run(job: BacktestJob): Promise<BacktestJobResult> {
+  async run(job: EvolutionJob): Promise<BacktestJobResult> {
     const slot = await this.acquire();
     try {
       if (slot.child === null) this.spawn(slot);

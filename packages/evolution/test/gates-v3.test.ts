@@ -187,9 +187,10 @@ describe("gate versions with v3", () => {
     assert.equal(EVOLUTION_GATES_V1_HASH, "65da3536653e56c054dd1aea13cba824e30b509085bbe0d367487639d6e82c76");
     assert.equal(EVOLUTION_GATES_V2_HASH, "8341a3c7bcd6a09d852187d5e55ef6190765a7659702d9e620d9817ad8fd5e96");
     assert.equal(EVOLUTION_GATES_V3_HASH, "250bf745365f432f1b2e5b99e6b39f0a507fd73b341e0061daeb5d413677c88b");
-    assert.deepEqual(Object.keys(EVOLUTION_GATE_VERSIONS), ["v1", "v2", "v3"]);
+    // v4 is registered next to v3 (gates-v4.test.ts); v1–v3 keep their hashes.
+    assert.deepEqual(Object.keys(EVOLUTION_GATE_VERSIONS), ["v1", "v2", "v3", "v4"]);
     assert.equal(isGateVersionKey("v3"), true);
-    assert.equal(isGateVersionKey("v4"), false);
+    assert.equal(isGateVersionKey("v5"), false);
   });
 
   it("builds v3 on the v1 base gates and has no successor switch", () => {
