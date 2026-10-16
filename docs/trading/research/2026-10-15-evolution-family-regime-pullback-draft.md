@@ -4,10 +4,12 @@
 > Stand 2026-10-15, dritte Fassung. Es gibt keinen Code, keinen Backtest,
 > keinen KI-Lauf und keine Freigabe. Champion, Challenger, Risk Engine
 > (einschließlich R-020), Arena V1 und der offizielle VPS-Forward-Test bleiben
-> unberührt. Geprüft wird die Familie nach dem
-> [Entwurf Gates v4](2026-10-15-evolution-gates-v4-draft.md). Beide
-> Vorregistrierungen werden erst nach der Prüfung mit Hash festgeschrieben,
-> **vor** dem ersten Experiment.
+> unberührt. Geprüft wird die Familie nach Gates v4, festgeschrieben in der
+> [Vorregistrierung Gates v4](2026-10-16-evolution-gates-v4-preregistration.md)
+> (Herleitung: [Entwurf Gates v4](2026-10-15-evolution-gates-v4-draft.md)). Die
+> Familie selbst ist noch nicht implementiert; ihre
+> Vorregistrierung wird vor ihrem ersten Experiment mit Hash
+> festgeschrieben und in `FamilySpec.independence` eingetragen.
 
 ## 1. Entscheidungen
 

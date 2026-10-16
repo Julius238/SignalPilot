@@ -10,17 +10,20 @@ die unabhängigen Instanzen für Ausführung und Leistungsbewertung.
 
 Entscheidungen: [ADR 0016](decisions/0016-evolution-engine-isolated-research.md),
 [ADR 0017](decisions/0017-evolution-gates-v2-successor-rule.md) (Gates v2),
-[ADR 0018](decisions/0018-evolution-gates-v3-lineage-rule.md) (Gates v3) ·
+[ADR 0018](decisions/0018-evolution-gates-v3-lineage-rule.md) (Gates v3),
+[ADR 0019](decisions/0019-evolution-gates-v4-portfolio-value.md) (Gates v4) ·
 Vorregistrierungen: [v1](research/2026-10-15-evolution-v1-preregistration.md),
 [Gates v2](research/2026-10-15-evolution-gates-v2-preregistration.md),
-[Gates v3](research/2026-10-15-evolution-gates-v3-preregistration.md)
+[Gates v3](research/2026-10-15-evolution-gates-v3-preregistration.md),
+[Gates v4](research/2026-10-16-evolution-gates-v4-preregistration.md)
 
 ## Bausteine
 
 | Baustein | Aufgabe |
 |---|---|
-| `packages/evolution` | Rein, ohne I/O: Genome und Parameterraum, Daten-Split, Kennzahlen, Gates, Score, Walk-Forward, Marktbedingungs-Analyse, KI-Kontext mit Leak-Prüfung, Prompts und strenges Parsing, Preise und Budgetregeln, deterministischer Mock-Provider, Berichte, Sandbox-Vertrag |
-| `apps/evolution-worker` | Orchestrierung: Anthropic-Provider, Budget-Schutz, Backtest-Pool (Kindprozesse), Forschungszyklus, Persistenz, Audit, CLI, Scheduler |
+| `packages/evolution` | Rein, ohne I/O: Genome und Parameterraum, Daten-Split, Kennzahlen, Gates, Score, Walk-Forward, Marktbedingungs-Analyse, KI-Kontext mit Leak-Prüfung, Prompts und strenges Parsing, Preise und Budgetregeln, deterministischer Mock-Provider, Berichte, Sandbox-Vertrag; Portfolio-Vergleich A/B mit festen Plätzen und Kennzahlen für Gates v4 (`portfolio.ts`, `portfolio-metrics.ts`) |
+| `packages/shadow-replay` | Einzel-Replay (`runShadowReplay`) und chronologische Mehrstrategien-Simulation (`runPortfolioReplay`) mit Gesamtportfolio-Prüfung (`group-risk.ts`), beide auf demselben Portfolio-Buch (`replay-core.ts`) |
+| `apps/evolution-worker` | Orchestrierung: Anthropic-Provider, Budget-Schutz, Backtest-Pool (Kindprozesse, auch für Portfolio-Vergleiche), Forschungszyklus, Portfolio-Weg von Gates v4 (`cycle/portfolioAssessment.ts`), Persistenz, Audit, CLI, Scheduler; Validierung der Portfolio-Simulation auf echten Daten (`validation/run.ts`) |
 | `Evolution*`-Tabellen | Agent-Status und Lease, Durchläufe, KI-Aufrufe (Kosten-Ledger), Hypothesen, Kandidaten, Backtests, Daten-Exposure, hash-verkettetes Audit. Kein Fremdschlüssel zu Trading oder Arena |
 | `GET /api/trading/evolution`, `…/candidates/:key` | Read-only, liest nur `Evolution*` |
 | Dashboard `Trading → Evolution` | Agent, Budget, Kosten, Durchläufe, Hypothesen, Rangliste, Gründe, Abstammung, Freigaben; Forward-Ergebnisse nur als Verweis auf die Arena |
@@ -74,9 +77,12 @@ Challenger, ihre Spezifikations-Hashes und Golden Fixtures sind unverändert.
 | `evolution-gates-v1` | 2026-10-15 (`efe4df8`) | Screening- und Finalprüfungen; jede Fast-Kopie einer bestehenden Strategie ist redundant |
 | `evolution-gates-v2` | 2026-10-15 | v1 mit identischen Schwellen plus Nachfolger-Regel: eine Fast-Kopie nur der eigenen Wurzel muss diese deutlich, in beiden Zeiträumen, gepaart signifikant (Newey–West, Student-t, Mehrfachtest) und ohne Verschlechterung übertreffen; höchstens 8 Versuche je Wurzel und Monat, ein Nachfolger-Finalist je Durchlauf |
 | `evolution-gates-v3` | 2026-10-15 | v1 mit identischen Schwellen plus Linien- und Diversifikationsregel, ohne Korrelations-Schalter. Jeder Kandidat muss entweder Wurzel, Eltern und besten Familienvertreter je einzeln deutlich, in beiden Zeiträumen und gepaart signifikant übertreffen, ohne wesentliche Verschlechterung (Profit Factor, Drawdown, Kosten, Phasen, Kapitalbindung, Validierung, Stichprobe). Oder er ist echt eigenständig (Korrelation ≤ 0,5, ≤ 50 % bespielte Einstiege, Portfolio in beiden Zeiträumen besser, signifikantes α gegenüber jeder bestehenden Strategie). Höchstens 10 Validierungsprüfungen je Familie und Monat, ein Finalist je Familie und Durchlauf |
+| `evolution-gates-v4` | 2026-10-16 | v3 unverändert für die bestehenden Familien. Für eigenständige Familien (`FamilySpec.independence`) entscheidet der Portfolio-Weg: chronologische Simulation des Bestands mit Reserveplatz (A) gegen den Bestand mit dem Kandidaten auf diesem Platz (B), gleiches Kapital, unveränderte Risk Engine plus Gruppenprüfung. Verlangt sind Nettozuwachs und Sharpe-Gewinn in allen Fenstern, Rendite je Drawdown, Risiko- und Kapitaleffizienz, Stabilität über Marktphasen, Kostenstress sowie eigenes α und ein signifikanter gepaarter Zuwachs mit Mehrfachtest-Schwelle |
 
 Neue Durchläufe verwenden v3 (`EVOLUTION_GATES_VERSION`, Standard `v3`; `v1`
-und `v2` bleiben für Reproduktionen wählbar). Alle Versionen sind per Hash
+und `v2` bleiben für Reproduktionen wählbar). `v4` ist wählbar und für die
+bestehenden Familien gleichwertig mit v3. Es ist Pflicht, sobald eine
+eigenständige Familie existiert; bisher gibt es keine. Alle Versionen sind per Hash
 festgenagelt (v3 einschließlich der Methodenkennungen); das Manifest jedes
 Durchlaufs enthält `gatesVersion` und `gatesHash`. Ein vom Betreiber
 abgelehnter Kandidat ist keine zulässige Elternstrategie mehr; freigegebene

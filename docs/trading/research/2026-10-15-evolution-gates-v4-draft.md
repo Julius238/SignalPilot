@@ -1,5 +1,11 @@
 # Entwurf: Gates v4 — Portfolio-Mehrwert eigenständiger Strategiefamilien
 
+> **Abgelöst am 2026-10-16** durch die festgeschriebene
+> [Vorregistrierung Gates v4](2026-10-16-evolution-gates-v4-preregistration.md)
+> und [ADR 0019](../decisions/0019-evolution-gates-v4-portfolio-value.md).
+> Dieser Entwurf bleibt als Herleitung erhalten; maßgeblich sind die
+> Vorregistrierung und der Code.
+
 > **Entwurf zur Prüfung durch den Betreiber, noch nicht festgeschrieben.**
 > Stand 2026-10-15, zweite Fassung. Es gibt keinen Code, keinen Backtest
 > und keinen KI-Lauf.
