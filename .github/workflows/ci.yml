@@ -97,9 +97,16 @@ jobs:
 
       # --no-bail: alle Pakete laufen, auch wenn eines fehlschlägt. Die Ausgabe
       # geht zusätzlich in eine Datei für die Zusammenfassung pro Paket.
+      # --no-sort: Gebaut ist schon, die Tests brauchen keine topologische
+      # Reihenfolge. Sortiert startet pnpm jede Abhängigkeitsstufe erst nach
+      # dem Ende der vorigen; der Evolution-Worker (längste Suite, letzte
+      # Stufe) wartete so auf alle anderen Pakete. Ohne Sortierung laufen alle
+      # Pakete in einer Stufe (je 4 gleichzeitig, nach Pfad; apps/* zuerst).
+      # Die Datenbank-Tests kollidieren dabei nicht: Evolution-Worker und
+      # Trading-Worker nutzen getrennte Tabellen, die übrigen Pakete Mocks.
       - name: Test
         shell: bash
-        run: pnpm -r --no-bail --if-present test 2>&1 | tee "$RUNNER_TEMP/test-output.log"
+        run: pnpm -r --no-sort --no-bail --if-present test 2>&1 | tee "$RUNNER_TEMP/test-output.log"
 
       # Tabelle pro Paket im Log und auf der Run-Seite (Job Summary).
       - name: Test summary

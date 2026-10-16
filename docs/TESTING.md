@@ -113,7 +113,11 @@ manuell. Ein Job auf `ubuntu-24.04` mit Node 22 und einem PostgreSQL-16-Service-
 5. `pnpm build` (Pakete, Apps, Next.js mit `NEXT_PUBLIC_TRADING_DASHBOARD_ENABLED=false`)
 6. `pnpm lint`
 7. `pnpm ops:test:scripts` (auf dem Runner mit shellcheck, Schwelle `warning`)
-8. `pnpm -r --no-bail --if-present test`
+8. `pnpm -r --no-sort --no-bail --if-present test` — ohne topologische Sortierung (gebaut ist
+   schon). Sortiert startet pnpm jede Abhängigkeitsstufe erst nach dem Ende der vorigen, und
+   der Evolution-Worker als längste Suite in der letzten Stufe wartete auf alle anderen
+   Pakete. So laufen alle Pakete in einer Stufe, je 4 gleichzeitig. Die Datenbank-Tests
+   kollidieren nicht: Evolution- und Trading-Worker nutzen getrennte Tabellen.
 9. Zusammenfassung pro Paket (`scripts/ci/test-summary.sh`): Tabelle mit Tests, bestanden,
    fehlgeschlagen und übersprungen — im Log und als Job Summary auf der Run-Seite. Der
    Schritt schlägt fehl, wenn ein Test fehlschlug oder keine Ergebnisse gefunden wurden.
