@@ -1,5 +1,11 @@
 # Vorregistrierung der Strategiefamilie REGIME_PULLBACK_LONG („Regime-Rücksetzer“) (2026-10-16)
 
+> **Status 2026-10-16: geschlossen (F4).** Das Startgenom EVO-RPB-0001 wurde im
+> Screening verworfen (`OWN_ALPHA` t = −0,34, `INCREMENT_SIGNIFICANCE`
+> t = 0,75, `PORTFOLIO_DRAWDOWN`). Bericht:
+> [Bewertung des Startgenoms](2026-10-16-regime-pullback-seed-evaluation.md).
+> Der Text unten bleibt als Festschreibung unverändert.
+
 Festgeschrieben **vor** dem ersten Experiment der Familie. Bis zur
 Festschreibung wurde keine Rücksetzer-Regel auf irgendeinem Zeitraum
 gerechnet, kein KI-Lauf gestartet und nichts freigegeben. Champion,

@@ -98,6 +98,11 @@ Die erste eigenständige Familie ist **REGIME_PULLBACK_LONG** („Regime-Rückse
 [Vorregistrierung](research/2026-10-16-evolution-family-regime-pullback-preregistration.md),
 Hash `b96bcc97…`).
 
+**Status 2026-10-16: geschlossen (F4).** Das Startgenom EVO-RPB-0001 hat das
+Gesamtportfolio zwar leicht verbessert (+0,51 pp, Sharpe +0,04 bei gleichem
+Kapital). Der Zuwachs war aber kein eigener Ertrag (α t = −0,34) und nicht
+signifikant (t = 0,75); [Bericht](research/2026-10-16-regime-pullback-seed-evaluation.md).
+
 - **Einstieg:** eigener Evaluator `crypto-regime-pullback-research-v1/1.0.0`,
   Forschungsidentität `RESEARCH:REGIME_PULLBACK_LONG_V1`. Er kauft einen
   Rücksetzer von mindestens N × ATR(14, 1d), optional mit Umkehrkerze und
