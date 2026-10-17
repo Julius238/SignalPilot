@@ -466,6 +466,7 @@ def check_gaps(series: dict[str, SymbolSeries], cfg: Config) -> dict:
     missing = trading = 0
     absent_by_day: dict[int, int] = defaultdict(int)
     active_by_day: dict[int, int] = defaultdict(int)
+    long_gaps = []
     for symbol, item in series.items():
         days = sorted(day for day in item.candles if cfg.window_start <= day < cfg.window_end)
         if not days:
@@ -476,6 +477,8 @@ def check_gaps(series: dict[str, SymbolSeries], cfg: Config) -> dict:
             if 0 < gap < cfg.long_gap_days:
                 missing += gap
                 trading += gap
+            elif gap >= cfg.long_gap_days:
+                long_gaps.append({"symbol": symbol, "from": day_text(previous + 1), "to": day_text(current - 1), "days": gap})
         for day in range(days[0], days[-1] + 1):
             active_by_day[day] += 1
             if day not in item.candles:
@@ -487,7 +490,8 @@ def check_gaps(series: dict[str, SymbolSeries], cfg: Config) -> dict:
         key_missing.extend(f"{symbol} {day}" for day in absent[:20])
     market_wide = [day_text(day) for day, count in sorted(absent_by_day.items()) if count * 2 > active_by_day[day]]
     report = {"missingSymbolDays": missing, "tradingSymbolDays": trading, "share": missing / trading if trading else 0.0,
-              "keySymbolsMissing": key_missing, "marketWideMissingDays": market_wide[:50]}
+              "keySymbolsMissing": key_missing, "marketWideMissingDays": market_wide[:50],
+              "longGaps": long_gaps, "longGapDays": sum(item["days"] for item in long_gaps)}
     report["passed"] = report["share"] <= cfg.d3_max_missing_share and not key_missing and not market_wide
     return report
 
@@ -1692,6 +1696,8 @@ def criteria_for(variant: str, runs: Runs, market: Market, benchmarks: dict[str,
     return {
         "B1": b1, "B2": b2, "B3": b3a_core and b3a_later and b3b and b3c, "B4": b4, "B5": b5_core and b5_later, "B6": all(b6.values()),
         "B3withoutSince2024": b3a_core and b3b and b3c, "B5withoutSince2024": b5_core,
+        "B3WithDailySharpe": b3a_core and b3a_later and b3b and v["netPerYear"] >= r["netPerYear"]
+                             and (v["sharpeDaily"] or -1e9) >= (r["sharpeDaily"] or -1e9),
         "since2024AlphaPositive": {"B3": b3a_later, "B5": b5_later},
         "details": {
             "B3": {"a": b3a_core and b3a_later, "b": b3b, "c": b3c,
@@ -1802,7 +1808,11 @@ def check_listing(data: Path, cfg: Config) -> dict:
     d0c = {"notTradingUsdtSymbols": len(not_trading), "absentFromArchive": absent,
            "absentShare": len(absent) / len(not_trading) if not_trading else None}
     halts = [name for name, passed in (("D0", d0["passed"]), ("D0b", d0b["passed"])) if not passed]
-    return {"usdtSymbols": len(symbols), "D0": d0, "D0b": d0b, "D0c": d0c, "halts": halts}
+    holes = {symbol: [month for month in months_between(months[0], months[-1]) if month not in months]
+             for symbol, months in symbols.items() if months}
+    holes = {symbol: missing for symbol, missing in holes.items() if missing}
+    return {"usdtSymbols": len(symbols), "D0": d0, "D0b": d0b, "D0c": d0c, "halts": halts,
+            "interiorMonthHoles": holes}  # whole archive months missing inside a series: long gaps (D3, D4), never filled by E1
 
 
 def d6_check(series: dict[str, SymbolSeries], snapshot: dict[str, dict], cfg: Config) -> dict:
@@ -2082,13 +2092,20 @@ def evaluate(data: Path, out: Path, spot: Path | None, cfg: Config, guard: dict,
             raise StudyError(f"Benchmark {key} misses months {missing[:6]}.")
     readings = {reading: run_reading(market, reading) for reading in ("A", "B")}
     criteria = {reading: {v: criteria_for(v, readings[reading], market, benchmarks) for v in ("A", "B")} for reading in ("A", "B")}
-    classes = {}
+    classes, controls_b1_by_reading = {}, {}
     for reading in ("A", "B"):
-        controls_b1 = any(series_metrics(equity_curve(readings[reading].base[key]), market, cfg.slot)["excessAfterHaircut"] > 0 for key in ("K_A", "K_B"))
+        controls_b1 = controls_b1_by_reading[reading] = any(series_metrics(equity_curve(readings[reading].base[key]), market, cfg.slot)["excessAfterHaircut"] > 0 for key in ("K_A", "K_B"))
         classes[reading] = classify(criteria[reading], controls_b1, venue_status, cfg)
     final = determinability(classes["A"], classes["B"], accepted_halts)
+    sharpe_check = {}
+    for reading in ("A", "B"):
+        alternative = {v: {**c, "B3": c["B3WithDailySharpe"]} for v, c in criteria[reading].items()}
+        other = classify(alternative, controls_b1_by_reading[reading], venue_status, cfg)
+        sharpe_check[reading] = {"classWithDailySharpe": other["outcome"],
+                                 "dependsOnSharpeDefinition": other["outcome"] != classes[reading]["outcome"]}
     report = {**base_report, "outcome": final["outcome"], "subclass": final.get("subclass"), "determinability": final,
               "classByReading": classes, "venueStatus": venue_status, "acceptedHalts": accepted_halts,
+              "b3cSharpeDefinitionCheck": sharpe_check,
               "criteria": {reading: {v: {key: value for key, value in c.items() if key != "metrics"} for v, c in by.items()}
                            for reading, by in criteria.items()},
               "dataChecks": data_report,
@@ -2115,7 +2132,11 @@ def report_metrics(market: Market, readings: dict[str, Runs], criteria: dict, be
     months = window_months(cfg)
     per_series = {}
     for key, result in base.items():
+        last_day_buys = [t for t in result.trades if t["side"] == "BUY" and t["day"] == market.instruments[t["instrument"]].end
+                         and market.instruments[t["instrument"]].end_rule.kind != "OPEN"]
         per_series[key] = {"trades": trade_metrics(result, market), "quota": quota_metrics(result, market),
+                           "buysOnLastTradingDay": {"count": len(last_day_buys), "notional": sum(t["notional"] for t in last_day_buys),
+                                                    "symbols": sorted({t["symbol"] for t in last_day_buys})},
                            "concentration": concentration(result), "events": result.events[:200],
                            "investedCapitalReturn": invested_capital_return(result, market),
                            "pausedOutsideRiskOn": result.paused_outside_risk_on}

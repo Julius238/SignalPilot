@@ -5,12 +5,14 @@ Setzt die eingefrorene
 um (Text `c188c38`, Blob `96525664…`, Statusblock `6520f42`). Abschnittsangaben
 (§) beziehen sich auf sie.
 
-**Stand 2026-10-17: Schritt 1.1.**
+**Stand 2026-10-17: Schritt 1.2.**
 
-- Das Skript ist fertig und nur gegen synthetische Daten getestet.
-- Es enthält keinen Netzwerkcode und hat nie echte Marktdaten gelesen.
-- Verzeichnisliste (1.2), Download (1.3) und Auswertung (1.5) stehen aus.
-  Download und Auswertung brauchen je eine eigene Freigabe.
+- `relative_strength_v1.py` ist fertig und nur gegen synthetische Daten
+  getestet. Es enthält keinen Netzwerkcode und hat nie Kursdaten gelesen.
+- `fetch_metadata.py` (Schritt 1.2) ruft nur Metadaten ab: Verzeichnisliste
+  des Archivs, `exchangeInfo`, öffentliche Ankündigungen. Ergebnis:
+  [Metadatenprüfung](../../../docs/trading/research/2026-10-17-relative-strength-metadata-check.md).
+- Download (1.3) und Auswertung (1.5) brauchen je eine eigene Freigabe.
 
 ## Aufruf
 
@@ -32,6 +34,23 @@ python3 -I scripts/research/relative-strength-v1/relative_strength_v1.py verify
 | `plan --data DIR` | fehlende Tage (E1), Sprungtage (D12, nur Uₜ-Mitglieder) und Ereignisfälle (D11) zum Nachladen | 1.3/1.4b/1.4c |
 | `check-data --data DIR [--spot DIR]` | D0–D12 ohne jede Rendite; Exit 2 bei Pflichtverstoß, 3 bei einem Halt | 1.4 |
 | `evaluate --data DIR --out DIR …` | der eine Lauf (§10.4): beide Lesarten, beide Kapital-Szenarien, alle Stresstests | 1.5 |
+
+Metadaten (Schritt 1.2, Netzwerk; Ziel ist das Datenverzeichnis des echten Laufs):
+
+```bash
+python3 -I scripts/research/relative-strength-v1/fetch_metadata.py listing --out data/market-snapshots/relative-strength-v1/listing
+```
+
+| Befehl von `fetch_metadata.py` | Zweck |
+|---|---|
+| `listing --out DIR` | S3-Verzeichnisliste aller USDT-Spot-Symbole, Monatsdateien 1d mit Größe und `.CHECKSUM`; Strukturbericht (Monatslücken, fehlende Prüfsummen) |
+| `exchange-info --out DIR` | heutige USDT-Symbole mit Status, nur für D0c, nie als historisches Universum |
+| `announcements --out DIR` | Ankündigungen der Kataloge 49 und 161 und eine automatische Vorauswahl; langsam, mit Zwischenspeicher. Nur Hilfe, nicht die D0b-Stichprobe |
+| `review-sheet --out DIR [--per-year N] [--years …]` | lädt die ersten N Kandidaten je Jahr und schreibt ein Prüfblatt mit Textauszug für die Durchsicht von Hand |
+| `d0b-sample --out DIR --decisions FILE` | D0b-Stichprobe: Entscheidungen von Hand aus [`d0b-review-decisions.json`](d0b-review-decisions.json), dazu ein automatisches „nein“ für Texte ohne Paar `X/USDT`; bricht ab, wenn vor dem dritten Treffer eines Jahres ein Kandidat ungeprüft ist |
+| `download-plan --listing FILE` | Dateien, Volumen, Abrufe und Dauer von Schritt 1.3 |
+
+Tests ohne Netz: `python3 -I scripts/research/relative-strength-v1/test_fetch_metadata.py`.
 
 Echter Lauf, erst nach ausdrücklicher Freigabe:
 
@@ -97,19 +116,14 @@ python3 -I scripts/research/relative-strength-v1/relative_strength_v1.py evaluat
    höchstens drei Tage vom Datenende abweicht (bei Umstellungen ein Tag). Der
    früheste Ausstieg ist die Eröffnung des Tags nach der Veröffentlichung.
 
-## Eingaben, die vor 1.2 und 1.3 noch fehlen
+## Eingaben für Schritt 1.3
 
-- **Abrufwerkzeug** für die Verzeichnisliste
-  (`listing/spot-monthly-klines-1d.json`) und `listing/exchangeInfo.json`.
-  Bewusst noch nicht geschrieben; es gehört zu Schritt 1.2.
-- **Stichprobe D0b:** Für jedes Jahr 2020–2025 die ersten drei
-  Binance-Ankündigungen zum Handelsende von USDT-Spot-Paaren, als
-  `listing/announcements-d0b.json`. Das muss von Hand über die öffentlichen
-  Ankündigungsseiten geschehen. Ob diese aus Deutschland abrufbar sind, ist
-  ungeprüft.
-- **Vor dem Download (§4.1, §7):** VIP0-Spotgebühr an der offiziellen Tabelle
-  und Mikrosekunden-Zeitstempel an der Archiv-Dokumentation bestätigen.
-- **Für 1.3:**
+- Schritt 1.2 hat Verzeichnisliste, `exchangeInfo`, D0b-Stichprobe, Gebühr
+  und Zeitstempel-Dokumentation erledigt (siehe Metadatenprüfung).
+- **Offen vor 1.3:** Entscheidung des Betreibers zum Halt an D0b (2020 ohne,
+  2025 mit nur zwei auswertbaren Ankündigungen; alle 25 genannten Paare
+  gefunden).
+- **Für 1.3 fehlen:**
   - Download-Werkzeug für Monats- und Tagesdateien mit `.CHECKSUM` und
     `manifest.sha256`;
   - Kopie von `fred/DTB3.csv` und der Benchmark-Datei aus dem Carry, je gegen
@@ -120,7 +134,7 @@ python3 -I scripts/research/relative-strength-v1/relative_strength_v1.py evaluat
 
 ## Testabdeckung (synthetisch)
 
-`test_relative_strength_v1.py`, 45 Tests:
+`test_relative_strength_v1.py`, 45 Tests (dazu `test_fetch_metadata.py`, 7 Tests ohne Netz):
 
 - Universum Point-in-Time (U1–U4, X1–X5);
 - kein Blick in die Zukunft bei Universum, Rang und Regime;

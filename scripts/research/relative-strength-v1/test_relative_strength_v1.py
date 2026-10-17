@@ -430,6 +430,11 @@ class DataChecks(unittest.TestCase):
         self.assertTrue(report["keySymbolsMissing"])
         report = rs.check_gaps({"BTCUSDT": series("BTCUSDT", wave(30000)), "ETHUSDT": eth}, CFG)
         self.assertTrue(report["passed"])
+        halted = series("HALTUSDT", wave(3), skip=set(range(START + 10, START + 20)))
+        report = rs.check_gaps({"BTCUSDT": series("BTCUSDT", wave(30000)), "ETHUSDT": eth, "HALTUSDT": halted}, CFG)
+        self.assertEqual(report["missingSymbolDays"], 0)  # a long gap is no trading time ...
+        self.assertEqual(report["longGaps"], [{"symbol": "HALTUSDT", "from": rs.day_text(START + 10), "to": rs.day_text(START + 19), "days": 10}])
+        self.assertTrue(report["passed"])  # ... but it is listed, never silent
 
     def test_d0_d0b_d0c(self):
         (self.tmp / "listing").mkdir()
@@ -602,6 +607,9 @@ class EndToEnd(unittest.TestCase):
         for key in ("fairness", "scenarioS2", "benchmarksS1", "benchmarksS2", "equalRisk", "m29E3Haircut", "readingB", "signalIc", "unresolvedCases"):
             self.assertIn(key, extra)
         self.assertGreater(extra["series"]["A"]["trades"]["trades"], 100)
+        self.assertEqual(set(report["b3cSharpeDefinitionCheck"]), {"A", "B"})
+        self.assertIn("dependsOnSharpeDefinition", report["b3cSharpeDefinitionCheck"]["A"])
+        self.assertEqual(set(extra["series"]["A"]["buysOnLastTradingDay"]), {"count", "notional", "symbols"})
         self.assertTrue((out / "results.json").exists() and (out / "results.md").exists() and (out / "RUN.lock").exists())
         with self.assertRaisesRegex(rs.StudyError, "already run once"):
             self.evaluate(self.data, out)
