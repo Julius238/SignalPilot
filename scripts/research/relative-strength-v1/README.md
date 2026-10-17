@@ -136,7 +136,7 @@ python3 -I scripts/research/relative-strength-v1/download_archive.py monthly --d
 
 | Befehl von `download_archive.py` | Zweck |
 |---|---|
-| `monthly --data DIR [--rate 4] --confirm DOWNLOAD_RELATIVE_STRENGTH_V1` | alle Monatsdateien der Liste im Fenster, je mit `.CHECKSUM`; behält nur Dateien mit passender SHA-256, setzt nach Abbruch fort |
+| `monthly --data DIR [--rate 12] [--workers 6] --confirm DOWNLOAD_RELATIVE_STRENGTH_V1` | alle Monatsdateien der Liste im Fenster, je mit `.CHECKSUM`; behält nur Dateien mit passender SHA-256, setzt nach Abbruch fort. Eine Antwort dauert 0,3–0,7 s, deshalb mehrere Verbindungen unter einer Gesamtrate |
 | `daily --data DIR --plan FILE --confirm …` | Tagesdateien aus `plan` (E1, D12); fehlende Tagesdateien sind erlaubt und werden gelistet |
 | `manifest --data DIR` | `manifest.sha256` über alle Dateien, zuletzt, nach Belegen und Lückenprüfung |
 

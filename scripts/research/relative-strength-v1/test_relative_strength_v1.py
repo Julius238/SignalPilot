@@ -18,6 +18,7 @@ import sys
 import tempfile
 import unittest
 import zipfile
+from contextlib import redirect_stdout
 from dataclasses import replace
 from pathlib import Path
 
@@ -668,6 +669,18 @@ class EndToEnd(unittest.TestCase):
             self.evaluate(self.data, out, correction="zweite")
         with self.assertRaisesRegex(rs.StudyError, "first run"):
             self.evaluate(self.data, self.tmp / "other", correction="ohne Erstlauf")
+
+    def test_without_the_gap_check_plan_works_and_d11_asks_for_it(self):
+        data = self.tmp / "no-gap-check"
+        shutil.copytree(self.data, data)
+        (data / "events" / "long-gap-check.json").unlink()
+        report, market, _ = rs.prepare(data, data / "spot", rs.FROZEN, True)
+        self.assertIsNotNone(market)
+        self.assertTrue(report["D11"]["halt"])
+        self.assertIn("D11", report["halts"])
+        with redirect_stdout(io.StringIO()) as out:
+            rs.main(["plan", "--data", str(data), "--spot", str(data / "spot")])
+        self.assertIn("LONGUSDT", {gap["symbol"] for gap in json.loads(out.getvalue())["longGapsToCheck"]})
 
     def test_a_halt_stops_until_accepted_and_releases_the_lock(self):
         data = self.tmp / "halt"

@@ -1966,7 +1966,8 @@ def load_inputs(data: Path, spot: Path | None, cfg: Config) -> dict:
     snapshot = {symbol: parse_spot_snapshot((spot or DEFAULT_SPOT) / f"{symbol}-1d.csv.gz", cfg) for symbol in ("BTCUSDT", "ETHUSDT")}
     evidence = parse_evidence(read_json(data / "events" / "evidence.json", {"cases": []}))
     rf = parse_dtb3(data / "fred" / "DTB3.csv")
-    gap_review = read_json(data / "events" / "long-gap-check.json", None)
+    gap_path = data / "events" / "long-gap-check.json"  # written by gap-check after plan; absent before
+    gap_review = read_json(gap_path) if gap_path.exists() else None
     return {"listing": listing, "series": series, "reports": reports, "snapshot": snapshot, "evidence": evidence, "rf": rf,
             "gapReview": gap_review}
 
