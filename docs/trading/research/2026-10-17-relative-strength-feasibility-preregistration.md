@@ -1,5 +1,20 @@
 # Vorregistrierung der Machbarkeitsstudie Relative Stärke im erweiterten Binance-Spot-Universum (2026-10-17)
 
+> **Status 2026-10-17: freigegeben und eingefroren (V1).**
+>
+> - Der Betreiber hat F1–F8, K1–K6 und P1–P6 entschieden und das Einfrieren
+>   freigegeben (Abschnitt 18).
+> - Eingefrorene Fassung: Commit `c188c38`, Blob
+>   `965256641b152d9a0850f72c4c2609f846d0bc90` dieser Datei.
+> - Nach Abschnitt 15 sind jetzt Schritt 1.1 (Skript, nur gegen synthetische
+>   Daten getestet) und Schritt 1.2 (nur Metadaten: Verzeichnisliste,
+>   `exchangeInfo`, Ankündigungsstichprobe D0b) erlaubt.
+> - Download (1.3) und Auswertung (1.5) brauchen je eine eigene, ausdrückliche
+>   Freigabe.
+>
+> Der Text unten bleibt als Festschreibung unverändert, nur dieser Statusblock
+> ist neu.
+
 > **Stand 2026-10-17, dritte Fassung: Entscheidungen und methodische
 > Korrekturen eingearbeitet.**
 >

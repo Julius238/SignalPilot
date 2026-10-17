@@ -580,7 +580,7 @@ geschlossen, nächster Schritt ist Rang 2
 
 Phase 0 für Rang 2 liegt vor:
 [Vorregistrierung der Machbarkeitsstudie relative Stärke](2026-10-17-relative-strength-feasibility-preregistration.md)
-(2026-10-17, zur Freigabe durch den Betreiber).
+(2026-10-17, freigegeben und eingefroren in `c188c38`).
 
 ### Was die Empfehlung ändern würde
 
