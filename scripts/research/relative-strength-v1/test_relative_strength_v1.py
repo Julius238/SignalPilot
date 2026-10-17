@@ -451,32 +451,36 @@ class DataChecks(unittest.TestCase):
         self.assertFalse(rs.long_gap_review([gap], members, checked)["halt"])
         self.assertFalse(rs.long_gap_review([gap], set(), None)["halt"])  # never a universe member: no requirement
 
-    def test_d0_d0b_d0c(self):
-        (self.tmp / "listing").mkdir()
-        symbols = {symbol: [f"{year}-01"] for symbol, year in rs.D0_CONTROL.items()}
-        symbols.update({f"D{year}USDT": [f"{year}-0{m}" for m in range(1, 4)] for year in rs.D0B_YEARS})
-        (self.tmp / "listing" / "spot-monthly-klines-1d.json").write_text(json.dumps({"symbols": symbols}))
-        years = {str(year): [{"url": "u", "published": f"{year}-0{k}-01", "tradingEnd": f"{year}-04-01", "pairs": [f"D{year}USDT"]} for k in (1, 2, 3)]
-                 for year in rs.D0B_YEARS}
-        (self.tmp / "listing" / "announcements-d0b.json").write_text(json.dumps({"years": years}))
-        (self.tmp / "listing" / "exchangeInfo.json").write_text(json.dumps({"symbols": [{"symbol": "GONEUSDT", "quoteAsset": "USDT", "status": "BREAK"}]}))
-        report = rs.check_listing(self.tmp, CFG)
-        self.assertEqual(report["halts"], [])
-        self.assertEqual(report["D0c"]["absentFromArchive"], ["GONEUSDT"])
-        years["2022"][0]["pairs"].append("NOTINARCHIVEUSDT")
-        (self.tmp / "listing" / "announcements-d0b.json").write_text(json.dumps({"years": years}))
-        self.assertEqual(rs.check_listing(self.tmp, CFG)["halts"], ["D0b"])  # 1 of 2 found in 2022: below 90 %
-        del symbols["LUNAUSDT"]
-        (self.tmp / "listing" / "spot-monthly-klines-1d.json").write_text(json.dumps({"symbols": symbols}))
-        self.assertIn("D0", rs.check_listing(self.tmp, CFG)["halts"])
-        (self.tmp / "listing" / "announcements-d0b.json").write_text(json.dumps({"years": years, "neverListed": [{"symbol": "LUNAUSDT", "url": "u"}]}))
-        self.assertNotIn("D0", rs.check_listing(self.tmp, CFG)["halts"])
-        (self.tmp / "listing" / "announcements-d0b.json").write_text(json.dumps({"years": {}}))
-        report = rs.check_listing(self.tmp, CFG)
-        self.assertFalse(report["D0b"]["performable"])
-        self.assertIn("D0b", report["halts"])
+    def test_d0_d0b_d0c_frozen_reading(self):
+        original, rs.APPROVED_PRECISIONS = rs.APPROVED_PRECISIONS, ()  # the V1 rules, kept as 'v1' next to P7
+        try:
+            (self.tmp / "listing").mkdir()
+            symbols = {symbol: [f"{year}-01"] for symbol, year in rs.D0_CONTROL.items()}
+            symbols.update({f"D{year}USDT": [f"{year}-0{m}" for m in range(1, 4)] for year in rs.D0B_YEARS})
+            (self.tmp / "listing" / "spot-monthly-klines-1d.json").write_text(json.dumps({"symbols": symbols}))
+            years = {str(year): [{"url": "u", "published": f"{year}-0{k}-01", "tradingEnd": f"{year}-04-01", "pairs": [f"D{year}USDT"]} for k in (1, 2, 3)]
+                     for year in rs.D0B_YEARS}
+            (self.tmp / "listing" / "announcements-d0b.json").write_text(json.dumps({"years": years}))
+            (self.tmp / "listing" / "exchangeInfo.json").write_text(json.dumps({"symbols": [{"symbol": "GONEUSDT", "quoteAsset": "USDT", "status": "BREAK"}]}))
+            report = rs.check_listing(self.tmp, CFG)
+            self.assertEqual(report["halts"], [])
+            self.assertEqual(report["D0c"]["absentFromArchive"], ["GONEUSDT"])
+            years["2022"][0]["pairs"].append("NOTINARCHIVEUSDT")
+            (self.tmp / "listing" / "announcements-d0b.json").write_text(json.dumps({"years": years}))
+            self.assertEqual(rs.check_listing(self.tmp, CFG)["halts"], ["D0b"])  # 1 of 2 found in 2022: below 90 %
+            del symbols["LUNAUSDT"]
+            (self.tmp / "listing" / "spot-monthly-klines-1d.json").write_text(json.dumps({"symbols": symbols}))
+            self.assertIn("D0", rs.check_listing(self.tmp, CFG)["halts"])
+            (self.tmp / "listing" / "announcements-d0b.json").write_text(json.dumps({"years": years, "neverListed": [{"symbol": "LUNAUSDT", "url": "u"}]}))
+            self.assertNotIn("D0", rs.check_listing(self.tmp, CFG)["halts"])
+            (self.tmp / "listing" / "announcements-d0b.json").write_text(json.dumps({"years": {}}))
+            report = rs.check_listing(self.tmp, CFG)
+            self.assertFalse(report["D0b"]["performable"])
+            self.assertIn("D0b", report["halts"])
+        finally:
+            rs.APPROVED_PRECISIONS = original
 
-    def test_d0b_precision_p7_only_once_approved(self):
+    def test_d0b_under_the_approved_precision_p7(self):
         (self.tmp / "listing").mkdir()
         symbols = {symbol: [f"{year}-01"] for symbol, year in rs.D0_CONTROL.items()}
         symbols.update({f"D{year}USDT": [f"{year}-0{m}" for m in range(1, 4)] for year in rs.D0B_YEARS})
@@ -488,9 +492,11 @@ class DataChecks(unittest.TestCase):
         p7 = {"years": {**v1, "2025": v1["2025"] + [{"url": "u", "published": "2025-03-01", "tradingEnd": "2025-04-01",
                                                       "pairs": ["D2025USDT"], "kind": "token"}]}}
         (self.tmp / "listing" / "announcements-d0b-p7.json").write_text(json.dumps(p7))
-        self.assertIn("D0b", rs.check_listing(self.tmp, CFG)["halts"])  # the draft is ignored until approved
+        self.assertEqual(rs.APPROVED_PRECISIONS, ("P7",))  # approved 2026-10-17
         original = rs.APPROVED_PRECISIONS
         try:
+            rs.APPROVED_PRECISIONS = ()
+            self.assertIn("D0b", rs.check_listing(self.tmp, CFG)["halts"])  # without P7 the frozen reading halts
             rs.APPROVED_PRECISIONS = ("P7",)
             report = rs.check_listing(self.tmp, CFG)
             self.assertEqual(report["halts"], [])
@@ -666,10 +672,11 @@ class EndToEnd(unittest.TestCase):
     def test_a_halt_stops_until_accepted_and_releases_the_lock(self):
         data = self.tmp / "halt"
         shutil.copytree(self.data, data)
-        path = data / "listing" / "announcements-d0b.json"
-        document = json.loads(path.read_text())
-        document["years"]["2023"][0]["pairs"] = ["MISSINGUSDT"]
-        path.write_text(json.dumps(document))
+        for name in ("announcements-d0b.json", "announcements-d0b-p7.json"):  # P7 governs D0b, V1 stays consistent
+            path = data / "listing" / name
+            document = json.loads(path.read_text())
+            document["years"]["2023"][0]["pairs"] = ["MISSINGUSDT"]
+            path.write_text(json.dumps(document))
         out = self.tmp / "halt-eval"
         with self.assertRaises(rs.HaltError):
             self.evaluate(data, out)

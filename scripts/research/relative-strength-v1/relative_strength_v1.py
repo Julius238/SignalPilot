@@ -29,7 +29,7 @@ Data layout (<data> is data/market-snapshots/relative-strength-v1 for the real r
   listing/exchangeInfo.json             Binance exchangeInfo as fetched (D0c)
   listing/announcements-d0b.json        {"years": {"2020": [{"url", "published", "tradingEnd", "pairs"}]},
                                          "neverListed": [{"symbol", "url"}]}
-  listing/announcements-d0b-p7.json     D0b under precision P7 (fetch_metadata.py d0b-p7); read only once P7 is approved
+  listing/announcements-d0b-p7.json     D0b under the approved precision P7 (fetch_metadata.py d0b-p7)
   events/evidence.json                  {"cases": [{"symbol", "kind", "day", "published", "url", "successor", "ratio"}]}
   events/long-gap-check.json            {"gaps": [{"symbol", "from", "to", "verdict"}]}  hourly-archive check of long
                                          gaps (fetch_metadata.py gap-check); verdict consistent|suspected|notCheckable
@@ -184,10 +184,10 @@ EVIDENCE_KINDS = ("DELISTING", "MIGRATION", "SYMBOL_REUSE", "REDENOMINATION", "P
 VENUE_STATUSES = ("OFFEN", "VERFUEGBAR", "NICHT_VERFUEGBAR")
 POSITIVE_CLASSES = ("BESTANDEN", "BESTANDEN_REFERENZ", "AUSSTEHEND_PHASE_1B")
 HALT_CHECKS = ("D0", "D0b", "D9", "D11")
-# Precisions approved by the operator after the freeze. "P7" (D0b with archived exchangeInfo captures,
-# docs/trading/research/2026-10-17-relative-strength-d0b-precision-p7.md) is a draft: it is added here only
-# after its approval, in its own commit.
-APPROVED_PRECISIONS: tuple[str, ...] = ()
+# Precisions approved by the operator after the freeze. "P7": D0b counts token delistings without a pair list
+# when archived exchangeInfo captures prove the pair (docs/trading/research/2026-10-17-relative-strength-d0b-
+# precision-p7.md, approved 2026-10-17, status block 7914de6).
+APPROVED_PRECISIONS: tuple[str, ...] = ("P7",)
 BLOCKING_CHECKS = ("D1", "D2", "D3", "D6", "D7")
 RISK_ON = "RISK_ON"
 KLINE_HEADER = "open_time,open,high,low,close,volume,close_time,quote_volume,count,taker_buy_volume,taker_buy_quote_volume,ignore"
@@ -2485,6 +2485,7 @@ def generate_synthetic(out: Path, seed: int = 7, cfg: Config = FROZEN) -> None:
                                             "tradingEnd": f"{year}-0{3 + 'ABC'.index(letter)}-15", "pairs": [f"DL{year % 100}{letter}USDT"]}
                                            for letter in "ABC"] for year in D0B_YEARS}, "neverListed": []}
     (out / "listing" / "announcements-d0b.json").write_text(json.dumps(announcements, indent=1), encoding="utf-8")
+    (out / "listing" / "announcements-d0b-p7.json").write_text(json.dumps({"years": announcements["years"]}, indent=1), encoding="utf-8")
     exchange = {"symbols": [{"symbol": symbol, "quoteAsset": QUOTE, "status": "BREAK" if symbol.startswith("DL") else "TRADING"} for symbol in listing]}
     (out / "listing" / "exchangeInfo.json").write_text(json.dumps(exchange), encoding="utf-8")
     evidence = {"cases": [

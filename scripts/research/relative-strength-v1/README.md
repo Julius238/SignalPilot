@@ -5,7 +5,7 @@ Setzt die eingefrorene
 um (Text `c188c38`, Blob `96525664…`, Statusblock `6520f42`). Abschnittsangaben
 (§) beziehen sich auf sie.
 
-**Stand 2026-10-17: Schritt 1.2, Präzisierung P7 als Entwurf, Downloader für 1.3 bereit.**
+**Stand 2026-10-17: Schritt 1.2, Präzisierung P7 freigegeben, Downloader für 1.3 bereit.**
 
 - `relative_strength_v1.py` ist fertig und nur gegen synthetische Daten
   getestet. Es enthält keinen Netzwerkcode und hat nie Kursdaten gelesen.
@@ -15,7 +15,9 @@ um (Text `c188c38`, Blob `96525664…`, Statusblock `6520f42`). Abschnittsangabe
 - `download_archive.py` (Schritt 1.3) lädt die Tageskerzen samt `.CHECKSUM`
   und schreibt `manifest.sha256`; bisher nur offline getestet.
 - [Präzisierung P7](../../../docs/trading/research/2026-10-17-relative-strength-d0b-precision-p7.md)
-  zu D0b ist ein Entwurf; `APPROVED_PRECISIONS` bleibt leer bis zur Freigabe.
+  zu D0b ist freigegeben (2026-10-17) und über `APPROVED_PRECISIONS = ("P7",)`
+  aktiv. `check-listing` prüft D0b nach P7, die V1-Lesart steht als `v1`
+  daneben.
 - Download (1.3) und Auswertung (1.5) brauchen je eine eigene Freigabe.
 
 ## Aufruf
@@ -52,7 +54,7 @@ python3 -I scripts/research/relative-strength-v1/fetch_metadata.py listing --out
 | `announcements --out DIR` | Ankündigungen der Kataloge 49 und 161 und eine automatische Vorauswahl; langsam, mit Zwischenspeicher. Nur Hilfe, nicht die D0b-Stichprobe |
 | `review-sheet --out DIR [--per-year N] [--years …]` | lädt die ersten N Kandidaten je Jahr und schreibt ein Prüfblatt mit Textauszug für die Durchsicht von Hand |
 | `snapshots --out DIR` | archivierte Binance-`exchangeInfo` (Internet Archive), je Monat die erste brauchbare Aufnahme, auf USDT reduziert |
-| `d0b-p7 --out DIR --decisions FILE` | D0b nach dem Entwurf P7: Token-Delistings mit Nachweis aus archivierten Symbollisten, dazu ein Zusatzbericht über alle endenden Paare 2020–2025; nur Bericht bis zur Freigabe |
+| `d0b-p7 --out DIR --decisions FILE` | D0b nach P7: Token-Delistings mit Nachweis aus archivierten Symbollisten, dazu ein Zusatzbericht über alle endenden Paare 2020–2025 → `listing/announcements-d0b-p7.json`, das `check-listing` liest |
 | `gap-check --plan FILE --out FILE` | Stundendateien des Archivs in jeder langen Lücke eines Uₜ-Mitglieds (P7 c) → `events/long-gap-check.json` |
 | `d0b-sample --out DIR --decisions FILE` | D0b-Stichprobe: Entscheidungen von Hand aus [`d0b-review-decisions.json`](d0b-review-decisions.json), dazu ein automatisches „nein“ für Texte ohne Paar `X/USDT`; bricht ab, wenn vor dem dritten Treffer eines Jahres ein Kandidat ungeprüft ist |
 | `download-plan --listing FILE` | Dateien, Volumen, Abrufe und Dauer von Schritt 1.3 |
@@ -145,7 +147,7 @@ Reihenfolge: `monthly` → `plan` → `daily` → `plan` (Lücken) →
 
 - Schritt 1.2 hat Verzeichnisliste, `exchangeInfo`, D0b-Stichprobe, Gebühr
   und Zeitstempel-Dokumentation erledigt (siehe Metadatenprüfung).
-- **Offen vor 1.3:** Freigabe von P7 (D0b) und des Downloads.
+- **Offen vor 1.3:** Freigabe des Downloads.
 - **Für 1.3 fehlen:**
   - Kopie von `fred/DTB3.csv` und der Benchmark-Datei aus dem Carry, je gegen
     deren Manifest geprüft;
