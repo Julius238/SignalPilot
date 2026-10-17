@@ -63,14 +63,18 @@ EXCHANGE_INFO_ORIGINALS = ("www.binance.com/api/v1/exchangeInfo", "api.binance.c
 S3_NS = {"s3": "http://s3.amazonaws.com/doc/2006-03-01/"}
 FIRST_MONTH, LAST_MONTH = "2019-07", "2026-09"  # Vorlauf and window of the preregistration (§4.1)
 D0B_YEARS = tuple(range(2020, 2026))
-CATALOGS = (49, 161)  # "Latest Binance News" (delistings until early 2022) and "Delisting" (from 2022-02)
-TITLE_KEYWORDS = ("delist", "removal", "remove", "cease trading", "swap", "migration", "rebrand", "redenomination")
+# "New Cryptocurrency Listing" (2020 removals and delistings were filed here), "Latest Binance News" (delistings
+# until early 2022) and "Delisting" (from 2022-02-17)
+CATALOGS = (48, 49, 161)
+# "trading pair" catches notices that add pairs and remove others in the same text (2020: BKRW/USDT, DAI/USDT inverted)
+TITLE_KEYWORDS = ("delist", "removal", "remove", "cease trading", "swap", "migration", "rebrand", "redenomination", "trading pair")
 TITLE_EXCLUDE = ("futures", "margin", "p2p", "staking", "loans", "earn", "options", "convert", "isolated", "cross",
                  "copy trading", "trading bots", "launchpool", "savings", "dual investment", "auto-invest",
                  "liquid swap", "bswap", "liquidity pool", "opens deposits", "completes")
 # The text must state an end of trading next to the named pair, not just mention a USDT pair (liquidity pools, new pairs).
 REMOVAL_PHRASES = ("delist", "remove", "removal", "cease trading", "close trading", "terminate trading",
                    "no longer be available for trading")
+END_PHRASES = REMOVAL_PHRASES + ("halt", "suspend", "stop trading")  # anything that might end trading goes to the manual review
 USER_AGENT = "Mozilla/5.0 (SignalPilot research; metadata only)"
 D0B_RULE = ("D0b (§4.2), Auslegung: eine Ankündigung zählt, wenn ihr Text das dauerhafte Ende des Spot-Handels "
             "mindestens eines ausdrücklich genannten Paars mit Quote USDT ankündigt. Nicht gezählt: nur Margin- oder "
@@ -503,16 +507,19 @@ def review_sheet(out: Path, cache: Path, fetch=http_get, per_year: int = 12, yea
 
 
 def merge_review(candidates: list[dict], cache: Path, manual: dict) -> tuple[dict, list]:
-    """Decisions for every cached candidate: the manual one if present, else an automatic 'no' when the
-    text names no X/USDT pair. Candidates with such a pair and no manual decision come back as pending."""
+    """Decisions for every cached candidate: the manual one if present, else an automatic 'no' when the text
+    names no USDT pair or announces no end of trading at all. Other candidates come back as pending."""
     decisions, pending = {}, []
     for article in candidates:
         path = cache / f"article-{article['code']}.json"
         if article["code"] in manual:
             decisions[article["code"]] = manual[article["code"]]
-        elif path.exists() and not named_usdt_pairs(article_text(json.loads(path.read_bytes())["data"].get("body", ""))):
+        elif path.exists() and not named_usdt_pairs(text := article_text(json.loads(path.read_bytes())["data"].get("body", ""))):
             decisions[article["code"]] = {"qualifies": False, "pairs": [], "tradingEnd": None,
                                           "reason": "kein USDT-Paar im Text genannt (automatisch)"}
+        elif path.exists() and not any(phrase in text.lower() for phrase in END_PHRASES):
+            decisions[article["code"]] = {"qualifies": False, "pairs": [], "tradingEnd": None,
+                                          "reason": "nennt USDT-Paare, kündigt aber kein Handelsende an (automatisch)"}
         elif path.exists():
             pending.append({"code": article["code"], "published": published_iso(article), "title": article["title"]})
     return decisions, pending
@@ -540,7 +547,7 @@ def build_reviewed_sample(candidates: list[dict], decisions: dict, per_year: int
 
 # --- D0b under the draft precision P7 ---------------------------------------------------------
 
-P7_YEARS = ("2021", "2022", "2023", "2024", "2025")  # announcement sample; 2020 uses the snapshot test
+P7_YEARS = tuple(str(year) for year in D0B_YEARS)
 
 
 def load_snapshots(out: Path) -> list[tuple[str, dict, str]]:
@@ -611,9 +618,9 @@ def build_p7_sample(candidates: list[dict], decisions: dict, snapshots: list, te
     return years
 
 
-def snapshot_endings(snapshots: list, first: str = "2019-12-01", last: str = "2020-12-31", reopen_days: int = 365) -> list[dict]:
-    """P7 (b), 2020: every USDT pair that is TRADING in one archived capture and no longer TRADING in the next,
-    for captures from `first` to `last`; a pair TRADING again within `reopen_days` was only paused."""
+def snapshot_endings(snapshots: list, first: str = "2019-12-01", last: str = "2025-12-31", reopen_days: int = 365) -> list[dict]:
+    """Report next to P7: every USDT pair that is TRADING in one archived capture and no longer TRADING in the
+    next, for captures from `first` to `last`; a pair TRADING again within `reopen_days` was only paused."""
     endings = []
     for (t1, s1, u1), (t2, s2, u2) in zip(snapshots, snapshots[1:]):
         if not first <= t1[:10] <= last:
@@ -636,19 +643,27 @@ def previous_month(month: str) -> str:
     return shift_month(month, -1)
 
 
-def p7_archive_check(years: dict, endings: list[dict], symbols: dict, min_share: float = 0.9) -> dict:
-    """Same 'found' rule as the frozen D0b for announcements (a file up to at least the month before the trading
-    end). For the snapshot test the file must lie between that month and the month the pair was seen ended, so a
-    symbol reused years later cannot pass for the old pair."""
-    result = {}
-    checks = []
+def snapshot_survey(endings: list[dict], symbols: dict) -> dict:
+    """Report only: is every pair the archived captures show ending in the archive? The file must lie between
+    the month before the last TRADING capture (at the earliest the month of the first one) and the month the end
+    is seen, so a symbol reused years later cannot pass for the old pair."""
+    by_year: dict[str, dict] = {}
     for pair in endings:
         required = max(previous_month(pair["lastSeenTrading"][:7]), pair["firstSeenTrading"][:7])
         months = symbols.get(pair["pair"], [])
-        checks.append((pair["pair"], any(required <= month <= pair["firstSeenEnded"][:7] for month in months),
-                       {"required": required, "archive": [months[0], months[-1]] if months else None}))
-    result["2020"] = {"method": "snapshots", "pairs": len(checks), "found": sum(ok for _, ok, _ in checks),
-                      "missing": [pair for pair, ok, _ in checks if not ok], "detail": {pair: info for pair, _, info in checks}}
+        ok = any(required <= month <= pair["firstSeenEnded"][:7] for month in months)
+        year = by_year.setdefault(pair["lastSeenTrading"][:4], {"pairs": 0, "found": 0, "missing": []})
+        year["pairs"] += 1
+        year["found"] += ok
+        if not ok:
+            year["missing"].append({"pair": pair["pair"], "required": required, "seenEnded": pair["firstSeenEnded"][:10],
+                                    "archive": [months[0], months[-1]] if months else None})
+    return dict(sorted(by_year.items()))
+
+
+def p7_archive_check(years: dict, symbols: dict, min_share: float = 0.9) -> dict:
+    """D0b under P7: the frozen 'found' rule (an archive file up to at least the month before the trading end)."""
+    result = {}
     for year, items in years.items():
         found = []
         for item in items:
@@ -660,7 +675,7 @@ def p7_archive_check(years: dict, endings: list[dict], symbols: dict, min_share:
                         "found": sum(ok for _, ok in found), "missing": [pair for pair, ok in found if not ok]}
     for item in result.values():
         item["share"] = item["found"] / item["pairs"] if item["pairs"] else None
-        item["performable"] = bool(item["pairs"]) and item.get("announcements", 3) >= 3
+        item["performable"] = bool(item["pairs"]) and item["announcements"] >= 3
         item["passed"] = item["performable"] and item["share"] >= min_share
     return {"years": result, "passed": all(item["passed"] for item in result.values())}
 
@@ -756,8 +771,10 @@ def main(argv: list[str] | None = None) -> int:
             symbols = json.loads((args.out / "spot-monthly-klines-1d.json").read_text(encoding="utf-8"))["symbols"]
             result = {"rule": "Entwurf P7 (docs/trading/research/2026-10-17-relative-strength-d0b-precision-p7.md); "
                               "Bericht bis zur Freigabe", "computedAt": datetime.now(timezone.utc).isoformat(),
-                      "snapshotsUsed": [item[0] for item in snapshots], "years": years, "endings2020": endings,
-                      "check": p7_archive_check(years, endings, symbols)}
+                      "snapshotsUsed": [item[0] for item in snapshots], "years": years,
+                      "check": p7_archive_check(years, symbols),
+                      "snapshotSurvey": {"note": "nur Bericht, kein Kriterium", "byYear": snapshot_survey(endings, symbols),
+                                         "endings": endings}}
             (args.out / "announcements-d0b-p7.json").write_text(json.dumps(result, indent=1, ensure_ascii=False), encoding="utf-8")
             print(json.dumps({year: {k: item[k] for k in ("pairs", "found", "share", "passed")} for year, item in result["check"]["years"].items()}))
         elif args.command == "snapshots":

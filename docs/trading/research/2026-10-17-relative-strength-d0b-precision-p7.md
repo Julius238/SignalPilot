@@ -4,75 +4,98 @@
 >
 > - Die eingefrorene Vorregistrierung V1 bleibt unverändert: Text `c188c38`,
 >   Statusblock `6520f42`, Blob `96525664…`.
-> - P7 ergänzt sie wie P1–P6 als versionierte Präzisierung und betrifft nur
->   D0b, die Wiederfindung angekündigter Delistings (§4.2).
+> - P7 ergänzt sie wie P1–P6 als versionierte Präzisierung. Sie betrifft nur
+>   D0b, die Wiederfindung angekündigter Delistings (§4.2), und dort nur die
+>   Frage, wann ein Token-Delisting ohne Paarliste ein USDT-Paar beendet.
 > - Unverändert bleiben Handelslogik, Kosten, Parameter, Universum, B1–B6,
->   Signifikanzschwellen und N.
-> - Teil (c) ist eine Verfahrenssicherung ohne Regeländerung und schon
->   umgesetzt (Anweisung vom 2026-10-17).
+>   Signifikanzschwellen, N und die D0b-Schwelle von 90 %.
+> - Teile (c) und (d) sind schon umgesetzt: (c) als Verfahrenssicherung ohne
+>   Regeländerung, (d) als festgehaltene Auslegung (Anweisung vom
+>   2026-10-17).
 > - Grundlage: [Vorregistrierung](2026-10-17-relative-strength-feasibility-preregistration.md),
 >   [Metadatenprüfung 1.2](2026-10-17-relative-strength-metadata-check.md).
 
-## 1. Anlass
+## 1. Anlass und Korrektur der Durchführung von 1.2
 
-- D0b nach V1 ist **nicht durchführbar**. Alle 25 Paare der gefundenen
-  Ankündigungen stehen zwar im Archiv (100 %). Zwei Jahre haben aber keine
-  drei Ankündigungen.
-- **2020: keine.** Die offiziellen Binance-Kataloge sind für 2020
-  unvollständig: Zu STORM, ERD, LEND, MCO und HC fehlt jede Meldung.
-- **2025: nur zwei.** Ab April 2025 kündigen die Texte das Ende „aller
-  Spot-Paare“ einzelner Token an, ohne die Paare zu nennen.
+- **Fehler in meiner Durchführung von 1.2:** Die Stichprobe in 1.2 las nur
+  die Binance-Kataloge 49 und 161. 2020 hat Binance Delistings und
+  Paar-Entfernungen aber im Katalog 48 („New Cryptocurrency Listing“)
+  abgelegt. Manche Entfernungen stehen zudem in Meldungen, die neue Paare
+  ankündigen (2020: BKRW/USDT und DAI/USDT, ersetzt durch USDT/BKRW und
+  USDT/DAI).
+  - V1 schränkt die Quelle nicht ein („öffentliche Binance-Ankündigungen“).
+    Die Lücke war also ein Durchführungsfehler, keine Regelfrage.
+- **Korrigiert** (V1-Durchführung, keine Präzisierung):
+  - Kataloge 48, 49 und 161 vollständig;
+  - Titel mit „trading pair“ zusätzlich;
+  - jede Meldung, die ein USDT-Paar nennt und ein mögliches Handelsende
+    erwähnt, wird von Hand entschieden.
+  - Rund 160 Texte kamen hinzu. In 2021–2024 ändert sich vor dem jeweils
+    dritten Treffer nichts.
+- **D0b nach V1, korrigiert:**
+
+  | Jahr | Ankündigungen | Paare gefunden |
+  |---|---|---|
+  | 2020 | 3: [FTX-Hebel-Token](https://www.binance.com/en/support/announcement/360041613471) (2020-03-28), [BKRW/USDT](https://www.binance.com/en/support/announcement/5fc9dbef7ab444eca29095666419ede4) (2020-08-06), [DAI/USDT](https://www.binance.com/en/support/announcement/cf77f566c9b64cc791fc152679175de8) (2020-08-11) | 12 / 12 |
+  | 2021–2024 | je 3, wie in 1.2 | 3/3, 3/3, 3/3, 7/7 |
+  | 2025 | **2** | 9 / 9 |
+
+  - D0b ist nach V1 **weiter nicht durchführbar**, jetzt nur noch wegen
+    2025.
+  - Ab April 2025 kündigt Binance das Ende „aller Spot-Paare“ einzelner Token
+    an, ohne die Paare zu nennen. Für solche Ankündigungen hat V1 keine
+    Regel.
 - Mit `--accept-halt D0b` wäre jedes positive Ergebnis `NICHT_BESTIMMBAR`
-  (§10.2, Regel 4). P7 soll D0b prüfbar machen, ohne es zu erleichtern.
+  (§10.2, Regel 4). P7 macht D0b prüfbar, ohne es zu erleichtern.
 
 ## 2. Gegenüberstellung
 
-| Punkt | V1 (eingefroren) | P7 (Entwurf) |
+| Punkt | V1 (eingefroren, Durchführung korrigiert) | P7 (Entwurf) |
 |---|---|---|
 | Was geprüft wird | ob das Archiv angekündigte Delistings enthält | unverändert |
-| Stichprobe 2021–2025 | die ersten drei Ankündigungen je Jahr, chronologisch, die das Handelsende mindestens eines USDT-Spot-Paars ankündigen | unverändert, chronologisch über beide Arten von (a) |
-| Ankündigung mit genannten Paaren | zählt, wenn ein Paar `X/USDT` endet (Auslegung aus 1.2) | unverändert. Neu: auch die Schreibweise `XUSDT` wird erkannt; das ändert an der Stichprobe nichts |
-| Token-Delisting **ohne** Paarliste | zählt nicht, weil kein Paar genannt ist | **zählt (a)**, wenn zeitlich passende archivierte Binance-Symbollisten das USDT-Paar dieses Tokens belegen |
-| Ankündigung, die Paare aufzählt, aber kein USDT-Paar | zählt nicht | unverändert: Die Aufzählung gilt, kein USDT-Paar wird ergänzt |
-| Aktualisierungen, regionale Einschränkungen (EWR), Abstimmungsstarts, Monitoring-Tag | zählen nicht | unverändert |
-| 2020 | wie andere Jahre; mangels Quelle nicht durchführbar | **Ersatznachweis (b):** jedes USDT-Paar, das laut archivierten Symbollisten 2020 endet |
-| Gefunden | eine Archivdatei bis mindestens zum Monat vor dem Handelsende | unverändert. Für (b) strenger: Die Datei muss zwischen diesem Monat und dem Monat liegen, in dem das Ende sichtbar ist, damit ein später neu vergebenes Symbol nicht zählt |
-| Schwelle | ≥ 90 % der Paare je Jahr, sonst Halt und Rückfrage | unverändert |
+| Quelle | öffentliche Binance-Ankündigungen, Kataloge 48, 49 und 161 | unverändert |
+| Stichprobe | je Jahr 2020–2025 die ersten drei Ankündigungen, chronologisch, die das Handelsende mindestens eines USDT-Spot-Paars ankündigen | unverändert |
+| Ankündigung nennt das USDT-Paar | zählt (Schreibweise `X/USDT` oder `XUSDT`) | unverändert |
+| Ankündigung zählt Paare auf, aber kein USDT-Paar | zählt nicht | unverändert: Die Aufzählung gilt, kein USDT-Paar wird ergänzt |
+| Token-Delisting **ohne** Paarliste („alle Paare von X“) | nicht geregelt; in 1.2 als „zählt nicht“ ausgelegt | **zählt (a)**, wenn zeitlich passende, archivierte Binance-Symbollisten das USDT-Paar dieses Tokens belegen |
+| Aktualisierungen, regionale Einschränkungen (EWR), Abstimmungsstarts, Monitoring-Tag, vorübergehende Handelsstopps | zählen nicht | unverändert |
+| Gefunden | eine Archivdatei bis mindestens zum Monat vor dem Handelsende | unverändert |
+| Schwelle und Folge | ≥ 90 % der Paare je Jahr, sonst Halt und Rückfrage; positive Klassen setzen bestandenes D0b voraus | unverändert |
 | Heutige `exchangeInfo` | nur D0c | unverändert: nur Plausibilisierung, nie Nachweis |
-| Positive Klassen | setzen bestandenes D0b voraus | unverändert |
 
 ## 3. Regel im Wortlaut
 
-**(a) Token-Delistings.**
+**(a) Token-Delistings ohne Paarliste.**
 
-- Eine Binance-Ankündigung, die das Ende des Spot-Handels aller Paare
-  genannter Token ankündigt, ohne die Paare aufzuzählen, zählt für ein
-  Paar `<TOKEN>USDT` nur, wenn zwei archivierte Symbollisten es belegen.
-- **Vorher:** In der letzten archivierten `exchangeInfo` von Binance vor der
-  Veröffentlichung steht das Paar mit Basis-Asset `<TOKEN>` und Status
-  `TRADING`. Maßgeblich ist der `serverTime` der Binance-Antwort.
-- **Nachher:** In der ersten archivierten `exchangeInfo` nach dem
-  angekündigten Handelsende ist es nicht mehr `TRADING`.
-- **Kein früheres Ende dazwischen:** Keine Binance-Ankündigung zwischen
-  beiden Zeitpunkten hat das Paar schon vorher entfernt. Geprüft wird das an
-  den Texten der Kataloge 49 und 161.
-- Ankündigungen dieser Art konkurrieren chronologisch mit den Ankündigungen
-  mit Paarliste. Gezählt werden die ersten drei eines Jahres.
+- Kündigt eine Binance-Ankündigung das Ende des Spot-Handels aller Paare
+  genannter Token an, ohne die Paare aufzuzählen, zählt sie für ein Paar
+  `<TOKEN>USDT` nur, wenn alle drei Bedingungen gelten:
+  1. **Vorher:** Die letzte archivierte Binance-`exchangeInfo` vor der
+     Veröffentlichung führt das Paar mit Basis-Asset `<TOKEN>` und Status
+     `TRADING`. Maßgeblich ist der `serverTime` der Binance-Antwort.
+  2. **Nachher:** Die erste archivierte `exchangeInfo` nach dem angekündigten
+     Handelsende führt es nicht mehr als `TRADING`.
+  3. **Kein früheres Ende dazwischen:** Keine Binance-Ankündigung zwischen
+     beiden Zeitpunkten hat das Paar schon entfernt. Geprüft wird das an den
+     Texten der Kataloge 48, 49 und 161.
+- Belegt eine solche Ankündigung mindestens ein Paar, konkurriert sie
+  chronologisch mit den Ankündigungen mit Paarliste. Gezählt werden die
+  ersten drei eines Jahres.
+- **Quelle der Symbollisten:** Internet Archive (`web.archive.org`), Abruf
+  der Rohantwort (`id_`). Je Monat zählt die erste vollständig lesbare
+  Aufnahme der Adressen `www`/`api.binance.com/api/v1|v3/exchangeInfo`.
 
-**(b) Ersatznachweis 2020.**
+**(b) Zusatzbericht, kein Kriterium.**
 
-- Für 2020 gibt es keine vollständige amtliche Ankündigungsliste. Deshalb
-  gilt dort statt der Ankündigungsstichprobe eine Vollerhebung.
-- Gezählt wird jedes USDT-Paar, das in einer archivierten Binance-
-  `exchangeInfo` mit Zeitstempel zwischen 2019-12-01 und 2020-12-31 `TRADING`
-  ist und in der nächsten archivierten Liste nicht mehr. Wird es binnen
-  365 Tagen wieder `TRADING`, war das eine Pause und zählt nicht.
-- **Gefunden** heißt: Das Archiv hat für das Paar eine Monatsdatei zwischen
-  zwei Grenzen.
+- Jedes USDT-Paar, das in einer archivierten Liste `TRADING` ist und in der
+  nächsten nicht mehr (2019-12 bis 2025-12), wird im Archiv gesucht.
+- Gesucht wird eine Monatsdatei zwischen zwei Grenzen:
   - Untere Grenze: der Monat vor der letzten `TRADING`-Liste, frühestens der
-    Monat der ersten `TRADING`-Liste.
+    Monat der ersten.
   - Obere Grenze: der Monat der Liste, in der das Ende sichtbar ist.
-- Schwelle wie in V1: ≥ 90 %.
+- Ein Paar, das binnen 365 Tagen wieder `TRADING` ist, war nur pausiert.
+- Der Bericht prüft die Vollständigkeit über die Stichprobe hinaus und ändert
+  das D0b-Urteil nicht.
 
 **(c) Lange Lücken (Verfahren, schon umgesetzt):**
 
@@ -101,28 +124,27 @@
 
 ## 4. Warum das keine Selbstbestätigung ist
 
-- **Getrennte Quellen:** Welche Paare geprüft werden, bestimmt allein Binance:
-  durch Ankündigungen oder durch seine eigene Symbolliste `exchangeInfo`.
-  Diese Listen hat das Internet Archive mit Zeitstempel gespeichert, ein
-  unabhängiger Dritter. Das Kursarchiv `data.binance.vision` ist nur der
-  Prüfgegenstand.
+- **Getrennte Quellen:** Welche Paare geprüft werden, bestimmen allein
+  Binance-Quellen: Ankündigungstexte und Binances eigene Symbolliste
+  `exchangeInfo`. Diese Listen hat das Internet Archive mit Zeitstempel
+  gespeichert, ein unabhängiger Dritter. Das Kursarchiv
+  `data.binance.vision` ist nur der Prüfgegenstand.
   - Ein Paar, das im Kursarchiv fehlt, fiele dadurch auf, statt still aus der
     Stichprobe zu verschwinden.
-- **Zeitstempel:** Jede archivierte Liste trägt den `serverTime` von Binance.
-  Er stimmt bei allen genutzten Listen auf die Sekunde genau mit dem
-  Aufnahmezeitpunkt des Archivs überein. Die SHA-256 jeder Rohantwort ist
-  abgelegt.
+- **Zeitstempel:** Der `serverTime` jeder genutzten Liste stimmt auf die
+  Sekunde mit dem Aufnahmezeitpunkt des Archivs überein. Die SHA-256 jeder
+  Rohantwort ist abgelegt.
 - **Wiederverwendete Symbole:**
   - (a) verlangt das Basis-Asset und `TRADING` **vor** der Ankündigung. Die
     heutige Liste reicht nicht.
-  - (b) verlangt eine Archivdatei **im** Zeitraum des Endes.
-  - Beispiele: `SKYUSDT` ist heute ein anderes Token als das 2021 delistete
-    SKY. `USDSUSDT` hat Dateien bis 2020-06 und erneut ab 2026-04; gezählt
-    wird nur der Teil bis 2020-06.
-- **Die Daten widersprechen sich nicht:** Bei den Hebel-Token aus 2022
-  meldet die Symbolliste schon vor der Ankündigung `BREAK`, und das Archiv
-  endet ebenso früher. Diese Paare zählt P7 deshalb nicht; sie haben nicht
-  durch diese Ankündigung geendet.
+  - Beispiel: `SKYUSDT` ist heute ein anderes Token als das 2021 delistete
+    SKY. `USDSUSDT` hat Dateien bis 2020-06 und erneut ab 2026-04.
+- **Die Daten widersprechen sich nicht:**
+  - Bei 16 der 20 Hebel-Token der Ankündigung vom 2022-01-06 meldet die
+    Symbolliste schon vor der Ankündigung `BREAK`, und das Archiv endet
+    ebenso früher (2021-12). P7 zählt sie deshalb nicht.
+  - Eine Regel, die nur auf Ankündigungen schaute, hätte sie gezählt und
+    womöglich als „fehlend“ gewertet.
 
 ## 5. Ergebnis unter P7 (nur Metadaten)
 
@@ -130,69 +152,100 @@ Genutzt wurden 22 archivierte `exchangeInfo`-Listen von 2019-10-10 bis
 2025-12-03. Neun weitere Aufnahmen sind bei 1 MiB abgeschnitten und wurden
 verworfen.
 
-| Jahr | Methode | Stichprobe | Paare gefunden |
-|---|---|---|---|
-| 2020 | (b) Vollerhebung aus Symbollisten (2019-12-23, 2020-03-28, 2020-09-14, 2020-11-09, 2020-12-02, 2021-02-10) | 18 endende USDT-Paare: 10 Hebel-Token, ERD, STORM, USDS, LEND, MCO, HC, STRAT, XZC | **18 / 18** |
-| 2021 | Ankündigungen | NPXS, PAX, BZRX (wie V1) | 3 / 3 |
-| 2022 | Ankündigungen | [Hebel-Token 2022-01-06](https://www.binance.com/en/support/announcement/83b0ed10abd646328bf104d871d03d70) (a: BCHUP, BCHDOWN, FILUP, FILDOWN; die übrigen 16 waren schon vorher `BREAK`), BTT, ANY | 6 / 6 |
-| 2023 | Ankündigungen | BEAM, KEY, AION (wie V1) | 3 / 3 |
-| 2024 | Ankündigungen | ANT/MULTI/XMR, PLA, DREP/MOB/PNT (wie V1) | 7 / 7 |
-| 2025 | Ankündigungen | AMB…, AERGO… (wie V1), [Vote-to-Delist 2025-04-08](https://www.binance.com/en/support/announcement/fac9c3e401da4cc8b604566fd261d70c) (a: 14 Paare; `TRADING` am [2024-10-01](https://web.archive.org/web/20241001183136id_/https://www.binance.com/api/v3/exchangeInfo), `BREAK` am [2025-04-26](https://web.archive.org/web/20250426005818id_/https://api.binance.com/api/v3/exchangeInfo); keine Entfernung dazwischen) | 23 / 23 |
+| Jahr | die ersten drei Ankündigungen unter P7 | Paare gefunden |
+|---|---|---|
+| 2020 | FTX-Hebel-Token (2020-03-28, genannt); [STORM-Tausch](https://www.binance.com/en/support/announcement/360043990532) (2020-06-03, a); [USDS-Delisting](https://www.binance.com/en/support/announcement/52e0db956218405b8b5eda03012a0798) (2020-06-24, a). STORM und USDS sind `TRADING` am 2020-03-28 und `BREAK` am 2020-09-14 | 12 / 12 |
+| 2021 | NPXS, PAX, BZRX (wie V1) | 3 / 3 |
+| 2022 | [Hebel-Token](https://www.binance.com/en/support/announcement/83b0ed10abd646328bf104d871d03d70) (2022-01-06, a: BCHUP, BCHDOWN, FILUP, FILDOWN); BTT; ANY | 6 / 6 |
+| 2023 | BEAM, KEY, AION (wie V1) | 3 / 3 |
+| 2024 | ANT/MULTI/XMR, PLA, DREP/MOB/PNT (wie V1) | 7 / 7 |
+| 2025 | AMB…, AERGO… (wie V1); [Vote-to-Delist](https://www.binance.com/en/support/announcement/fac9c3e401da4cc8b604566fd261d70c) (2025-04-08, a: 14 Paare) | 23 / 23 |
 
 **Unter P7 wäre D0b in jedem Jahr mit 100 % bestanden.**
 
-- Dieses Ergebnis ist bekannt, bevor P7 freigegeben ist.
-- Es betrifft nur die Vollständigkeit des Archivs, keine Rendite. Es wurde
-  allein aus Dateilisten, Symbollisten und Ankündigungen ermittelt.
-- Die Regel entstand aus der Quellenlage. Mit dem Ergebnis abgestimmt ist sie
-  nicht: Die strengere Regel für (b) und der Ausschluss der 16 Hebel-Token
-  verkleinern die Stichprobe eher.
+Belege zum Vote-to-Delist 2025:
+
+- Alle 14 Paare sind `TRADING` am
+  [2024-10-01](https://web.archive.org/web/20241001183136id_/https://www.binance.com/api/v3/exchangeInfo)
+  und `BREAK` am
+  [2025-04-26](https://web.archive.org/web/20250426005818id_/https://api.binance.com/api/v3/exchangeInfo).
+- Alle 35 Binance-Texte dazwischen sind gelesen, keiner nennt eines der
+  Paare.
+
+**Zusatzbericht (b):**
+
+| Jahr | endende USDT-Paare | im Archiv |
+|---|---|---|
+| 2020 | 18 | 18 |
+| 2021 | 19 | 19 |
+| 2022 | 40 | 40 |
+| 2023 | 26 | 26 |
+| 2024 | 70 | 70 |
+| 2025 | 20 | 20 |
+
+Kein einziges Paar fehlt (193 von 193).
+
+**Einordnung:**
+
+- Diese Ergebnisse sind bekannt, bevor P7 freigegeben ist. Sie betreffen nur
+  die Vollständigkeit des Archivs, keine Rendite. Ermittelt wurden sie allein
+  aus Dateilisten, Symbollisten und Ankündigungen.
+- Die Regel (a) folgt der Quellenlage: Sie wird nur gebraucht, weil Binance
+  ab 2025 keine Paare mehr nennt. Sie macht die Stichprobe nicht günstiger.
+  Auch nach V1 (korrigiert) sind alle 37 Paare gefunden, und der
+  Zusatzbericht ist ohne Ausnahme.
 
 Nachvollziehen ohne Netz:
 
-- Ergebnisse: `data/market-snapshots/relative-strength-v1/listing/announcements-d0b-p7.json`
-  und `wayback-exchangeInfo/`.
-- Neu rechnen:
-  `fetch_metadata.py d0b-p7 --out <data>/listing --decisions scripts/research/relative-strength-v1/d0b-review-decisions.json`.
+- Ergebnisse in `data/market-snapshots/relative-strength-v1/listing/`:
+  `announcements-d0b-p7.json`, `announcements-d0b.json` (V1, korrigiert) und
+  `wayback-exchangeInfo/`.
+- Neu rechnen: `fetch_metadata.py d0b-p7` und `d0b-sample`, je mit
+  `--decisions scripts/research/relative-strength-v1/d0b-review-decisions.json`.
 
 ## 6. Grenzen
 
-- **Lücken zwischen den Aufnahmen:** Ein Paar, das zwischen zwei Aufnahmen
-  gelistet und wieder entfernt wurde, sieht (b) nicht. Für 2020 betrifft das
-  BKRW und DAI (Juli bis August 2020); beide sind im Archiv. Die Abstände
-  2020 betragen bis zu 5½ Monate.
+- **Abstände zwischen den Aufnahmen:** Der Zusatzbericht (b) sieht kein Paar,
+  das zwischen zwei Aufnahmen gelistet und wieder entfernt wurde (2020 etwa
+  BKRW und DAI). Diese beiden sind aber über ihre Ankündigungen in der
+  V1-Stichprobe.
 - **2025, Abstand der Vorher-Liste:** Die letzte brauchbare Liste vor dem
-  2025-04-08 stammt vom 2024-10-01. Aufnahmen aus 2024-11 bis 2025-03 sind
-  im Internet Archive gesperrt (HTTP 451). Dass die 14 Paare bis zur
-  Ankündigung gehandelt wurden, zeigen zwei Dinge:
-  - Alle 35 Binance-Texte dazwischen sind gelesen (Titelfilter der Kataloge
-    49 und 161). Keiner nennt eines der Paare.
-  - 10 Tage nach dem Handelsende steht jedes der Paare auf `BREAK`.
-- **Dritte Partei:** Ein unvollständiges oder manipuliertes Internet-Archiv
-  ist nicht auszuschließen, aber unwahrscheinlich. `serverTime`,
-  Aufnahmezeit und der Abgleich mit dem Kursarchiv stimmen überein.
-- **Kataloge 2021–2025:** Dass sie vollständig sind, bleibt unbeweisbar.
-  „Die ersten drei“ heißt weiter: die ersten drei in den Katalogen.
-- **2020, amtliche Ankündigungen:** ANNOUNCEMENTS_2020
+  2025-04-08 stammt vom 2024-10-01. Spätere Aufnahmen sind gesperrt
+  (HTTP 451). Die Lücke schließen die 35 gelesenen Texte und der Status
+  `BREAK` 10 Tage nach dem Handelsende.
+- **Dritte Partei:** Ein unvollständiges Internet-Archiv ist nicht
+  auszuschließen. `serverTime`, Aufnahmezeit und Kursarchiv stimmen aber
+  überein.
+- **Kataloge:** Dass 48, 49 und 161 vollständig sind, bleibt unbeweisbar.
+  - Kataloge für Fiat, API und Wartung wurden nicht durchsucht.
+  - Von Binance gelöschte Artikel sind unsichtbar.
+  - Für 2020 Januar bis Juni deckt sich der Katalog 48 mit den archivierten
+    Zendesk-Adressen der damaligen Binance-Hilfeseiten (Abgleich über den
+    CDX-Index des Internet Archive).
+- **Prüfung:** Die Entscheidungen hat Claude allein getroffen, ohne
+  Zweitprüfung. Jede ist am Text begründet
+  ([`d0b-review-decisions.json`](../../../scripts/research/relative-strength-v1/d0b-review-decisions.json)).
 
 ## 7. Falls P7 nicht freigegeben wird
 
-- **Rückfallebene: eingeschränkte Forschung.**
-  - Weiter mit `--accept-halt D0b`. Nach Regel 4 ist ein positives Ergebnis
-    dann `NICHT_BESTIMMBAR`.
-  - Ein gutes Ergebnis darf nur als Hinweis berichtet werden, nie als
-    bestätigt. Es öffnet keinen Gate-v4-Pfad und keinen Shadow-Betrieb.
+- D0b bleibt nach V1 nicht durchführbar, weil 2025 nur zwei Ankündigungen
+  hat. Weiter ginge es nur als **eingeschränkte Forschung**:
+  - mit `--accept-halt D0b`;
+  - ein positives Ergebnis wäre dann `NICHT_BESTIMMBAR` und dürfte nur als
+    Hinweis berichtet werden, nie als bestätigt;
+  - es öffnet keinen Gate-v4-Pfad und keinen Shadow-Betrieb;
   - N steigt trotzdem auf 57, sobald Renditen berechnet sind.
-- **Bewertung:** Diese Variante kostet die Aussagekraft der Studie. Wegen des
-  unabhängigen Nachweises oben halte ich sie für unnötig.
+- **Bewertung:** Bei 100 % Wiederfindung nach V1 und P7 und einem
+  lückenlosen Zusatzbericht halte ich diesen Weg für unnötig.
 
 ## 8. Umsetzung
 
 | Teil | Ort | Stand |
 |---|---|---|
-| Archivierte Symbollisten laden (je Monat die erste brauchbare Aufnahme) | `fetch_metadata.py snapshots` | fertig, getestet |
-| P7-Stichprobe, Ersatznachweis 2020, Archivabgleich | `fetch_metadata.py d0b-p7` | fertig, getestet; Ergebnis nur Bericht |
-| Entscheidungen je Ankündigung, mit P7-Feldern für die zwei Token-Delistings | `d0b-review-decisions.json` | fertig |
+| Kataloge 48/49/161, Titel mit „trading pair“, Schreibweise `XUSDT`, automatische Entscheidung ohne Handelsende | `fetch_metadata.py` | fertig, getestet (V1-Durchführung) |
+| Archivierte Symbollisten | `fetch_metadata.py snapshots` | fertig, getestet |
+| P7-Stichprobe und Zusatzbericht | `fetch_metadata.py d0b-p7` | fertig, getestet; Ergebnis nur Bericht |
+| Entscheidungen je Ankündigung, P7-Felder für Token-Delistings | `d0b-review-decisions.json` | fertig |
 | D0b nach P7 im Studienskript, mit eigener Neuprüfung gegen die Liste; V1 bleibt als `v1` im Bericht | `relative_strength_v1.py`, `APPROVED_PRECISIONS` | vorbereitet. **Aktiv erst nach Freigabe**, dazu ein eigener Commit mit `("P7",)` |
 | Lange Lücken (c) | `fetch_metadata.py gap-check`, D11 in `relative_strength_v1.py` | umgesetzt |
 | B3(c) (d) | Auslegungstext im Ergebnis | umgesetzt |

@@ -20,11 +20,17 @@
   - Jede Monatsdatei hat eine `.CHECKSUM`.
   - Die offizielle Gebühr bestätigt 10 bp je Seite.
 - **D0b: Halt und Rückfrage (`check-listing` Exit 3).**
+  - > **Korrektur 2026-10-17:** Die Stichprobe las zunächst nur die Kataloge
+    > 49 und 161. Die Meldungen aus 2020 liegen aber im Katalog 48. Mit allen
+    > drei Katalogen hat auch 2020 drei Ankündigungen (FTX-Hebel-Token,
+    > BKRW/USDT, DAI/USDT; 12 von 12 Paaren gefunden). Nicht durchführbar
+    > bleibt D0b dann nur wegen 2025. Einzelheiten:
+    > [Präzisierung P7](2026-10-17-relative-strength-d0b-precision-p7.md),
+    > Abschnitt 1.
   - Alle 25 Paare aus den 14 gefundenen Ankündigungen stehen im Archiv
-    (100 %).
-  - Formal ist D0b aber nicht durchführbar: Für 2020 enthalten die
-    offiziellen Kataloge keine Ankündigung mit genanntem USDT-Paar, für 2025
-    nur zwei statt drei.
+    (100 %), nach der Korrektur alle 37 Paare aus 17 Ankündigungen.
+  - Formal ist D0b aber nicht durchführbar: für 2025 nur zwei Ankündigungen
+    statt drei. Die ursprüngliche Aussage, 2020 habe keine, ist überholt.
   - Arbeitet der Betreiber mit `--accept-halt D0b` weiter, kann nach §10.2
     Regel 4 kein positives Ergebnis mehr entstehen.
   - Optionen und Empfehlung stehen in Abschnitt 3.
@@ -106,6 +112,20 @@ ab dem 1. Januar 2025 in Mikrosekunden. Das Skript erkennt die Einheit je Zeile
 
 ### D0b: Wiederfindung angekündigter Delistings
 
+> **Korrektur 2026-10-17:** Dieser Abschnitt beschreibt den Stand vor der
+> Korrektur, mit den Katalogen 49 und 161.
+>
+> - Binance hat die Meldungen aus 2020 im Katalog 48 („New Cryptocurrency
+>   Listing“) abgelegt; zwei Entfernungen stehen in Meldungen über neue
+>   Paare.
+> - Mit den Katalogen 48, 49 und 161 gilt für 2020 nach V1: FTX-Hebel-Token
+>   (2020-03-28), BKRW/USDT (2020-08-06) und DAI/USDT (2020-08-11), alle 12
+>   Paare im Archiv.
+> - 2021–2024 bleiben unverändert. 2025 hat weiter nur zwei Ankündigungen.
+> - Die Aussagen unten zu „2020 leer“ und Option (b) sind damit überholt;
+>   maßgeblich ist der Entwurf
+>   [P7](2026-10-17-relative-strength-d0b-precision-p7.md).
+
 **Auslegung, festgelegt vor dem Abgleich mit dem Archiv:**
 
 - Eine Ankündigung zählt, wenn ihr Text das dauerhafte Ende des Spot-Handels
@@ -165,7 +185,7 @@ Monat vor dem Handelsende):
 durchführbar**, weil 2020 und 2025 keine drei Ankündigungen haben. Nach §4.2
 gilt dann „Halt und Rückfrage“; `check-listing` meldet `halts: ["D0b"]`.
 
-**Warum 2020 leer bleibt:**
+**Warum 2020 leer blieb (überholt, siehe Korrektur oben):**
 
 - Katalog 49 enthält 442 Artikel aus 2020, aber keinen, der ein endendes
   USDT-Paar nennt.
@@ -218,9 +238,9 @@ durchgesehen; unter der Auslegung oben zählt danach keine Ankündigung mehr.
 > `--accept-halt` umgehen. Statt Option (b) mit der heutigen `exchangeInfo`
 > liegt jetzt der Entwurf
 > [P7](2026-10-17-relative-strength-d0b-precision-p7.md) zur Freigabe vor.
-> Er belegt die Paare mit zeitlich passenden, archivierten Binance-Symbollisten
-> und ersetzt 2020 die Stichprobe durch eine Vollerhebung. Unter P7 sind alle
-> Jahre zu 100 % gefunden.
+> Er belegt die Paare von Token-Delistings mit zeitlich passenden, archivierten
+> Binance-Symbollisten. 2020 braucht nach der Korrektur keinen Ersatznachweis
+> mehr. Unter P7 sind alle Jahre zu 100 % gefunden.
 
 **Optionen für den Betreiber** (die Vorregistrierung bleibt unverändert, bis
 der Betreiber entscheidet):

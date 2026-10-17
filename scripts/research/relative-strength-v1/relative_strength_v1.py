@@ -1773,19 +1773,11 @@ def determinability(class_a: dict, class_b: dict, accepted_halts: list[str]) -> 
 
 
 def d0b_p7(document: dict, symbols: dict[str, list[str]], cfg: Config) -> dict:
-    """D0b under precision P7, re-checked here against the listing: announcements 2021-2025 (named pairs or
-    token delistings proven by archived exchangeInfo), and for 2020 every USDT pair that the archived captures
-    show ending; such a pair needs a file between the month before its last TRADING capture (or its first
-    capture) and the month it was seen ended."""
+    """D0b under precision P7, re-checked here against the listing: per year the first three announcements,
+    with named USDT pairs or token delistings whose pairs archived exchangeInfo captures prove; the frozen
+    'found' rule (a file up to at least the month before the trading end) and the frozen 90 % threshold."""
     years = {}
-    pairs_2020 = document.get("endings2020") or []
-    found = []
-    for item in pairs_2020:
-        required = max(shift_month(item["lastSeenTrading"][:7], -1), item["firstSeenTrading"][:7])
-        found.append((item["pair"], any(required <= month <= item["firstSeenEnded"][:7] for month in symbols.get(item["pair"], []))))
-    years["2020"] = {"method": "snapshots", "pairs": len(found), "found": sum(ok for _, ok in found),
-                     "missing": [pair for pair, ok in found if not ok]}
-    for year in range(2021, 2026):
+    for year in D0B_YEARS:
         items = sorted(document.get("years", {}).get(str(year), []), key=lambda item: item["published"])[: cfg.d0b_announcements_per_year]
         checks = []
         for item in items:
@@ -1793,11 +1785,10 @@ def d0b_p7(document: dict, symbols: dict[str, list[str]], cfg: Config) -> dict:
             for pair in item["pairs"]:
                 months = symbols.get(pair, [])
                 checks.append((pair, bool(months) and max(months) >= required))
-        years[str(year)] = {"method": "announcements", "announcements": len(items), "pairs": len(checks),
-                            "found": sum(ok for _, ok in checks), "missing": [pair for pair, ok in checks if not ok]}
-    for item in years.values():
-        item["share"] = item["found"] / item["pairs"] if item["pairs"] else None
-    performable = bool(pairs_2020) and all(years[str(year)]["announcements"] >= cfg.d0b_announcements_per_year for year in range(2021, 2026))
+        years[str(year)] = {"announcements": len(items), "pairs": len(checks), "found": sum(ok for _, ok in checks),
+                            "share": sum(ok for _, ok in checks) / len(checks) if checks else None,
+                            "missing": [pair for pair, ok in checks if not ok]}
+    performable = all(item["announcements"] >= cfg.d0b_announcements_per_year for item in years.values())
     passed = performable and all(item["share"] is not None and item["share"] >= cfg.d0b_min_share for item in years.values())
     return {"precision": "P7", "years": years, "performable": performable, "passed": passed}
 

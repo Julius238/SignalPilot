@@ -479,14 +479,14 @@ class DataChecks(unittest.TestCase):
     def test_d0b_precision_p7_only_once_approved(self):
         (self.tmp / "listing").mkdir()
         symbols = {symbol: [f"{year}-01"] for symbol, year in rs.D0_CONTROL.items()}
-        symbols.update({f"D{year}USDT": [f"{year}-0{m}" for m in range(1, 4)] for year in range(2021, 2026)})
-        symbols.update({"OLDUSDT": ["2019-08", "2020-05"], "REUSEDUSDT": ["2019-08", "2026-04"]})
+        symbols.update({f"D{year}USDT": [f"{year}-0{m}" for m in range(1, 4)] for year in rs.D0B_YEARS})
         (self.tmp / "listing" / "spot-monthly-klines-1d.json").write_text(json.dumps({"symbols": symbols}))
-        (self.tmp / "listing" / "announcements-d0b.json").write_text(json.dumps({"years": {}}))  # V1: not performable
-        years = {str(year): [{"url": "u", "published": f"{year}-0{k}-01", "tradingEnd": f"{year}-04-01", "pairs": [f"D{year}USDT"]} for k in (1, 2, 3)]
-                 for year in range(2021, 2026)}
-        ending = {"pair": "OLDUSDT", "firstSeenTrading": "2019-10-10T00:00:00Z", "lastSeenTrading": "2020-03-28T00:00:00Z", "firstSeenEnded": "2020-09-14T00:00:00Z"}
-        p7 = {"years": years, "endings2020": [ending]}
+        v1 = {str(year): [{"url": "u", "published": f"{year}-0{k}-01", "tradingEnd": f"{year}-04-01", "pairs": [f"D{year}USDT"]} for k in (1, 2, 3)]
+              for year in rs.D0B_YEARS}
+        v1["2025"] = v1["2025"][:2]  # the frozen reading finds only two announcements in 2025
+        (self.tmp / "listing" / "announcements-d0b.json").write_text(json.dumps({"years": v1}))
+        p7 = {"years": {**v1, "2025": v1["2025"] + [{"url": "u", "published": "2025-03-01", "tradingEnd": "2025-04-01",
+                                                      "pairs": ["D2025USDT"], "kind": "token"}]}}
         (self.tmp / "listing" / "announcements-d0b-p7.json").write_text(json.dumps(p7))
         self.assertIn("D0b", rs.check_listing(self.tmp, CFG)["halts"])  # the draft is ignored until approved
         original = rs.APPROVED_PRECISIONS
@@ -496,11 +496,11 @@ class DataChecks(unittest.TestCase):
             self.assertEqual(report["halts"], [])
             self.assertEqual(report["D0b"]["precision"], "P7")
             self.assertFalse(report["D0b"]["v1"]["performable"])  # the frozen reading stays visible
-            p7["endings2020"].append({**ending, "pair": "REUSEDUSDT"})  # only files from a later reuse of the symbol
+            p7["years"]["2021"][0]["pairs"].append("NOTINARCHIVEUSDT")
             (self.tmp / "listing" / "announcements-d0b-p7.json").write_text(json.dumps(p7))
             report = rs.check_listing(self.tmp, CFG)
-            self.assertEqual(report["D0b"]["years"]["2020"]["missing"], ["REUSEDUSDT"])
-            self.assertIn("D0b", report["halts"])  # 1 of 2 found: below 90 %
+            self.assertEqual(report["D0b"]["years"]["2021"]["missing"], ["NOTINARCHIVEUSDT"])
+            self.assertIn("D0b", report["halts"])  # re-checked against the listing: 3 of 4 found, below 90 %
         finally:
             rs.APPROVED_PRECISIONS = original
 

@@ -52,7 +52,7 @@ python3 -I scripts/research/relative-strength-v1/fetch_metadata.py listing --out
 | `announcements --out DIR` | Ankündigungen der Kataloge 49 und 161 und eine automatische Vorauswahl; langsam, mit Zwischenspeicher. Nur Hilfe, nicht die D0b-Stichprobe |
 | `review-sheet --out DIR [--per-year N] [--years …]` | lädt die ersten N Kandidaten je Jahr und schreibt ein Prüfblatt mit Textauszug für die Durchsicht von Hand |
 | `snapshots --out DIR` | archivierte Binance-`exchangeInfo` (Internet Archive), je Monat die erste brauchbare Aufnahme, auf USDT reduziert |
-| `d0b-p7 --out DIR --decisions FILE` | D0b nach dem Entwurf P7: Token-Delistings mit Nachweis aus archivierten Symbollisten, 2020 als Vollerhebung; nur Bericht bis zur Freigabe |
+| `d0b-p7 --out DIR --decisions FILE` | D0b nach dem Entwurf P7: Token-Delistings mit Nachweis aus archivierten Symbollisten, dazu ein Zusatzbericht über alle endenden Paare 2020–2025; nur Bericht bis zur Freigabe |
 | `gap-check --plan FILE --out FILE` | Stundendateien des Archivs in jeder langen Lücke eines Uₜ-Mitglieds (P7 c) → `events/long-gap-check.json` |
 | `d0b-sample --out DIR --decisions FILE` | D0b-Stichprobe: Entscheidungen von Hand aus [`d0b-review-decisions.json`](d0b-review-decisions.json), dazu ein automatisches „nein“ für Texte ohne Paar `X/USDT`; bricht ab, wenn vor dem dritten Treffer eines Jahres ein Kandidat ungeprüft ist |
 | `download-plan --listing FILE` | Dateien, Volumen, Abrufe und Dauer von Schritt 1.3 |

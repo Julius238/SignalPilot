@@ -107,9 +107,9 @@ class PrecisionP7(unittest.TestCase):
         endings = {item["pair"]: item for item in fm.snapshot_endings(self.SNAPSHOTS)}
         self.assertEqual(set(endings), {"OLDUSDT", "REUSEUSDT", "TOKUSDT"})  # PAUSEUSDT trades again within a year
         symbols = {"OLDUSDT": ["2019-07", "2019-12", "2020-01"], "REUSEUSDT": ["2019-06", "2023-01"], "TOKUSDT": ["2020-06", "2020-07"]}
-        check = fm.p7_archive_check({}, list(endings.values()), symbols)
-        self.assertEqual(check["years"]["2020"]["missing"], ["REUSEUSDT"])  # only files from the reuse after 2020
-        self.assertFalse(check["years"]["2020"]["passed"])  # 2 of 3 found, below 90 %
+        survey = fm.snapshot_survey(list(endings.values()), symbols)
+        self.assertEqual([item["pair"] for item in survey["2019"]["missing"]], ["REUSEUSDT"])  # only files from the reuse
+        self.assertEqual((survey["2019"]["found"], survey["2020"]["found"]), (1, 1))
 
     def test_sample_counts_token_delistings_and_drops_pairs_removed_earlier(self):
         day = 86_400_000
@@ -208,15 +208,16 @@ class Announcements(unittest.TestCase):
             fm.build_reviewed_sample(candidates, decisions)  # an unreviewed candidate before the third hit
 
     def test_merge_review_marks_texts_without_a_usdt_pair_and_keeps_manual_decisions(self):
-        candidates = [article(c, f"Binance Will Delist {c}", MS_2020) for c in ("m", "auto", "open", "uncached")]
+        candidates = [article(c, f"Binance Will Delist {c}", MS_2020) for c in ("m", "auto", "open", "uncached", "adds")]
         manual = {"m": {"qualifies": True, "pairs": ["MMUSDT"], "tradingEnd": "2020-01-08", "reason": "named"}}
         with tempfile.TemporaryDirectory() as directory:
             cache = Path(directory)
-            for code, text in (("m", "remove MM/USDT"), ("auto", "remove AA/BTC"), ("open", "remove OO/USDT")):
+            for code, text in (("m", "remove MM/USDT"), ("auto", "remove AA/BTC"), ("open", "remove OO/USDT"), ("adds", "Binance adds NN/USDT")):
                 (cache / f"article-{code}.json").write_text(json.dumps({"data": {"body": body(text)}}))
             decisions, pending = fm.merge_review(candidates, cache, manual)
         self.assertEqual(decisions["m"], manual["m"])
         self.assertFalse(decisions["auto"]["qualifies"])
+        self.assertIn("kein Handelsende", decisions["adds"]["reason"])  # a new pair, no end: decided automatically
         self.assertEqual([item["code"] for item in pending], ["open"])
         self.assertNotIn("uncached", decisions)  # never fetched, so build_reviewed_sample refuses it if it matters
 
