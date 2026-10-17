@@ -9,6 +9,11 @@
 > - Es wurde **keine Rendite berechnet**; `evaluate` wurde nie gestartet.
 > - Die Vorregistrierung und die Datenquelle sind unverändert.
 > - Wie es weitergeht, entscheidet der Betreiber (Abschnitt 5).
+>
+> **Entscheidung des Betreibers am 2026-10-17: Weg 2.** Eine V2 ergänzt nur die
+> fehlenden Tage aus dem Tagesarchiv:
+> [Vorregistrierung V2](2026-10-17-funding-carry-feasibility-preregistration-v2.md),
+> Entwurf zur Freigabe.
 
 - Vorregistrierung:
   [Funding-Carry V1](2026-10-16-funding-carry-feasibility-preregistration.md),

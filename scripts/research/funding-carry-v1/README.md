@@ -10,6 +10,9 @@ aus diesem Dokument; Abschnittsangaben (§) im Code verweisen darauf.
 bei den BTCUSDT-Mark- und Indexpreisen, weil im Monatsarchiv ganze Tage
 fehlen. Es wurde keine Rendite berechnet. Details stehen in der
 [Datenprüfung](../../../docs/trading/research/2026-10-17-funding-carry-data-check.md).
+Die [V2](../../../docs/trading/research/2026-10-17-funding-carry-feasibility-preregistration-v2.md)
+ergänzt nur die ganz fehlenden Tage aus dem Tagesarchiv. Sie ist ein Entwurf
+zur Freigabe; das Skript wird erst danach erweitert.
 
 - Nur Python-Standardbibliothek, Aufruf immer mit `python3 -I`.
 - **Kein Netzwerkcode.** Das Skript liest nur Dateien und schreibt nie ins
