@@ -5,9 +5,11 @@ Setzt die eingefrorene
 um (Commit `248b739`, Blob `9b00cc92…`). Jede Konstante im Skript ist ein Wert
 aus diesem Dokument; Abschnittsangaben (§) im Code verweisen darauf.
 
-**Stand: Schritt 1.1.** Das Skript ist nur gegen synthetische Daten getestet.
-Es wurden keine Funding-, Perp-, Mark- oder Indexdaten geladen oder angesehen.
-Der Download (Schritt 1.2) braucht eine eigene, ausdrückliche Freigabe.
+**Stand 2026-10-17:** Der Download (Schritt 1.2) ist mit Freigabe gelaufen
+(`download_v1.sh`). Die Datenprüfung ergab `NICHT_AUSWERTBAR`: D4 scheitert
+bei den BTCUSDT-Mark- und Indexpreisen, weil im Monatsarchiv ganze Tage
+fehlen. Es wurde keine Rendite berechnet. Details stehen in der
+[Datenprüfung](../../../docs/trading/research/2026-10-17-funding-carry-data-check.md).
 
 - Nur Python-Standardbibliothek, Aufruf immer mit `python3 -I`.
 - **Kein Netzwerkcode.** Das Skript liest nur Dateien und schreibt nie ins
