@@ -1,5 +1,18 @@
 # Vorregistrierung der Machbarkeitsstudie Funding-/Basis-Carry BTC/ETH (2026-10-16)
 
+> **Status 2026-10-17: freigegeben und eingefroren (V1).**
+>
+> - Der Betreiber hat die offenen Punkte F1–F6 wie empfohlen freigegeben.
+> - Schritt 1.1 ist erlaubt: das Skript unter
+>   `scripts/research/funding-carry-v1/`, getestet nur gegen synthetische
+>   Daten.
+> - Der Download (Schritt 1.2) ist **noch nicht** freigegeben.
+> - Eingefrorene Fassung: Commit `248b739`, Blob
+>   `9b00cc9232efac8755496259cc9ff734d5620774` dieser Datei.
+>
+> Der Text unten bleibt als Festschreibung unverändert, nur dieser
+> Statusblock ist neu.
+
 > **Status: Entwurf zur Freigabe (Phase 0).** Geschrieben, **bevor** irgendwelche
 > Funding-, Perpetual-, Mark- oder Indexpreis-Daten abgerufen oder angesehen
 > wurden. Nichts wurde heruntergeladen, kein Code geschrieben, keine
