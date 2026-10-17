@@ -29,7 +29,10 @@ Data layout (<data> is data/market-snapshots/relative-strength-v1 for the real r
   listing/exchangeInfo.json             Binance exchangeInfo as fetched (D0c)
   listing/announcements-d0b.json        {"years": {"2020": [{"url", "published", "tradingEnd", "pairs"}]},
                                          "neverListed": [{"symbol", "url"}]}
+  listing/announcements-d0b-p7.json     D0b under precision P7 (fetch_metadata.py d0b-p7); read only once P7 is approved
   events/evidence.json                  {"cases": [{"symbol", "kind", "day", "published", "url", "successor", "ratio"}]}
+  events/long-gap-check.json            {"gaps": [{"symbol", "from", "to", "verdict"}]}  hourly-archive check of long
+                                         gaps (fetch_metadata.py gap-check); verdict consistent|suspected|notCheckable
   fred/DTB3.csv, benchmarks/benchmarks.csv   copies of the carry files (§4.1)
   manifest.sha256                       real run; a file SYNTHETIC marks synthetic data
   <spot>/<SYM>-1d.csv.gz                existing BTC/ETH snapshot (default data/market-snapshots/real)
@@ -181,6 +184,10 @@ EVIDENCE_KINDS = ("DELISTING", "MIGRATION", "SYMBOL_REUSE", "REDENOMINATION", "P
 VENUE_STATUSES = ("OFFEN", "VERFUEGBAR", "NICHT_VERFUEGBAR")
 POSITIVE_CLASSES = ("BESTANDEN", "BESTANDEN_REFERENZ", "AUSSTEHEND_PHASE_1B")
 HALT_CHECKS = ("D0", "D0b", "D9", "D11")
+# Precisions approved by the operator after the freeze. "P7" (D0b with archived exchangeInfo captures,
+# docs/trading/research/2026-10-17-relative-strength-d0b-precision-p7.md) is a draft: it is added here only
+# after its approval, in its own commit.
+APPROVED_PRECISIONS: tuple[str, ...] = ()
 BLOCKING_CHECKS = ("D1", "D2", "D3", "D6", "D7")
 RISK_ON = "RISK_ON"
 KLINE_HEADER = "open_time,open,high,low,close,volume,close_time,quote_volume,count,taker_buy_volume,taker_buy_quote_volume,ignore"
@@ -698,7 +705,8 @@ def build_instruments(series: dict[str, SymbolSeries], evidence: list[Evidence],
             elif rule.kind != "OPEN":
                 cases.append(EventCase(rule.kind, symbol, instrument.id, instrument.end, rule.documented,
                                        {"reason": rule.reason, "trigger": day_text(rule.trigger) if rule.trigger else None,
-                                        "successor": rule.successor, "ratio": rule.ratio, "url": rule.url}))
+                                        "successor": rule.successor, "ratio": rule.ratio, "url": rule.url,
+                                        "resumes": day_text(rule.resume_day) if rule.resume_day else None}))
     for symbol, days in data_errors.items():
         for day in sorted(days):
             cases.append(EventCase("E4", symbol, "", day, True, {"status": "belegter Datenfehler (D12)"}))
@@ -1764,6 +1772,41 @@ def determinability(class_a: dict, class_b: dict, accepted_halts: list[str]) -> 
 # --- Checks on listing and data (D0-D12) ------------------------------------------------
 
 
+def d0b_p7(document: dict, symbols: dict[str, list[str]], cfg: Config) -> dict:
+    """D0b under precision P7, re-checked here against the listing: announcements 2021-2025 (named pairs or
+    token delistings proven by archived exchangeInfo), and for 2020 every USDT pair that the archived captures
+    show ending; such a pair needs a file between the month before its last TRADING capture (or its first
+    capture) and the month it was seen ended."""
+    years = {}
+    pairs_2020 = document.get("endings2020") or []
+    found = []
+    for item in pairs_2020:
+        required = max(shift_month(item["lastSeenTrading"][:7], -1), item["firstSeenTrading"][:7])
+        found.append((item["pair"], any(required <= month <= item["firstSeenEnded"][:7] for month in symbols.get(item["pair"], []))))
+    years["2020"] = {"method": "snapshots", "pairs": len(found), "found": sum(ok for _, ok in found),
+                     "missing": [pair for pair, ok in found if not ok]}
+    for year in range(2021, 2026):
+        items = sorted(document.get("years", {}).get(str(year), []), key=lambda item: item["published"])[: cfg.d0b_announcements_per_year]
+        checks = []
+        for item in items:
+            required = shift_month(item["tradingEnd"][:7], -1)
+            for pair in item["pairs"]:
+                months = symbols.get(pair, [])
+                checks.append((pair, bool(months) and max(months) >= required))
+        years[str(year)] = {"method": "announcements", "announcements": len(items), "pairs": len(checks),
+                            "found": sum(ok for _, ok in checks), "missing": [pair for pair, ok in checks if not ok]}
+    for item in years.values():
+        item["share"] = item["found"] / item["pairs"] if item["pairs"] else None
+    performable = bool(pairs_2020) and all(years[str(year)]["announcements"] >= cfg.d0b_announcements_per_year for year in range(2021, 2026))
+    passed = performable and all(item["share"] is not None and item["share"] >= cfg.d0b_min_share for item in years.values())
+    return {"precision": "P7", "years": years, "performable": performable, "passed": passed}
+
+
+def shift_month(month: str, delta: int) -> str:
+    index = int(month[:4]) * 12 + int(month[5:7]) - 1 + delta
+    return f"{index // 12:04d}-{index % 12 + 1:02d}"
+
+
 def check_listing(data: Path, cfg: Config) -> dict:
     """D0, D0b and D0c on the step-1.2 metadata; never opens a market data file."""
     listing = read_json(data / "listing" / "spot-monthly-klines-1d.json")
@@ -1803,6 +1846,9 @@ def check_listing(data: Path, cfg: Config) -> dict:
         if months and max(months) < month_text(cfg.window_end - 1):
             ended[max(months)[:4]] += 1
     d0b = {"years": d0b_years, "performable": performable, "passed": d0b_passed, "endingSymbolsPerYear": dict(sorted(ended.items()))}
+    if "P7" in APPROVED_PRECISIONS:  # the frozen reading stays in the report next to the approved one
+        d0b = {**d0b_p7(read_json(data / "listing" / "announcements-d0b-p7.json"), symbols, cfg),
+               "v1": d0b, "endingSymbolsPerYear": d0b["endingSymbolsPerYear"]}
     not_trading = [item["symbol"] for item in exchange.get("symbols", []) if item.get("quoteAsset") == QUOTE and item.get("status") != "TRADING"]
     absent = [symbol for symbol in not_trading if symbol not in symbols]
     d0c = {"notTradingUsdtSymbols": len(not_trading), "absentFromArchive": absent,
@@ -1886,7 +1932,29 @@ def d9_check(market: Market) -> dict:
             "halt": len(ended) == 0}
 
 
-def d11_check(market: Market, cases: list[EventCase]) -> dict:
+def long_gap_review(cases: list[EventCase], members_ever: set[str], review: dict | None) -> dict:
+    """Operator requirement of 2026-10-17 (P7 draft, part c): a long gap of a universe member without a
+    documented pause is booked as E3 only after the hourly archive was checked for it. Hourly files inside
+    the gap mean a suspected archive error; an unchecked or suspected gap halts at D11 for the operator."""
+    checked = {(item["symbol"], item["from"]): item for item in (review or {}).get("gaps", [])}
+    unchecked, suspected, not_checkable = [], [], []
+    for case in cases:
+        if case.kind != "E3" or case.documented or case.instrument not in members_ever:
+            continue
+        resumes = case.detail.get("resumes")
+        gap = {"symbol": case.symbol, "from": day_text(case.day + 1), "to": day_text(day_of(resumes) - 1) if resumes else None}
+        item = checked.get((gap["symbol"], gap["from"]))
+        if item is None:
+            unchecked.append(gap)
+        elif item.get("verdict") == "suspected":
+            suspected.append({**gap, "hourlyDaysInGap": item.get("hourlyDaysInGap")})
+        elif item.get("verdict") == "notCheckable":
+            not_checkable.append(gap)
+    return {"unchecked": unchecked, "suspectedArchiveErrors": suspected, "notCheckable": not_checkable,
+            "halt": bool(unchecked or suspected)}
+
+
+def d11_check(market: Market, cases: list[EventCase], gap_review: dict | None = None) -> dict:
     cfg = market.cfg
     members_ever = {key for day in market.universe for key in market.universe[day].members}
     symbols = {market.instruments[key].symbol for key in members_ever}
@@ -1896,8 +1964,9 @@ def d11_check(market: Market, cases: list[EventCase]) -> dict:
     share = len(documented) / len(final_ends) if final_ends else 1.0
     lookups = [{"symbol": case.symbol, "kind": case.kind, "day": day_text(case.day), "documented": case.documented}
                for case in cases if case.symbol in symbols and case.kind in ("E3", "E4", "E5", "E6W", "E6C", "E7")]
-    return {"finalEnds": len(final_ends), "documented": len(documented), "share": share,
-            "halt": share < cfg.d11_min_share, "cases": lookups}
+    gaps = long_gap_review(cases, members_ever, gap_review)
+    return {"finalEnds": len(final_ends), "documented": len(documented), "share": share, "longGapReview": gaps,
+            "halt": share < cfg.d11_min_share or gaps["halt"], "cases": lookups}
 
 
 def load_inputs(data: Path, spot: Path | None, cfg: Config) -> dict:
@@ -1906,7 +1975,9 @@ def load_inputs(data: Path, spot: Path | None, cfg: Config) -> dict:
     snapshot = {symbol: parse_spot_snapshot((spot or DEFAULT_SPOT) / f"{symbol}-1d.csv.gz", cfg) for symbol in ("BTCUSDT", "ETHUSDT")}
     evidence = parse_evidence(read_json(data / "events" / "evidence.json", {"cases": []}))
     rf = parse_dtb3(data / "fred" / "DTB3.csv")
-    return {"listing": listing, "series": series, "reports": reports, "snapshot": snapshot, "evidence": evidence, "rf": rf}
+    gap_review = read_json(data / "events" / "long-gap-check.json", None)
+    return {"listing": listing, "series": series, "reports": reports, "snapshot": snapshot, "evidence": evidence, "rf": rf,
+            "gapReview": gap_review}
 
 
 def prepare(data: Path, spot: Path | None, cfg: Config, synthetic: bool) -> tuple[dict, Market | None, list]:
@@ -1936,7 +2007,7 @@ def prepare(data: Path, spot: Path | None, cfg: Config, synthetic: bool) -> tupl
     report["D5"] = {"excluded": dict(sorted(market.exclusions.items()))}
     report["D8"] = d8_check(market)
     report["D9"] = d9_check(market)
-    report["D11"] = d11_check(market, cases)
+    report["D11"] = d11_check(market, cases, inputs["gapReview"])
     halts = list(report["listing"]["halts"])
     if report["D9"]["halt"]:
         halts.append("D9")
@@ -1967,7 +2038,9 @@ def plan(data: Path, spot: Path | None, cfg: Config) -> dict:
     try:
         _, market, cases = prepare(data, spot, cfg, (data / "SYNTHETIC").exists())
         if market is not None:
-            report["evidenceCasesD11"] = d11_check(market, cases)["cases"]
+            d11 = d11_check(market, cases)
+            report["evidenceCasesD11"] = d11["cases"]
+            report["longGapsToCheck"] = d11["longGapReview"]["unchecked"]  # input of fetch_metadata.py gap-check
             members = {market.instruments[key].symbol for day in market.universe for key in market.universe[day].members}
     except StudyError as error:
         report["evidenceCasesD11"] = f"nicht bestimmbar: {error}"
@@ -2116,7 +2189,9 @@ def evaluate(data: Path, out: Path, spot: Path | None, cfg: Config, guard: dict,
 
 
 INTERPRETATIONS = [
-    "B3(c): 'Sharpe' ist die Monats-Sharpe (wie Vergleichstabelle und α-Tests); die Tages-Sharpe steht als cWithDailySharpe daneben.",
+    "B3(c): 'Sharpe' ist die Monats-Sharpe aus denselben Kalendermonats-Renditen wie die α-Tests (M2: × √12, ohne Zins); "
+    "vom Betreiber am 2026-10-17 als primäre Berechnung bestätigt. Die Tages-Sharpe steht nur als Sensitivität daneben "
+    "(cWithDailySharpe, b3cSharpeDefinitionCheck) und ersetzt die Entscheidung nie.",
     "AUSSTEHEND_PHASE_1B: positives Ergebnis vor Phase 1B (venue OFFEN), wie beim Carry; endgültig nach 1.6.",
     "D3 zählt nur Lücken von 1-6 Tagen als fehlend; lange Lücken (E3/E7) sind keine Handelszeit und stehen in D4.",
     "Mindestorder 10 USDT gilt für Käufe und reguläre Verkäufe; erzwungene Ausstiege (E2-E7) und die Glattstellung am Ende entfallen nie.",
@@ -2432,6 +2507,8 @@ def generate_synthetic(out: Path, seed: int = 7, cfg: Config = FROZEN) -> None:
           "published": f"{year}-0{2 + 'ABC'.index(letter)}-20", "url": f"https://example.invalid/{year}/{letter}"} for year in D0B_YEARS for letter in "ABC"]}
     (out / "events").mkdir(exist_ok=True)
     (out / "events" / "evidence.json").write_text(json.dumps(evidence, indent=1), encoding="utf-8")
+    gap_check = {"gaps": [{"symbol": "LONGUSDT", "from": "2021-07-01", "to": "2021-07-20", "verdict": "consistent", "hourlyDaysInGap": []}]}
+    (out / "events" / "long-gap-check.json").write_text(json.dumps(gap_check, indent=1), encoding="utf-8")
     (out / "fred").mkdir(exist_ok=True)
     rows = ["observation_date,DTB3"]
     for day in range(day_of("2019-06-01"), cfg.window_end):

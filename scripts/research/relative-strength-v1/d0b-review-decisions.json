@@ -9,6 +9,7 @@
  "51eb4f0351194fab957bb23cc6ee52dd": {"qualifies": false, "pairs": [], "tradingEnd": null, "reason": "DREP-Redenominierung: Handelsstopp, Wiedereröffnung unter demselben Symbol"},
  "64c09de652f94a639868aecffbe7b013": {"qualifies": false, "pairs": [], "tradingEnd": null, "reason": "INJ-Mainnet-Tausch: USDT nur im Margin-Zusammenhang, kein Spot-Ende"},
  "7ec33a2d62974c3490b92ff0780ba461": {"qualifies": true, "pairs": ["KEYUSDT"], "tradingEnd": "2023-02-10", "reason": "Spot-Paar KEY/USDT wird am 2023-02-10 entfernt"},
+ "83b0ed10abd646328bf104d871d03d70": {"qualifies": false, "pairs": [], "tradingEnd": null, "reason": "nennt keine Paare (V1: nein); P7: Delisting der Hebel-Token ohne Paarliste, Enden 2022-02-14 bis 2022-02-18", "p7": {"tokens": ["EOSUP", "EOSDOWN", "BCHUP", "BCHDOWN", "YFIUP", "YFIDOWN", "XLMUP", "XLMDOWN", "1INCHUP", "1INCHDOWN", "SXPUP", "SXPDOWN", "UNIUP", "UNIDOWN", "AAVEUP", "AAVEDOWN", "SUSHIUP", "SUSHIDOWN", "FILUP", "FILDOWN"], "tradingEnd": "2022-02-14"}},
  "89c3426b722341269effb0c073b30cdf": {"qualifies": false, "pairs": [], "tradingEnd": null, "reason": "entferntes Paar ist USDT/BKRW (Quote BKRW); laut Korrekturvermerk nicht BKRW/USDT"},
  "8bdcb060635b491d912247fb00603d4d": {"qualifies": true, "pairs": ["NPXSUSDT"], "tradingEnd": "2021-04-05", "reason": "alle NPXS-Paare (NPXS/ETH, NPXS/USDT) werden am 2021-04-05 delistet; Nachfolger unter neuem Symbol PUNDIX"},
  "9524932fe684406d9bb189423ede69fe": {"qualifies": false, "pairs": [], "tradingEnd": null, "reason": "RSR-Vertragstausch: nur Margin und Futures erwähnt, kein Spot-Ende"},
@@ -27,5 +28,6 @@
  "f555f8013eff42bc9c91eaa48b9da24b": {"qualifies": false, "pairs": [], "tradingEnd": null, "reason": "COCOS-Redenominierung: Handelsstopp, Wiedereröffnung unter demselben Symbol"},
  "f73b083ba6834771b07dbe5319917ae5": {"qualifies": true, "pairs": ["ANTUSDT", "MULTIUSDT", "XMRUSDT"], "tradingEnd": "2024-02-20", "reason": "entfernte USDT-Paare laut Text: ANT/USDT, MULTI/USDT, XMR/USDT am 2024-02-20 (USDT/VAI hat Quote VAI)"},
  "f923f2e4056843a9a9b87beb2aaa2f31": {"qualifies": false, "pairs": [], "tradingEnd": null, "reason": "SUN-Migration: Wiedereröffnung von SUN/USDT unter demselben Symbol"},
- "f97738a409ca40fbb7fb4e7740e5cd00": {"qualifies": false, "pairs": [], "tradingEnd": null, "reason": "Abschlussmeldung BZRX zu OOKI: nennt nur neu eröffnete OOKI-Paare"}
+ "f97738a409ca40fbb7fb4e7740e5cd00": {"qualifies": false, "pairs": [], "tradingEnd": null, "reason": "Abschlussmeldung BZRX zu OOKI: nennt nur neu eröffnete OOKI-Paare"},
+ "fac9c3e401da4cc8b604566fd261d70c": {"qualifies": false, "pairs": [], "tradingEnd": null, "reason": "nennt keine Paare (V1: nein); P7: Delisting aller Spot-Paare von 14 Token am 2025-04-16 03:00 UTC", "p7": {"tokens": ["BADGER", "BAL", "BETA", "CREAM", "CTXC", "ELF", "FIRO", "HARD", "NULS", "PROS", "SNT", "TROY", "UFT", "VIDT"], "tradingEnd": "2025-04-16"}}
 }

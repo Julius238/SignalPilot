@@ -5,13 +5,17 @@ Setzt die eingefrorene
 um (Text `c188c38`, Blob `96525664…`, Statusblock `6520f42`). Abschnittsangaben
 (§) beziehen sich auf sie.
 
-**Stand 2026-10-17: Schritt 1.2.**
+**Stand 2026-10-17: Schritt 1.2, Präzisierung P7 als Entwurf, Downloader für 1.3 bereit.**
 
 - `relative_strength_v1.py` ist fertig und nur gegen synthetische Daten
   getestet. Es enthält keinen Netzwerkcode und hat nie Kursdaten gelesen.
 - `fetch_metadata.py` (Schritt 1.2) ruft nur Metadaten ab: Verzeichnisliste
   des Archivs, `exchangeInfo`, öffentliche Ankündigungen. Ergebnis:
   [Metadatenprüfung](../../../docs/trading/research/2026-10-17-relative-strength-metadata-check.md).
+- `download_archive.py` (Schritt 1.3) lädt die Tageskerzen samt `.CHECKSUM`
+  und schreibt `manifest.sha256`; bisher nur offline getestet.
+- [Präzisierung P7](../../../docs/trading/research/2026-10-17-relative-strength-d0b-precision-p7.md)
+  zu D0b ist ein Entwurf; `APPROVED_PRECISIONS` bleibt leer bis zur Freigabe.
 - Download (1.3) und Auswertung (1.5) brauchen je eine eigene Freigabe.
 
 ## Aufruf
@@ -47,6 +51,9 @@ python3 -I scripts/research/relative-strength-v1/fetch_metadata.py listing --out
 | `exchange-info --out DIR` | heutige USDT-Symbole mit Status, nur für D0c, nie als historisches Universum |
 | `announcements --out DIR` | Ankündigungen der Kataloge 49 und 161 und eine automatische Vorauswahl; langsam, mit Zwischenspeicher. Nur Hilfe, nicht die D0b-Stichprobe |
 | `review-sheet --out DIR [--per-year N] [--years …]` | lädt die ersten N Kandidaten je Jahr und schreibt ein Prüfblatt mit Textauszug für die Durchsicht von Hand |
+| `snapshots --out DIR` | archivierte Binance-`exchangeInfo` (Internet Archive), je Monat die erste brauchbare Aufnahme, auf USDT reduziert |
+| `d0b-p7 --out DIR --decisions FILE` | D0b nach dem Entwurf P7: Token-Delistings mit Nachweis aus archivierten Symbollisten, 2020 als Vollerhebung; nur Bericht bis zur Freigabe |
+| `gap-check --plan FILE --out FILE` | Stundendateien des Archivs in jeder langen Lücke eines Uₜ-Mitglieds (P7 c) → `events/long-gap-check.json` |
 | `d0b-sample --out DIR --decisions FILE` | D0b-Stichprobe: Entscheidungen von Hand aus [`d0b-review-decisions.json`](d0b-review-decisions.json), dazu ein automatisches „nein“ für Texte ohne Paar `X/USDT`; bricht ab, wenn vor dem dritten Treffer eines Jahres ein Kandidat ungeprüft ist |
 | `download-plan --listing FILE` | Dateien, Volumen, Abrufe und Dauer von Schritt 1.3 |
 
@@ -100,12 +107,15 @@ python3 -I scripts/research/relative-strength-v1/relative_strength_v1.py evaluat
 
 ## Auslegungen, die das Skript ausweist (`interpretations` im Ergebnis)
 
-1. B3(c) vergleicht die Monats-Sharpe. Die Tages-Sharpe steht als
-   `cWithDailySharpe` daneben.
+1. B3(c) vergleicht die Monats-Sharpe aus denselben Monatsrenditen wie die
+   α-Tests; vom Betreiber am 2026-10-17 bestätigt. Die Tages-Sharpe ist nur
+   Sensitivität (`cWithDailySharpe`).
 2. Ein positives Ergebnis vor Phase 1B heißt wie beim Carry
    `AUSSTEHEND_PHASE_1B`.
 3. D3 zählt nur Lücken von 1–6 Tagen als fehlend; lange Lücken sind keine
-   Handelszeit und stehen in D4.
+   Handelszeit und stehen in D4. Eine lange Lücke eines Uₜ-Mitglieds ohne
+   belegte Pause braucht die Prüfung des Stundenarchivs (`gap-check`), sonst
+   oder bei Verdacht auf Archivfehler hält D11 an.
 4. Die Mindestorder von 10 USDT gilt für Käufe und reguläre Verkäufe.
    Erzwungene Ausstiege (E2–E7) und die Glattstellung am Ende entfallen nie.
 5. S2-Zins: DTB3/365 je Tag an Nicht-`RISK_ON`-Tagen außer dem Ausstiegstag.
@@ -116,16 +126,27 @@ python3 -I scripts/research/relative-strength-v1/relative_strength_v1.py evaluat
    höchstens drei Tage vom Datenende abweicht (bei Umstellungen ein Tag). Der
    früheste Ausstieg ist die Eröffnung des Tags nach der Veröffentlichung.
 
+## Download (Schritt 1.3, erst nach Freigabe)
+
+```bash
+python3 -I scripts/research/relative-strength-v1/download_archive.py monthly --data data/market-snapshots/relative-strength-v1 --dry-run
+```
+
+| Befehl von `download_archive.py` | Zweck |
+|---|---|
+| `monthly --data DIR [--rate 4] --confirm DOWNLOAD_RELATIVE_STRENGTH_V1` | alle Monatsdateien der Liste im Fenster, je mit `.CHECKSUM`; behält nur Dateien mit passender SHA-256, setzt nach Abbruch fort |
+| `daily --data DIR --plan FILE --confirm …` | Tagesdateien aus `plan` (E1, D12); fehlende Tagesdateien sind erlaubt und werden gelistet |
+| `manifest --data DIR` | `manifest.sha256` über alle Dateien, zuletzt, nach Belegen und Lückenprüfung |
+
+Reihenfolge: `monthly` → `plan` → `daily` → `plan` (Lücken) →
+`fetch_metadata.py gap-check` → Belege D11 → `manifest`.
+
 ## Eingaben für Schritt 1.3
 
 - Schritt 1.2 hat Verzeichnisliste, `exchangeInfo`, D0b-Stichprobe, Gebühr
   und Zeitstempel-Dokumentation erledigt (siehe Metadatenprüfung).
-- **Offen vor 1.3:** Entscheidung des Betreibers zum Halt an D0b (2020 ohne,
-  2025 mit nur zwei auswertbaren Ankündigungen; alle 25 genannten Paare
-  gefunden).
+- **Offen vor 1.3:** Freigabe von P7 (D0b) und des Downloads.
 - **Für 1.3 fehlen:**
-  - Download-Werkzeug für Monats- und Tagesdateien mit `.CHECKSUM` und
-    `manifest.sha256`;
   - Kopie von `fred/DTB3.csv` und der Benchmark-Datei aus dem Carry, je gegen
     deren Manifest geprüft;
   - `events/evidence.json` aus 1.4b.
@@ -134,7 +155,7 @@ python3 -I scripts/research/relative-strength-v1/relative_strength_v1.py evaluat
 
 ## Testabdeckung (synthetisch)
 
-`test_relative_strength_v1.py`, 45 Tests (dazu `test_fetch_metadata.py`, 7 Tests ohne Netz):
+`test_relative_strength_v1.py`, 47 Tests (dazu `test_fetch_metadata.py` mit 12 und `test_download_archive.py` mit 7 Tests, alle ohne Netz):
 
 - Universum Point-in-Time (U1–U4, X1–X5);
 - kein Blick in die Zukunft bei Universum, Rang und Regime;

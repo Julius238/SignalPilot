@@ -68,6 +68,76 @@ class Listing(unittest.TestCase):
         self.assertEqual(plan["symbolsEndingBeforeWindowEndByYear"], {"2021": 1, "2026": 1})
 
 
+class GapCheck(unittest.TestCase):
+    def test_hourly_files_inside_a_gap_are_suspected_archive_errors(self):
+        def fake(url: str, pause: float = 0.0) -> bytes:
+            prefix = dict(urllib.parse.parse_qsl(urllib.parse.urlparse(url).query))["prefix"]
+            symbol, month = prefix.split("/")[4], prefix[-7:]
+            days = {("GAPUSDT", "2021-06"): ["2021-06-29", "2021-06-30"], ("GAPUSDT", "2021-07"): ["2021-07-03", "2021-07-25"],
+                    ("OKUSDT", "2021-06"): ["2021-06-30"], ("OKUSDT", "2021-07"): ["2021-07-21"]}.get((symbol, month), [])
+            return s3_xml(keys=[(f"data/spot/daily/klines/{symbol}/1h/{symbol}-1h-{day}.zip", 10) for day in days] +
+                               [(f"data/spot/daily/klines/{symbol}/1h/{symbol}-1h-{day}.zip.CHECKSUM", 1) for day in days])
+        gaps = [{"symbol": symbol, "from": "2021-07-01", "to": "2021-07-20"} for symbol in ("GAPUSDT", "OKUSDT", "OLDUSDT")]
+        result = {item["symbol"]: item for item in fm.gap_check(gaps, fake)}
+        self.assertEqual((result["GAPUSDT"]["verdict"], result["GAPUSDT"]["hourlyDaysInGap"]), ("suspected", ["2021-07-03"]))
+        self.assertEqual(result["OKUSDT"]["verdict"], "consistent")
+        self.assertEqual(result["OLDUSDT"]["verdict"], "notCheckable")  # no hourly file around the gap at all
+        self.assertEqual(fm.shift_month("2021-01", -1), "2020-12")
+
+
+def snap(time: str, symbols: dict) -> tuple:
+    return (time, symbols, f"https://web.archive.org/web/{time[:10]}/x")
+
+
+class PrecisionP7(unittest.TestCase):
+    SNAPSHOTS = [snap("2019-12-20T00:00:00Z", {"OLDUSDT": ["OLD", "TRADING"], "PAUSEUSDT": ["PAUSE", "TRADING"], "REUSEUSDT": ["REUSE", "TRADING"]}),
+                 snap("2020-06-01T00:00:00Z", {"OLDUSDT": ["OLD", "BREAK"], "PAUSEUSDT": ["PAUSE", "BREAK"], "REUSEUSDT": ["REUSE", "BREAK"],
+                                               "TOKUSDT": ["TOK", "TRADING"], "GONEUSDT": ["GONE", "BREAK"]}),
+                 snap("2020-09-01T00:00:00Z", {"PAUSEUSDT": ["PAUSE", "TRADING"], "TOKUSDT": ["TOK", "BREAK"], "REUSEUSDT": ["REUSE", "BREAK"]}),
+                 snap("2023-01-01T00:00:00Z", {"REUSEUSDT": ["REUSE", "TRADING"], "TOKUSDT": ["TOK", "BREAK"], "PAUSEUSDT": ["PAUSE", "TRADING"]})]
+
+    def test_token_pairs_need_archived_trading_before_and_an_end_after(self):
+        evidenced, rejected = fm.token_pairs(["TOK", "GONE", "NONE"], "2020-07-01T00:00:00Z", "2020-07-15", self.SNAPSHOTS)
+        self.assertEqual([item["pair"] for item in evidenced], ["TOKUSDT"])
+        self.assertEqual({item["pair"] for item in rejected}, {"GONEUSDT", "NONEUSDT"})  # already BREAK, or never listed
+        evidenced, _ = fm.token_pairs(["TOK"], "2020-07-01T00:00:00Z", "2023-06-01", self.SNAPSHOTS)
+        self.assertEqual(evidenced, [])  # no capture after the trading end
+
+    def test_snapshot_endings_skip_pauses_and_the_archive_check_refuses_reused_symbols(self):
+        endings = {item["pair"]: item for item in fm.snapshot_endings(self.SNAPSHOTS)}
+        self.assertEqual(set(endings), {"OLDUSDT", "REUSEUSDT", "TOKUSDT"})  # PAUSEUSDT trades again within a year
+        symbols = {"OLDUSDT": ["2019-07", "2019-12", "2020-01"], "REUSEUSDT": ["2019-06", "2023-01"], "TOKUSDT": ["2020-06", "2020-07"]}
+        check = fm.p7_archive_check({}, list(endings.values()), symbols)
+        self.assertEqual(check["years"]["2020"]["missing"], ["REUSEUSDT"])  # only files from the reuse after 2020
+        self.assertFalse(check["years"]["2020"]["passed"])  # 2 of 3 found, below 90 %
+
+    def test_sample_counts_token_delistings_and_drops_pairs_removed_earlier(self):
+        day = 86_400_000
+        start = 1_590_969_600_000  # 2020-06-01
+        candidates = [article("t1", "Binance Will Delist TOK", start + 30 * day), article("n1", "Notice of Removal", start + 10 * day),
+                      article("x1", "Binance Will Delist X", start + 40 * day)]
+        texts = {"n1": "Binance will remove ABC/USDT", "t1": "delist TOK", "x1": "delist X"}
+        decisions = {"n1": {"qualifies": True, "pairs": ["ABCUSDT"], "tradingEnd": "2020-06-15"},
+                     "t1": {"qualifies": False, "pairs": [], "tradingEnd": None, "p7": {"tokens": ["TOK"], "tradingEnd": "2020-07-15"}},
+                     "x1": {"qualifies": False, "pairs": [], "tradingEnd": None}}
+        snapshots = [snap(t.replace("2020-", "2021-"), s) for t, s, _ in self.SNAPSHOTS]  # shift the captures into a sample year
+        candidates = [{**item, "releaseDate": item["releaseDate"] + 365 * day} for item in candidates]
+        for item in decisions.values():
+            for key in ("tradingEnd",):
+                if item.get(key):
+                    item[key] = item[key].replace("2020-", "2021-")
+            if "p7" in item:
+                item["p7"]["tradingEnd"] = item["p7"]["tradingEnd"].replace("2020-", "2021-")
+        years = fm.build_p7_sample(candidates, decisions, snapshots, lambda a: texts[a["code"]])
+        self.assertEqual([(item["kind"], item["pairs"]) for item in years["2021"]], [("named", ["ABCUSDT"]), ("token", ["TOKUSDT"])])
+        texts["n1"] = "Binance will remove TOK/USDT and ABC/USDT"
+        years = fm.build_p7_sample(candidates, decisions, snapshots, lambda a: texts[a["code"]])
+        self.assertEqual([item["kind"] for item in years["2021"]], ["named"])  # TOK/USDT ended earlier, the token delisting adds nothing
+
+    def test_slashless_pair_notation_is_recognized(self):
+        self.assertEqual(fm.named_usdt_pairs("remove AAVEBRL, ABCUSDT and DEF/USDT"), ["DEFUSDT", "ABCUSDT"])
+
+
 def article(code: str, title: str, published_ms: int) -> dict:
     return {"code": code, "title": title, "releaseDate": published_ms, "id": 1, "type": 1}
 

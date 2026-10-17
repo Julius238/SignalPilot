@@ -214,6 +214,14 @@ durchgesehen; unter der Auslegung oben zählt danach keine Ankündigung mehr.
   Zweitprüfung. Sie sind aber je Ankündigung begründet und am Text
   nachprüfbar.
 
+> **Nachtrag 2026-10-17:** Der Betreiber will den Halt nicht mit
+> `--accept-halt` umgehen. Statt Option (b) mit der heutigen `exchangeInfo`
+> liegt jetzt der Entwurf
+> [P7](2026-10-17-relative-strength-d0b-precision-p7.md) zur Freigabe vor.
+> Er belegt die Paare mit zeitlich passenden, archivierten Binance-Symbollisten
+> und ersetzt 2020 die Stichprobe durch eine Vollerhebung. Unter P7 sind alle
+> Jahre zu 100 % gefunden.
+
 **Optionen für den Betreiber** (die Vorregistrierung bleibt unverändert, bis
 der Betreiber entscheidet):
 

@@ -436,6 +436,21 @@ class DataChecks(unittest.TestCase):
         self.assertEqual(report["longGaps"], [{"symbol": "HALTUSDT", "from": rs.day_text(START + 10), "to": rs.day_text(START + 19), "days": 10}])
         self.assertTrue(report["passed"])  # ... but it is listed, never silent
 
+    def test_long_gaps_of_members_need_the_hourly_archive_check(self):
+        gap = rs.EventCase("E3", "LONGUSDT", "LONGUSDT#1", rs.day_of("2021-06-30"), False, {"resumes": "2021-07-21"})
+        paused = rs.EventCase("E3", "PAUSEUSDT", "PAUSEUSDT#1", rs.day_of("2021-06-30"), True, {"resumes": "2021-07-21"})
+        members = {"LONGUSDT#1", "PAUSEUSDT#1"}
+        review = rs.long_gap_review([gap, paused], members, None)
+        self.assertEqual(review["unchecked"], [{"symbol": "LONGUSDT", "from": "2021-07-01", "to": "2021-07-20"}])  # documented pause exempt
+        self.assertTrue(review["halt"])
+        checked = {"gaps": [{"symbol": "LONGUSDT", "from": "2021-07-01", "verdict": "suspected", "hourlyDaysInGap": ["2021-07-03"]}]}
+        review = rs.long_gap_review([gap], members, checked)
+        self.assertEqual(len(review["suspectedArchiveErrors"]), 1)
+        self.assertTrue(review["halt"])  # hourly files inside the gap: not booked as a pause without the operator
+        checked["gaps"][0]["verdict"] = "consistent"
+        self.assertFalse(rs.long_gap_review([gap], members, checked)["halt"])
+        self.assertFalse(rs.long_gap_review([gap], set(), None)["halt"])  # never a universe member: no requirement
+
     def test_d0_d0b_d0c(self):
         (self.tmp / "listing").mkdir()
         symbols = {symbol: [f"{year}-01"] for symbol, year in rs.D0_CONTROL.items()}
@@ -460,6 +475,34 @@ class DataChecks(unittest.TestCase):
         report = rs.check_listing(self.tmp, CFG)
         self.assertFalse(report["D0b"]["performable"])
         self.assertIn("D0b", report["halts"])
+
+    def test_d0b_precision_p7_only_once_approved(self):
+        (self.tmp / "listing").mkdir()
+        symbols = {symbol: [f"{year}-01"] for symbol, year in rs.D0_CONTROL.items()}
+        symbols.update({f"D{year}USDT": [f"{year}-0{m}" for m in range(1, 4)] for year in range(2021, 2026)})
+        symbols.update({"OLDUSDT": ["2019-08", "2020-05"], "REUSEDUSDT": ["2019-08", "2026-04"]})
+        (self.tmp / "listing" / "spot-monthly-klines-1d.json").write_text(json.dumps({"symbols": symbols}))
+        (self.tmp / "listing" / "announcements-d0b.json").write_text(json.dumps({"years": {}}))  # V1: not performable
+        years = {str(year): [{"url": "u", "published": f"{year}-0{k}-01", "tradingEnd": f"{year}-04-01", "pairs": [f"D{year}USDT"]} for k in (1, 2, 3)]
+                 for year in range(2021, 2026)}
+        ending = {"pair": "OLDUSDT", "firstSeenTrading": "2019-10-10T00:00:00Z", "lastSeenTrading": "2020-03-28T00:00:00Z", "firstSeenEnded": "2020-09-14T00:00:00Z"}
+        p7 = {"years": years, "endings2020": [ending]}
+        (self.tmp / "listing" / "announcements-d0b-p7.json").write_text(json.dumps(p7))
+        self.assertIn("D0b", rs.check_listing(self.tmp, CFG)["halts"])  # the draft is ignored until approved
+        original = rs.APPROVED_PRECISIONS
+        try:
+            rs.APPROVED_PRECISIONS = ("P7",)
+            report = rs.check_listing(self.tmp, CFG)
+            self.assertEqual(report["halts"], [])
+            self.assertEqual(report["D0b"]["precision"], "P7")
+            self.assertFalse(report["D0b"]["v1"]["performable"])  # the frozen reading stays visible
+            p7["endings2020"].append({**ending, "pair": "REUSEDUSDT"})  # only files from a later reuse of the symbol
+            (self.tmp / "listing" / "announcements-d0b-p7.json").write_text(json.dumps(p7))
+            report = rs.check_listing(self.tmp, CFG)
+            self.assertEqual(report["D0b"]["years"]["2020"]["missing"], ["REUSEDUSDT"])
+            self.assertIn("D0b", report["halts"])  # 1 of 2 found: below 90 %
+        finally:
+            rs.APPROVED_PRECISIONS = original
 
 
 # --- Statistics and classes (§10) -------------------------------------------------------

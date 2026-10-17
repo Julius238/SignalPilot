@@ -22,11 +22,19 @@ Commands:
                                                  manual decisions plus an automatic "no" for texts without a USDT pair
                                                  -> DIR/announcements-d0b-review.json, D0b sample -> DIR/announcements-d0b.json
   download-plan  --listing FILE [--out FILE]     files, volume, requests and duration of step 1.3
+  gap-check      --plan FILE --out FILE          hourly archive files inside each long gap of a universe member
+                                                 (input: `relative_strength_v1.py plan`, key longGapsToCheck)
+  d0b-p7         --out DIR --decisions FILE [--cache DIR]
+                                                 D0b under the draft precision P7 (report until approved)
+                                                 -> DIR/announcements-d0b-p7.json
+  snapshots      --out DIR                       archived exchangeInfo captures (Internet Archive), one per month,
+                                                 reduced to USDT symbols -> DIR/wayback-exchangeInfo/ (P7 evidence)
 """
 
 from __future__ import annotations
 
 import argparse
+import gzip
 import hashlib
 import json
 import re
@@ -46,6 +54,12 @@ ARTICLE_LIST_URL = "https://www.binance.com/bapi/composite/v1/public/cms/article
 ARTICLE_DETAIL_URL = "https://www.binance.com/bapi/composite/v1/public/cms/article/detail/query"
 ARTICLE_PAGE_URL = "https://www.binance.com/en/support/announcement/{code}"
 MONTHLY_PREFIX = "data/spot/monthly/klines/"
+HOURLY_DAILY_PREFIX = "data/spot/daily/klines/{symbol}/1h/{symbol}-1h-{month}"
+WAYBACK_CDX_URL = "https://web.archive.org/cdx/search/cdx"
+WAYBACK_RAW_URL = "https://web.archive.org/web/{timestamp}id_/{original}"
+# Binance served the same exchangeInfo under these addresses; the Internet Archive captured each of them now and then.
+EXCHANGE_INFO_ORIGINALS = ("www.binance.com/api/v1/exchangeInfo", "api.binance.com/api/v1/exchangeInfo",
+                           "api.binance.com/api/v3/exchangeInfo", "www.binance.com/api/v3/exchangeInfo")
 S3_NS = {"s3": "http://s3.amazonaws.com/doc/2006-03-01/"}
 FIRST_MONTH, LAST_MONTH = "2019-07", "2026-09"  # Vorlauf and window of the preregistration (§4.1)
 D0B_YEARS = tuple(range(2020, 2026))
@@ -190,6 +204,36 @@ def structure_report(listing: dict) -> dict:
             "lastModifiedByMonth": dict(sorted(modified.items()))}
 
 
+def shift_month(month: str, delta: int) -> str:
+    index = int(month[:4]) * 12 + int(month[5:7]) - 1 + delta
+    return f"{index // 12:04d}-{index % 12 + 1:02d}"
+
+
+def gap_check(gaps: list[dict], fetch=http_get) -> list[dict]:
+    """Metadata check of long gaps (P7 draft, part c): daily files of the hourly klines inside a gap whose
+    daily candles are missing point to an archive error. The months around the gap show whether the hourly
+    archive covers that time at all; without any hourly file there the gap is not checkable."""
+    results = []
+    for gap in gaps:
+        symbol, first, last = gap["symbol"], gap["from"], gap["to"]
+        inside, around = [], 0
+        for month in months_between(shift_month(first[:7], -1), shift_month(last[:7], 1)):
+            _, keys = s3_list(HOURLY_DAILY_PREFIX.format(symbol=symbol, month=month), fetch)
+            for item in keys:
+                name = item["key"].rsplit("/", 1)[-1]
+                if not (name.startswith(f"{symbol}-1h-") and name.endswith(".zip")):
+                    continue
+                day = name[len(symbol) + 4:-4]
+                if first <= day <= last:
+                    inside.append(day)
+                else:
+                    around += 1
+        verdict = "suspected" if inside else ("consistent" if around else "notCheckable")
+        results.append({"symbol": symbol, "from": first, "to": last, "verdict": verdict,
+                        "hourlyDaysInGap": sorted(inside), "hourlyFilesAround": around})
+    return results
+
+
 def download_plan(listing: dict, requests_per_second: float = 4.0) -> dict:
     """Monthly 1d files of every USDT symbol for 2019-07..2026-09, with their .CHECKSUM (step 1.3)."""
     files = size = 0
@@ -218,6 +262,65 @@ def download_plan(listing: dict, requests_per_second: float = 4.0) -> dict:
 
 
 # --- exchangeInfo (D0c only) ----------------------------------------------------------------
+
+
+def wayback_index(fetch=http_get, first: str = "201910", last: str = "202512") -> dict[str, list[dict]]:
+    """Archived exchangeInfo captures with HTTP 200 over all addresses, grouped by month in capture order."""
+    rows = []
+    for original in EXCHANGE_INFO_ORIGINALS:
+        query = urllib.parse.urlencode({"url": original, "from": first, "to": last, "output": "json",
+                                        "fl": "timestamp,original,digest", "filter": "statuscode:200"})
+        table = json.loads(fetch(f"{WAYBACK_CDX_URL}?{query}", 2.0) or b"[]")
+        rows.extend(dict(zip(table[0], row)) for row in table[1:])
+    by_month: dict[str, list[dict]] = {}
+    for row in sorted(rows, key=lambda item: item["timestamp"]):
+        by_month.setdefault(row["timestamp"][:6], []).append(row)
+    return by_month
+
+
+def reduce_snapshot(raw: bytes, row: dict) -> dict:
+    """USDT symbols of one archived capture. Binance's own serverTime dates the content; the capture time
+    of the Internet Archive is kept next to it."""
+    if raw[:2] == b"\x1f\x8b":
+        raw = gzip.decompress(raw)
+    document = json.loads(raw)
+    server_time = document.get("serverTime")
+    return {"captured": row["timestamp"], "original": row["original"],
+            "archiveUrl": WAYBACK_RAW_URL.format(timestamp=row["timestamp"], original=row["original"]),
+            "rawSha256": hashlib.sha256(raw).hexdigest(),
+            "serverTime": datetime.fromtimestamp(server_time / 1000, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") if server_time else None,
+            "symbols": {item["symbol"]: [item["baseAsset"], item["status"]] for item in document.get("symbols", [])
+                        if item.get("quoteAsset") == "USDT"}}
+
+
+def fetch_snapshots(out: Path, fetch=http_get) -> list[dict]:
+    """The first usable capture of every month (cached by capture time). Some captures are cut off at 1 MiB;
+    those are listed as unusable and the next capture of the month is tried."""
+    folder = out / "wayback-exchangeInfo"
+    folder.mkdir(parents=True, exist_ok=True)
+    index = []
+    for month, rows in sorted(wayback_index(fetch).items()):
+        reduced = None
+        for row in rows:
+            path = folder / f"{row['timestamp']}.json"
+            if path.exists():
+                reduced = json.loads(path.read_text(encoding="utf-8"))
+                break
+            try:
+                reduced = reduce_snapshot(fetch(WAYBACK_RAW_URL.format(timestamp=row["timestamp"], original=row["original"]), 2.0), row)
+            except (FetchError, ValueError) as error:
+                index.append({"captured": row["timestamp"], "original": row["original"], "unusable": str(error)[:200]})
+                continue
+            path.write_text(json.dumps(reduced, indent=1), encoding="utf-8")
+            break
+        if reduced is None:
+            continue
+        index.append({key: reduced[key] for key in ("captured", "original", "archiveUrl", "rawSha256", "serverTime")}
+                     | {"usdtSymbols": len(reduced["symbols"]), "trading": sum(1 for _, status in reduced["symbols"].values() if status == "TRADING")})
+    (out / "wayback-exchangeInfo.json").write_text(json.dumps({"source": WAYBACK_CDX_URL, "fetchedAt": datetime.now(timezone.utc).isoformat(),
+                                                               "captures": index}, indent=1), encoding="utf-8")
+    return index
+
 
 
 def reduce_exchange_info(raw: bytes) -> dict:
@@ -255,6 +358,7 @@ def article_text(body: str) -> str:
 
 
 PAIR_PATTERN = re.compile(r"\b([A-Z0-9]{2,15})\s*/\s*USDT\b")
+SLASHLESS_PATTERN = re.compile(r"\b([A-Z0-9]{2,15})USDT\b")  # some notices write pairs as AAVEBRL, ABCUSDT
 DATE_PATTERN = re.compile(r"(20\d\d)[-/.](\d{1,2})[-/.](\d{1,2})")
 
 
@@ -266,6 +370,11 @@ def usdt_pairs(text: str) -> list[str]:
         if symbol not in seen:
             seen.append(symbol)
     return seen
+
+
+def named_usdt_pairs(text: str) -> list[str]:
+    """USDT pairs in either notation ('ABC/USDT' or 'ABCUSDT')."""
+    return usdt_pairs(text) + [f"{base}USDT" for base in SLASHLESS_PATTERN.findall(text) if f"{base}USDT" not in usdt_pairs(text)]
 
 
 def trading_end(title: str, text: str, published: str) -> tuple[str, str]:
@@ -401,7 +510,7 @@ def merge_review(candidates: list[dict], cache: Path, manual: dict) -> tuple[dic
         path = cache / f"article-{article['code']}.json"
         if article["code"] in manual:
             decisions[article["code"]] = manual[article["code"]]
-        elif path.exists() and not usdt_pairs(article_text(json.loads(path.read_bytes())["data"].get("body", ""))):
+        elif path.exists() and not named_usdt_pairs(article_text(json.loads(path.read_bytes())["data"].get("body", ""))):
             decisions[article["code"]] = {"qualifies": False, "pairs": [], "tradingEnd": None,
                                           "reason": "kein USDT-Paar im Text genannt (automatisch)"}
         elif path.exists():
@@ -429,6 +538,133 @@ def build_reviewed_sample(candidates: list[dict], decisions: dict, per_year: int
     return {"years": years, "reviewedUntil": reviewed_until}
 
 
+# --- D0b under the draft precision P7 ---------------------------------------------------------
+
+P7_YEARS = ("2021", "2022", "2023", "2024", "2025")  # announcement sample; 2020 uses the snapshot test
+
+
+def load_snapshots(out: Path) -> list[tuple[str, dict, str]]:
+    """(Binance serverTime, {symbol: [baseAsset, status]}, archive URL) of every usable capture, oldest first."""
+    index = json.loads((out / "wayback-exchangeInfo.json").read_text(encoding="utf-8"))
+    snapshots = []
+    for row in index["captures"]:
+        if row.get("serverTime"):
+            reduced = json.loads((out / "wayback-exchangeInfo" / f"{row['captured']}.json").read_text(encoding="utf-8"))
+            snapshots.append((reduced["serverTime"], reduced["symbols"], row["archiveUrl"]))
+    return sorted(snapshots, key=lambda item: item[0])
+
+
+def token_pairs(tokens: list[str], published: str, trading_end: str, snapshots: list) -> tuple[list[dict], list[dict]]:
+    """P7 (a): a token delisting ends <TOKEN>USDT only if Binance's own exchangeInfo, as archived before the
+    publication, lists that pair with this base asset as TRADING, and the first capture after the trading end
+    no longer lists it as TRADING. Today's exchangeInfo is not used."""
+    before = [item for item in snapshots if item[0] <= published]
+    after = [item for item in snapshots if item[0][:10] > trading_end]
+    evidenced, rejected = [], []
+    for token in tokens:
+        pair = f"{token}USDT"
+        b, a = (before[-1] if before else None), (after[0] if after else None)
+        b_state, a_state = (b[1].get(pair) if b else None), (a[1].get(pair) if a else None)
+        record = {"pair": pair, "before": b[0] if b else None, "beforeState": b_state, "beforeUrl": b[2] if b else None,
+                  "after": a[0] if a else None, "afterState": a_state, "afterUrl": a[2] if a else None}
+        ok = b_state == [token, "TRADING"] and a is not None and (a_state is None or a_state[1] != "TRADING")
+        (evidenced if ok else rejected).append(record)
+    return evidenced, rejected
+
+
+def intervening_removal(pair: str, start: str, end: str, candidates: list[dict], text_of) -> str | None:
+    """Code of an announcement between the archived capture and the delisting that already removed the pair."""
+    for article in candidates:
+        if start < published_iso(article) < end:
+            text = text_of(article)
+            if pair in named_usdt_pairs(text) and any(phrase in text.lower() for phrase in REMOVAL_PHRASES):
+                return article["code"]
+    return None
+
+
+def build_p7_sample(candidates: list[dict], decisions: dict, snapshots: list, text_of, per_year: int = 3) -> dict:
+    """First `per_year` announcements per year, chronological: explicitly named USDT pairs as before, plus token
+    delistings without any pair list whose USDT pairs the archived exchangeInfo proves (decision field 'p7')."""
+    years: dict[str, list] = {year: [] for year in P7_YEARS}
+    ordered = sorted(candidates, key=lambda item: item["releaseDate"])
+    for article in ordered:
+        year = published_iso(article)[:4]
+        if year not in years or len(years[year]) >= per_year:
+            continue
+        decision = decisions.get(article["code"])
+        if decision is None:
+            raise FetchError(f"Candidate {article['code']} ({published_iso(article)[:10]}, {article['title'][:60]}) is not reviewed.")
+        item = {"url": ARTICLE_PAGE_URL.format(code=article["code"]), "published": published_iso(article), "title": article["title"]}
+        if decision["qualifies"]:
+            years[year].append({**item, "kind": "named", "tradingEnd": decision["tradingEnd"], "pairs": decision["pairs"]})
+        elif decision.get("p7"):
+            p7 = decision["p7"]
+            evidenced, rejected = token_pairs(p7["tokens"], item["published"], p7["tradingEnd"], snapshots)
+            for record in list(evidenced):
+                code = intervening_removal(record["pair"], record["before"], item["published"], ordered, text_of)
+                if code:
+                    evidenced.remove(record)
+                    rejected.append({**record, "removedEarlierBy": code})
+            if evidenced:
+                years[year].append({**item, "kind": "token", "tradingEnd": p7["tradingEnd"], "pairs": [r["pair"] for r in evidenced],
+                                    "evidence": evidenced, "tokensWithoutUsdtPair": [r["pair"] for r in rejected]})
+    return years
+
+
+def snapshot_endings(snapshots: list, first: str = "2019-12-01", last: str = "2020-12-31", reopen_days: int = 365) -> list[dict]:
+    """P7 (b), 2020: every USDT pair that is TRADING in one archived capture and no longer TRADING in the next,
+    for captures from `first` to `last`; a pair TRADING again within `reopen_days` was only paused."""
+    endings = []
+    for (t1, s1, u1), (t2, s2, u2) in zip(snapshots, snapshots[1:]):
+        if not first <= t1[:10] <= last:
+            continue
+        for pair, (base, status) in sorted(s1.items()):
+            after = s2.get(pair)
+            if status != "TRADING" or (after and after[1] == "TRADING"):
+                continue
+            limit = datetime.fromisoformat(t2.replace("Z", "+00:00")).timestamp() + reopen_days * 86_400
+            if any(s.get(pair, [None, None])[1] == "TRADING" for t, s, _ in snapshots
+                   if t > t2 and datetime.fromisoformat(t.replace("Z", "+00:00")).timestamp() <= limit):
+                continue
+            seen = next(t for t, s, _ in snapshots if pair in s and s[pair][1] == "TRADING")
+            endings.append({"pair": pair, "baseAsset": base, "firstSeenTrading": seen, "lastSeenTrading": t1, "firstSeenEnded": t2,
+                            "stateAfter": after, "lastTradingUrl": u1, "endedUrl": u2})
+    return endings
+
+
+def previous_month(month: str) -> str:
+    return shift_month(month, -1)
+
+
+def p7_archive_check(years: dict, endings: list[dict], symbols: dict, min_share: float = 0.9) -> dict:
+    """Same 'found' rule as the frozen D0b for announcements (a file up to at least the month before the trading
+    end). For the snapshot test the file must lie between that month and the month the pair was seen ended, so a
+    symbol reused years later cannot pass for the old pair."""
+    result = {}
+    checks = []
+    for pair in endings:
+        required = max(previous_month(pair["lastSeenTrading"][:7]), pair["firstSeenTrading"][:7])
+        months = symbols.get(pair["pair"], [])
+        checks.append((pair["pair"], any(required <= month <= pair["firstSeenEnded"][:7] for month in months),
+                       {"required": required, "archive": [months[0], months[-1]] if months else None}))
+    result["2020"] = {"method": "snapshots", "pairs": len(checks), "found": sum(ok for _, ok, _ in checks),
+                      "missing": [pair for pair, ok, _ in checks if not ok], "detail": {pair: info for pair, _, info in checks}}
+    for year, items in years.items():
+        found = []
+        for item in items:
+            required = previous_month(item["tradingEnd"][:7])
+            for pair in item["pairs"]:
+                months = symbols.get(pair, [])
+                found.append((pair, bool(months) and max(months) >= required))
+        result[year] = {"method": "announcements", "announcements": len(items), "pairs": len(found),
+                        "found": sum(ok for _, ok in found), "missing": [pair for pair, ok in found if not ok]}
+    for item in result.values():
+        item["share"] = item["found"] / item["pairs"] if item["pairs"] else None
+        item["performable"] = bool(item["pairs"]) and item.get("announcements", 3) >= 3
+        item["passed"] = item["performable"] and item["share"] >= min_share
+    return {"years": result, "passed": all(item["passed"] for item in result.values())}
+
+
 # --- CLI ------------------------------------------------------------------------------------
 
 
@@ -452,6 +688,15 @@ def main(argv: list[str] | None = None) -> int:
     reviewed.add_argument("--out", type=Path, required=True)
     reviewed.add_argument("--decisions", type=Path, required=True, help="manual decisions (d0b-review-decisions.json)")
     reviewed.add_argument("--cache", type=Path)
+    gaps = commands.add_parser("gap-check")
+    gaps.add_argument("--plan", type=Path, required=True)
+    gaps.add_argument("--out", type=Path, required=True, help="events/long-gap-check.json of the data directory")
+    p7 = commands.add_parser("d0b-p7")
+    p7.add_argument("--out", type=Path, required=True)
+    p7.add_argument("--decisions", type=Path, required=True)
+    p7.add_argument("--cache", type=Path)
+    snapshots = commands.add_parser("snapshots")
+    snapshots.add_argument("--out", type=Path, required=True)
     plan = commands.add_parser("download-plan")
     plan.add_argument("--listing", type=Path, required=True)
     plan.add_argument("--out", type=Path)
@@ -488,6 +733,36 @@ def main(argv: list[str] | None = None) -> int:
             sample = {"rule": D0B_RULE, "reviewedAt": review["reviewedAt"], "neverListed": [], **result}
             (args.out / "announcements-d0b.json").write_text(json.dumps(sample, indent=1, ensure_ascii=False), encoding="utf-8")
             print(json.dumps({year: [item["pairs"] for item in items] for year, items in result["years"].items()}, ensure_ascii=False))
+        elif args.command == "gap-check":
+            checked = gap_check(json.loads(args.plan.read_text(encoding="utf-8")).get("longGapsToCheck") or [])
+            args.out.parent.mkdir(parents=True, exist_ok=True)
+            args.out.write_text(json.dumps({"source": f"{LISTING_URL}?prefix={HOURLY_DAILY_PREFIX}", "checkedAt": datetime.now(timezone.utc).isoformat(),
+                                            "gaps": checked}, indent=1), encoding="utf-8")
+            print(json.dumps({verdict: sum(1 for item in checked if item["verdict"] == verdict) for verdict in ("consistent", "suspected", "notCheckable")}))
+        elif args.command == "d0b-p7":
+            cache = args.cache or args.out / "announcement-cache"
+            candidates = cached_candidates(cache)
+            decisions, _ = merge_review(candidates, cache, json.loads(args.decisions.read_text(encoding="utf-8")))
+
+            def text_of(article: dict) -> str:
+                path = cache / f"article-{article['code']}.json"
+                if not path.exists():
+                    path.write_bytes(http_get(f"{ARTICLE_DETAIL_URL}?articleCode={article['code']}", 4.0))
+                return article_text(json.loads(path.read_bytes())["data"].get("body", ""))
+
+            snapshots = load_snapshots(args.out)
+            years = build_p7_sample(candidates, decisions, snapshots, text_of)
+            endings = snapshot_endings(snapshots)
+            symbols = json.loads((args.out / "spot-monthly-klines-1d.json").read_text(encoding="utf-8"))["symbols"]
+            result = {"rule": "Entwurf P7 (docs/trading/research/2026-10-17-relative-strength-d0b-precision-p7.md); "
+                              "Bericht bis zur Freigabe", "computedAt": datetime.now(timezone.utc).isoformat(),
+                      "snapshotsUsed": [item[0] for item in snapshots], "years": years, "endings2020": endings,
+                      "check": p7_archive_check(years, endings, symbols)}
+            (args.out / "announcements-d0b-p7.json").write_text(json.dumps(result, indent=1, ensure_ascii=False), encoding="utf-8")
+            print(json.dumps({year: {k: item[k] for k in ("pairs", "found", "share", "passed")} for year, item in result["check"]["years"].items()}))
+        elif args.command == "snapshots":
+            index = fetch_snapshots(args.out)
+            print(json.dumps([(item["captured"], item.get("serverTime"), item.get("trading", item.get("unusable"))) for item in index]))
         else:
             plan_result = download_plan(json.loads(args.listing.read_text(encoding="utf-8")))
             text = json.dumps(plan_result, indent=1)
