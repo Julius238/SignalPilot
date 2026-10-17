@@ -9,9 +9,12 @@ fehlt, kommt aus der Tagesdatei desselben Tages im Binance-Tagesarchiv.
 V1 ist endgültig `NICHT_AUSWERTBAR`. Ihre Werkzeuge unter
 [`../funding-carry-v1/`](../funding-carry-v1/README.md) bleiben unverändert.
 
-**Stand: V2-Schritt 1.1.** Das Skript ist nur synthetisch getestet; ein
-Probelauf auf den echten V1-Daten lief ohne Download. Download (1.2) und
-Auswertung (1.5) brauchen je eine gesonderte Freigabe.
+**Stand 2026-10-17:** Der Download (Schritt 1.2) ist mit Freigabe gelaufen.
+Die Datenprüfung D1–D9 hat alle Pflichtprüfungen bestanden; 29 Tage wurden je
+24 Stunden ergänzt, ohne Auffälligkeit
+([Bericht](../../../docs/trading/research/2026-10-17-funding-carry-v2-data-check.md)).
+Es wurde keine Rendite berechnet. Die Auswertung (1.4/1.5) braucht eine
+gesonderte Freigabe.
 
 ## Was gegenüber V1 neu ist
 
