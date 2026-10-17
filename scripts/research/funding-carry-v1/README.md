@@ -57,16 +57,65 @@ python3 -I scripts/research/funding-carry-v1/funding_carry_v1.py evaluate --data
 | `<spot>/<SYM>-1h.csv.gz`, `<SYM>-1d.csv.gz` | vorhandener Snapshot `data/market-snapshots/real/` |
 | `benchmarks.csv`: `month,champion,challenger[,champion_binding,challenger_binding]` | Schritt 1.4: Monatsrenditen 2020-01 – 2026-09 der Plätze aus Vergleich A (`portfolio-replay-v1/1.0.0`); optional die mittlere Kapitalbindung je Monat |
 
-Für Schritt 1.4 gibt es noch keinen Exportbefehl. Vergleich A läuft heute nur
-innerhalb der Evolution (`apps/evolution-worker/src/cycle/portfolioAssessment.ts`).
-Der Export ist ein kleines, rein lesendes Skript auf `runPortfolioReplay`. Es
-wird in Schritt 1.4 gebaut und braucht keine neuen Daten.
+**Schritt 1.4, rein lesender Export** (vorbereitet und synthetisch getestet,
+auf echten Snapshots noch nicht ausgeführt):
 
-**Vor dem Download zu prüfen (nur Verzeichnisliste, ohne Dateiinhalte):** In
-welchem Monat beginnen Mark- und Indexpreis-Kerzen je Symbol? Beginnen sie nach
-dem Start des jeweiligen Teils (2020-01-01, bzw. 7 Tage nach der ersten
-Funding-Abrechnung), scheitert D4. Die Studie wäre dann nach §8.2
-`NICHT_AUSWERTBAR`. Das ist dem Betreiber vor dem Download zu melden.
+```bash
+EVOLUTION_SNAPSHOT_DIR=/Users/juliuseggert/Dev/SignalPilot/data/market-snapshots/real EVOLUTION_CODE_VERSION=$(git rev-parse HEAD) corepack pnpm --filter @signalpilot/evolution-worker exec tsx src/research/exportCarryBenchmarks.ts --out=/Users/juliuseggert/Dev/SignalPilot/data/replay-research/carry-v1/benchmarks.csv --meta=/Users/juliuseggert/Dev/SignalPilot/data/replay-research/carry-v1/benchmarks.meta.json
+```
+
+- Code: `apps/evolution-worker/src/research/carryBenchmarks.ts` (Umrechnung)
+  und `exportCarryBenchmarks.ts` (Start). Der Export ist nirgends im Worker
+  verdrahtet. Er nutzt keine Datenbank und keinen API-Schlüssel und zählt
+  nicht für N.
+- Er rechnet Vergleich A (Champion, Challenger, Reserveplatz;
+  `portfolio-replay-v1` mit Stufe 2) unverändert zweimal. Der erste Lauf
+  umfasst Entdeckung + Validierung (2018-04-01 – 2023-12-31) wie im
+  Screening, der zweite den Holdout (2024-01-01 – 2026-10-14). Daraus
+  entstehen die Monate 2020-01 – 2026-09.
+- Der erste Monat jedes Laufs wird ab dem Startkapital des Platzes gemessen.
+- Kapitalbindung je Monat = Einstiegsnotional der offenen Trades, gewichtet
+  mit den offenen Stunden, geteilt durch das Platzkapital (20 000 USDT).
+- Die Meta-Datei hält fest: Daten-Fingerprint, Code-Version,
+  Spezifikations-Hashes und Output-Hashes beider Läufe.
+- Laufzeit lokal grob 25 min in einem Prozess (Schätzung nach dem Protokoll
+  der Pullback-Bewertung).
+- `data/replay-research/` ist gitignoriert.
+
+## Verfügbarkeitsprüfung (2026-10-17, nur Verzeichnislisten)
+
+Geprüft wurden die S3-Verzeichnislisten von `data.binance.vision` mit Namen,
+Größe und Datum. Keine Marktdatendatei wurde geladen oder geöffnet.
+
+| Reihe (Monatsarchiv, je BTCUSDT und ETHUSDT) | erster Monat | letzter Monat | Lücken | Prüfsummen | Größe BTC / ETH |
+|---|---|---|---|---|---:|
+| `fundingRate` | 2020-01 | 2026-09 | keine | alle | 0,07 / 0,07 MB |
+| `klines/1h` (Perp) | 2020-01 | 2026-09 | keine | alle | 3,07 / 3,07 MB |
+| `markPriceKlines/1h` | 2020-01 | 2026-09 | keine | alle | 1,80 / 1,69 MB |
+| `indexPriceKlines/1h` | 2020-01 | 2026-09 | keine | alle | 1,93 / 1,76 MB |
+
+- Zusammen: 8 × 81 Archive plus 8 × 81 Prüfsummen = **1 296 Dateien,
+  rund 13,5 MB**.
+- Ein Funding-Tagesarchiv gibt es nicht. Tägliche Kerzen beginnen Ende
+  Dezember 2019; sie werden nicht gebraucht.
+- **Folge nach §2.1:** Vor 2020-01-01 gibt es keine Funding-Historie, also
+  auch keinen 7-Tage-Vorlauf. Jeder Teil beginnt deshalb am **2020-01-08**,
+  die erste Woche liegt als Kasse. Das regelt die eingefrorene Vorregistrierung
+  selbst, eine Änderung ist nicht nötig. D4 prüft ab dem 2020-01-08, und die
+  Kerzen-Archive beginnen 2020-01.
+- REST `GET /fapi/v1/fundingRate` ist erreichbar. Eine Probe auf 2019-01, vor
+  der Listung, lieferte HTTP 200 mit leerer Liste.
+- FRED `DTB3` ist erreichbar (CSV, rund 0,3 MB).
+- Spot-Snapshot: `data/market-snapshots/real/` vom 2026-10-14. 1h-Dateien
+  2,2 MB (BTC) und 2,0 MB (ETH), Datenstand bis 2026-10-14T23:59:59.999Z
+  laut Evolution-Fingerprint; nicht neu geöffnet.
+- **Nutzungsbedingungen:** Die Daten stehen unter CC BY-NC-SA 4.0 plus den
+  `TERMS_AND_CONDITIONS` von `binance-public-data`.
+  - Erlaubt ist unter anderem persönliches, nicht-kommerzielles Backtesting zu
+    Forschungszwecken.
+  - Verboten sind kommerzielle Nutzung, Weitergabe und Hosting sowie
+    Live-Handel und Signalverkauf auf Basis der Daten.
+  - Die Dateien bleiben deshalb lokal und gitignoriert.
 
 ## Präzisierungen der Umsetzung
 
