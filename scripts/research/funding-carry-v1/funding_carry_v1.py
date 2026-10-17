@@ -1616,12 +1616,17 @@ def _write_zip(path: Path, csv_name: str, text: str) -> None:
     path.with_name(path.name + ".CHECKSUM").write_text(f"{sha256_file(path)}  {path.name}\n", encoding="utf-8")
 
 
-def generate_synthetic(out: Path, seed: int = 7) -> None:
-    """Random-walk prices and funding in the exact file formats. Never real data."""
+def generate_synthetic(out: Path, seed: int = 7, futures_from: str | None = None) -> None:
+    """Random-walk prices and funding in the exact file formats. Never real data.
+    `futures_from` (YYYY-MM) starts every futures series in that month, like the real
+    monthly archive, which begins in 2020-01."""
     rng = random.Random(seed)
     out.mkdir(parents=True, exist_ok=True)
     (out / "SYNTHETIC").write_text("Synthetische Testdaten, kein Marktdatum.\n", encoding="utf-8")
-    spot_start, futures_start = utc_ms(2019, 1, 1), {"BTCUSDT": utc_ms(2019, 9, 1), "ETHUSDT": utc_ms(2019, 11, 1)}
+    spot_start = utc_ms(2019, 1, 1)
+    futures_start = {"BTCUSDT": utc_ms(2019, 9, 1), "ETHUSDT": utc_ms(2019, 11, 1)}
+    if futures_from is not None:
+        futures_start = {symbol: utc_ms(int(futures_from[:4]), int(futures_from[5:7]), 1) for symbol in SYMBOLS}
     hourly_sigma = 0.6 / math.sqrt(8760)
     for symbol, price in (("BTCUSDT", 4000.0), ("ETHUSDT", 150.0)):
         spot, perp, mark, index = {}, {}, {}, {}
@@ -1703,6 +1708,7 @@ def main(argv: list[str] | None = None) -> int:
     synth = commands.add_parser("synth", help="synthetic data in the archive layout")
     synth.add_argument("--out", type=Path, required=True)
     synth.add_argument("--seed", type=int, default=7)
+    synth.add_argument("--futures-from", help="YYYY-MM: start of every futures series (the real archive starts 2020-01)")
     check = commands.add_parser("check-data", help="data checks D1-D8, no returns")
     check.add_argument("--data", type=Path, required=True)
     check.add_argument("--spot", type=Path)
@@ -1717,7 +1723,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         if args.command == "synth":
-            generate_synthetic(args.out, args.seed)
+            generate_synthetic(args.out, args.seed, args.futures_from)
             print(f"Synthetic data written to {args.out}")
             return 0
         if args.command == "check-data":

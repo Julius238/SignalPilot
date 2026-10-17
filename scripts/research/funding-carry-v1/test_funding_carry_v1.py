@@ -276,6 +276,24 @@ class EndToEnd(unittest.TestCase):
             with self.assertRaises(fc.StudyError):
                 fc.evaluate(data, data / "benchmarks.csv", out, correction="zweite Korrektur")
 
+    def test_archive_starting_in_january_2020_delays_the_sleeves_by_seven_days(self):
+        # The real monthly archive begins in 2020-01 (directory listing of 2026-10-17): §2.1 applies.
+        with tempfile.TemporaryDirectory() as tmp:
+            data, out = Path(tmp) / "data", Path(tmp) / "out"
+            fc.generate_synthetic(data, seed=17, futures_from="2020-01")
+            data_report, loaded = fc.check_data(data)
+            self.assertTrue(data_report["blockingPassed"])
+            for symbol in fc.SYMBOLS:
+                self.assertEqual(data_report["checks"]["D1"]["series"][f"fundingRate/{symbol}"]["first"], "2020-01")
+                self.assertEqual(data_report["checks"]["D2"]["symbols"][symbol]["sleeveStart"], "2020-01-08T00:00Z")
+                self.assertEqual(data_report["checks"]["D4"]["series"][f"markPriceKlines/{symbol}"]["range"][0], "2020-01-08T00:00Z")
+            report = fc.evaluate(data, data / "benchmarks.csv", out)
+            for variant in ("A", "B"):
+                total = report["variants"][variant]["total"]
+                self.assertEqual(len(total["monthlyReturns"]), 81)  # 2020-01 still counts, with a week of cash
+                self.assertEqual(report["variants"][variant]["sleeves"]["BTCUSDT"]["start"], "2020-01-08T00:00Z")
+                self.assertGreater(total["finalEquity"], 0)
+
     def test_failed_data_check_stops_before_returns(self):
         with tempfile.TemporaryDirectory() as tmp:
             data, out = Path(tmp) / "data", Path(tmp) / "out"
