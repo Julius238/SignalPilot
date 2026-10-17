@@ -573,6 +573,11 @@ Phase 0 liegt vor:
 [Vorregistrierung der Machbarkeitsstudie](2026-10-16-funding-carry-feasibility-preregistration.md)
 (2026-10-16, zur Freigabe durch den Betreiber).
 
+Ergebnis der Phase 1 (2026-10-17): `KOMPRIMIERT`. Bis 2023 war der Carry
+attraktiv; seit 2024 liegt er unter Geldmarkt plus Abschlag. Er ist damit
+geschlossen, nächster Schritt ist Rang 2
+([Ergebnisbericht](2026-10-17-funding-carry-v2-results.md)).
+
 ### Was die Empfehlung ändern würde
 
 - **Phase 1 zeigt nach Kosten keinen tragfähigen Carry**, etwa wegen

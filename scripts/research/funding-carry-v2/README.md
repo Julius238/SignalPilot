@@ -13,8 +13,10 @@ V1 ist endgültig `NICHT_AUSWERTBAR`. Ihre Werkzeuge unter
 Die Datenprüfung D1–D9 hat alle Pflichtprüfungen bestanden; 29 Tage wurden je
 24 Stunden ergänzt, ohne Auffälligkeit
 ([Bericht](../../../docs/trading/research/2026-10-17-funding-carry-v2-data-check.md)).
-Es wurde keine Rendite berechnet. Die Auswertung (1.4/1.5) braucht eine
-gesonderte Freigabe.
+Die einmalige Auswertung (1.4/1.5) ist mit Freigabe gelaufen. Das Ergebnis
+ist `KOMPRIMIERT`
+([Ergebnisbericht](../../../docs/trading/research/2026-10-17-funding-carry-v2-results.md)).
+Ein zweiter Lauf ist gesperrt.
 
 ## Was gegenüber V1 neu ist
 

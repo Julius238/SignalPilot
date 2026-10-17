@@ -8,6 +8,10 @@
 > - Es wurde **keine Rendite berechnet**; `evaluate` lief nicht.
 > - Die Auswertung (Schritte 1.4/1.5) braucht die gesonderte Freigabe des
 >   Betreibers.
+>
+> **Nachtrag 2026-10-17:** Die Auswertung ist mit Freigabe gelaufen. Das
+> Ergebnis ist `KOMPRIMIERT`
+> ([Ergebnisbericht](2026-10-17-funding-carry-v2-results.md)).
 
 - Vorregistrierung:
   [V2](2026-10-17-funding-carry-feasibility-preregistration-v2.md),

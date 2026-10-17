@@ -1,5 +1,10 @@
 # Vorregistrierung der Machbarkeitsstudie Funding-/Basis-Carry BTC/ETH, V2 (2026-10-17)
 
+> **Endstatus 2026-10-17: `KOMPRIMIERT`.** Die einmalige Auswertung erfüllt
+> B1 und B3–B6, scheitert aber an B2 (seit 2024 unter Geldmarkt plus
+> Abschlag). Der Carry ist in dieser Form geschlossen (V1 §8.4):
+> [Ergebnisbericht](2026-10-17-funding-carry-v2-results.md).
+>
 > **Status 2026-10-17: freigegeben und eingefroren (V2).**
 >
 > - Der Betreiber hat V2 freigegeben.
