@@ -1,5 +1,16 @@
 # Vorregistrierung der Machbarkeitsstudie Funding-/Basis-Carry BTC/ETH (2026-10-16)
 
+> **Endstatus 2026-10-17: `NICHT_AUSWERTBAR` (endgültig).**
+>
+> - Die Pflichtprüfung D4 ist bei BTCUSDT gescheitert: Im Monatsarchiv der
+>   Mark- und Indexpreise fehlen ganze Tage
+>   ([Datenprüfung](2026-10-17-funding-carry-data-check.md)).
+> - V1 wurde nie ausgewertet und hat keine Ergebnisse.
+> - Die Frage wird unter einer eigenen Version weitergeführt:
+>   [Vorregistrierung V2](2026-10-17-funding-carry-feasibility-preregistration-v2.md).
+>
+> Der eingefrorene Text bleibt unverändert.
+
 > **Status 2026-10-17: freigegeben und eingefroren (V1).**
 >
 > - Der Betreiber hat die offenen Punkte F1–F6 wie empfohlen freigegeben.

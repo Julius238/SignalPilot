@@ -1,5 +1,17 @@
 # Vorregistrierung der Machbarkeitsstudie Funding-/Basis-Carry BTC/ETH, V2 (2026-10-17)
 
+> **Status 2026-10-17: freigegeben und eingefroren (V2).**
+>
+> - Der Betreiber hat V2 freigegeben.
+> - Eingefrorene Fassung: Commit `2f75ef0`, Blob
+>   `0bc948df03807b0ba9884dd50934de027d1f9fa4` dieser Datei.
+> - Schritt 1.1 ist erlaubt: Werkzeuge erweitern, nur synthetisch testen.
+> - Download (Schritt 1.2) und Auswertung (Schritt 1.5) brauchen je eine
+>   gesonderte Freigabe.
+>
+> Der Text unten bleibt als Festschreibung unverändert, nur dieser Statusblock
+> ist neu.
+
 > **Status: Entwurf zur Freigabe.** V2 wird geschrieben, nachdem V1 an der
 > Datenprüfung gescheitert ist
 > ([Bericht](2026-10-17-funding-carry-data-check.md): D4, ganze Tage fehlen im

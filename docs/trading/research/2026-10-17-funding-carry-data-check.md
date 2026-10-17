@@ -13,7 +13,7 @@
 > **Entscheidung des Betreibers am 2026-10-17: Weg 2.** Eine V2 ergänzt nur die
 > fehlenden Tage aus dem Tagesarchiv:
 > [Vorregistrierung V2](2026-10-17-funding-carry-feasibility-preregistration-v2.md),
-> Entwurf zur Freigabe.
+> am selben Tag freigegeben und eingefroren (Commit `2f75ef0`).
 
 - Vorregistrierung:
   [Funding-Carry V1](2026-10-16-funding-carry-feasibility-preregistration.md),
