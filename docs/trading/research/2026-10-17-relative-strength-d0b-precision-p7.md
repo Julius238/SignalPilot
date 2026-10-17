@@ -1,6 +1,14 @@
-# Präzisierung P7 zu D0b der Machbarkeitsstudie Relative Stärke (Entwurf, 2026-10-17)
+# Präzisierung P7 zu D0b der Machbarkeitsstudie Relative Stärke (2026-10-17)
 
-> **Status: Entwurf zur Freigabe durch den Betreiber.**
+> **Status 2026-10-17: freigegeben (P7).**
+>
+> - Der Betreiber hat den Entwurf in der Fassung von Commit `7582fc3`
+>   unverändert freigegeben.
+> - Aktiv im Studienskript über `APPROVED_PRECISIONS = ("P7",)`, in einem
+>   eigenen Commit nach diesem.
+> - V1 bleibt unverändert und steht im Ergebnis von D0b weiter als `v1`.
+
+> **Fassung:** Entwurf, am 2026-10-17 zur Freigabe vorgelegt.
 >
 > - Die eingefrorene Vorregistrierung V1 bleibt unverändert: Text `c188c38`,
 >   Statusblock `6520f42`, Blob `96525664…`.
