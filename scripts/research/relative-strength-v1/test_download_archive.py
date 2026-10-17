@@ -134,7 +134,7 @@ class EndToEnd(unittest.TestCase):
             jobs = da.monthly_jobs({"files": files}) + da.daily_jobs(
                 {"dailyFilesE1": [f"{p.parent.parent.name}\t{p.stem.rsplit('-1d-', 1)[1]}" for p in remote.glob("daily/klines/*/1d/*.zip")]})
             self.assertGreater(len(jobs), 10)
-            log = da.run(data, jobs, fetch=FakeArchive(remote), rate=0, absent_ok=True)
+            log = da.run(data, jobs, fetch=FakeArchive(remote), rate=0, absent_ok=True, workers=4)  # parallel as in the real run
             self.assertEqual(log["failed"], 0)
             for path in remote.rglob("*.zip*"):
                 self.assertEqual((data / "binance" / "spot" / path.relative_to(remote)).read_bytes(), path.read_bytes())

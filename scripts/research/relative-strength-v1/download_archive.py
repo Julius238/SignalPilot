@@ -13,9 +13,9 @@ Standard library only; run with ``python3 -I``. Network commands refuse to run w
 ``--confirm DOWNLOAD_RELATIVE_STRENGTH_V1``; ``--dry-run`` only prints what would be fetched.
 
 Commands:
-  monthly   --data DIR [--listing FILE] [--rate N] [--dry-run] [--confirm TOKEN]
+  monthly   --data DIR [--listing FILE] [--rate N] [--workers N] [--dry-run] [--confirm TOKEN]
             every monthly 1d file of the listing in 2019-07..2026-09 (step 1.3)
-  daily     --data DIR --plan FILE [--rate N] [--dry-run] [--confirm TOKEN]
+  daily     --data DIR --plan FILE [--rate N] [--workers N] [--dry-run] [--confirm TOKEN]
             daily files named by `relative_strength_v1.py plan` (E1, D12; steps 1.4a/1.4c)
   manifest  --data DIR       SHA-256 of every file under DIR -> DIR/manifest.sha256
 """
@@ -23,6 +23,7 @@ Commands:
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import hashlib
 import json
 import os
@@ -153,23 +154,30 @@ def daily_jobs(plan: dict) -> list[str]:
     return jobs
 
 
-def run(data: Path, jobs: list[str], fetch=http_get, rate: float = 4.0, absent_ok: bool = False, log_name: str = "download-log.json") -> dict:
-    """Fetch all jobs at about `rate` requests per second; failures are collected, never skipped silently."""
-    pause = 1.0 / rate if rate > 0 else 0.0
+def run(data: Path, jobs: list[str], fetch=http_get, rate: float = 4.0, absent_ok: bool = False, log_name: str = "download-log.json",
+        workers: int = 1) -> dict:
+    """Fetch all jobs with `workers` parallel connections at about `rate` requests per second in total (each
+    answer takes 0.3-0.7 s, so one connection alone stays far below the rate); failures are collected."""
+    pause = workers / rate if rate > 0 else 0.0
     counts = {"skipped": 0, "fetched": 0, "absent": 0, "failed": 0}
     absent, failed = [], []
     started = datetime.now(timezone.utc).isoformat()
-    for index, path in enumerate(jobs, 1):
-        try:
-            counts[fetch_pair(data, path, fetch, pause)] += 1
-        except Absent:
-            counts["absent"] += 1
-            absent.append(path)
-        except DownloadError as error:
-            counts["failed"] += 1
-            failed.append({"path": path, "error": str(error)[:300]})
-        if index % 500 == 0:
-            print(json.dumps({"done": index, "of": len(jobs), **counts}), flush=True)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(fetch_pair, data, path, fetch, pause): path for path in jobs}
+        for index, future in enumerate(concurrent.futures.as_completed(futures), 1):
+            path = futures[future]
+            try:
+                counts[future.result()] += 1
+            except Absent:
+                counts["absent"] += 1
+                absent.append(path)
+            except DownloadError as error:
+                counts["failed"] += 1
+                failed.append({"path": path, "error": str(error)[:300]})
+            if index % 500 == 0:
+                print(json.dumps({"done": index, "of": len(jobs), **counts}), flush=True)
+    absent.sort()
+    failed.sort(key=lambda item: item["path"])
     if not absent_ok:  # a monthly file listed in 1.2 but missing now is a failure, not an absence
         failed.extend({"path": path, "error": "HTTP 404 although the listing shows the file"} for path in absent)
         counts["failed"] += counts["absent"]
@@ -199,7 +207,8 @@ def main(argv: list[str] | None = None) -> int:
     for name in ("monthly", "daily"):
         command = commands.add_parser(name)
         command.add_argument("--data", type=Path, required=True)
-        command.add_argument("--rate", type=float, default=4.0, help="requests per second")
+        command.add_argument("--rate", type=float, default=4.0, help="requests per second in total")
+        command.add_argument("--workers", type=int, default=1, help="parallel connections")
         command.add_argument("--dry-run", action="store_true")
         command.add_argument("--confirm", default="")
         if name == "monthly":
@@ -226,7 +235,8 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.confirm != CONFIRM:
             raise DownloadError(f"downloading needs --confirm {CONFIRM} (separate approval of step 1.3)")
-        log = run(args.data, jobs, rate=args.rate, absent_ok=args.command == "daily", log_name=f"download-{args.command}.json")
+        log = run(args.data, jobs, rate=args.rate, absent_ok=args.command == "daily", log_name=f"download-{args.command}.json",
+                  workers=max(1, args.workers))
         print(json.dumps({key: log[key] for key in ("jobs", "skipped", "fetched", "absent", "failed")}))
         return 0 if not log["failed"] else 2
     except (DownloadError, OSError, ValueError) as error:
