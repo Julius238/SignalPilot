@@ -1,15 +1,15 @@
 # Vorregistrierung der Machbarkeitsstudie Relative Stärke im erweiterten Binance-Spot-Universum (2026-10-17)
 
-> **Stand 2026-10-17, zweite Fassung: Entscheidungen eingearbeitet, noch
-> nicht eingefroren.**
+> **Stand 2026-10-17, dritte Fassung: Entscheidungen und methodische
+> Korrekturen eingearbeitet.**
 >
-> - Der Betreiber hat F1–F8 wie empfohlen entschieden und die Korrekturen
->   K1–K6 mit Präzisierungen übernommen (Abschnitt 18).
-> - Keine Schwelle in B1–B6 wurde erleichtert. Neu sind nur die zwei
->   verschärfenden Bedingungen B3(d) und B6(f).
-> - Für die zweite Fassung wurde nichts abgerufen; es gibt weiterhin keine
+> - F1–F8 wie empfohlen entschieden, K1–K6 und die Präzisierungen P1–P6
+>   übernommen (Abschnitt 18).
+> - B1–B6 und ihre Schwellen sind wörtlich die der ersten Fassung. Alle
+>   später hinzugekommenen Prüfungen sind Pflichtbericht, Stresstest oder
+>   Bestimmbarkeitsregel, keine zusätzliche Hürde.
+> - Für keine Fassung wurde etwas abgerufen; es gibt weiterhin keine
 >   Renditedaten, keinen Code und keinen Backtest.
-> - Eingefroren wird erst der Commit, den der Betreiber ausdrücklich freigibt.
 
 > **Status: Entwurf zur Freigabe (Phase 0).** Geschrieben, **bevor**
 > irgendwelche Kursdaten anderer Spot-Paare als BTCUSDT und ETHUSDT abgerufen
@@ -48,7 +48,7 @@ Er wünscht ausdrücklich, dass diese Vorregistrierung festlegt:
 | vorbelastete Zeiträume, Mehrfachtest-Zähler, Erfolgs- und Stop-Kriterien, begrenzter Umfang | 10, 13 |
 | Kontrollstrategie mit derselben `RISK_ON`-Exposition | 6 |
 | Machbarkeits- und Aufwandseinschätzung, kritische Bewertung | 2, 15, 17 |
-| Entscheidungen F1–F8 und Korrekturen K1–K6 | 18 |
+| Entscheidungen F1–F8, Korrekturen K1–K6 und P1–P6 | 18 |
 
 | | Wert |
 |---|---|
@@ -292,11 +292,11 @@ Marktdaten. Nichts wird auf den VPS übertragen.
 | Verzeichnisliste aller Spot-Symbole | S3-Liste von `data.binance.vision`, Präfix `data/spot/monthly/klines/` | – | Kandidaten, D0, D0b (nur Metadaten, keine Dateiinhalte) |
 | heutiger Symbolstatus | `GET https://api.binance.com/api/v3/exchangeInfo` (öffentlich, ohne Schlüssel) | heutiger Stand | D0c (nur Bericht) |
 | Tageskerzen 1d aller USDT-Symbole | `data/spot/monthly/klines/<SYM>/1d/` mit `.CHECKSUM` | 2019-07 – 2026-09, je Symbol nur Monate seiner Handelszeit | Universum, Signal, Bewertung |
-| fehlende Tage | `data/spot/daily/klines/<SYM>/1d/<SYM>-1d-YYYY-MM-DD.zip` mit `.CHECKSUM` | nur Tage nach 4.3 (E1) | Lückenfüllung |
+| fehlende Tage | `data/spot/daily/klines/<SYM>/1d/<SYM>-1d-YYYY-MM-DD.zip` mit `.CHECKSUM` | nur Tage nach 4.3 (E1) sowie Sprungtage nach D12 (höchstens 100 Dateien, mehr nur nach Rückfrage) | Lückenfüllung, Datenfehlerprüfung |
 | BTC/ETH für das Regime | **vorhandener** Snapshot `data/market-snapshots/real/`, kein neuer Download | ab 2018 | `RISK_ON`-Gate, wie in allen bisherigen Studien |
 | `DTB3` | **vorhandene** Datei aus `carry-v2`, Abgleich gegen deren Manifest | 2020-01 – 2026-09 | Zinshürde B1/B2, Kapital-Szenario S2 |
 | Champion/Challenger | **vorhandene** Benchmark-Datei aus Carry-Schritt 1.4 (Vergleich A, Output-Hashes `39095a44…` und `2a8b05fb…`), unverändert | 2020-01 – 2026-09 | B5 und Vergleich |
-| Ankündigungen zu Delistings und Migrationen | öffentliche Binance-Ankündigungsseiten, nur für die Fälle aus D11 (Schritt 1.4b) | je Fall | Nachweis für E5/E6; Adresse und Zeit werden abgelegt, keine Kursdaten |
+| Ankündigungen zu Delistings und Migrationen | öffentliche Binance-Ankündigungsseiten, nur für die Stichprobe D0b und die Fälle aus D11 | je Fall | D0b und Nachweise für E3–E7; Adresse und Zeit werden abgelegt, keine Kursdaten |
 
 - **Umfang (Schätzung, nicht geprüft):** rund 600–800 USDT-Symbole, im Mittel
   rund 45 Monatsdateien je Symbol, also 50 000–70 000 Abrufe mit Prüfsummen,
@@ -315,38 +315,44 @@ Die Prüfung läuft als eigener Schritt (1.4, Ereignisnachweise 1.4b). Ihr
 Bericht enthält nur Datenqualität und Ereignisse: Zählungen, Lücken,
 Ausreißerlisten, Universumsgrößen, Ankündigungen. Renditen,
 Signale, Rangfolgen oder Kennzahlen stehen nicht darin. Erst wenn die
-blockierenden Prüfungen D0, D0b, D1, D2, D3, D6 und D7 bestanden sind und
-D11 die Schwelle erreicht, wird gerechnet.
+blockierenden Prüfungen D1, D2, D3, D6 und D7 bestanden sind und jeder
+Halt (D0, D0b, D9, D11) vom Betreiber entschieden ist, wird gerechnet.
 
 | Nr. | Prüfung | Toleranz | Behandlung |
 |---|---|---|---|
-| D0 | **Überlebens-Verzerrung**, schon an der Verzeichnisliste vor dem Download: Für jedes Paar der Kontrollliste existiert im Archiv mindestens eine Monatsdatei 1d im Jahr des Ereignisses. Kontrollliste (Ereignis laut Vorwissen, ungeprüft): ERDUSDT (Umstellung auf EGLD, 2020), LUNAUSDT (Zusammenbruch 2022), FTTUSDT (Zusammenbruch 2022), XMRUSDT (Delisting 2024), MATICUSDT (Migration zu POL, 2024). Die Liste prüft nur die Vollständigkeit des Archivs; sie bestimmt nicht das Universum | keine Abweichung | fehlt ein Paar, zuerst an öffentlichen Binance-Ankündigungen prüfen, ob es das USDT-Paar je gab. Gab es das Paar nie, wird es ohne Ersatz gestrichen und im Bericht genannt (Irrtum des Vorwissens). Fehlt ein nachweislich gelistetes Paar: Halt **vor** dem Download, `NICHT_AUSWERTBAR`; eine andere Quelle bräuchte eine neue Vorregistrierung. Bericht: Zahl aller USDT-Symbole, Zahl der Symbole mit Datenende vor 2026-09 |
-| D0b | **Mehrjährige Archivkontrolle** (K4), ebenfalls an der Verzeichnisliste vor dem Download: In jedem Jahr 2020–2025 hat das Archiv mindestens 3 USDT-Symbole, deren letzte Monatsdatei in diesem Jahr liegt (endgültiges Datenende). Der Wert 3 ist eine Plausibilitätsuntergrenze vor den Daten, kein Wissen über die tatsächliche Zahl | mindestens 3 je Jahr | sonst Halt **vor** dem Download, `NICHT_AUSWERTBAR`. **Grenze des Nachweises:** Ein Datenende beweist kein Delisting; es kann auch eine Migration, eine Umbenennung oder ein Archivfehler sein. D0 und D0b zeigen nur, dass das Archiv endende Symbole aller Jahre enthält, nicht, dass es vollständig ist. Eine amtliche Liste aller je gehandelten Paare gibt es nicht. Was hinter einem Datenende steckt, klärt erst D11 |
+| D0 | **Überlebens-Verzerrung, bekannte Fälle**, schon an der Verzeichnisliste vor dem Download: Für jedes Paar der Kontrollliste existiert im Archiv mindestens eine Monatsdatei 1d im Jahr des Ereignisses. Kontrollliste (Ereignis laut Vorwissen, ungeprüft): ERDUSDT (Umstellung auf EGLD, 2020), LUNAUSDT (Zusammenbruch 2022), FTTUSDT (Zusammenbruch 2022), XMRUSDT (Delisting 2024), MATICUSDT (Migration zu POL, 2024). Die Liste prüft nur die Vollständigkeit des Archivs; sie bestimmt nicht das Universum | keine Abweichung | Fehlt ein Paar, wird zuerst an öffentlichen Binance-Ankündigungen geprüft, ob es das USDT-Paar je gab. Gab es das Paar nie, wird es ohne Ersatz gestrichen und im Bericht genannt (Irrtum des Vorwissens). Fehlt ein nachweislich gelistetes Paar: **Halt und Rückfrage** vor dem Download, kein automatischer Ausschluss. Positive Ergebnisklassen setzen ein bestandenes D0 voraus (10.2) |
+| D0b | **Wiederfindung angekündigter Delistings** (K4, P5), vor dem Download: Für jedes Jahr 2020–2025 die ersten drei öffentlichen Binance-Ankündigungen des Jahres (chronologisch), die das Handelsende mindestens eines Spot-Paars mit Quote USDT ankündigen. Jedes darin genannte USDT-Paar muss im Archiv Monatsdateien bis mindestens zum Monat vor dem angekündigten Handelsende haben. Das ist ein Wiederfindungstest an unabhängig belegten Fällen statt einer Mindestzahl; die Zahl endender Symbole je Jahr wird nur berichtet | ≥ 90 % der genannten Paare je Jahr gefunden | sonst, oder wenn die Ankündigungen nicht abrufbar sind: **Halt und Rückfrage** vor dem Download, mit Liste der fehlenden Paare; kein automatischer Ausschluss. Positive Ergebnisklassen setzen ein bestandenes D0b voraus (10.2). **Grenze des Nachweises:** Die Stichprobe zeigt, ob angekündigte Delistings im Archiv stehen, nicht, dass jedes je gehandelte Paar enthalten ist. Ein Datenende beweist kein Delisting; was dahinter steckt, klärt D11. Eine amtliche Liste aller je gehandelten Paare gibt es nicht |
 | D0c | Abgleich mit `exchangeInfo` (öffentliche REST-Abfrage ohne Schlüssel, heutiger Stand): Jedes USDT-Symbol, das Binance heute mit einem anderen Status als `TRADING` führt, sollte im Archiv vorkommen | – | nur Bericht: Anteil und Liste der fehlenden |
 | D1 | Jede erwartete Monats- und Tagesdatei vorhanden, SHA-256 gleich `.CHECKSUM` | BTCUSDT, ETHUSDT: keine Abweichung. Sonst ≤ 0,5 % der erwarteten Symbol-Monate | einmal neu laden. Bleibt die Abweichung, gilt der Monat als fehlend (4.3). Bei Überschreitung `NICHT_AUSWERTBAR` |
 | D2 | Format: Kopfzeile erkannt, 12 Spalten, Zeitstempel-Einheit je Datei (ms/µs) erkannt und vereinheitlicht, sortiert, keine Duplikate, Eröffnung um 00:00 UTC, Tief ≤ Eröffnung/Schluss ≤ Hoch, Volumen ≥ 0 | ≤ 0,1 % fehlerhafte Zeilen | Fehlerhafte Zeilen gelten als fehlender Tag. Bei Überschreitung `NICHT_AUSWERTBAR` |
 | D3 | Lücken nach 4.3, nach Ergänzung aus dem Tagesarchiv | ≤ 0,5 % fehlende Symbol-Tage innerhalb der Handelszeiten im Fenster; BTCUSDT und ETHUSDT ohne fehlenden Tag; kein Tag, der bei mehr als der Hälfte der aktiven Symbole fehlt | Behandlung nach 4.3. Bei Überschreitung `NICHT_AUSWERTBAR` |
-| D4 | Ereignisse nach 4.3: jede Lücke nach der Ergänzung (E2, E3), jeder Kurssprung ≥ ×10 (E4), jedes endgültige Reihenende (Kandidaten für E5–E7), jeder Tagesverlust ≤ −90 % (nicht entfernt) | – | gelistet |
+| D4 | Ereignisse nach 4.3: jede Lücke nach der Ergänzung (E2, E3), jeder Kurssprung ≥ ×10 oder ≤ ×0,1 (E4), jedes endgültige Reihenende (Kandidaten für E5–E7) | – | gelistet, mit Einordnung nach D11 und D12 |
 | D5 | Ausschlüsse X1–X5 je Symbol mit Regel; alle Treffer von X2 und X4 | – | gelistet, nicht nachträglich geändert |
 | D6 | Abgleich BTCUSDT/ETHUSDT: Tagesschluss im Archiv gleich dem Tagesschluss des vorhandenen Snapshots (\|relative Abweichung\| ≤ 10⁻⁸) | ≤ 0,1 % abweichende Tage | Abweichungen gelistet. Bei Überschreitung `NICHT_AUSWERTBAR` |
 | D7 | Regime-Nachbildung `crypto-native-regime-v1` (Python wie in `funding-carry-v2`): Tage je Label im Fenster genau wie im Carry-Bericht, `RISK_ON` 829, `NEUTRAL` 633, `MIXED` 275, `RISK_OFF` 728 | exakt | sonst Halt und Fehlersuche, keine Rendite |
 | D8 | Kostenstufen-Plausibilität (nur Bericht): Spread-Schätzer nach Abdi/Ranaldo (2017) aus Tagesschluss, -hoch und -tief, Median je Symbol und Monat, verglichen mit der angenommenen Spanne der Stufe | – | Liegt der Median einer Stufe über dem Doppelten der Annahme, wird das gemeldet. Die Kosten ändern sich nicht; den Schutz bietet der Kostenstress (B6) |
 | D9 | Universum: Größe von Uₜ je Monat (Minimum, Median, Maximum), Zahl verschiedener Mitglieder, Anteil der Tage mit Uₜ < 20. **Nicht nur heutige Gewinner:** Anteil der Mitglieder (nach Symbolen und nach Symbol-Tagen), deren Reihe vor 2026-09-30 endgültig endet, mit Liste je Jahr | – | Bericht. Hat **kein einziges** Mitglied von Uₜ im Fenster ein endgültiges Reihenende: Halt und Rückfrage (Verdacht auf Überlebens-Verzerrung) |
 | D10 | Ergänzte Tage aus dem Tagesarchiv je Symbol; Kerzen außerhalb ihres Tages; Tage in beiden Quellen | – | nur Bericht |
-| D11 | **Ereignisnachweise** (Schritt 1.4b, nach der Datenprüfung, vor jeder Renditeberechnung): für jedes Instrument, das an mindestens einem Tag Mitglied von Uₜ war und dessen Reihe im Fenster endgültig endet, sowie für jeden E3-Fall eines Mitglieds: öffentliche Binance-Ankündigung mit Adresse, Veröffentlichungszeit (UTC, sonst Datum), Art (Delisting, Migration mit Nachfolger und Verhältnis, anderes) und angekündigtem Handelsende. Abgleich des angekündigten Handelsendes mit der letzten Kerze. Nur Ereignisdaten, keine Kurse oder Renditen | Anteil der Fälle mit Nachweis ≥ 80 % | Fälle ohne Nachweis gelten als E7. Unter 80 %: Halt und Rückfrage vor jeder Renditeberechnung, weil die Delisting- und Symbolhistorie dann nicht ausreichend nachvollziehbar ist. Ist die Ankündigungsseite nicht abrufbar, gilt der Fall als ohne Nachweis |
+| D11 | **Ereignisnachweise** (Schritt 1.4b, nach der Datenprüfung, vor jeder Renditeberechnung): für jedes Instrument, das an mindestens einem Tag Mitglied von Uₜ war: jedes endgültige Reihenende im Fenster sowie jeder E3- und E4-Fall, öffentliche Binance-Ankündigung mit Adresse, Veröffentlichungszeit (UTC, sonst Datum), Art (Delisting, Migration oder Symbolneuvergabe mit Nachfolger und Verhältnis, Umstellung, Handelspause, anderes) und angekündigtem Handelsende. Abgleich des angekündigten Handelsendes mit der letzten Kerze. Nur Ereignisdaten, keine Kurse oder Renditen | Anteil der endgültigen Reihenenden mit Nachweis ≥ 80 % | Fälle ohne Nachweis gelten als ungeklärt (E7, ungeklärter Sprung in E4). Unter 80 %: **Halt und Rückfrage** vor jeder Renditeberechnung, weil die Delisting- und Symbolhistorie dann nicht ausreichend nachvollziehbar ist; arbeitet der Betreiber weiter, entscheidet die Bestimmbarkeitsregel (10.2). Ist eine Ankündigungsseite nicht abrufbar, gilt der Fall als ohne Nachweis |
+| D12 | **Datenfehler an Sprungtagen** (Schritt 1.4c): Für jeden E4-Tag eines Mitglieds von Uₜ wird die Tagesdatei geladen und mit der Monatsdatei verglichen. Ein Widerspruch in Eröffnung, Hoch, Tief oder Schluss belegt einen Datenfehler | – | Bericht; belegte Fehler nach E4 (betroffene Kerze fehlend), sonst bleibt der Sprung eine echte Marktbewegung oder ungeklärt |
 
-### 4.3 Lücken, Handelspausen, Delistings und Migrationen (E1–E7)
+### 4.3 Lücken, Handelspausen, Kurssprünge, Delistings und Migrationen (E1–E7)
 
 Aus dem Carry gelernt: Monatsarchive lassen ganze Tage aus. Dazu kommen echte
-Handelspausen, Delistings und Migrationen. Für alle gilt:
+Handelspausen, Tokenumstellungen, Delistings und Migrationen. Die Regeln
+sollen die Strategie weder künstlich profitabler rechnen noch durch
+unrealistische Strafannahmen unbrauchbar machen:
 
-- **Keine spätere Information für eine frühere Handelsentscheidung.** Eine
-  Position wird erst zu einem Zeitpunkt geschlossen, an dem der Anlass
-  öffentlich bekannt und ein Preis tatsächlich ausführbar war.
-- **Wo das nicht belegbar ist, gilt der niedrigste in Frage kommende Wert,
-  bis hin zum Totalverlust.** Ein Ereignis darf nie einen Gewinn erzeugen, den
-  es in Wirklichkeit nicht gab.
-- **Keine Interpolation**, keine andere Kursquelle, kein Zusammenführen von
+- **Haupttest (Lesart A): nur tatsächlich ausführbare Preise und belegte
+  Ereignisse.** Eine Handlung wird erst ausgelöst, wenn ihr Anlass öffentlich
+  bekannt war. Keine spätere Information für eine frühere Entscheidung.
+- **Ungeklärte Fälle werden nicht geraten.** Sie gehen in den Haupttest mit
+  einem neutralen, ausdrücklich benannten Ansatz ein und zusätzlich in eine
+  **konservative Lesart B**. Hängt das Urteil an ihnen, ist es nicht
+  bestimmbar (Bestimmbarkeitsregel, 10.2).
+- **Zusätzliche Abschläge sind getrennte Stresstests** (M18, M29), nie Teil
+  des Haupttests.
+- Keine Interpolation, keine andere Kursquelle, kein Zusammenführen von
   Symbolen.
 
 **Ergänzung vor der Einordnung:** Primärquelle ist das Monatsarchiv. Ein
@@ -355,29 +361,46 @@ Monatsdatei keine Kerze enthält, wird aus **genau** der Tagesdatei dieses Tages
 ergänzt, wenn sie vorhanden ist und ihre Prüfsumme stimmt. Liegt ein Tag in
 beiden Quellen vor, gilt das Monatsarchiv.
 
-| Fall | Erkennung | gehaltene Position | Zulassung (U1/U2) |
-|---|---|---|---|
-| E1 Archivlücke | Tag fehlt im Monatsarchiv, liegt im Tagesarchiv | keine Wirkung, der Tag ist ergänzt | keine Wirkung |
-| E2 kurze Lücke | nach der Ergänzung 1–6 Tage ohne Kerze, danach geht die Reihe weiter. Handelspause und nicht behebbare Datenlücke sind aus den Daten nicht zu unterscheiden; beide gelten als Handelspause | bleibt gehalten, Bewertung mit dem letzten Schluss, kein Handel möglich. Ein fälliger Ausstieg erfolgt zur **ersten Eröffnung nach der Wiederaufnahme** | gesperrt, bis U2 wieder erfüllt ist |
-| E3 lange Lücke | nach der Ergänzung ≥ 7 Tage ohne Kerze, danach geht die Reihe weiter | Eine lange Pause und die Wiederverwendung des Symbols durch eine andere Münze (etwa LUNAUSDT) sind aus den Kursen nicht zu unterscheiden. Schließung zur **ersten Eröffnung nach der Wiederaufnahme**, gebucht zum **niedrigeren** Wert aus diesem Kurs und dem letzten Schluss vor der Lücke; L3 | Was danach kommt, ist ein neues Instrument (U1 beginnt neu) |
-| E4 Kurssprung | Tagesschluss ≥ 10 × Vortagesschluss | Schließung zur Eröffnung des Folgetags (erst dann ist der Sprung bekannt), gebucht höchstens zum Vortagesschluss vor dem Sprung; L3. Ein Gewinn aus dem Sprung entsteht nie | neues Instrument ab dem Folgetag |
-| E5 Delisting mit Nachweis | Die Reihe endet endgültig vor 2026-09-30, und eine öffentliche Binance-Ankündigung kündigt das Handelsende an (D11) | Ausstieg zur **ersten Tageseröffnung nach der Veröffentlichung**, frühestens am Tag nach dem Einstieg und spätestens zur Eröffnung der letzten vorhandenen Kerze; L3. Ist nur das Datum der Veröffentlichung belegt, gilt das Ende dieses Tags | Instrument endet |
-| E6 Migration mit Nachweis | wie E5; die Ankündigung nennt ein Nachfolgesymbol und ein Umtauschverhältnis | wie E5. Liegt keine Eröffnung zwischen Veröffentlichung und letzter Kerze: Umtausch zum angekündigten Verhältnis, Ausstieg zur ersten Eröffnung des Nachfolgesymbols; L3 | Der Nachfolger ist ein neues Instrument (U1) |
-| E7 Datenende ohne Nachweis | Die Reihe endet endgültig, ohne Ankündigung nach D11 oder ohne ausführbaren Weg nach E5/E6 | **Totalverlust** der Position | Instrument endet |
+**Belegt** heißt: durch eine öffentliche, datierte Binance-Ankündigung (D11),
+bei Datenfehlern durch einen Widerspruch zwischen Monats- und Tagesdatei
+desselben Tags (D12) oder eine Verletzung von D2. Ein bloßes Datenende belegt
+weder ein Delisting noch einen Verlust.
 
+| Fall | Erkennung | Haupttest (Lesart A) | konservative Lesart B | Zulassung (U1/U2) |
+|---|---|---|---|---|
+| E1 Archivlücke | Tag fehlt im Monatsarchiv, liegt im Tagesarchiv | ergänzt, keine Wirkung | wie A | keine Wirkung |
+| E2 kurze Lücke | nach der Ergänzung 1–6 Tage ohne Kerze, danach geht die Reihe weiter. Handelspause und nicht behebbare Datenlücke sind nicht zu unterscheiden; beide gelten als Handelspause | gehalten, Bewertung mit dem letzten Schluss, kein Handel möglich. Ein fälliger Ausstieg erfolgt zur ersten Eröffnung nach der Wiederaufnahme | wie A | gesperrt, bis U2 wieder erfüllt ist |
+| E3 lange Lücke | nach der Ergänzung ≥ 7 Tage ohne Kerze, danach geht die Reihe weiter; Wiedereröffnung unter dem Zehnfachen des letzten Schlusses und kein Nachweis einer Umstellung (sonst E6 oder E7) | Schließung zur ersten Eröffnung nach der Wiederaufnahme, also zum ersten tatsächlich ausführbaren Preis; L3 | wie A | neues Instrument (U1 beginnt neu) |
+| E4 Kurssprung | Schluss ≥ 10 × oder ≤ 0,1 × vorheriger Schluss, ohne Lücke oder über eine kurze Lücke (E2) | **belegte Umstellung** (Split, Neustückelung, Tokentausch mit Verhältnis): Verhältnis auf Bestand und Kurshistorie angewandt, weder Gewinn noch Verlust. **Belegter Datenfehler:** betroffene Kerzen gelten als fehlend (E2). **Sonst echte Marktbewegung:** unverändert, auch im Signal | ungeklärter Sprung **nach oben** als Umstellung: Sprungfaktor aus Bewertung und Signal herausgerechnet. Ungeklärte Stürze bleiben echt | belegte Umstellung: neues Instrument; sonst keine Wirkung |
+| E5 belegtes Delisting | Reihe endet endgültig vor 2026-09-30; eine Ankündigung des Handelsendes (D11) ist belegt, und zwischen Veröffentlichung und letzter Kerze liegt mindestens eine Tageseröffnung | Ausstieg zur ersten Tageseröffnung nach der Veröffentlichung, frühestens am Tag nach dem Einstieg; L3. Ist nur das Datum belegt, gilt das Ende dieses Tags | wie A | Instrument endet |
+| E6 belegte Migration oder Symbolwiederverwendung | Ankündigung nennt Nachfolger und Umtauschverhältnis oder die Neuvergabe des Symbols an eine andere Münze | wie E5. Ohne Ausführungsfenster: Umtausch zum angekündigten Verhältnis und Ausstieg zur ersten Eröffnung des Nachfolgers; L3 | wie A | Nachfolger oder neue Münze ist ein neues Instrument |
+| E7 ungeklärtes Reihenende | Datenende ohne Ankündigung; belegtes Delisting ohne Ausführungsfenster und ohne belegten Weg zur Verwertung; lange Lücke mit Wiedereröffnung ≥ 10 × ohne Nachweis | **Bewertung, kein Verkauf:** Die Position wird zum letzten vorhandenen Schluss als nicht handelbarer Posten eingefroren, bis zum Fensterende im Eigenkapital geführt und nie wieder angelegt | Wert 0 ab dem Datenende | Instrument endet |
+
+- **Was als Verlust zählt:** Der tatsächliche wirtschaftliche Verlust ist der
+  Kursverfall, den die Daten bis zum Ausstieg oder bis zum Datenende zeigen.
+  Er steht in beiden Lesarten. Ob nach einem ungeklärten Datenende noch etwas
+  verwertbar war, ist offen; genau das deckt das Band zwischen A und B ab.
+- **Starke Kursgewinne bleiben stehen**, solange sie nicht als Umstellung oder
+  Datenfehler belegt sind. Nur Lesart B rechnet ungeklärte Sprünge nach oben
+  heraus.
 - **Warum E5 und E6 nicht in die Zukunft blicken:** Die Regel „aussteigen,
   sobald ein Delisting oder eine Migration öffentlich angekündigt ist“ nutzt
   nur Information, die zum Ausführungszeitpunkt veröffentlicht war. Ob eine
   Reihe endgültig endet, bestimmt nur, **welche** Fälle nachgeschlagen werden,
   nie einen Preis oder einen Zeitpunkt.
-- **Kein automatischer letzter Schlusskurs:** Der letzte vorhandene
-  Schlusskurs wird nie rückwirkend als Verkaufspreis unterstellt. Ohne
-  belegtes Ausführungsfenster gilt E7.
+- **Kein rückwirkender Verkauf zum letzten Schlusskurs.** E7 ist im
+  Haupttest eine Bewertung ohne Verkauf; der Wert wird nicht wieder angelegt.
 - **Endgültig** heißt: keine Kerze mehr bis 2026-09-30. Endet eine Reihe erst
   danach, wird die Position am Fensterende normal glattgestellt.
-- E2–E7 gelten für Varianten, Kontrollen und die BTC/ETH-Referenz gleich. Der
-  Bericht weist jeden Fall mit Ergebnis aus (M14). Der Delisting-Stress in
-  B6(d) bucht jede Schließung nach E3–E7 mit Erlös 0.
+- E1–E7 gelten für Varianten, Kontrollen und die BTC/ETH-Referenz gleich, in
+  beiden Lesarten. Der Bericht weist jeden Fall mit Einordnung, Nachweis und
+  Ergebnis aus (M14) und zeigt Lesart B vollständig (M30).
+- **Stresstests, nie Haupttest:**
+  - M18, Delisting-Stress (Kriterium B6(d) der ersten Fassung): jede
+    Schließung oder Bewertung nach E3, E5, E6 und E7 mit Erlös 0, für alle
+    Reihen;
+  - M29, E3-Abschlag: Schließung zum niedrigeren Wert aus letztem Schluss vor
+    der Lücke und erster Eröffnung danach; nur Bericht.
 
 ### 4.4 Lookahead-Schutz
 
@@ -393,8 +416,9 @@ beiden Quellen vor, gilt das Monatsarchiv.
     die Ausführung einen Tag später.
 - **Bewertung** zum Tagesschluss.
 - **Ereignisse** (4.3) lösen eine Handlung erst aus, wenn ihr Anlass bekannt
-  war: eine Lücke bei der Wiederaufnahme, ein Kurssprung am Folgetag, ein
+  war: eine Lücke bei der Wiederaufnahme, eine belegte Umstellung, ein
   Delisting oder eine Migration ab der Veröffentlichung der Ankündigung.
+  Ungeklärte Fälle lösen keinen Verkauf aus (E7).
 - **Champion/Challenger** stammen aus der unveränderten Benchmark-Datei.
   Nichts aus den neuen Daten fließt dort ein.
 - **Keine Parameterwahl auf Daten:** Alle Werte stehen in Abschnitt 5.4 und
@@ -433,9 +457,11 @@ beiden Quellen vor, gilt das Monatsarchiv.
     verkauft.
   - Beim Neuranking: Rang > 20 oder nicht mehr in Uₜ.
   - **Ereignisse nach 4.3** (E2 Handelspause, E3 lange Lücke, E4 Kurssprung,
-    E5 Delisting, E6 Migration, E7 Datenende ohne Nachweis): Schließung genau
-    nach der dortigen Tabelle, Kostenstufe L3, nie rückwirkend zum letzten
-    Schlusskurs. Der Platz bleibt bis zum nächsten Termin Kasse.
+    E5 belegtes Delisting, E6 belegte Migration, E7 ungeklärtes Reihenende):
+    Handlung genau nach der dortigen Tabelle, Ausstiege mit Kostenstufe L3.
+    Nie ein rückwirkender Verkauf zum letzten Schlusskurs; E7 friert die
+    Position ein. Ein frei gewordener Platz bleibt bis zum nächsten Termin
+    Kasse.
   - **Kein Stop-Loss, kein Kursziel, keine Haltefrist.** Jede davon wäre ein
     weiterer Parameter.
 - **Mindestorder** 10 USDT; kleinere Orders entfallen.
@@ -499,13 +525,14 @@ oder nur aus mehr Krypto-Engagement?**
     (mehr Schwankung, grob 0,3 pp p. a. weniger CAGR); die Zufallsportfolios
     (M24) zeigen den Vergleich bei gleicher Konzentration.
   - **Investitionsquote:** Ohne Nachgewichtung kann nach Verkäufen Kasse
-    liegen bleiben. B3(d) verlangt deshalb den Vorteil auch auf das
-    investierte Kapital.
+    liegen bleiben. Das frei geschätzte β in B3(a) fängt konstante
+    Unterschiede auf; M27 weist den Vorteil zusätzlich verpflichtend auf das
+    investierte Kapital aus.
   - **Ereignisse:** Die Kontrolle hält mehr schwache Titel und trägt deshalb
     eher mehr Delistings (M14). Das ist zum Teil ein echter Vorteil der
-    Auswahl. Damit die strenge Buchung ohne Nachweis keinen scheinbaren
-    Vorteil erzeugt, verlangt B6(f) den Vorsprung auch dann, wenn die
-    Kontrolle ihre Ereignisse zum günstigsten Wert bucht.
+    Auswahl. Ob ein Vorsprung an der Buchung ungeklärter Fälle hängt, prüft
+    die Bestimmbarkeitsregel (10.2). Der einseitige Stresstest M28 zeigt das
+    zusätzlich; er ist kein Performancevergleich.
 - Die Kontrolle hat **mehr Positionen** (bis zu 50). Ihr Ertrag ist deshalb
   ruhiger, aber im Erwartungswert ohne Auswahl gleich. Die Konzentration auf
   10 Titel erhöht die Schwankung; B4 begrenzt das.
@@ -527,7 +554,7 @@ Handelstag aus der eigenen Liquidität bis zum Vortag eine Stufe bestimmt:
 |---|---|---:|---:|---:|---:|---:|
 | L1 | ≥ 100 Mio. USDT | 10 bp | 2 bp | 3 bp | **14 bp** (= VIP0-Schätzung) | 28 bp |
 | L2 | 20–100 Mio. USDT | 10 bp | 10 bp | 10 bp | **25 bp** | 50 bp |
-| L3 | < 20 Mio. USDT, **oder** Kursschritt-Ersatz > 10 bp, **oder** Schließung nach E2–E7 | 10 bp | 20 bp | 20 bp | **40 bp** | 80 bp |
+| L3 | < 20 Mio. USDT, **oder** Kursschritt-Ersatz > 10 bp, **oder** Ausstieg nach E2, E3, E5 oder E6 | 10 bp | 20 bp | 20 bp | **40 bp** | 80 bp |
 
 - **Kursschritt-Ersatz:** kleinste positive Differenz zwischen zwei Kursen
   (Eröffnung, Hoch, Tief, Schluss) der letzten 30 Tage, geteilt durch den
@@ -607,8 +634,9 @@ Kapitalbindung von 2,1 %; der Mittelwert von `DTB3` lag bei 2,85 %
   (Zeit in `RISK_ON`), der Challenger 2,1 %, der Champion 0,9 % (Carry-Bericht).
 - **Investitionsquote innerhalb von `RISK_ON`** (K6): Ohne Nachgewichtung kann
   nach Verkäufen Kasse liegen bleiben, bei Variante und Kontrolle verschieden
-  viel. M16 weist die Quote je Tag aus. B3(d) verhindert, dass ein Unterschied
-  in der Quote als Auswahlvorteil durchgeht.
+  viel. M16 weist die Quote je Tag aus, M27 den Vorteil auf das investierte
+  Kapital (beides Pflichtbericht). Dass ein Quotenunterschied nicht als
+  Auswahlvorteil durchgeht, sichert das frei geschätzte β in B3(a).
 
 ### 8.3 Drei Sichten im Vergleich (Bericht)
 
@@ -654,11 +682,11 @@ Kontrolle im selben Zeitraum.
 | M11 | Korrelationen | Pearson und Spearman der Monatsrenditen mit Challenger und Champion, roh und für die Selektionsrendite | B5 (Selektionsrendite gegen Challenger) |
 | M12 | Umschlag | Termine, Ø getauschter Anteil je Termin, Umschlag p. a., Kosten ÷ Brutto, Kostenanteil aus Gate-Wechseln gegenüber Neuranking | Bericht (Abschnitt 2.2) |
 | M13 | Kostenstufen | Anteil des gehandelten Volumens in L1/L2/L3, Ø Kosten je Seite, Zahl der L3-Fälle durch den Kursschritt-Ersatz | Bericht |
-| M14 | Universum und Ereignisse | Uₜ je Monat, Zahl gehaltener Instrumente; jede Schließung nach E2–E7 mit Fall, Datum, Symbol, Nachweis (D11) und Ergebnis; getrennt ausgewiesen das Ergebnis von Positionen, die wegen einer Handelspause außerhalb von `RISK_ON` gehalten werden mussten | Bericht |
+| M14 | Universum und Ereignisse | Uₜ je Monat, Zahl gehaltener Instrumente; jeder Fall E2–E7 mit Einordnung (belegt oder ungeklärt), Datum, Symbol, Nachweis (D11, D12) und Ergebnis in beiden Lesarten; getrennt ausgewiesen das Ergebnis von Positionen, die wegen einer Handelspause außerhalb von `RISK_ON` gehalten werden mussten | Bericht |
 | M15 | Konzentration | Beitrag des besten Instruments und der besten 5 zur Gesamtrendite; Ergebnis ohne das beste Instrument | Bericht |
-| M16 | Kapitalbindung und Investitionsquote (K6) | investierter Anteil je Tag; Mittel über alle Tage und über `RISK_ON`-Tage; Monatsmittel in `RISK_ON` mit P10, Median, P90; Unterschied Variante − Kontrolle; Netto ÷ Kapitalbindung | Bericht, B3(d) |
+| M16 | Kapitalbindung und Investitionsquote (K6) | investierter Anteil je Tag; Mittel über alle Tage und über `RISK_ON`-Tage; Monatsmittel in `RISK_ON` mit P10, Median, P90; Unterschied Variante − Kontrolle; Netto ÷ Kapitalbindung | Pflichtbericht |
 | M17 | Kostenstress | alle Ausführungskosten × 2 | B6 |
-| M18 | Delisting-Stress | jede Schließung nach E3–E7 mit Erlös 0 (Totalverlust der Position) | B6 |
+| M18 | Delisting-Stress | jede Schließung oder Bewertung nach E3, E5, E6 und E7 mit Erlös 0 (Totalverlust der Position), für alle Reihen gleich | B6(d) |
 | M19 | Ausführung +1 Tag | alle Ausführungen aller Strategien, auch des Gates, zur Eröffnung des Folgetags | B6 |
 | M20 | Netto nach Abschlag, Überschuss über `DTB3` (S1) | M1 − 1,5 pp (pessimistisch auch − 3,0 pp) − Ø `DTB3` | B1, B2 |
 | M21 | gleiche Risiko-Sicht (S2) | Abschnitt 8.3, Sicht 3 | Bericht |
@@ -667,8 +695,10 @@ Kontrolle im selben Zeitraum.
 | M24 | Zufalls-Gegenprobe | Abschnitt 6 | Bericht |
 | M25 | Kapital-Szenario S2 | M1, M2, M3 und Überschuss über `DTB3` in S2 für alle Reihen (Abschnitt 8.1) | nur Bericht, nie Kriterium |
 | M26 | Fairness-Ausweis Variante gegen Kontrolle | β aus B3(a) und β zu BTC; Zahl der Positionen und Herfindahl-Index; Investitionsquote (M16); Ø Kosten je Seite und Kosten ÷ Brutto; Zahl der Ereignisse E2–E7; Median und 5–95-%-Spanne der Zufallsportfolios (M24) | Bericht |
-| M27 | Selektionsrendite auf das investierte Kapital | über alle `RISK_ON`-Tage verkettete Tagesrendite des investierten Teils (Positionsergebnis des Tages einschließlich Kosten ÷ eingesetzter Positionswert), Variante minus Kontrolle | B3(d) |
-| M28 | Gegenstress Ereignisbuchung | Kontrolle mit allen Ereignissen E3–E7 zum letzten Schluss vor dem Ereignis, Variante unverändert nach 4.3. Der letzte Schluss dient hier nur als günstigste Obergrenze für die Kontrolle, nie als realisierbarer Preis | B6(f) |
+| M27 | Selektionsrendite auf das investierte Kapital | über alle `RISK_ON`-Tage verkettete Tagesrendite des investierten Teils (Positionsergebnis des Tages einschließlich Kosten ÷ eingesetzter Positionswert), Variante minus Kontrolle | Pflichtbericht, kein Kriterium |
+| M28 | Asymmetrischer Stresstest Ereignisbuchung | Nur die Kontrolle bucht ihre Ereignisse E3, E5, E6 und E7 zum letzten Schluss vor dem Ereignis, die Variante bleibt bei Lesart A. Bewusst einseitig und **kein** historischer Performancevergleich; zeigt, ob ein Vorsprung an der Ereignisbuchung hängt | Stresstest, nur Bericht |
+| M29 | E3-Abschlag | Schließung nach E3 zum niedrigeren Wert aus letztem Schluss vor der Lücke und erster Eröffnung danach | Stresstest, nur Bericht |
+| M30 | Lesart B | alle Kennzahlen und Kriterien in Lesart B (4.3); Zahl und Anteil ungeklärter Fälle (E4 ungeklärt, E7) je Reihe; Einfluss auf jede Kriterienzeile | Bestimmbarkeitsregel (10.2) |
 
 ## 10. Bestehens- und Abbruchkriterien
 
@@ -681,10 +711,10 @@ steht. **Alle** müssen erfüllt sein.
 |---|---|---|
 | B1 | Wirtschaftlichkeit gesamt | Netto p. a. − 1,5 pp (Abschlag) − Ø `DTB3` > 0 |
 | B2 | Wirtschaftlichkeit seit 2024 | dasselbe für 2024-01-01 – 2026-09-30, mit Ø `DTB3` dieses Zeitraums |
-| B3 | **Auswahlvorteil** | (a) Selektions-α gegen die eigene Kontrolle: t ≥ max(2; √(2·ln 57); t₀,₉₇₅ mit n − 2 FG) ≈ **2,84**, mindestens 24 Monate mit eigenem Ertrag, α̂ > 0 in 2020–2023 **und** in 2024–2026-09; **und** (b) Netto p. a. der Variante > Netto p. a. der Kontrolle; **und** (c) Netto p. a. ≥ R und Sharpe ≥ R; **und** (d) die Selektionsrendite auf das investierte Kapital (M27) ist > 0 |
+| B3 | **Auswahlvorteil** | (a) Selektions-α gegen die eigene Kontrolle: t ≥ max(2; √(2·ln 57); t₀,₉₇₅ mit n − 2 FG) ≈ **2,84**, mindestens 24 Monate mit eigenem Ertrag, α̂ > 0 in 2020–2023 **und** in 2024–2026-09; **und** (b) Netto p. a. der Variante > Netto p. a. der Kontrolle; **und** (c) Netto p. a. ≥ R und Sharpe ≥ R |
 | B4 | Verlustbegrenzung | max. Drawdown ≤ 1,25 × max. Drawdown der Kontrolle **und** Netto ÷ max. Drawdown ≥ dem Wert der Kontrolle |
 | B5 | eigener Ertrag gegenüber dem Bestand | α-t gegen Champion und Challenger ≥ max(2; √(2·ln 57); t₀,₉₇₅ mit n − 3 FG) ≈ **2,84**, mindestens 24 Monate mit eigenem Ertrag, α̂ > 0 in beiden Teilfenstern; **und** Pearson-Korrelation der monatlichen **Selektionsrendite** mit dem Challenger ≤ 0,5 |
-| B6 | Stetigkeit und Robustheit | (a) Selektionsrendite > 0 in mindestens zwei Dritteln (aufgerundet) der Kalenderjahre mit ≥ 30 `RISK_ON`-Tagen; (b) ohne das beste dieser Jahre bleibt die Summe der jährlichen Selektionsrenditen > 0; (c) bei Kosten × 2: Netto > Kontrolle und B1 erfüllt; (d) unter Delisting-Stress (M18): Netto > Kontrolle; (e) bei Ausführung +1 Tag: Netto > Kontrolle; (f) Gegenstress zu (d) (M28): Netto der Variante > Netto der Kontrolle, wenn **nur** die Kontrolle ihre Ereignisse E3–E7 zum letzten Schluss vor dem Ereignis bucht |
+| B6 | Stetigkeit und Robustheit | (a) Selektionsrendite > 0 in mindestens zwei Dritteln (aufgerundet) der Kalenderjahre mit ≥ 30 `RISK_ON`-Tagen; (b) ohne das beste dieser Jahre bleibt die Summe der jährlichen Selektionsrenditen > 0; (c) bei Kosten × 2: Netto > Kontrolle und B1 erfüllt; (d) unter Delisting-Stress: Netto > Kontrolle; (e) bei Ausführung +1 Tag: Netto > Kontrolle |
 
 **Methode `spanningAlphaTest`** wie in `packages/evolution/src/paired.ts` und
 in der Carry-Studie nachgebildet:
@@ -701,8 +731,11 @@ in der Carry-Studie nachgebildet:
   Geldmarkt liegt, ist kein zusätzlicher Ertrag.
 - **B3** ist das Kernkriterium aus dem Auftrag (Kontrollstrategie). Seine
   Schwelle ist die von `OWN_ALPHA`, mit derselben Mehrfachtest-Korrektur.
-  B3(d) ist in der zweiten Fassung hinzugekommen (K6) und **verschärft**: Ein
-  Vorteil, der nur aus einer höheren Investitionsquote kommt, zählt nicht.
+  Die Rendite auf das investierte Kapital (M27) ist **Pflichtbericht, kein
+  Kriterium**: Bei kleiner oder wechselnder Investitionsquote wäre sie
+  statistisch instabil. Konstante Quotenunterschiede fängt das frei geschätzte
+  β in B3(a) auf. Ist M27 ≤ 0, obwohl B3 erfüllt ist, nennt der Bericht das
+  ausdrücklich als Einschränkung.
 - **B4** übersetzt `PORTFOLIO_DRAWDOWN` aus Gates v4 („Rendite ÷ Drawdown nicht
   schlechter, Drawdown begrenzt“). Die absolute 10-%-Grenze hängt hier an der
   Investitionsquote und ist deshalb relativ zur Kontrolle gefasst.
@@ -714,12 +747,10 @@ in der Carry-Studie nachgebildet:
   Die Rohkorrelation wird weiter berichtet (M11).
 - **B6:** Zwei Drittel der Jahre und „ohne das beste Jahr“ sind
   Ermessenswerte gegen einen Effekt, der nur aus einer einzigen Altcoin-Saison
-  stammt. B6(f) ist in der zweiten Fassung hinzugekommen und **verschärft**:
-  Die strenge Ereignisbuchung (4.3, ohne Nachweis Totalverlust) trifft die
-  Kontrolle mit ihren vielen schwachen Titeln stärker. Ein Auswahlvorteil darf
-  nicht allein aus dieser Buchung stammen.
+  stammt. Der Delisting-Stress in (d) ist M18 (4.3).
 - Alle Werte wurden vor jedem Datenabruf gesetzt und nie an Daten geprüft.
-  Keine Schwelle der ersten Fassung wurde erleichtert.
+  B1–B6 und ihre Schwellen sind wörtlich die der ersten Fassung. Alle später
+  hinzugekommenen Prüfungen sind Bericht oder Stresstest.
 
 ### 10.2 Ergebnisklassen
 
@@ -730,7 +761,25 @@ in der Carry-Studie nachgebildet:
 | `KOMPRIMIERT` | alles erfüllt außer B2 und/oder der Bedingung „α̂ > 0 seit 2024“ in B3 oder B5: Den Vorteil gab es, seit 2024 trägt er nicht mehr |
 | `NICHT_BESTANDEN` | sonst |
 | ↳ Unterfall `NUR_BETA` | keine Variante erfüllt B3, aber eine Kontrolle erfüllt B1: Der Ertrag kam aus dem Engagement, nicht aus der Auswahl. Das ist eine Information für eine Risiko-Entscheidung, **kein** Vorteil |
-| `NICHT_AUSWERTBAR` | D0, D0b, D1, D2, D3, D6 oder D7 verletzt; es werden keine Renditen berechnet |
+| `NICHT_BESTIMMBAR` | nach der Bestimmbarkeitsregel (unten): Das Urteil hängt an ungeklärten Fällen oder an einer nicht bestandenen Vollständigkeitsprüfung. Einschränkung der Auswertbarkeit, **kein** Bestehen |
+| `NICHT_AUSWERTBAR` | D1, D2, D3, D6 oder D7 verletzt, oder der Betreiber beendet die Studie nach einem Halt (D0, D0b, D9, D11); es werden keine Renditen berechnet |
+
+**Bestimmbarkeitsregel** (P4):
+
+1. Der eine Lauf bestimmt die Klasse zweimal mit denselben Kriterien: in
+   Lesart A (Haupttest) und in Lesart B (4.3). Die Lesarten unterscheiden
+   sich nur in ungeklärten Fällen; beide gelten für alle Reihen gleich.
+2. Ist in **beiden** Lesarten keine Klasse positiv (`BESTANDEN`,
+   `BESTANDEN_REFERENZ`), gilt die Klasse aus Lesart A. Weicht Lesart B
+   davon ab, nennt der Bericht beide; die Folgen nach 10.4 sind dieselben.
+3. Ist eine Lesart positiv und die andere nicht, lautet das Ergebnis
+   `NICHT_BESTIMMBAR`. Der Bericht nennt beide Klassen und die Fälle, an denen
+   das Urteil hängt.
+4. Positive Klassen setzen außerdem bestandene Vollständigkeitsprüfungen D0
+   und D0b voraus. Hat der Betreiber nach einem Halt an D0 oder D0b
+   weiterarbeiten lassen, lautet ein positives Ergebnis `NICHT_BESTIMMBAR`.
+5. Stresstests (M18 außerhalb von B6(d), M28, M29), das Kapital-Szenario S2
+   und die Pflichtberichte M16 und M27 bestimmen keine Klasse.
 
 **Jede Klasse beschreibt nur ein historisches Forschungsergebnis an einem
 Referenzmarkt.** Auch `BESTANDEN` heißt nicht, dass die Strategie unter den
@@ -752,23 +801,32 @@ ist.
   - Eine neue Prüfung ist nur auf Forward-Daten zulässig, frühestens 12 Monate
     nach 2026-10-15 und mit neuer Vorregistrierung.
   - Die marktneutrale Frage bleibt davon unberührt (Abschnitt 1).
+- **`NICHT_BESTIMMBAR`:** Die Richtung ist weder bestätigt noch geschlossen.
+  Keine Phase 2. Eine Klärung bräuchte bessere Ereignis- oder Archivdaten und
+  eine neue Vorregistrierung; kein zweiter Lauf auf denselben Daten.
 - **`NICHT_AUSWERTBAR`:** Die Arbeit endet vor jeder Renditeberechnung. Eine
   andere Datenquelle braucht eine neue Vorregistrierung.
 - **Stopp und Rückfrage beim Betreiber:**
   - sobald ein Abruf Geld, ein Konto, einen API-Schlüssel oder die Zustimmung
     zu Bedingungen verlangen würde;
-  - wenn D0 oder D0b an der Verzeichnisliste scheitert, noch vor dem
+  - wenn D0 oder D0b scheitert oder D0b nicht durchführbar ist, noch vor dem
     Download;
   - wenn kein Mitglied von Uₜ ein endgültiges Reihenende hat (D9, Verdacht
     auf Überlebens-Verzerrung);
-  - wenn D11 weniger als 80 % der Ereignisfälle belegt, vor jeder
+  - wenn D11 weniger als 80 % der endgültigen Reihenenden belegt, vor jeder
     Renditeberechnung;
+  - nach jedem Halt entscheidet der Betreiber: beenden (`NICHT_AUSWERTBAR`)
+    oder mit ausdrücklich dokumentierter Einschränkung weiter (dann gilt die
+    Bestimmbarkeitsregel);
   - wenn der Download-Umfang mehr als doppelt so groß ist wie geschätzt.
 - **Keine Zwischenblicke.** Renditen werden erst berechnet, wenn die
   blockierenden Prüfungen bestanden sind, und dann in **einem** Lauf für beide
   Varianten, beide Kontrollen und alle Referenzen.
-- **Ereignisnachweise** (D11) werden vollständig vor dem Lauf erhoben und
+- **Ereignisnachweise** (D11, D12) werden vollständig vor dem Lauf erhoben und
   danach weder ergänzt noch umgedeutet.
+- **Ein Lauf** heißt: Lesart A und B, beide Kapital-Szenarien und alle
+  Stresstests werden zusammen berechnet, nicht nacheinander mit Blick auf
+  Zwischenergebnisse.
 - **Fehlerkorrektur:** Findet sich nach dem Lauf ein reiner
   Implementierungsfehler gegenüber diesem Dokument, ist **ein** korrigierter
   Lauf zulässig. Der Bericht nennt beide Ergebnisse und den Fehler. Eine
@@ -793,7 +851,7 @@ gewählt wird.
 
 | Risiko | Im Shadow sichtbar? | Behandlung |
 |---|---|---|
-| Delisting, Migration, Zusammenbruch eines Tokens | teilweise: Kurse bis zum letzten Handelstag, Ankündigungen nur für die Fälle aus D11 | Regeln E3–E7 (4.3), ohne Nachweis Totalverlust; Delisting-Stress (B6) |
+| Delisting, Migration, Zusammenbruch eines Tokens | teilweise: Kurse bis zum letzten Handelstag, Ankündigungen nur für die Fälle aus D11 | Regeln E1–E7 (4.3); ungeklärte Fälle mit konservativer Lesart B und Bestimmbarkeitsregel (10.2); Delisting-Stress (B6) |
 | Momentum-Crash: gehaltene Gewinner stürzen gemeinsam | ja | B4, M4, M15 |
 | Liquiditätsengpass im Crash, breitere Spreads | nein, Kosten fest je Stufe | Kostenstufen, Kostenstress × 2 |
 | Pump-and-Dump in kleineren Coins | teilweise | Universum 50, Schwelle 5 Mio., 90 Tage Historie |
@@ -854,8 +912,8 @@ plus die zwei Carry-Varianten, [Carry-Bericht](2026-10-17-funding-carry-v2-resul
 Abschnitt 1). Die zwei Varianten dieser Studie werden konservativ mitgezählt:
 **N = 55 → 57**, wenn ausgewertet wird, Schwelle √(2·ln 57) = 2,84. Wird nicht
 ausgewertet (`NICHT_AUSWERTBAR`), bleibt N = 55. Kontrollen, Referenzen, die
-Zufalls-Gegenprobe und das Kapital-Szenario S2 sind keine Kandidaten und
-zählen nicht. Der Zähler wird nie
+Zufalls-Gegenprobe, das Kapital-Szenario S2, Lesart B und die Stresstests
+sind keine Kandidaten und zählen nicht. Der Zähler wird nie
 zurückgesetzt. Die Evolution Engine kennt diese Varianten nicht; die nächste
 Evolution-Vorregistrierung muss sie ausdrücklich mitzählen, ebenso die zwei
 Carry-Varianten.
@@ -978,12 +1036,13 @@ heutigen Regeln so verletzen:
 |---|---|---|---|---|
 | 0.1 | Diese Vorregistrierung committen | Claude | – | 0 |
 | 0.2 | Review; F1–F8 und K1–K6 sind entschieden (Abschnitt 18). Der ausdrücklich freigegebene Commit friert V1 ein | Betreiber | **ja** | 0 |
-| 1.1 | Skript `scripts/research/relative-strength-v1/` schreiben und **vor** jedem Abruf gegen synthetische Daten testen: Ausschlüsse je Stichtag, Ereignisregeln E1–E7, Universum, Rang und Puffer, Ein- und Ausstiege, Gate, Kostenstufen, Stresse, Kontrolle, Referenzen, Kapital-Szenarien S1/S2, `spanningAlphaTest`, Kennzahlen M1–M28, B3(d), B6(f), Ergebnisklassen | Claude | mit 0.2 | 0 |
-| 1.2 | Verzeichnisliste und `exchangeInfo` lesen (nur Metadaten), D0, D0b und D0c prüfen, Download-Plan mit genauer Dateizahl und Größe | Claude | mit 0.2 | 0 |
+| 1.1 | Skript `scripts/research/relative-strength-v1/` schreiben und **vor** jedem Abruf gegen synthetische Daten testen: Ausschlüsse je Stichtag, Ereignisregeln E1–E7, Universum, Rang und Puffer, Ein- und Ausstiege, Gate, Kostenstufen, Stresse, Kontrolle, Referenzen, Kapital-Szenarien S1/S2, `spanningAlphaTest`, Kennzahlen M1–M30, Lesarten A und B, Bestimmbarkeitsregel, Ergebnisklassen | Claude | mit 0.2 | 0 |
+| 1.2 | Verzeichnisliste und `exchangeInfo` lesen (nur Metadaten), Ankündigungsstichprobe für D0b nachschlagen, D0, D0b und D0c prüfen, Download-Plan mit genauer Dateizahl und Größe; bei einem Halt Rückfrage | Claude | mit 0.2 | 0 |
 | 1.3 | Download nach Plan, Prüfsummen, Manifest; vorhandene `DTB3`- und Benchmark-Dateien kopieren und gegen ihre Manifeste prüfen | Claude | **ja, ausdrücklich** | 0 USD |
 | 1.4 | Datenprüfung D1–D10; Bericht nur zur Datenqualität; bei einer gescheiterten Pflichtprüfung Halt und Meldung | Claude | – | 0 |
 | 1.4b | Ereignisnachweise D11: öffentliche Binance-Ankündigungen für die Fälle aus 4.3 nachschlagen und mit Adresse und Zeit ablegen; nur Ereignisdaten, keine Kurse oder Renditen; unter 80 % Halt und Rückfrage | Claude | – | 0 |
-| 1.5 | ein Lauf: beide Varianten, beide Kontrollen, alle Referenzen, beide Kapital-Szenarien, M1–M28, B1–B6 | Claude | **ja, gesondert** (wie beim Carry) | 0 |
+| 1.4c | Datenfehlerprüfung D12: Tagesdateien der Sprungtage laden (höchstens 100) und mit dem Monatsarchiv vergleichen | Claude | im Rahmen der Freigabe von 1.3 | 0 USD |
+| 1.5 | ein Lauf: beide Varianten, beide Kontrollen, alle Referenzen, beide Kapital-Szenarien, Lesarten A und B, alle Stresstests, M1–M30, B1–B6, Bestimmbarkeitsregel | Claude | **ja, gesondert** (wie beim Carry) | 0 |
 | 1.6 | Phase 1B: Primärquellen; Konto prüft der Betreiber | Claude und Betreiber | – | 0 |
 | 1.7 | Ergebnisbericht `docs/trading/research/<Datum>-relative-strength-feasibility-results.md` mit Ergebnisklasse; N auf 57 | Claude | – | 0 |
 | 2 | Nur bei `BESTANDEN` (oder bewusst bei `BESTANDEN_REFERENZ`) und nach Betreiberbeschluss: Grundsatzentscheidungen aus Abschnitt 16 | – | **ja**, je ADR | Bauaufwand |
@@ -1010,8 +1069,9 @@ heutigen Regeln so verletzen:
 |---|---|
 | 1.1 Skript und Tests | etwa eine Arbeitssitzung; größer als beim Carry wegen Universum und Ereignisregeln |
 | 1.2/1.3 Liste und Download | Minuten Arbeit, einige Stunden Laufzeit im Hintergrund |
+| 1.2 Ankündigungsstichprobe D0b | rund 18 Ankündigungen, unter einer Stunde |
 | 1.4/1.5 Prüfung und Lauf | jeweils unter einer Stunde |
-| 1.4b Ereignisnachweise | Zahl der Fälle vorab unbekannt, Größenordnung Dutzende; etwa eine halbe bis eine Arbeitssitzung |
+| 1.4b/1.4c Ereignisnachweise und Sprungtage | Zahl der Fälle vorab unbekannt, Größenordnung Dutzende; etwa eine halbe bis eine Arbeitssitzung |
 | 1.6/1.7 Phase 1B und Bericht | etwa eine Arbeitssitzung |
 | Geld | 0 USD, kein KI-Forschungslauf |
 
@@ -1122,28 +1182,45 @@ des Betreibers, keine Forschungsfrage, und nicht Gegenstand dieser Studie.
 
 | Nr. | Korrektur mit Präzisierung des Betreibers | umgesetzt in |
 |---|---|---|
-| K1 | Kein Lookahead bei Handelspausen und Delistings. Eine Pause endet erst zum ersten ausführbaren Preis nach der Wiederaufnahme. Ein Delisting nie automatisch zum letzten Schlusskurs: früherer Ausstieg nur mit belegter öffentlicher Ankündigung und handelbarem Fenster, sonst Totalverlust. Pause, Datenlücke, Delisting und Migration werden getrennt | 4.3 (E1–E7), 4.4, 5.1, D4, D11, M14, M18; Gegenstress B6(f)/M28 |
+| K1 | Kein Lookahead bei Handelspausen und Delistings. Eine Pause endet erst zum ersten ausführbaren Preis nach der Wiederaufnahme. Ein Delisting nie automatisch zum letzten Schlusskurs: früherer Ausstieg nur mit belegter öffentlicher Ankündigung und handelbarem Fenster. Pause, Datenlücke, Delisting und Migration werden getrennt. Ungeklärte Fälle nach P4 | 4.3 (E1–E7), 4.4, 5.1, D4, D11, M14 |
 | K2 | Kurse außerhalb von `RISK_ON` nur als Rückschau für Signale; dort keine fiktiven Strategieerträge | 1 |
-| K3 | Zwei Kapital-Szenarien: S1 unverzinste Handelsreserve (Shadow-Performance, alle Kriterien), S2 Geldmarkt für freies Kapital mit realistischem Transfer (nur Bericht). Überschuss passend zur Kapitalbindung; Challenger-Aussage korrigiert; B1/B2 unverändert | 8.1, 8.3, 17, M20, M21, M25 |
-| K4 | Mehrjährige, blockierende Archivkontrolle; ein Datenende beweist kein Delisting; Grenzen offen dokumentiert; Nachvollziehbarkeit der Delisting- und Symbolhistorie geprüft | D0b, D0c, D9, D11, 10.4 |
+| K3 | Zwei Kapital-Szenarien: S1 unverzinste Handelsreserve (Shadow-Buchführung, alle Kriterien), S2 Geldmarkt für freies Kapital mit realistischem Transfer (nur Bericht). Überschuss passend zur Kapitalbindung; Challenger-Aussage korrigiert; B1/B2 unverändert | 8.1, 8.3, 17, M20, M21, M25 |
+| K4 | Mehrjährige Archivkontrolle; ein Datenende beweist kein Delisting; Grenzen offen dokumentiert; Nachvollziehbarkeit der Delisting- und Symbolhistorie geprüft. Form nach P5 | D0b, D0c, D9, D11, 10.4 |
 | K5 | Ausschluss gehebelter Token nur mit Information bis zum Stichtag; alle Ausschlüsse je Stichtag | 3.2 |
-| K6 | Investitionsquote innerhalb von `RISK_ON` je Tag berichten; ein Quotenunterschied darf nicht als Auswahlvorteil durchgehen | M16, M27, **B3(d)**, 6, 8.2 |
+| K6 | Investitionsquote innerhalb von `RISK_ON` je Tag berichten; ein Quotenunterschied darf nicht als Auswahlvorteil durchgehen. Form nach P1 | M16, M27, 6, 8.2, B3(a) |
 
 ### 18.3 Zusätzliche Auflagen vor dem Einfrieren
 
 | Auflage | umgesetzt in |
 |---|---|
-| Strategie und Kontrolle nach Kosten fair vergleichen; Unterschiede in Beta, Konzentration und Investitionsquote transparent | 6, M26, B3(a) und B3(d) |
+| Strategie und Kontrolle nach Kosten fair vergleichen; Unterschiede in Beta, Konzentration und Investitionsquote transparent | 6, M26, M16, M27, B3(a) |
 | Das historische Universum enthält nicht nur heutige Gewinner | 3.1, D0, D0b, D9, D11 |
 | Strenge Trennung zwischen Forschungssimulation und unter R-004/R-015/R-020 handelbarer Strategie | 10.2, 14.1, 17 |
-| B1–B6 nicht erleichtern | 10.1: keine Schwelle erleichtert; B3(d) und B6(f) verschärfen |
-| Keine Renditedaten analysieren, keine Parameter an Ergebnissen nachoptimieren | Statusblock, 5.4, 13: für die zweite Fassung wurde nichts abgerufen |
+| B1–B6 nicht erleichtern | 10.1: wörtlich wie in der ersten Fassung |
+| Keine Renditedaten analysieren, keine Parameter an Ergebnissen nachoptimieren | Statusblock, 5.4, 13: für keine Fassung wurde etwas abgerufen |
 
-### 18.4 Noch offen
+### 18.4 Dritte Fassung: methodische Präzisierungen P1–P6
 
-Nur die **ausdrückliche Freigabe dieses Commits zum Einfrieren** durch den
-Betreiber. Danach folgt Schritt 1.1. Download (1.3) und Auswertung (1.5)
-brauchen je eine eigene, ausdrückliche Freigabe.
+Leitlinie des Betreibers: Die Strategie darf weder künstlich profitabler
+gerechnet noch durch unrealistische Strafannahmen unbrauchbar gemacht werden.
+Zusätzliche Prüfungen sollen die Aussagekraft verbessern, keine neuen Hürden
+schaffen.
+
+| Nr. | Präzisierung | umgesetzt in |
+|---|---|---|
+| P1 | Rendite auf das investierte Kapital verpflichtend berechnen und ausweisen, aber kein binäres Kriterium (statistisch instabil bei kleiner oder wechselnder Quote). Der Auswahlvorteil wird über den fairen Vergleich und die α-Tests nachgewiesen. Die verschärfende Bedingung B3(d) der zweiten Fassung entfällt | M27, 10.1 |
+| P2 | Der asymmetrische Vergleich mit günstigen Ausstiegspreisen nur für die Kontrolle ist ein konservativer Stresstest, kein K.-o.-Kriterium und kein Performancevergleich. Die Bedingung B6(f) der zweiten Fassung entfällt | M28, 6 |
+| P3 | Lange Handelspausen (E3) im Haupttest nur zu tatsächlich ausführbaren Preisen; der Abschlag auf den niedrigeren Wert ist ein getrennter Stresstest | 4.3, M29 |
+| P4 | Ein Datenende beweist keinen Totalverlust. Getrennt werden belegtes Delisting (E5), ungeklärtes Reihenende (E7) und tatsächlicher wirtschaftlicher Verlust (Kursverfall in den Daten). Ungeklärte Fälle: im Haupttest eingefrorene Bewertung ohne Verkauf, Totalverlust nur in Lesart B und im Stresstest. Hängt das Urteil daran, ist es `NICHT_BESTIMMBAR` | 4.3, 10.2, 10.4, M30 |
+| P5 | Statt einer willkürlichen Mindestzahl endender Paare ein Wiederfindungstest an angekündigten Delistings; kein automatischer Ausschluss, sondern Halt und Rückfrage; positive Klassen setzen ihn voraus | D0, D0b, 10.2, 10.4 |
+| P6 | Starke Kursgewinne bleiben echt, solange keine Umstellung oder kein Datenfehler belegt ist; Belege über Ankündigungen (D11) und den Abgleich der Archivdateien (D12); ungeklärte Sprünge transparent über Lesart B | 4.3 (E4), D12, M30 |
+
+### 18.5 Freigabe
+
+Der Betreiber hat am 2026-10-17 das Einfrieren dieser Fassung freigegeben,
+sofern P1–P6 sauber umgesetzt sind. Das Einfrieren selbst dokumentiert der
+Statusblock am Anfang dieses Dokuments. Danach folgt Schritt 1.1. Download
+(1.3) und Auswertung (1.5) brauchen je eine eigene, ausdrückliche Freigabe.
 
 ## 19. Was unverändert bleibt
 
