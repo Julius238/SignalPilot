@@ -578,6 +578,10 @@ attraktiv; seit 2024 liegt er unter Geldmarkt plus Abschlag. Er ist damit
 geschlossen, nächster Schritt ist Rang 2
 ([Ergebnisbericht](2026-10-17-funding-carry-v2-results.md)).
 
+Phase 0 für Rang 2 liegt vor:
+[Vorregistrierung der Machbarkeitsstudie relative Stärke](2026-10-17-relative-strength-feasibility-preregistration.md)
+(2026-10-17, zur Freigabe durch den Betreiber).
+
 ### Was die Empfehlung ändern würde
 
 - **Phase 1 zeigt nach Kosten keinen tragfähigen Carry**, etwa wegen
