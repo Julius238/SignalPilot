@@ -58,7 +58,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 STUDY_KEY = "RELATIVE_STRENGTH_FEASIBILITY_V1"
-SCRIPT_VERSION = "relative-strength-v1/1.0.0"
+SCRIPT_VERSION = "relative-strength-v1/1.0.1"  # 1.0.1: S1 metrics are stored (metricsS1), nothing else changed
 PREREGISTRATION = {
     "path": "docs/trading/research/2026-10-17-relative-strength-feasibility-preregistration.md",
     "frozenCommit": "c188c38",
@@ -2173,6 +2173,9 @@ def evaluate(data: Path, out: Path, spot: Path | None, cfg: Config, guard: dict,
               "b3cSharpeDefinitionCheck": sharpe_check,
               "criteria": {reading: {v: {key: value for key, value in c.items() if key != "metrics"} for v, c in by.items()}
                            for reading, by in criteria.items()},
+              # S1 series metrics of variant, its control and the reference R per reading, exactly as the criteria used them
+              # (1.0.0 computed but did not store them: Sharpe, calendar years, sub-periods, monthly returns)
+              "metricsS1": {reading: {v: c["metrics"] for v, c in by.items()} for reading, by in criteria.items()},
               "dataChecks": data_report,
               "report": report_metrics(market, readings, criteria, benchmarks, binding, cases, cfg)}
     report["interpretations"] = INTERPRETATIONS

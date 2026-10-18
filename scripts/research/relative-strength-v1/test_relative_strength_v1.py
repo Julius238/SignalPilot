@@ -660,6 +660,15 @@ class EndToEnd(unittest.TestCase):
         self.assertEqual(set(report["b3cSharpeDefinitionCheck"]), {"A", "B"})
         self.assertIn("dependsOnSharpeDefinition", report["b3cSharpeDefinitionCheck"]["A"])
         self.assertEqual(set(extra["series"]["A"]["buysOnLastTradingDay"]), {"count", "notional", "symbols"})
+        for reading in ("A", "B"):  # 1.0.1: the S1 metrics behind the criteria are stored, consistent with B4
+            for variant in ("A", "B"):
+                metrics = report["metricsS1"][reading][variant]
+                self.assertEqual(set(metrics), {"variant", "control", "reference"})
+                for key in ("sharpeMonthly", "sharpeDaily", "calendarYears", "netPerYearSince2024", "monthlyReturns", "finalEquity"):
+                    self.assertIn(key, metrics["variant"])
+                b4 = report["criteria"][reading][variant]["details"]["B4"]
+                self.assertEqual(b4["maxDrawdown"], [metrics["variant"]["maxDrawdown"], metrics["control"]["maxDrawdown"]])
+                self.assertAlmostEqual(b4["calmar"][0] * metrics["variant"]["maxDrawdown"], metrics["variant"]["netPerYear"], places=12)
         self.assertTrue((out / "results.json").exists() and (out / "results.md").exists() and (out / "RUN.lock").exists())
         with self.assertRaisesRegex(rs.StudyError, "already run once"):
             self.evaluate(self.data, out)
