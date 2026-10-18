@@ -5,7 +5,7 @@ Setzt die eingefrorene
 um (Text `c188c38`, Blob `96525664…`, Statusblock `6520f42`). Abschnittsangaben
 (§) beziehen sich auf sie.
 
-**Stand 2026-10-17: Schritt 1.2, Präzisierung P7 freigegeben, Downloader für 1.3 bereit.**
+**Stand 2026-10-18: Studie ausgewertet: `NICHT_BESTANDEN` (`NUR_BETA`), N = 57; die Familie ist nach §10.4 geschlossen.** Ergebnis: [Forschungsbericht](../../../docs/trading/research/2026-10-18-relative-strength-results.md).
 
 - `relative_strength_v1.py` ist fertig und nur gegen synthetische Daten
   getestet. Es enthält keinen Netzwerkcode und hat nie Kursdaten gelesen.
@@ -150,7 +150,7 @@ Reihenfolge: `monthly` → `plan` → `daily` → `plan` (Lücken) →
 - 1.3 (Download) und 1.4/1.4b (Datenprüfung, Belege, Manifest) sind erledigt:
   [Datenqualitätsbericht](../../../docs/trading/research/2026-10-18-relative-strength-data-quality.md).
   Die Ereignisbelege stehen versioniert in [`d11-evidence.json`](d11-evidence.json).
-- **Offen:** Freigabe der einmaligen Auswertung (1.5).
+- 1.5 (einmaliger Lauf) ist erledigt; `RUN.lock` und `results.json` liegen unter `data/replay-research/relative-strength-v1/evaluation`. Ein zweiter Lauf ist nur als der eine Korrekturlauf zulässig.
 - **Für 1.3 fehlen:**
   - Kopie von `fred/DTB3.csv` und der Benchmark-Datei aus dem Carry, je gegen
     deren Manifest geprüft;
