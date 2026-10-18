@@ -8,6 +8,18 @@
 >   eigenen Commit nach diesem.
 > - V1 bleibt unverändert und steht im Ergebnis von D0b weiter als `v1`.
 
+> **Nachtrag 2026-10-18 (Sachstand, keine Regeländerung):**
+>
+> - In Schritt 1.4b kam Katalog 157 („Maintenance Updates“) als Quelle hinzu.
+>   Binance legt dort ab 2022 Token-Tausche und Umbenennungen ab; V1 schränkt
+>   die Quelle nicht ein.
+> - Damit hat 2025 auch nach V1 drei Ankündigungen (LIT, AMB, BNX). D0b ist in
+>   beiden Lesarten bestanden.
+> - Die Aussage in Abschnitt 1, V1 sei wegen 2025 nicht durchführbar, ist
+>   damit überholt. Der Regeltext von P7 bleibt unverändert.
+> - Einzelheiten: [Datenqualitätsbericht](2026-10-18-relative-strength-data-quality.md),
+>   Abschnitt 4.
+
 > **Fassung:** Entwurf, am 2026-10-17 zur Freigabe vorgelegt.
 >
 > - Die eingefrorene Vorregistrierung V1 bleibt unverändert: Text `c188c38`,

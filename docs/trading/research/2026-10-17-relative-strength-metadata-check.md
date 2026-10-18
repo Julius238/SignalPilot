@@ -27,6 +27,9 @@
     > bleibt D0b dann nur wegen 2025. Einzelheiten:
     > [Präzisierung P7](2026-10-17-relative-strength-d0b-precision-p7.md),
     > Abschnitt 1.
+  - > **Korrektur 2026-10-18:** Mit Katalog 157 hat auch 2025 drei
+    > Ankündigungen; D0b ist nach V1 und P7 bestanden
+    > ([Datenqualitätsbericht](2026-10-18-relative-strength-data-quality.md)).
   - Alle 25 Paare aus den 14 gefundenen Ankündigungen stehen im Archiv
     (100 %), nach der Korrektur alle 37 Paare aus 17 Ankündigungen.
   - Formal ist D0b aber nicht durchführbar: für 2025 nur zwei Ankündigungen

@@ -51,7 +51,7 @@ python3 -I scripts/research/relative-strength-v1/fetch_metadata.py listing --out
 |---|---|
 | `listing --out DIR` | S3-Verzeichnisliste aller USDT-Spot-Symbole, Monatsdateien 1d mit Größe und `.CHECKSUM`; Strukturbericht (Monatslücken, fehlende Prüfsummen) |
 | `exchange-info --out DIR` | heutige USDT-Symbole mit Status, nur für D0c, nie als historisches Universum |
-| `announcements --out DIR` | Ankündigungen der Kataloge 49 und 161 und eine automatische Vorauswahl; langsam, mit Zwischenspeicher. Nur Hilfe, nicht die D0b-Stichprobe |
+| `announcements --out DIR` | Ankündigungen der Kataloge 48, 49, 157 und 161 und eine automatische Vorauswahl; langsam, mit Zwischenspeicher. Nur Hilfe, nicht die D0b-Stichprobe |
 | `review-sheet --out DIR [--per-year N] [--years …]` | lädt die ersten N Kandidaten je Jahr und schreibt ein Prüfblatt mit Textauszug für die Durchsicht von Hand |
 | `snapshots --out DIR` | archivierte Binance-`exchangeInfo` (Internet Archive), je Monat die erste brauchbare Aufnahme, auf USDT reduziert |
 | `d0b-p7 --out DIR --decisions FILE` | D0b nach P7: Token-Delistings mit Nachweis aus archivierten Symbollisten, dazu ein Zusatzbericht über alle endenden Paare 2020–2025 → `listing/announcements-d0b-p7.json`, das `check-listing` liest |
@@ -147,7 +147,10 @@ Reihenfolge: `monthly` → `plan` → `daily` → `plan` (Lücken) →
 
 - Schritt 1.2 hat Verzeichnisliste, `exchangeInfo`, D0b-Stichprobe, Gebühr
   und Zeitstempel-Dokumentation erledigt (siehe Metadatenprüfung).
-- **Offen vor 1.3:** Freigabe des Downloads.
+- 1.3 (Download) und 1.4/1.4b (Datenprüfung, Belege, Manifest) sind erledigt:
+  [Datenqualitätsbericht](../../../docs/trading/research/2026-10-18-relative-strength-data-quality.md).
+  Die Ereignisbelege stehen versioniert in [`d11-evidence.json`](d11-evidence.json).
+- **Offen:** Freigabe der einmaligen Auswertung (1.5).
 - **Für 1.3 fehlen:**
   - Kopie von `fred/DTB3.csv` und der Benchmark-Datei aus dem Carry, je gegen
     deren Manifest geprüft;
