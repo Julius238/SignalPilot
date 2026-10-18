@@ -274,7 +274,7 @@ R +30,3 % p. a., Kontrolle K_A −5,7 %, Variante A −10,8 %.
 
 | Entscheidung | Befund | Einschränkung |
 |---|---|---|
-| Einstieg | Challenger: Gate offen, keine weitere Regel. Champion: Ausbruch plus Stop-Kappe 3 % (laut Bedingungsstudie kontraproduktiv) | beim Challenger keine |
+| Einstieg | Challenger: Gate offen, keine weitere Regel. Champion: Ausbruch mit Stop zwischen 1,75 % und 6 % (`specification-v1.ts:250-251`) | beim Challenger keine |
 | Ausstieg | Challenger-Exits (Replay, 104 Trades): 71 Regime, 15 Stop, 14 Ziel, 4 Zeit. Ziel und Backstop schneiden die rechte Flanke ab, aus der Trendfolge ihren Ertrag zieht. Danach folgen Wiedereinstieg und neue Kosten. Das Ziel erzwingt R-008, den Backstop hat die Strategie selbst gewählt | **plausibel**, aber nicht belegt: Der Abstand R ↔ Challenger bei gleicher Volatilität ist durch Gewichtung, Ausführung und Kill Switch verzerrt |
 | Größe | rund 2,8 % Notional: etwa Faktor 10 unter halbem Kelly, Faktor 35 unter voller Investition | **dominant** |
 
@@ -549,6 +549,12 @@ einführen. Ihre Wirkung hängt davon ab, dass es außerhalb der drei Wände
 
 0 USD, kein Datenzugriff, kein Code. Höchstens zwei Seiten, nach der Regel
 „entscheidendes Kriterium zuerst“.
+
+> **Stand 2026-10-18:** Der Entwurf liegt vor:
+> [Vorregistrierung `RISK_BUDGET_V1`](2026-10-18-risk-budget-v1-preregistration.md).
+> Auf Wunsch des Betreibers sind dort die Szenarien A (Bestand), B
+> (portfolioweites Risikobudget) und C (reine Größenreferenz) ausgearbeitet.
+> Sie ersetzen A0–A2 unten.
 
 **a) Fünf Vorgaben des Betreibers** (Eingabe, nicht Ergebnis der Studie):
 
