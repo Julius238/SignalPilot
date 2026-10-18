@@ -13,6 +13,11 @@
 > - Genau ein echter Lauf, nach der ausdrücklichen Freigabe des Betreibers vom
 >   2026-10-18, unverändert nach der Vorregistrierung V1 und der Präzisierung
 >   P7.
+> - **Technischer Korrekturlauf (Freigabe 2026-10-18):** Skript 1.0.0
+>   speicherte die S1-Kennzahlen nicht. Der eine zulässige Korrekturlauf mit
+>   Skript 1.0.1 hat das Original **exakt reproduziert**: alle 1 369 Zahlen
+>   und 6 584 übrigen Werte gleich. Er hat die fehlenden S1-Kennzahlen
+>   ergänzt (Abschnitte 1, 4, 5, 9). Klasse und N bleiben.
 > - Keine Echtgeldorder, keine Strategieimplementierung, keine Änderung an
 >   Risk Engine, Gates oder VPS, kein Merge nach main, keine neuen Marktdaten.
 
@@ -28,7 +33,9 @@
     (t = 0,61, nötig 2,84) und hängt fast ganz an 2020/2021 und an einem
     einzigen Coin (SOL).
   - Variante B (alle 4 Wochen) lag 14,2 pp p. a. unter ihrer Kontrolle.
-  - Seit 2024 verlieren beide gegen die Kontrolle.
+  - Seit 2024 verlieren beide gegen die Kontrolle und auch absolut: A −10,8 %,
+    B −17,6 % p. a. (S1), während BTC/ETH mit demselben Filter +30,3 % p. a.
+    machte.
 - **Einordnung:** Alle Altcoin-Körbe, ob ausgewählt oder nicht, blieben weit
   hinter BTC/ETH mit demselben Regime-Filter: 47,2 % p. a. gegenüber
   9–30 % p. a., bei kleinerem Drawdown für BTC/ETH.
@@ -44,6 +51,9 @@
 | Vorab geprüft | Vorregistrierung Blob `965256641b15…` (Text `c188c38`), P7 aktiv (`7914de6`, `138720e`), Konfigurations-Hash `800da68d…`, Manifest 56 544 Dateien `297ab134…`, D0–D12 ohne Halt, N = 55 |
 | Skript | `relative-strength-v1/1.0.0`, SHA-256 `525e025f…` (Commit `c44de25`) |
 | Ergebnis | `results.json` SHA-256 `a714fdb4…`, `results.md` `b2f53edf…`; `RUN.lock` bleibt, ein zweiter Lauf wird abgelehnt |
+| Korrekturlauf | 2026-10-18 11:46:33 – 11:47:24 UTC, Skript `relative-strength-v1/1.0.1` (Commit `c804328`; einzige Änderung: Block `metricsS1` wird gespeichert), gleiche Daten (Manifest `297ab134…`), gleiche Konfiguration (`800da68d…`), gleiche Zufallsseeds; `--correction` nennt das Original mit SHA-256 |
+| Ergebnis Korrekturlauf | `results-correction.json` SHA-256 `15fb8076…`, `RUN-correction.lock`; das Original `results.json` bleibt unverändert (`a714fdb4…`). §10.4 lässt keinen weiteren Lauf zu |
+| Abgleich Original ↔ Korrektur | alle 1 369 Zahlen und 6 584 übrigen Werte (Klassen, Kriterien, Renditen, Trades, Kosten, Drawdowns, α, t-Werte, Stresstests, Zufallsportfolios, S2, Datenprüfungen) bitgleich; Unterschiede nur bei Skriptversion, Skript-Hash, Korrekturvermerk und dem neuen Block. Der neue Block stimmt mit B4 (Drawdown, Calmar), B6 (Auswahl je Jahr), der Auswahl je Monat und M28 überein |
 | Konfiguration | eingefroren: 28-Tage-Rückschau, Top 10, Puffer 20, Universum Top 50 (U1–U4, X1–X5), nur `RISK_ON`, Kostenstufen L1/L2/L3 = 14/25/40 bp je Seite, 20 000 USDT je Platz, 1 000 Zufallsportfolios |
 
 **Vorbelastung:**
@@ -134,17 +144,34 @@ Kontrolle; Jahre mit mindestens 30 `RISK_ON`-Tagen; 2022 hatte keinen):
 S1 ist die Shadow-Buchführung: Kasse zu 0 %, Fenster 2020-01-01 bis
 2026-09-30 (6,75 Jahre, 829 `RISK_ON`-Tage = 33,6 %).
 
-| Reihe | Endkapital | Gewinn | Netto p. a. | max. Drawdown | Calmar |
-|---|---|---|---|---|---|
-| Variante A (wöchentlich) | 119 254 | **+99 254** | 30,3 % | 54,9 % | 0,55 |
-| Kontrolle K_A | 98 877 | +78 877 | 26,7 % | 54,2 % | 0,49 |
-| Variante B (4-wöchentlich) | 36 186 | **+16 186** | 9,2 % | 59,8 % | 0,15 |
-| Kontrolle K_B | 82 595 | +62 595 | 23,4 % | 52,5 % | 0,45 |
-| BTC/ETH 50/50 mit demselben Gate (R) | 271 161 | +251 161 | **47,2 %** | – | – |
-| BTC/ETH Kaufen und Halten | 323 274 | +303 274 | 51,0 % | 77,8 % | 0,66 |
-| Champion `CRYPTO_TREND_CORE_LONG_V1` (Platz 20 000, Bindung 0,9 %) | – | – | −0,5 % | 7,7 % (Monatsende) | – |
-| Challenger `CRYPTO_REGIME_LONG_V1` (Bindung 2,1 %) | – | – | +2,7 % | 1,4 % (Monatsende) | – |
-| Geldmarkt (DTB3) | – | – | Ø 2,85 % (seit 2024 4,29 %) | – | – |
+| Reihe | Endkapital | Gewinn | Netto p. a. | Sharpe (Monat / Tag) | max. Drawdown | Calmar | längste Erholung |
+|---|---|---|---|---|---|---|---|
+| Variante A (wöchentlich) | 119 254 | **+99 254** | 30,3 % | 0,72 / 0,76 | 54,9 % | 0,55 | 935 Tage |
+| Kontrolle K_A | 98 877 | +78 877 | 26,7 % | 0,69 / 0,75 | 54,2 % | 0,49 | 930 Tage |
+| Variante B (4-wöchentlich) | 36 186 | **+16 186** | 9,2 % | 0,40 / 0,43 | 59,8 % | 0,15 | 1 015 Tage |
+| Kontrolle K_B | 82 595 | +62 595 | 23,4 % | 0,64 / 0,69 | 52,5 % | 0,45 | 965 Tage |
+| BTC/ETH 50/50 mit demselben Gate (R) | 271 161 | +251 161 | **47,2 %** | 1,14 / 1,27 | 32,3 % | 1,46 | 981 Tage |
+| BTC/ETH Kaufen und Halten | 323 274 | +303 274 | 51,0 % | 0,91 / 0,94 | 77,8 % | 0,66 | 1 368 Tage |
+| Champion `CRYPTO_TREND_CORE_LONG_V1` (Platz 20 000, Bindung 0,9 %) | – | – | −0,5 % | −0,25 / – | 7,7 % (Monatsende) | – | – |
+| Challenger `CRYPTO_REGIME_LONG_V1` (Bindung 2,1 %) | – | – | +2,7 % | 1,18 / – | 1,4 % (Monatsende) | – | – |
+| Geldmarkt (DTB3) | – | – | Ø 2,85 % (seit 2024 4,29 %) | – | – | – | – |
+
+**Kalenderjahre (S1, Rendite des Jahres):**
+
+| Jahr | `RISK_ON`-Tage | A | K_A | B | K_B | R | Kaufen und Halten |
+|---|---|---|---|---|---|---|---|
+| 2020 | 187 | **+95,5 %** | +28,6 % | +23,5 % | +27,0 % | +190,8 % | +385,4 % |
+| 2021 | 160 | **+207,1 %** | +169,2 % | +66,3 % | +121,6 % | +47,7 % | +258,9 % |
+| 2022 | 0 | 0,0 % | 0,0 % | 0,0 % | 0,0 % | 0,0 % | −66,9 % |
+| 2023 | 180 | +35,8 % | +67,8 % | +50,1 % | +68,4 % | +52,7 % | +103,7 % |
+| 2024 | 165 | **−13,5 %** | −4,6 % | **−27,1 %** | −2,6 % | +45,8 % | +65,0 % |
+| 2025 | 100 | **−20,5 %** | −23,1 % | **−27,2 %** | −23,5 % | +33,8 % | −9,4 % |
+| 2026 (bis 09) | 37 | +6,4 % | +16,0 % | +10,5 % | +17,0 % | +6,0 % | −8,0 % |
+
+- 2022 gab es keinen `RISK_ON`-Tag; alle gegateten Reihen lagen in Kasse,
+  daher 0,0 %.
+- A und B waren 2024 und 2025 im Verlust, in beiden Jahren auch absolut.
+  R war in jedem investierten Jahr im Gewinn.
 
 **Lesehilfe:**
 
@@ -159,8 +186,8 @@ S1 ist die Shadow-Buchführung: Kasse zu 0 %, Fenster 2020-01-01 bis
   A 7,9 %, K_A 7,3 %, B 4,5 %, K_B 6,7 %, R 11,7 %, Kaufen und Halten 8,7 %,
   Challenger 8,0 %, Champion −6,6 %.
 - **Drawdown:** Variante und Kontrolle verlieren in der Spitze mehr als die
-  Hälfte. Die längste Erholung dauerte in S2 bei A 935, bei B 1 017 und bei
-  Kaufen und Halten 1 368 Tage.
+  Hälfte. R verliert höchstens ein Drittel. Schlechtester Monat: A −24,8 %,
+  K_A −24,5 %, B −24,6 %, K_B −24,3 %, R −13,7 %.
 
 **Handel und Kosten (S1):**
 
@@ -182,11 +209,24 @@ S1 ist die Shadow-Buchführung: Kasse zu 0 %, Fenster 2020-01-01 bis
 
 ## 5. Seit 2024
 
-- **Kriterium:** B2 ist in beiden Varianten verfehlt. Netto nach Abschlag
-  lagen beide seit 2024 nicht über dem Geldmarkt.
+- **Kriterium:** B2 ist in beiden Varianten verfehlt. Netto nach dem
+  Abschlag von 1,5 pp lagen sie seit 2024 um 16,6 pp (A) bzw. 23,4 pp (B)
+  unter dem Geldmarkt.
 - **Selektions-α seit 2024:** negativ, A −0,56 %, B −1,19 % je Monat.
-- **Netto p. a. seit 2024 (nur in S2 ausgewiesen, mit Zins auf freie
-  Kasse):**
+- **S1 (maßgeblich, Kasse 0 %), 2024-01 bis 2026-09, im Vergleich zu
+  2020–2023:**
+
+  | Reihe | Netto p. a. seit 2024 | Sharpe seit 2024 | max. DD seit 2024 | Netto p. a. 2020–2023 | Sharpe 2020–2023 |
+  |---|---|---|---|---|---|
+  | A | **−10,8 %** | −0,07 | 54,9 % | +69,0 % | 1,13 |
+  | K_A | −5,7 % | 0,09 | 54,2 % | +55,3 % | 1,09 |
+  | B | **−17,6 %** | −0,21 | 59,8 % | +32,5 % | 0,77 |
+  | K_B | −4,9 % | 0,11 | 52,5 % | +47,5 % | 0,99 |
+  | R | **+30,3 %** | 0,85 | 29,4 % | +60,0 % | 1,33 |
+  | Kaufen und Halten | +12,3 % | 0,47 | 62,3 % | +85,2 % | 1,16 |
+  | Geldmarkt | 4,29 % | – | – | – | – |
+
+- **S2 (nur Bericht, Kasse zu DTB3), Netto p. a. seit 2024:**
 
   | Reihe | Netto p. a. |
   |---|---|
@@ -196,7 +236,9 @@ S1 ist die Shadow-Buchführung: Kasse zu 0 %, Fenster 2020-01-01 bis
   | K_B | +2,0 % |
   | R | +35,9 % |
   | Kaufen und Halten | +12,3 % |
-  | Geldmarkt | 4,29 % |
+
+  S2 liegt hier deutlich über S1, weil Zins und Transfertag den Pfad
+  verschieben (Abschnitt 9). Das Urteil richtet sich nach S1.
 
 - **Auswahl je Jahr:** 2024 und 2026 negativ, 2025 knapp positiv nur bei A
   (+2,6 pp).
@@ -259,22 +301,22 @@ Eigenes.
 
 ## 9. Kapital-Szenarien S1 und S2
 
-| Reihe | S1 Netto p. a. (Kasse 0 %) | S2 Netto p. a. (Kasse zu DTB3) | S2 Sharpe (Monat) | S2 max. DD |
-|---|---|---|---|---|
-| A | 30,3 % | 37,9 % | 0,85 | 45,7 % |
-| K_A | 26,7 % | 31,0 % | 0,79 | 46,5 % |
-| B | 9,2 % | 15,3 % | 0,51 | 55,2 % |
-| K_B | 23,4 % | 27,8 % | 0,73 | 46,1 % |
-| R | 47,2 % | 50,5 % | 1,25 | 30,3 % |
+| Reihe | S1 Netto p. a. | S1 Sharpe (Monat) | S1 max. DD | S2 Netto p. a. | S2 Sharpe (Monat) | S2 max. DD | S1 / S2 seit 2024 |
+|---|---|---|---|---|---|---|---|
+| A | 30,3 % | 0,72 | 54,9 % | 37,9 % | 0,85 | 45,7 % | −10,8 % / −3,1 % |
+| K_A | 26,7 % | 0,69 | 54,2 % | 31,0 % | 0,79 | 46,5 % | −5,7 % / +1,2 % |
+| B | 9,2 % | 0,40 | 59,8 % | 15,3 % | 0,51 | 55,2 % | −17,6 % / −10,8 % |
+| K_B | 23,4 % | 0,64 | 52,5 % | 27,8 % | 0,73 | 46,1 % | −4,9 % / +2,0 % |
+| R | 47,2 % | 1,14 | 32,3 % | 50,5 % | 1,25 | 30,3 % | +30,3 % / +35,9 % |
+
+S1 ist die Shadow-Buchführung mit Kasse zu 0 %; S2 verzinst die freie Kasse
+zu DTB3 und braucht einen Transfertag beim Aufbau.
 
 - **Wirkung von S2:**
   - Der Zins auf die freie Kasse und der Transfertag beim Aufbau ändern den
     Pfad. S2 liegt deshalb mehr als nur um den Zins über S1.
   - Die Rangfolge ändert sich nicht.
   - Das Urteil hängt nur an S1; S2 ist Bericht.
-- **Nicht gespeichert:** Die S1-Sharpe und die Kalenderjahresrenditen der
-  Varianten selbst schreibt das Skript nicht in `results.json` (Abschnitt 11).
-  Die Sharpe-Werte oben sind daher aus S2.
 
 ## 10. Welche Variante ist besser, und warum
 
@@ -293,23 +335,20 @@ Eigenes.
   besser und nicht riskanter) wäre A die maßgebliche Variante gewesen. Da
   keine besteht, hat das keine Folge.
 
-## 11. Grenzen und offener technischer Punkt
+## 11. Grenzen und behobener technischer Punkt
 
-- **Fehlende S1-Kennzahlen:**
-  - Die Kennzahlen der Varianten, Kontrollen und der Referenz in S1 werden
-    im Ergebnis nicht vollständig gespeichert. Das Skript entfernt den Block
-    `metrics` aus den Kriterien.
-  - Rekonstruierbar sind daraus exakt: Netto p. a. (Calmar × Drawdown),
-    Gewinn, Drawdown, Calmar, Auswahl je Jahr, Stresstests.
-  - Nicht verfügbar sind: S1-Sharpe, Kalenderjahresrenditen der Varianten
-    selbst (Kaufen und Halten: 2020 +385 %, 2021 +259 %, 2022 −67 %, 2023
-    +104 %, 2024 +65 %, 2025 −9 %, 2026 −8 %), Netto p. a. seit 2024 in S1.
-  - Klasse und Kriterien sind davon nicht berührt. Sie wurden im Lauf aus
-    den vollständigen Kennzahlen berechnet.
-  - Nachholen ließe sich das nur mit dem einen zulässigen Korrekturlauf
-    (`--correction`, §10.4), nach einer Skriptänderung, die den Block
-    speichert. Der Lauf ist deterministisch, die Klasse bliebe gleich. **Das
-    ist nicht geschehen und braucht die Entscheidung des Betreibers.**
+- **S1-Kennzahlen (behoben):**
+  - Skript 1.0.0 hat die S1-Kennzahlen hinter den Kriterien berechnet, aber
+    nicht gespeichert. Betroffen waren Sharpe, Kalenderjahre, Teilzeiträume
+    und Monatsrenditen von Variante, Kontrolle und Referenz.
+  - Aus dem Original allein ließen sie sich nicht exakt rekonstruieren: Es
+    enthält nur die Monats-Differenz Variante − Kontrolle, keine
+    Niveau-Reihen.
+  - **Korrektur:** Mit Freigabe des Betreibers wurde nur die Speicherung
+    behoben (1.0.1, synthetisch getestet). Der eine zulässige Korrekturlauf
+    lief auf identischen Eingaben und hat das Original bitgleich
+    reproduziert (Abschnitt 1).
+  - §10.4 lässt keinen weiteren Lauf zu.
 - **Aussagekraft:**
   - Nur gut 2¼ Jahre sind informativ (`RISK_ON`).
   - Ein mäßiger echter Vorteil wäre deshalb schwer nachzuweisen (§2.3:
@@ -334,8 +373,10 @@ Eigenes.
      ist er weg.
    - Bei B ist er mit −46 400 USDT deutlich negativ.
 3. **Ist er seit 2024 noch vorhanden?**
-   - Nein. Selektions-α seit 2024 negativ; A verliert seit 2024 auch
-     absolut (S2 −3,1 % p. a.).
+   - Nein. Selektions-α seit 2024 negativ.
+   - In S1 verlor A seit 2024 −10,8 % p. a., B −17,6 % p. a.; die Kontrollen
+     verloren −5,7 % bzw. −4,9 %.
+   - BTC/ETH mit demselben Filter gewann +30,3 % p. a.
 4. **Welche Variante ist besser?**
    - A (wöchentlich), weil das Signal schnell verfällt und B Gewinner in die
      Umkehr hält.
@@ -364,4 +405,6 @@ Eigenes.
 - VPS, offizieller Forward-Test `OFFICIAL_V1`;
 - main;
 - keine Order, kein Echtgeld, keine neuen Marktdaten, keine weiteren
-  Varianten oder Läufe.
+  Varianten;
+- außer dem einen freigegebenen technischen Korrekturlauf (nur Speicherung
+  der S1-Kennzahlen, Ergebnis bitgleich) kein weiterer Lauf.

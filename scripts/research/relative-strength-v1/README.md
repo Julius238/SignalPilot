@@ -150,7 +150,8 @@ Reihenfolge: `monthly` → `plan` → `daily` → `plan` (Lücken) →
 - 1.3 (Download) und 1.4/1.4b (Datenprüfung, Belege, Manifest) sind erledigt:
   [Datenqualitätsbericht](../../../docs/trading/research/2026-10-18-relative-strength-data-quality.md).
   Die Ereignisbelege stehen versioniert in [`d11-evidence.json`](d11-evidence.json).
-- 1.5 (einmaliger Lauf) ist erledigt; `RUN.lock` und `results.json` liegen unter `data/replay-research/relative-strength-v1/evaluation`. Ein zweiter Lauf ist nur als der eine Korrekturlauf zulässig.
+- 1.5 (einmaliger Lauf) ist erledigt; `RUN.lock` und `results.json` liegen unter `data/replay-research/relative-strength-v1/evaluation`.
+- Der eine Korrekturlauf ist verbraucht (`results-correction.json`, Skript 1.0.1): Er hat nur die fehlenden S1-Kennzahlen (`metricsS1`) gespeichert und das Original bitgleich reproduziert. Weitere Läufe lehnt das Skript ab.
 - **Für 1.3 fehlen:**
   - Kopie von `fred/DTB3.csv` und der Benchmark-Datei aus dem Carry, je gegen
     deren Manifest geprüft;
