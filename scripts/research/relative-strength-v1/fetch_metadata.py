@@ -64,8 +64,8 @@ S3_NS = {"s3": "http://s3.amazonaws.com/doc/2006-03-01/"}
 FIRST_MONTH, LAST_MONTH = "2019-07", "2026-09"  # Vorlauf and window of the preregistration (§4.1)
 D0B_YEARS = tuple(range(2020, 2026))
 # "New Cryptocurrency Listing" (2020 removals and delistings were filed here), "Latest Binance News" (delistings
-# until early 2022) and "Delisting" (from 2022-02-17)
-CATALOGS = (48, 49, 161)
+# until early 2022), "Maintenance Updates" (token swaps and rebrandings from 2022) and "Delisting" (from 2022-02-17)
+CATALOGS = (48, 49, 157, 161)
 # "trading pair" catches notices that add pairs and remove others in the same text (2020: BKRW/USDT, DAI/USDT inverted)
 TITLE_KEYWORDS = ("delist", "removal", "remove", "cease trading", "swap", "migration", "rebrand", "redenomination", "trading pair")
 TITLE_EXCLUDE = ("futures", "margin", "p2p", "staking", "loans", "earn", "options", "convert", "isolated", "cross",
