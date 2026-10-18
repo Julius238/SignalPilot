@@ -295,6 +295,17 @@ gleichem Vorzeichen im Holdout.
 
 ## 8. Technische Umsetzung und Aufwand
 
+> **Stand 2026-10-18: so nicht ausführbar.** Mit
+> [ADR 0021](../decisions/0021-risk-limit-set-value-integrity.md), Option A
+> (`risk-rules-v1/1.4.0`, Branch `claude/risk-limit-integrity-draft`, noch
+> nicht übernommen) prüft R-026 jedes Feld des Limit-Sets gegen
+> `RISK_LIMIT_SET_V1`. Ein Replay-Snapshot mit `maxRiskPerTradePct = rₜ`
+> endet dann in `ERROR`, und K1d hält die Studie an. Es gibt bewusst keine
+> Ausnahme und kein Flag. Eine spätere Untersuchung braucht einen separat
+> freizugebenden, isolierten Research-Pfad mit eigener Policy-Identität
+> (ADR 0021, S1, zurückgestellt). Der Rest dieses Abschnitts beschreibt den
+> ursprünglichen Plan.
+
 **Machbarkeit mit vorhandenem Code: ja, ohne Änderung an der Risk Engine.**
 
 - `runPortfolioReplay` (`packages/shadow-replay/src/portfolio-replay.ts`)

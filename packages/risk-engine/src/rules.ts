@@ -29,12 +29,11 @@ import {
   PORTFOLIO_TOLERANCE,
   RISK_ASSET_SCOPE,
   RISK_FRESHNESS_LIMITS_MS,
-  RISK_LIMIT_SET_SPECIFICATION_HASH,
-  RISK_LIMIT_SET_V1,
   RISK_MINIMUM_CANDLES,
   RISK_REGIME_POLICY,
   RISK_RULE_SET_VERSION
 } from "./policy-v1.js";
+import { riskLimitSetDeviations } from "./limit-set-integrity.js";
 import { RiskReasonCode, RiskRuleCode } from "./reason-codes.js";
 
 export type RiskDirective =
@@ -1977,25 +1976,19 @@ function ruleIdempotencyVersion(ctx: RiskEvaluationContext): RuleVerdict {
       { inputJson }
     );
   }
-  if (riskLimitSet.specificationHash !== RISK_LIMIT_SET_SPECIFICATION_HASH) {
+  // Every field against the pinned policy, decimals by value (ADR 0021). A
+  // matching hash string alone proves nothing: a row cannot vouch for itself.
+  const riskLimitSetDeviationFields = riskLimitSetDeviations(riskLimitSet);
+  if (riskLimitSetDeviationFields.length > 0) {
     return critical(
       RiskReasonCode.IDEMPOTENCY_OR_VERSION_CONFLICT,
-      "The stored risk limit set does not match the pinned v1 specification hash.",
-      { inputJson }
-    );
-  }
-  const limitsMatchPolicy =
-    riskLimitSet.maxOpenPositions === RISK_LIMIT_SET_V1.maxOpenPositions &&
-    riskLimitSet.maxNewTradesPerDay === RISK_LIMIT_SET_V1.maxNewTradesPerDay &&
-    riskLimitSet.maxConsecutiveLosses ===
-      RISK_LIMIT_SET_V1.maxConsecutiveLosses &&
-    riskLimitSet.maxSpreadBps === RISK_LIMIT_SET_V1.maxSpreadBps &&
-    riskLimitSet.maxSlippageBps === RISK_LIMIT_SET_V1.maxSlippageBps;
-  if (!limitsMatchPolicy) {
-    return critical(
-      RiskReasonCode.IDEMPOTENCY_OR_VERSION_CONFLICT,
-      "The stored risk limit set contradicts the pinned v1 numbers.",
-      { inputJson }
+      `The stored risk limit set deviates from the pinned v1 policy: ${riskLimitSetDeviationFields.join(", ")}.`,
+      {
+        inputJson: {
+          ...inputJson,
+          riskLimitSetDeviations: [...riskLimitSetDeviationFields]
+        }
+      }
     );
   }
   if (

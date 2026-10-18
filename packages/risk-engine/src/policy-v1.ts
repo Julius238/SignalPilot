@@ -6,16 +6,24 @@
  *   "Portfolio-Konsistenz und Toleranz", "Correlation v1"
  *   docs/trading/decisions/0003-deterministic-versioned-engines.md
  *
- * These are the values a `RiskLimitSet` row must carry. The engine still reads
- * the limits from the snapshot — a stored, versioned rule book is the source of
- * truth — but it refuses to run against a set whose numbers contradict this
- * pinned reference, so an edited row cannot silently loosen a limit.
+ * These are the values a `RiskLimitSet` row must carry. The engine reads the
+ * limits from the snapshot, but `R-026` compares every field of the stored set
+ * with this pinned reference — identity, integers and the decimal limits by
+ * value — and refuses to run on any deviation (`riskLimitSetDeviations`,
+ * docs/trading/decisions/0021-risk-limit-set-value-integrity.md). A stored
+ * specification hash is only an identity label; it never vouches for the
+ * numbers next to it.
  */
 
 import { buildSpecificationHash } from "@signalpilot/trading-domain";
 
 export const RISK_ENGINE_VERSION = "risk-engine-v1/1.1.0";
-export const RISK_RULE_SET_VERSION = "risk-rules-v1/1.3.0";
+/**
+ * 1.4.0: `R-026` checks every field of the stored limit set against
+ * `RISK_LIMIT_SET_V1`, not only the hash string and the integer limits
+ * (ADR 0021). A set equal to v1 gets the same verdict as under 1.3.0.
+ */
+export const RISK_RULE_SET_VERSION = "risk-rules-v1/1.4.0";
 
 /**
  * LONG strategy identities R-001 approves; every other LONG key is refused as

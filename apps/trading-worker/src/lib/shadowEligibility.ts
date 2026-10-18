@@ -65,6 +65,7 @@ import {
   CircuitBreakerScope,
   evaluateCircuitBreaker
 } from "./circuitBreaker.js";
+import { riskLimitSetRowDeviations } from "./riskLimitSetIntegrity.js";
 import { SHADOW_PORTFOLIO_KEY, isShadowPortfolioKey, type ShadowPortfolioKey } from "./shadowPortfolios.js";
 import { checkShadowBaseAllowed, type EnvSource } from "./tradingSafety.js";
 
@@ -1162,34 +1163,62 @@ export async function buildEligibilityReport(
     }
 
     // ── 12. Valid risk limit set ──────────────────────────────────────────
-    const activeLimitSet = await database.riskLimitSet.findFirst({
-      where: {
-        key: RISK_LIMIT_SET_KEY,
-        version: RISK_LIMIT_SET_VERSION,
-        status: RiskLimitSetStatus.ACTIVE
-      }
+    // Exactly one ACTIVE set, and it must equal the pinned v1 policy in every
+    // field (ADR 0021). A matching hash string alone is not enough.
+    const activeLimitSets = await database.riskLimitSet.findMany({
+      where: { status: RiskLimitSetStatus.ACTIVE },
+      orderBy: { version: "desc" }
     });
-    const activeLimitSetValid =
-      activeLimitSet !== null &&
-      activeLimitSet.specificationHash === RISK_LIMIT_SET_SPECIFICATION_HASH;
+    const activeLimitSet =
+      activeLimitSets.find(
+        (limitSet) =>
+          limitSet.key === RISK_LIMIT_SET_KEY &&
+          limitSet.version === RISK_LIMIT_SET_VERSION
+      ) ?? null;
+    const limitSetDeviations =
+      activeLimitSet === null ? [] : riskLimitSetRowDeviations(activeLimitSet);
     checks.push(
-      !activeLimitSetValid
+      activeLimitSet === null
         ? fail(
             "ACTIVE_RISK_LIMIT_SET",
             "Gültiges RiskLimitSet",
-            `Kein aktives ${RISK_LIMIT_SET_KEY} v${RISK_LIMIT_SET_VERSION} mit aktuellem Specification Hash vorhanden.`,
-            { expectedSpecificationHash: RISK_LIMIT_SET_SPECIFICATION_HASH }
-          )
-        : pass(
-            "ACTIVE_RISK_LIMIT_SET",
-            "Gültiges RiskLimitSet",
-            `RiskLimitSet ${activeLimitSet.key} v${activeLimitSet.version} ist aktiv.`,
+            `Kein aktives ${RISK_LIMIT_SET_KEY} v${RISK_LIMIT_SET_VERSION} vorhanden.`,
             {
-              riskLimitSetId: activeLimitSet.id,
-              version: activeLimitSet.version,
-              specificationHash: activeLimitSet.specificationHash
+              activeRiskLimitSetCount: activeLimitSets.length,
+              expectedSpecificationHash: RISK_LIMIT_SET_SPECIFICATION_HASH
             }
           )
+        : limitSetDeviations.length > 0
+          ? fail(
+              "ACTIVE_RISK_LIMIT_SET",
+              "Gültiges RiskLimitSet",
+              `RiskLimitSet ${activeLimitSet.key} v${activeLimitSet.version} weicht von der freigegebenen Policy ab: ${limitSetDeviations.join(", ")}.`,
+              {
+                riskLimitSetId: activeLimitSet.id,
+                deviations: [...limitSetDeviations],
+                expectedSpecificationHash: RISK_LIMIT_SET_SPECIFICATION_HASH
+              }
+            )
+          : activeLimitSets.length !== 1
+            ? fail(
+                "ACTIVE_RISK_LIMIT_SET",
+                "Gültiges RiskLimitSet",
+                `${activeLimitSets.length} aktive RiskLimitSets gefunden, genau eines ist erlaubt.`,
+                {
+                  activeRiskLimitSetCount: activeLimitSets.length,
+                  riskLimitSetIds: activeLimitSets.map((limitSet) => limitSet.id)
+                }
+              )
+            : pass(
+                "ACTIVE_RISK_LIMIT_SET",
+                "Gültiges RiskLimitSet",
+                `RiskLimitSet ${activeLimitSet.key} v${activeLimitSet.version} ist aktiv und entspricht der freigegebenen Policy.`,
+                {
+                  riskLimitSetId: activeLimitSet.id,
+                  version: activeLimitSet.version,
+                  specificationHash: activeLimitSet.specificationHash
+                }
+              )
     );
 
     // ── 13. Alert outbox operable ─────────────────────────────────────────

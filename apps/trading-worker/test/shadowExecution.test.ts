@@ -21,7 +21,10 @@ import { runShadowProcessFills } from "../src/jobs/shadowProcessFills.js";
 
 import { buildCandidateKey } from "@signalpilot/trading-domain";
 
+import { Prisma } from "@signalpilot/database";
+
 import { createFakeExecutionDatabase } from "./support/shadowExecutionFixtures.js";
+import { pinnedRiskLimitSetRow } from "./support/riskLimitSetRows.js";
 
 const CODE_VERSION = "test-code-version";
 const CORRELATION_ID = "correlation-1";
@@ -105,14 +108,7 @@ function seedWorld(
   // its own active RiskLimitSet.minRewardRisk fresh rather than trusting
   // anything cached on the candidate/assessment.
   tables.get("riskLimitSet")!.create({
-    data: {
-      id: "risk-limit-set-1",
-      key: "SHADOW_V1",
-      version: 1,
-      status: "ACTIVE",
-      scope: "PORTFOLIO",
-      minRewardRisk: "2.000000000000"
-    }
+    data: pinnedRiskLimitSetRow({ id: "risk-limit-set-1" })
   });
 
   const assetId = "asset-btc";
@@ -589,6 +585,81 @@ describe("entry fill — spread, slippage, fee and ledger/portfolio consistency"
     assert.ok(
       Number.parseFloat(String(updatedPortfolio.availableCash)) >
         10000 - reservedAtAcceptance
+    );
+  });
+});
+
+describe("entry fill — post-fill recheck against a deviating risk limit set (ADR 0021)", () => {
+  const fillWithTamperedLimitSet = async (override: Record<string, unknown>) => {
+    const { database, tables, portfolio, session, candidate, candleC1 } = seedWorld();
+    const orderResult = await createShadowOrderForCandidate(database as never, {
+      tradeCandidateId: candidate.id as string,
+      asOf: new Date("2026-08-02T09:00:05.000Z"),
+      codeVersion: CODE_VERSION,
+      correlationId: CORRELATION_ID,
+      capability: SAFE_LONG_CAPABILITY
+    });
+    // The row changes between approval and fill; the stored hash stays v1.
+    Object.assign(tables.get("riskLimitSet")!.rows[0]!, override);
+    const fillResult = await processEntryOrderFillForCandle(database as never, {
+      shadowOrderId: orderResult.shadowOrderId!,
+      candleId: candleC1.id as string,
+      asOf: new Date("2026-08-02T10:00:00.000Z"),
+      codeVersion: CODE_VERSION,
+      correlationId: CORRELATION_ID
+    });
+    return { tables, portfolio, session, fillResult };
+  };
+
+  for (const [label, override, field] of [
+    ["a lowered minimum reward/risk", { minRewardRisk: new Prisma.Decimal("1") }, "minRewardRisk"],
+    ["a raised risk per trade", { maxRiskPerTradePct: new Prisma.Decimal("0.01") }, "maxRiskPerTradePct"],
+    ["a foreign scope", { scope: "STRATEGY" }, "scope"]
+  ] as const) {
+    it(`fails closed and locks on ${label} although the hash still matches`, async () => {
+      const { tables, portfolio, session, fillResult } =
+        await fillWithTamperedLimitSet(override);
+
+      // The fill is booked and never hidden, but treated as a shortfall.
+      assert.equal(fillResult.outcome, ShadowFillOutcome.FILLED_CRV_SHORTFALL);
+      assert.equal(tables.get("shadowFill")!.rows.length, 1);
+      const position = tables.get("shadowPosition")!.rows[0]!;
+      const marked = tables
+        .get("shadowPositionEvent")!
+        .rows.filter((row) => row.shadowPositionId === position.id && row.type === "MARKED");
+      assert.equal(marked.length, 1);
+
+      const events = tables.get("riskEvent")!.rows;
+      const forcedExit = events.find((row) => row.type === "RISK_RULE_BLOCK")!;
+      assert.equal(forcedExit.severity, "CRITICAL");
+      assert.equal(forcedExit.reasonCode, "POST_FILL_RISK_LIMIT_SET_INVALID");
+      assert.deepEqual(
+        (forcedExit.payloadJson as { riskLimitSetDeviations: string[] }).riskLimitSetDeviations,
+        [field]
+      );
+      const lockEvent = events.find((row) => row.type === "SIMULATION_ERROR")!;
+      assert.equal(lockEvent.severity, "CRITICAL");
+      assert.equal(lockEvent.reasonCode, "POST_FILL_RISK_LIMIT_SET_INVALID");
+
+      const lockedSession = tables.get("tradingSession")!.rows.find((row) => row.id === session.id)!;
+      assert.equal(lockedSession.status, "ERROR_LOCKED");
+      assert.equal(lockedSession.killSwitchEngaged, true);
+      const lockedPortfolio = tables.get("portfolio")!.rows.find((row) => row.id === portfolio.id)!;
+      assert.equal(lockedPortfolio.status, "ERROR_LOCKED");
+    });
+  }
+
+  it("leaves an ordinary fill with the pinned set untouched: no lock, no deviation payload", async () => {
+    const { tables, portfolio, session, fillResult } = await fillWithTamperedLimitSet({});
+    assert.equal(fillResult.outcome, ShadowFillOutcome.FILLED);
+    assert.equal(tables.get("riskEvent")!.rows.length, 0);
+    assert.equal(
+      tables.get("tradingSession")!.rows.find((row) => row.id === session.id)!.status,
+      "SHADOW_ACTIVE"
+    );
+    assert.equal(
+      tables.get("portfolio")!.rows.find((row) => row.id === portfolio.id)!.status,
+      "ACTIVE"
     );
   });
 });

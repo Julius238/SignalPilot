@@ -7,12 +7,15 @@
   (R-026) · [RISK_BUDGET_V1-Vorregistrierung](../research/2026-10-18-risk-budget-v1-preregistration.md),
   Abschnitt 8 · [Offizieller Forward-Test V1](../research/official-forward-test-v1.md)
 
-> **Entwurf zur Entscheidung.** Dieser ADR ändert keinen Code, keine
-> Risk-Regel, keinen Test, kein Limit und kein Flag.
-> `RISK_RULE_SET_VERSION` bleibt `risk-rules-v1/1.3.0`. Der offizielle
-> VPS-Forward-Test bleibt unberührt. Solange der Status „Proposed“ lautet,
-> gilt dieser ADR nicht (README: Bei Konflikten gelten _akzeptierte_ ADRs).
-> Alle Zeilenangaben beziehen sich auf `eee0af5`.
+> **Entwurf zur Entscheidung, Option A umgesetzt, noch nicht übernommen.**
+> Option A ist auf dem lokalen Branch `claude/risk-limit-integrity-draft`
+> umgesetzt und getestet (Abschnitt „Umsetzung“). Der Branch ist nicht
+> gepusht, nicht gemergt und nicht deployt. S1 ist auf Entscheidung des
+> Betreibers vom 2026-10-18 zurückgestellt. Der offizielle
+> VPS-Forward-Test läuft unverändert mit `risk-rules-v1/1.3.0`. Solange der
+> Status „Proposed“ lautet, gilt dieser ADR nicht (README: Bei Konflikten
+> gelten _akzeptierte_ ADRs). Die Zeilenangaben in Kontext und Optionen
+> beziehen sich auf `eee0af5`.
 
 ## Kurzantwort
 
@@ -34,8 +37,9 @@
   Fill-Recheck und Bootstrap wiederverwendet. Es braucht keine Migration
   und keine neue Infrastruktur.
 - **Konflikt:** `RISK_BUDGET_V1` baut in Abschnitt 8 genau auf dieser Lücke
-  auf. Die Studie braucht deshalb einen eigenen Forschungseinstieg mit
-  expliziter Policy (F2).
+  auf. Nach der Korrektur ist die Studie wie vorregistriert nicht
+  ausführbar. Sie braucht einen separat freizugebenden, isolierten
+  Research-Pfad (F2, zurückgestellt).
 
 ## Kontext
 
@@ -195,7 +199,7 @@ jeder Demo- oder Echtgeldstufe muss die Lücke geschlossen sein.
 
 ## Optionen zu F1
 
-### Option A – Wertvergleich aller Felder mit `RISK_LIMIT_SET_V1` (empfohlen)
+### Option A – Wertvergleich aller Felder mit `RISK_LIMIT_SET_V1` (empfohlen, umgesetzt)
 
 Eine neue reine Funktion in `packages/risk-engine/src/limit-set-integrity.ts`,
 exportiert über `index.ts`:
@@ -289,7 +293,7 @@ Prozentwert nicht prüft und der Schalter „deshalb ohne Fehler“ läuft.
 von R-024/R-026“) würde die Studie sofort anhalten. Die Studie *nutzt* die
 Lücke heute also. Nach dem Fix braucht sie einen sauberen Weg.
 
-### S1 – Eigener Forschungseinstieg mit expliziter Policy (empfohlen)
+### S1 – Eigener Forschungseinstieg mit expliziter Policy (empfohlen, am 2026-10-18 zurückgestellt)
 
 - **Gemeinsame Kernfunktion:** `evaluateRisk(snapshot)` bleibt mit
   unveränderter Signatur der einzige produktive Einstieg. Intern ruft er
@@ -402,115 +406,237 @@ eine neue Version, entscheidet der Betreiber.
 - Voraussetzung: Schritt 1 von Z1 ist bestanden. Bei einer abweichenden
   Zeile würde der Fix beide Sessions sofort per `ERROR_LOCK` sperren.
 
-## Konkrete Änderungen (erst nach Freigabe)
+## Entscheidungen (Stand 2026-10-18)
 
-| Datei | Änderung | Umfang |
+- **F1: Option A.** Die Umsetzung hat der Betreiber freigegeben. Sie liegt
+  auf dem Branch (Abschnitt „Umsetzung“). Übernommen ist sie noch nicht.
+- **F2: S1 ausdrücklich zurückgestellt.** Es gibt keine Ausnahme, kein Flag
+  und keinen Forschungseinstieg. Die Folge für `RISK_BUDGET_V1` steht
+  weiter unten.
+- **F3: offen.** Die tatsächliche `OFFICIAL_V1`-Konfiguration auf dem VPS
+  prüft der Betreiber separat.
+
+## Umsetzung (Option A)
+
+Branch `claude/risk-limit-integrity-draft` auf Basis `eee0af5`, nur lokal
+committet.
+
+### Was geändert wurde
+
+| Datei | Änderung |
+|---|---|
+| `packages/risk-engine/src/limit-set-integrity.ts` (neu) | `riskLimitSetDeviations(set)` vergleicht `key`, `version`, `scope`, die fünf Ganzzahlen, die sechs Dezimalfelder und den Hash mit `RISK_LIMIT_SET_V1`. Dezimalwerte über `DecimalValue.eq`. Alles, was kein reiner Dezimaltext ist, zählt als Abweichung. Die Funktion wirft nie |
+| `packages/risk-engine/src/rules.ts` (R-026) | ersetzt Hash-Textvergleich und `limitsMatchPolicy`. Eine Abweichung ergibt CRITICAL `IDEMPOTENCY_OR_VERSION_CONFLICT`, `ERROR` und `ERROR_LOCK`. Die Feldliste `riskLimitSetDeviations` steht nur im Fehlerfall in `inputJson` |
+| `packages/risk-engine/src/policy-v1.ts` | `RISK_RULE_SET_VERSION` → `risk-rules-v1/1.4.0`. `RISK_ENGINE_VERSION` bleibt `1.1.0`, ohne S1 gibt es keine neue Engine-API. Der Kopfkommentar beschreibt den tatsächlichen Schutz |
+| `packages/risk-engine/test/fixtures/*.json`, `test/support/critical-cases.ts` | neu erzeugt, dazu der kritische Fall `limit-set-percent-tampered-with-v1-hash` |
+| `apps/trading-worker/src/lib/riskLimitSetIntegrity.ts` (neu) | gemeinsames Zeilen-Mapping `riskLimitSetInputFromRow`: `Prisma.Decimal` → 12 Stellen wie bisher, eine unlesbare Spalte bekommt keinen Ersatzwert `0` mehr. Dazu `riskLimitSetRowDeviations` |
+| `apps/trading-worker/src/lib/riskInputAssembler.ts` | nutzt das Mapping, die Auswahl der Zeile bleibt gleich. Der Assembler urteilt nicht: Sein Fehlerpfad wäre ein stilles Überspringen ohne Sperre (`shadowAssessRisk.ts`, `assemblerFailures` setzen den BotRun nicht auf FAILED) |
+| `apps/trading-worker/src/lib/shadowEligibility.ts` (Check 12) | verlangt genau eine `ACTIVE`-Zeile, nämlich `SHADOW_V1` v1 ohne Abweichung. Die Felder stehen in `details.deviations` |
+| `apps/trading-worker/src/lib/shadowRiskPersistence.ts`, `jobs/shadowAssessRisk.ts` | `engageRiskLimitSetErrorLock` führt das `ERROR_LOCK` von R-026 für diesen Befund aus: Session `ERROR_LOCKED` mit Kill Switch, Portfolio `ERROR_LOCKED`, Audit `SESSION_ERROR_LOCKED` mit Feldliste. Ergänzt werden der CRITICAL-RiskEvent der Persistenz und der BotRun `FAILED` |
+| `apps/trading-worker/src/lib/shadowFillPersistence.ts` | eine abweichende Zeile liefert keine vertrauenswürdige Mindest-CRV. Es greift der vorhandene Fail-closed-Pfad mit eigenem Reason Code `POST_FILL_RISK_LIMIT_SET_INVALID`: Fill gebucht, Rest storniert, Position `MARKED` zur Zwangsschließung, CRITICAL RiskEvent. Danach werden Session und Portfolio `ERROR_LOCKED` |
+| `apps/trading-worker/src/jobs/shadowBootstrap.ts` | prüft eine vorhandene `SHADOW_V1` v1 vor jedem Schreibzugriff. Bei Abweichung: `RISK_LIMIT_SET_CONFLICT`, BotRun `FAILED`, nichts wird angelegt oder weiterverwendet |
+| `docs/trading/06-risk-engine-specification.md` | R-026-Zeile und ein Absatz zum Limitset |
+| RISK_BUDGET_V1-Vorregistrierung, Abschnitt 8 | Hinweis: nach dieser Korrektur nicht ausführbar |
+
+### Abweichungen vom Entwurf
+
+- **Neuer Befund: Der Worker führte `ERROR_LOCK` nie aus.**
+  - `applyRiskDirective` setzt nur `ENGAGE_KILL_SWITCH` um. `ERROR_LOCK`
+    und `BLOCK_NEW` aus der Engine bleiben ohne Wirkung auf die Session,
+    und zwar für jede CRITICAL-Regel (R-001, R-003, R-006, R-017, R-023,
+    R-026).
+  - Dokument 04 verlangt das Gegenteil: „Die Orchestrierung setzt
+    Session/RiskEvent/Audit atomar.“
+  - Für die Limit-Set-Integrität setzt `engageRiskLimitSetErrorLock` die
+    Sperre jetzt gezielt um.
+  - Die allgemeine Lücke bleibt offen (Folgearbeit 3). Sie zu schließen
+    würde das Verhalten des laufenden Forward-Tests bei anderen Befunden
+    ändern.
+- **Post-Fill sperrt zusätzlich.** Eine abweichende Zeile wird nicht nur wie
+  eine fehlende behandelt.
+- **Eine fehlende Zeile wird behandelt wie bisher.** Ohne aktives Limit-Set
+  ist keine Bewertung speicherbar, der Fremdschlüssel ist Pflicht. Der Job
+  zählt `errored`, der BotRun steht auf `FAILED`, freigegeben wird nichts.
+- **S1 ist nicht umgesetzt.** Deshalb bleibt `RISK_ENGINE_VERSION`
+  unverändert.
+
+### Tests
+
+| Suite | vorher | nachher |
 |---|---|---|
-| `packages/risk-engine/src/limit-set-integrity.ts` (neu), `index.ts` | `riskLimitSetDeviations` (A) | ~40 Zeilen |
-| `packages/risk-engine/src/rules.ts:1980-1999` | R-026 nutzt die Funktion gegen die Referenz aus dem Kontext | ~15 Zeilen |
-| `packages/risk-engine/src/evaluate-risk.ts`, `rules.ts` (`RiskEvaluationContext`) | gemeinsame Kernfunktion, `evaluateRiskForResearch`, `policyHash` aus der benutzten Policy (S1) | ~40 Zeilen |
-| `packages/risk-engine/src/policy-v1.ts:17-18` | `RISK_RULE_SET_VERSION` → `risk-rules-v1/1.4.0`, `RISK_ENGINE_VERSION` → `risk-engine-v1/1.2.0` (S1 ist neue Engine-API). Der Kopfkommentar beschreibt danach den echten Schutz | 2 Zeilen |
-| `packages/risk-engine/test/fixtures/*.json` | über `generate-fixtures.ts` neu erzeugen, nur Versions- und Hash-Felder ändern sich, im Commit begründen | generiert |
-| `apps/trading-worker/src/lib/riskInputAssembler.ts:452-478` | Mapping als `riskLimitSetInputFromRow(row)` exportieren, damit alle Stellen dieselbe Dezimaldarstellung prüfen | Umbau, kein Verhalten |
-| `apps/trading-worker/src/lib/shadowEligibility.ts:1164-1192` | Check 12 nutzt die Funktion, nennt die abweichenden Felder und verlangt genau eine `ACTIVE`-Zeile | ~20 Zeilen |
-| `apps/trading-worker/src/lib/shadowFillPersistence.ts:503-506`, `:671-674` | eine abweichende Zeile behandeln wie eine fehlende: der vorhandene Fail-closed-Pfad | ~5 Zeilen |
-| `apps/trading-worker/src/jobs/shadowBootstrap.ts:310-341` | eine vorhandene abweichende Zeile blockiert mit `RISK_LIMIT_SET_CONFLICT`, statt still weiterverwendet zu werden. Vorbild: `shadowStrategySetup.ts:391-402` | ~10 Zeilen |
-| `apps/trading-worker/src/lib/shadowRiskPersistence.ts` | speichert nur `policyHash === RISK_POLICY_HASH` (S1) | ~5 Zeilen |
-| `docs/trading/06-risk-engine-specification.md` (R-026), RISK_BUDGET_V1-Vorregistrierung Abschnitte 8 und 11 | an die neue Prüfung und den Forschungseinstieg anpassen, *bevor* E1–E7 eingefroren werden | Text |
+| risk-engine | 98/98 | 114/114 (+16) |
+| trading-worker ohne DB | 250/250 | 276/276 (+26) |
+| trading-worker mit echter PostgreSQL (arena, jobRunner, leases) | 17 rot, kein `DATABASE_URL` lokal | unverändert 17 rot aus demselben Grund. Diese Suiten berühren keine Limit-Sets. In CI laufen sie mit PostgreSQL |
+| shadow-replay | 58/58 | 58/58, Replay-Regressionshashes unverändert |
+| evolution | 122/122 | 122/122 |
+| arena | 16/16 | 16/16 |
+| api | – | 199/199 (nur nach der Änderung gelaufen) |
+| evolution-worker | – | lokal nicht gelaufen (braucht PostgreSQL), CI vor jeder Übernahme |
+| Lint risk-engine, trading-worker | sauber | sauber |
 
-Bewusst unverändert bleiben:
+Die neuen Tests decken diese Fälle ab:
 
-- der Assembler-Filter in `riskInputAssembler.ts:220`. Eine zweite aktive
-  Zeile soll *laut* scheitern (R-026 `ERROR_LOCK`), statt still übergangen
-  zu werden;
-- die Limitwerte selbst;
-- Strategien, Gates, Arena und Schema.
+- **Manipulierte Prozentwerte bei unverändertem Hash:**
+  - jedes Dezimalfeld um ±1e-12, dazu die Probe-Fälle P1–P4 und P6
+    (`limit-set-integrity.test.ts`);
+  - Risk-Job mit drei Prozentfeldern;
+  - Eligibility und Post-Fill.
+- **Falsche Identität:** `key`, `version` und `scope` einzeln, sowohl in der
+  Engine als auch im Job, in Eligibility und im Post-Fill.
+- **Fehlende, doppelte oder ungültige `ACTIVE`-Sets:**
+  - Eligibility: fehlend, `RETIRED`, zwei aktive Zeilen;
+  - Job: zweite aktive Zeile mit höherer Version;
+  - Engine: `null` und `RETIRED`;
+  - der bestehende Job-Test „missing risk limit set“.
+- **Ungültige Dezimalwerte:** 16 Varianten, darunter Exponent, leer,
+  Leerzeichen, Komma, `+`, `.0025`, `NaN`, 13 Nachkommastellen, Zahl,
+  `null` und Objekt.
+- **Gültige DB-Darstellungen:** `0.00250`, `2.0`, 12 Stellen,
+  `Prisma.Decimal` und Text. Abgedeckt in Engine, Mapping, Eligibility und
+  Job.
+- **Bootstrap:** eine abweichende Zeile blockiert vor jedem Schreiben, die
+  echte Zeile wird weiterverwendet.
+- **Post-Fill:** drei Manipulationen sperren, ein sauberer Fill bleibt ohne
+  RiskEvent.
+- **Gültige `OFFICIAL_V1`-Limits:**
+  - Freigabe mit identischer Menge in allen Darstellungen, ohne Sperre;
+  - Eligibility `READY`;
+  - die Golden-Fixtures.
 
-## Testfälle
+### Gleiches Verhalten bei gültigen Limits
 
-**Risk Engine (synthetisch, `rules.test.ts`):**
+1. **Golden-Fixtures:** Nach Normalisierung von Versionstext und Hashes sind
+   der PASS-Fall und alle zehn bisherigen kritischen Fälle identisch.
+2. **Engine-Vergleich über 2 412 gültige Snapshots**, alte Engine (1.3.0,
+   `fbe858c`) gegen neue. Variiert wurden:
+   - Equity von 123,45 bis 25 000 USDT;
+   - beide Take-Profits;
+   - BTC und ETH;
+   - Tages-PnL von 0 bis −1,5 %;
+   - Verlustserie 0, 2 und 3;
+   - mit und ohne Vorfreigabe nach Verlust;
+   - mit und ohne offene Position;
+   - Dezimalformat als Konstante und mit 12 Stellen;
+   - SHORT und alle bisherigen kritischen Fälle.
 
-| Nr. | Fall | Erwartung |
-|---|---|---|
-| T1 | je Dezimalfeld (6×) ein höherer **und** ein niedrigerer Wert, V1-Hash unverändert | R-026 CRITICAL `IDEMPOTENCY_OR_VERSION_CONFLICT`, Ergebnis `ERROR`, `ERROR_LOCK`, genehmigte Menge 0, Feldname in `inputJson` |
-| T2 | `key`, `version`, `scope` einzeln geändert | wie T1 |
-| T3 | V1-Werte im 12-Stellen-Format (Assembler, Replay) | PASS, sonst gleich wie heute (Schutz vor Textvergleich) |
-| T4 | `"2.5e-3"`, `""`, `"-0.0025"`, `"0.0025 "` | Abweichung, keine Exception |
-| T5 | Probe P2 (1 % + Kappen 100 %) | `ERROR` statt APPROVED: der rot/grüne Kern-Test |
-| T6 | Probe P3 (−1,5 %, `maxDailyLossPct` 0.05) | `ERROR`, kein stilles Passieren des Kill-Switch-Pfads |
-| T7 | Golden-Fixtures neu erzeugt | Urteile, Mengen, Regel-Ergebnisse gleich, nur Versions- und Hash-Felder neu |
-| T8 | `evaluateRiskForResearch` mit `RESEARCH:`-Satz | PASS gegen sich selbst, `policyHash ≠ RISK_POLICY_HASH` |
-| T9 | Forschungssatz an `evaluateRisk` übergeben, `SHADOW_V1` als Forschungsschlüssel | beides abgelehnt |
+   **0 Abweichungen** in Urteil, Direktive, Reason Codes, Mengen, Sizing
+   und allen 26 Regel-Ergebnissen. Abweichen durften nur Versionstext und
+   Hashes. Das Vergleichsskript war einmalig und ist nicht committet.
+3. **Worker:**
+   - Das Snapshot-Mapping für `Prisma.Decimal` ist unverändert
+     (`toFixed(12)`).
+   - Alle bisherigen Worker-Tests sind grün; nur zwei Teil-Fixtures wurden
+     auf vollständige V1-Zeilen ergänzt.
+   - Die Payloads eines gewöhnlichen CRV-Shortfalls sind bytegleich.
 
-**Trading-Worker (In-Memory-Fakes):**
+### Versionssprung, Rollout und `OFFICIAL_V1`
 
-| Nr. | Fall | Erwartung |
-|---|---|---|
-| W1 | Eligibility, Zeile mit V1-Hash und `maxRiskPerTradePct` 0.01 | `ACTIVE_RISK_LIMIT_SET` FAIL, `NOT_READY`, Feld benannt |
-| W2 | Eligibility, zwei `ACTIVE`-Zeilen | FAIL |
-| W3 | `shadowAssessRisk` mit manipulierter Zeile, echte `Prisma.Decimal`-Werte | Assessment `ERROR`, Session `ERROR_LOCK`, RiskEvent CRITICAL, keine Order |
-| W4 | `shadowAssessRisk` mit zweiter aktiver Zeile, höhere Version, V1-Hash | `ERROR`, nicht still verwendet |
-| W5 | Fill-Recheck, aktive Zeile mit `minRewardRisk` 1 | Fail-closed-Pfad wie bei fehlender Zeile |
-| W6 | Bootstrap, vorhandene `SHADOW_V1` v1 mit abweichenden Werten | blockiert, nichts angelegt oder weiterverwendet |
-| W7 | Persistenz einer Bewertung mit fremdem `policyHash` | abgelehnt |
-| W8 | Quelltext-Scan von `apps/trading-worker/src` | kein `evaluateRiskForResearch` |
-| W9 | vorhandene Teil-Fixtures (`shadowEligibility.test.ts:131`, `shadowExecution.test.ts:107`) | auf vollständige V1-Zeilen ergänzt, sonst würden sie fälschlich rot |
+| Größe | Wirkung des Sprungs auf 1.4.0 |
+|---|---|
+| `ruleSetVersion` neuer Bewertungen und Regel-Ergebnisse | `risk-rules-v1/1.3.0` → `risk-rules-v1/1.4.0` |
+| `RISK_POLICY_HASH` | `c8c0fefa…` → `1fda5380e74e246b442ef79eb3086ec7c54a43ed3bd7c425ef644a5e7f4e81e1` |
+| `inputHash`/`outputHash` neuer Bewertungen | neu, weil der Snapshot die Version trägt |
+| Limit-Set-Hash `ff9ab296…` | unverändert, das Forward-Test-Dokument bleibt korrekt |
+| Strategie-Hashes, Arena-Policy-Hash, Portfolios, Sessions, Ledger | unverändert |
+| Replay- und Evolution-Hashes | unverändert: Der Replay-Hash enthält keine Risk-Hashes, die Regressionstests sind grün |
+| Schema, Migrationen, bestehende DB-Zeilen | keine Änderung, nichts wird umgeschrieben (ADR 0003) |
 
-**Replay:**
+**Bestehende Sessions:**
 
-| Nr. | Fall | Erwartung |
-|---|---|---|
-| R1 | Standardpfad (D2) | alle Golden-, Replay- und Portfolio-Tests bitgleich. Der Replay-`outputHash` enthält keine Risk-Hashes (`replay.ts:236-243`, `portfolio-replay.ts:552-559`), sollte also gleich bleiben. Das ist bei der Umsetzung zu belegen |
-| R2 | Forschungsschalter C und B über S1 | kein R-026-`ERROR`, Größe folgt rₜ, R-024 erfüllt |
+- Der Sprung blockiert sie nicht. Weder Session-Aktivierung noch
+  Eligibility, Arena, `opsConsistency` oder Circuit Breaker vergleichen
+  `ruleSetVersion` oder `RISK_POLICY_HASH`.
+- Die Idempotenzprüfung von R-026 vergleicht nur Bewertungen desselben
+  Candidates. Jeder bewertete Candidate trägt bereits eine Entscheidung und
+  wird nicht erneut bewertet; Assessment, Entscheidung und Status werden in
+  einer Transaktion geschrieben.
+- Alte Bewertungen bleiben mit 1.3.0 stehen. Dashboard und Audit-Drilldown
+  zeigen das Regelwerk je Bewertung.
 
-## Risiken der Umstellung
+**Gesperrt würde nur, wenn die VPS-Zeile abweicht.** Dann ist die Sperre
+gewollt. Deshalb steht die lesende Prüfung aus Z1 zwingend vor dem
+Rollout.
 
-| Risiko | Wirkung | Gegenmittel |
-|---|---|---|
-| Textvergleich statt Wertvergleich | jede echte Zeile (`0.002500000000`) sperrt sofort per `ERROR_LOCK` | Wertvergleich, T3, W3 mit echten `Prisma.Decimal` |
-| Fix auf eine abweichende VPS-Zeile deployt | beide offiziellen Sessions gesperrt | erst Z1 Schritt 1, dann deployen |
-| Versionssprung 1.3.0 → 1.4.0 | neues `RISK_POLICY_HASH`, neue Golden-Hashes. Die Forward-Test-Dokumente nennen 1.3.0 | Fixtures neu erzeugen und begründen, Eintrag im Änderungsprotokoll. Historische Bewertungen bleiben 1.3.0 (ADR 0003) |
-| Strengere Werte werden ebenfalls abgelehnt | eine „vorsichtigere“ Handänderung sperrt auch | gewollt. Jede Limitänderung ist eine neue Version mit ADR |
-| Teil-Fixtures im Worker | Tests werden aus falschem Grund rot | W9 |
-| `RISK_BUDGET_V1` unverändert gestartet | K1d hält die Studie sofort an | Vorregistrierung vor dem Einfrieren anpassen (S1) |
-| Laute Sperre bei einem DB-Versehen | Der Forward-Test steht, bis jemand prüft | gewollt: lieber anhalten als still falsch handeln |
-| Neustart des Workers | Downtime-Eintrag nötig | Z1 bevorzugt, sonst Ablauf wie die Probe vom 2026-10-15 |
+**Rollout-Weg** (nicht ausgeführt, jeder Schritt mit eigener Freigabe):
 
-## Einschätzung des Entwurfs (nicht bindend)
+1. Betreiber: lesende SQL-Prüfung aus Z1. Bei einer Abweichung gibt es
+   keinen Rollout, erst wird der Befund geklärt.
+2. Betreiber entscheidet F3: entweder ein Bugfix-Eintrag im laufenden
+   `OFFICIAL_V1` (Regel 2) oder Übernahme erst mit dessen nächster Version
+   (Regel 1).
+   - Für den Bugfix spricht: Urteile, Mengen und Trades sind für die echte
+     Zeile nachweislich gleich. Es ändern sich nur Identitätsfelder neuer
+     Bewertungen.
+   - Dagegen spricht: Die eingefrorene Konfiguration nennt
+     `risk-rules-v1/1.3.0`.
+3. Branch pushen, CI grün einschließlich der DB-Suiten und des
+   Evolution-Workers, Review. Danach Merge auf den Entwicklungsbranch, nach
+   main nur mit Freigabe.
+4. Vollsicherung wie am 2026-10-15. Dann die Images von Trading-Worker und
+   API neu bauen; die API importiert Eligibility und Risk Engine. Vorher
+   `consistency-snapshot` ausführen, den Trading-Worker mit `--no-deps` neu
+   erstellen, nachher `consistency-compare`. Die Downtime kommt ins
+   Änderungsprotokoll.
+5. Danach prüfen:
+   - Eligibility meldet für beide offiziellen Portfolios `READY`;
+   - die erste neue Bewertung trägt `risk-rules-v1/1.4.0`;
+   - es gibt kein `SESSION_ERROR_LOCKED`-Audit.
 
-- **F1: Option A.** Sie ist die kleinste Änderung, die gegen eine
-  vertrauenswürdige Referenz prüft und bei jeder Abweichung sicher
-  ablehnt. B bringt nur zusätzliche Kanonisierung, C nur zusätzlichen
-  Betrieb.
-- **F2: S1**, im selben Versionssprung wie A. Sonst ist `RISK_BUDGET_V1`
-  zwischen den beiden Änderungen blockiert. Die Vorregistrierung ist noch
-  nicht eingefroren, die Anpassung kostet also keinen Lauf.
-- **F3: Z1.** Erst lesend prüfen, dann auf dem Branch umsetzen. Deployen
-  erst nach Entscheidung des Betreibers.
+**Rollback:** das vorherige Image. Weil es keine Migration gibt, ist das ein
+reiner Image-Tausch. Mit 1.4.0 geschriebene Bewertungen bleiben als solche
+dokumentiert.
 
-## Was dieser Entwurf nicht ändert
+### `RISK_BUDGET_V1` nach dieser Korrektur
 
-- Risk Engine, Regeln, Limits, Golden Fixtures, `risk-rules-v1/1.3.0`;
-- Strategien, Gates v1–v4, Arena und Arena-Policy;
-- VPS, `OFFICIAL_V1`, Datenbank, main;
-- Die Probe lief nur lokal und synthetisch und wurde wieder entfernt.
+- **Wie vorregistriert nicht ausführbar.** Abschnitt 8 setzt im Replay
+  `maxRiskPerTradePct = rₜ`. Ab `risk-rules-v1/1.4.0` lehnt R-026 das mit
+  `ERROR` ab, und K1d hält die Studie an.
+- **Kein Weg vorbei, mit Absicht.** Es gibt kein Flag, keine Ausnahme und
+  keinen Forschungseinstieg, denn S1 ist zurückgestellt.
+- **Eine spätere Untersuchung** braucht einen separat freizugebenden,
+  isolierten Research-Pfad mit eigener Policy-Identität. Der Entwurf S1
+  oben kann der Ausgangspunkt sein, mit eigenem ADR oder eigener
+  Vorregistrierung.
 
-## Folgearbeiten nach der Entscheidung
+### Verbleibende Risiken
 
-1. Betreiber: lesende Prüfung aus Z1 Schritt 1 auf dem VPS. Das Ergebnis
-   kommt ins Änderungsprotokoll von `OFFICIAL_V1`.
-2. Umsetzung A + S1 + Worker-Stellen auf eigenem Branch, mit allen Tests
-   oben. CI grün, kein Merge nach main ohne Freigabe.
-3. Abschnitte 8 und 11 der `RISK_BUDGET_V1`-Vorregistrierung anpassen.
-4. **Gleiche Lückenform beim Execution Profile, eigene Prüfung:** R-026
-   vergleicht den Hash des Profils nicht, obwohl Dokument 06 das verlangt.
-   Eligibility prüft nur das Format des Hashs (`shadowEligibility.ts:739`).
-   `feeBps`, `fullSpreadBps` und `slippageBps` steuern Netto-CRV und Größe.
-   Die Referenz gibt es im Code bereits:
-   - `BOOTSTRAP_EXECUTION_PROFILES` im Bootstrap,
-   - `BINANCE_SPOT_VIP0_ESTIMATE_V1` in
+| Punkt | Einordnung |
+|---|---|
+| Der Worker führt `ERROR_LOCK` anderer CRITICAL-Regeln nicht aus | offen, eigene Entscheidung nötig (Folgearbeit 3) |
+| Execution Profiles ohne Wertprüfung | offen (Folgearbeit 4) |
+| Eine abweichende Zeile sperrt ein Portfolio erst bei seinem nächsten Kontakt, also bei einer Bewertung oder einem Fill | Bis dahin kann dort nichts genehmigt werden, und Eligibility meldet sofort `NOT_READY` |
+| Wer Schreibzugriff auf die DB hat, kann Zeile und Session wieder entsperren | Entsperren bleibt manuell und auditiert. Eine dauerhaft falsche Zeile sperrt bei jeder Bewertung erneut. Die Code-Konstante lässt sich über die DB nicht ändern |
+| Ohne aktives Limit-Set gibt es keine Sperre, nur `errored` und BotRun `FAILED` | unverändert, freigegeben wird nichts |
+| DB-Suiten und Evolution-Worker liefen nicht lokal | CI vor jeder Übernahme |
+| Strengere Werte werden ebenfalls abgelehnt | gewollt: Jede Limitänderung ist eine neue Version mit ADR |
+
+## Was diese Änderung nicht ändert
+
+- Limitwerte, `RISK_LIMIT_SET_V1`, den Limit-Set-Hash `ff9ab296…` und
+  `RISK_ENGINE_VERSION`;
+- Strategien, Champion, Challenger, Gates v1–v4, Arena und Arena-Policy;
+- Schema, Migrationen, VPS, `OFFICIAL_V1`, die produktive Datenbank, main
+  und den gemeinsamen Entwicklungsbranch.
+
+## Folgearbeiten
+
+1. Betreiber: lesende Prüfung aus Z1 auf dem VPS, separat.
+2. Betreiber: F3 und Übernahme nach dem Rollout-Weg oben.
+3. **`ERROR_LOCK` im Worker allgemein umsetzen:** eigener ADR-Entwurf. Die
+   Umsetzung ändert die Reaktion auf R-001, R-003, R-006, R-017 und R-023
+   im laufenden Betrieb.
+4. **Gleiche Lückenform beim Execution Profile, eigene Prüfung:**
+   - R-026 vergleicht den Hash des Profils nicht, obwohl Dokument 06 das
+     verlangt.
+   - Eligibility prüft nur das Format des Hashs
+     (`shadowEligibility.ts:739`).
+   - `feeBps`, `fullSpreadBps` und `slippageBps` steuern Netto-CRV und
+     Größe.
+   - Eine Referenz gibt es im Code bereits: `BOOTSTRAP_EXECUTION_PROFILES`
+     im Bootstrap und `BINANCE_SPOT_VIP0_ESTIMATE_V1` in
      `apps/trading-worker/src/jobs/shadowExecutionProfileCalibrate.ts:60`.
-5. Option C (DB-Trigger) erst bei einer Echtgeldstufe neu bewerten.
+5. Ein Research-Pfad für `RISK_BUDGET_V1` nur mit separater Freigabe.
+6. Option C (DB-Trigger) erst bei einer Echtgeldstufe neu bewerten.
 
 ## Belegstellen (Stand `eee0af5`)
 

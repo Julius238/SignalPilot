@@ -16,6 +16,7 @@
 export * from "./contracts.js";
 export * from "./reason-codes.js";
 export * from "./policy-v1.js";
+export * from "./limit-set-integrity.js";
 export * from "./position-sizing.js";
 export * from "./post-fill-recheck.js";
 export * from "./rules.js";
