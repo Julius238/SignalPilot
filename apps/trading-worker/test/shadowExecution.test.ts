@@ -1961,6 +1961,33 @@ describe("entry expiry after a partial fill opens the position (ADR 0024)", () =
     assert.equal(world.tables.get("shadowFill")!.rows.filter((row) => row.triggerType === "TAKE_PROFIT").length, 1);
   });
 
+  it("still stops the opened position out while session and portfolio are ERROR_LOCKED by a tampered limit set", async () => {
+    const { world } = await partialThenExpire({ c1Volume: "0.1", c2: THIN_C2 });
+    // An ADR 0021 lock after the expiry: entries stop, exits must not.
+    Object.assign(world.tables.get("riskLimitSet")!.rows[0]!, { minRewardRisk: new Prisma.Decimal("1") });
+    Object.assign(world.tables.get("tradingSession")!.rows[0]!, {
+      status: "ERROR_LOCKED",
+      killSwitchEngaged: true,
+      killReasonCode: "POST_FILL_RISK_LIMIT_SET_INVALID"
+    });
+    Object.assign(world.tables.get("portfolio")!.rows[0]!, { status: "ERROR_LOCKED" });
+    addCandleAt(world, "candle-c3-stop", "2026-08-02T11:00:00.000Z", {
+      open: "24000", high: "24100", low: "23500", close: "23700", volume: "1000"
+    });
+    const summary = await runShadowMonitorPositions(world.database as never, {
+      asOf: new Date("2026-08-02T12:01:00.000Z"),
+      env: MONITOR_ENV,
+      codeVersion: CODE_VERSION,
+      correlationId: CORRELATION_ID
+    });
+    assert.equal(summary.scanned, 1);
+    assert.equal(summary.outcomes[ShadowMonitorOutcome.TRIGGERED_CLOSED], 1);
+    const closed = world.tables.get("shadowPosition")!.rows[0]!;
+    assert.equal(closed.status, "STOPPED_OUT");
+    assert.equal(closed.openQuantity, "0.000000000000");
+    assert.equal(world.tables.get("tradingSession")!.rows[0]!.status, "ERROR_LOCKED", "the lock stays");
+  });
+
   it("applies the time exit and accepts a manual risk close after the expiry", async () => {
     const timed = await partialThenExpire({ c1Volume: "0.1", c2: THIN_C2 });
     const timedPosition = timed.world.tables.get("shadowPosition")!.rows[0]!;

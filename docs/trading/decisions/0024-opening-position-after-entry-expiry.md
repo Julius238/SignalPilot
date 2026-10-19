@@ -402,9 +402,9 @@ lässt `undefined` jetzt wie Prisma unverändert und kennt die Relationen
 `shadowOrder.tradeDecision` und `tradeDecision.riskAssessment`. Die beiden
 Artefakte aus „Regressionstests“ treten nicht mehr auf.
 
-**Regressionstests** (`test/shadowExecution.test.ts`, Block „ADR 0024“, 9
-Fälle). Gegen den Code ohne K schlagen die ersten sechs fehl, die letzten drei
-sind auf beiden Ständen grün:
+**Regressionstests** (`test/shadowExecution.test.ts`, Block „ADR 0024“, 10
+Fälle). Gegen den Code ohne K schlagen die ersten sieben fehl, die letzten
+drei sind auf beiden Ständen grün:
 
 1. LONG, C2 ohne Liquidität: Order `EXPIRED` (`SIMULATION_NO_LIQUIDITY`),
    Reserve frei, Position `OPEN`, Events `OPENING` → `OPENED`, keine Sperre.
@@ -412,15 +412,18 @@ sind auf beiden Ständen grün:
    Monitor erkennt den Stop in C2 selbst (`STOPPED_OUT`).
 3. Der Monitor-Job findet die Position und arbeitet C2, C3 und die
    TP-Kerze C4 ab (`CLOSED`, Take Profit).
-4. Zeit-Exit nach `maxHoldUntil`; manueller Risk Close wird angenommen und
+4. Session und Portfolio `ERROR_LOCKED` wegen manipuliertem Limit-Set
+   (ADR 0021): der Monitor-Job stoppt die Position trotzdem aus, die Sperre
+   bleibt.
+5. Zeit-Exit nach `maxHoldUntil`; manueller Risk Close wird angenommen und
    ausgeführt.
-5. Reconciliation nach dem Monitorlauf auf C2: konsistent.
-6. SHORT: Collateral bleibt bis zum Exit an der Position, danach frei;
+6. Reconciliation nach dem Monitorlauf auf C2: konsistent.
+7. SHORT: Collateral bleibt bis zum Exit an der Position, danach frei;
    Reconciliation konsistent.
-7. Wiederholter Aufruf mit C2: `NOT_APPLICABLE`, kein zweites Event, keine
+8. Wiederholter Aufruf mit C2: `NOT_APPLICABLE`, kein zweites Event, keine
    Buchung.
-8. Ablauf ohne Fill: keine Position, kein Event, Reserve vollständig frei.
-9. Entry-Gap auf C1: unverändert `ENTRY_GAP_EXPIRED`.
+9. Ablauf ohne Fill: keine Position, kein Event, Reserve vollständig frei.
+10. Entry-Gap auf C1: unverändert `ENTRY_GAP_EXPIRED`.
 
 **Bestätigter Nebenbefund N3.** Die Reconciliation bewertet mit der neuesten
 geschlossenen Kerze, der Equity-Cache trägt den Mark der letzten Buchung.
