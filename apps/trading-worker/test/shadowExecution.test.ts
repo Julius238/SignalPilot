@@ -4,7 +4,8 @@ import { describe, it } from "node:test";
 
 import {
   createShadowOrderForCandidate,
-  ShadowOrderOutcome
+  ShadowOrderOutcome,
+  ShadowOrderReasonCode
 } from "../src/lib/shadowOrderPersistence.js";
 import {
   processEntryOrderFillForCandle,
@@ -18,12 +19,18 @@ import { reconcilePortfolio } from "../src/lib/shadowReconciliation.js";
 import { startTradingDay } from "../src/lib/shadowTradingDay.js";
 import { requestManualRiskClose } from "../src/lib/manualRiskClose.js";
 import { runShadowProcessFills } from "../src/jobs/shadowProcessFills.js";
+import { EXECUTION_PROFILE_INTEGRITY_VIOLATION } from "../src/lib/executionProfileIntegrity.js";
+import { loadShadowPortfolioValuation } from "../src/lib/shadowPortfolioValuation.js";
 
 import { buildCandidateKey } from "@signalpilot/trading-domain";
 
 import { Prisma } from "@signalpilot/database";
 
 import { createFakeExecutionDatabase } from "./support/shadowExecutionFixtures.js";
+import {
+  approvedExecutionProfileRow,
+  approvedRiskSnapshotProfile
+} from "./support/executionProfileRows.js";
 import { pinnedRiskLimitSetRow } from "./support/riskLimitSetRows.js";
 
 const CODE_VERSION = "test-code-version";
@@ -144,23 +151,7 @@ function seedWorld(
     }
   });
   const executionProfile = tables.get("instrumentExecutionProfile")!.create({
-    data: {
-      assetId,
-      version: 1,
-      status: "ACTIVE",
-      tickSize: "0.010000000000",
-      stepSize: "0.000010000000",
-      minQuantity: "0.000010000000",
-      minNotional: "10.000000000000",
-      maxQuantity: null,
-      feeBps: 10,
-      fullSpreadBps: 10,
-      slippageBps: 10,
-      maxParticipationRate: "0.500000000000",
-      source: "MANUAL_CONSERVATIVE_V1",
-      sourceObservedAt: new Date("2026-08-01T00:00:00.000Z"),
-      specificationHash: "profile-hash-1"
-    }
+    data: approvedExecutionProfileRow("BTCUSDT", { assetId })
   });
 
   // Anchor candle C0 (not used for fill), and C1 which serves both as the
@@ -283,10 +274,7 @@ function seedWorld(
       marketDataAsOf: new Date("2026-08-02T08:59:59.999Z"),
       inputsJson: {
         snapshot: {
-          executionProfile: {
-            id: executionProfile.id,
-            specificationHash: executionProfile.specificationHash
-          }
+          executionProfile: approvedRiskSnapshotProfile(executionProfile)
         },
         sizing: {
           approvedQuantity: "0.100000000000",
@@ -464,10 +452,10 @@ describe("entry fill — spread, slippage, fee and ledger/portfolio consistency"
 
   it("never opens a normal position when the post-fill net-CRV recheck falls short", async () => {
     // Same fill economics as above, but a tighter take-profit target whose
-    // gross R-multiple no longer survives real spread/slippage/fees (net CRV
-    // ~1.91, below the 2.0 minimum) — ADR 0009.
+    // gross R-multiple no longer survives the approved profile's spread,
+    // slippage and fees (net CRV below the 2.0 minimum) — ADR 0009.
     const { database, tables, candidate, candleC1 } = seedWorld({
-      takeProfitPrice: "25350.000000000000"
+      takeProfitPrice: "25150.000000000000"
     });
     const orderResult = await createShadowOrderForCandidate(database as never, {
       tradeCandidateId: candidate.id,
@@ -529,7 +517,7 @@ describe("entry fill — spread, slippage, fee and ledger/portfolio consistency"
     // A thin candle caps the fill at 1 % of its own volume, leaving most of
     // the order unfilled; the shortfall must not keep chasing more exposure.
     const { database, tables, portfolio, candidate, candleC1 } = seedWorld({
-      takeProfitPrice: "25350.000000000000"
+      takeProfitPrice: "25150.000000000000"
     });
     tables
       .get("candle")!
@@ -700,7 +688,7 @@ describe("fill job — only the portfolios the scheduler cleared", () => {
 describe("position monitor — forced MANUAL_RISK_CLOSE after a post-fill CRV shortfall", () => {
   it("closes the position at the next candle's close when no harder stop/TP fires first", async () => {
     const { database, tables, candidate, candleC1 } = seedWorld({
-      takeProfitPrice: "25350.000000000000"
+      takeProfitPrice: "25150.000000000000"
     });
     const orderResult = await createShadowOrderForCandidate(database as never, {
       tradeCandidateId: candidate.id,
@@ -720,7 +708,7 @@ describe("position monitor — forced MANUAL_RISK_CLOSE after a post-fill CRV sh
     const position = tables.get("shadowPosition")!.rows[0];
 
     // A quiet follow-up candle: nowhere near the stop (23600) or the take
-    // profit (25350), so the ordinary exit resolution finds nothing.
+    // profit (25150), so the ordinary exit resolution finds nothing.
     const candleC2 = tables.get("candle")!.create({
       data: {
         id: "candle-c2-quiet",
@@ -1347,5 +1335,452 @@ describe("start-of-day rollover — idempotent", () => {
     });
     assert.equal(second.outcome, "ALREADY_STARTED");
     assert.equal(tables.get("portfolioSnapshot")!.rows.length, 1);
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// Execution profile integrity (ADR 0023, option W). Every manipulation keeps
+// the approved row's id and hash text unless the hash is the manipulation.
+// ───────────────────────────────────────────────────────────────────────────
+
+type World = ReturnType<typeof seedWorld>;
+
+const PROFILE_MANIPULATIONS: ReadonlyArray<
+  readonly [string, Record<string, unknown>, string]
+> = [
+  ["fee 0 bp", { feeBps: 0 }, "feeBps"],
+  ["spread 0 bp", { fullSpreadBps: 0 }, "fullSpreadBps"],
+  ["slippage 0 bp", { slippageBps: 0 }, "slippageBps"],
+  ["a stricter fee", { feeBps: 25 }, "feeBps"],
+  ["another tick size", { tickSize: new Prisma.Decimal("0.000000000001") }, "tickSize"],
+  ["another step size", { stepSize: new Prisma.Decimal("0.001") }, "stepSize"],
+  ["another minimum notional", { minNotional: new Prisma.Decimal("0.000000000001") }, "minNotional"],
+  ["another participation rate", { maxParticipationRate: new Prisma.Decimal("1") }, "maxParticipationRate"],
+  ["a foreign hash text", { specificationHash: "f".repeat(64) }, "specificationHash"],
+  ["another version", { version: 99 }, "version"],
+  ["another source", { source: "MANUAL_CONSERVATIVE_V1" }, "source"]
+];
+
+const profileRow = (world: World) =>
+  world.tables.get("instrumentExecutionProfile")!.rows[0]!;
+const tamperProfile = (world: World, override: Record<string, unknown>) =>
+  Object.assign(profileRow(world), override);
+const addIntruderProfile = (world: World, override: Record<string, unknown> = {}) =>
+  world.tables.get("instrumentExecutionProfile")!.create({
+    data: approvedExecutionProfileRow("BTCUSDT", {
+      assetId: world.assetId,
+      version: 7,
+      feeBps: 0,
+      ...override
+    })
+  });
+
+const createOrder = (world: World) =>
+  createShadowOrderForCandidate(world.database as never, {
+    tradeCandidateId: world.candidate.id as string,
+    asOf: new Date("2026-08-02T09:00:05.000Z"),
+    codeVersion: CODE_VERSION,
+    correlationId: CORRELATION_ID,
+    capability: SAFE_LONG_CAPABILITY
+  });
+const fillEntry = (world: World, shadowOrderId: string, candleId = world.candleC1.id as string) =>
+  processEntryOrderFillForCandle(world.database as never, {
+    shadowOrderId,
+    candleId,
+    asOf: new Date("2026-08-02T12:00:00.000Z"),
+    codeVersion: CODE_VERSION,
+    correlationId: CORRELATION_ID
+  });
+/** A candle whose low (23500) breaches the stop (23600): a stop-first exit. */
+const addStopCandle = (world: World) =>
+  world.tables.get("candle")!.create({
+    data: {
+      id: "candle-c2-stop",
+      assetId: world.assetId,
+      symbol: "BTCUSDT",
+      timeframe: "1h",
+      openTime: new Date("2026-08-02T10:00:00.000Z"),
+      closeTime: new Date("2026-08-02T10:59:59.999Z"),
+      open: "24000",
+      high: "24100",
+      low: "23500",
+      close: "23700",
+      volume: "1000",
+      source: "BINANCE"
+    }
+  });
+const monitor = (world: World, positionId: string, candleId: string) =>
+  monitorPositionForCandle(world.database as never, {
+    shadowPositionId: positionId,
+    candleId,
+    asOf: new Date("2026-08-02T11:00:00.000Z"),
+    codeVersion: CODE_VERSION,
+    correlationId: CORRELATION_ID
+  });
+
+const integrityEvents = (world: World) =>
+  world.tables
+    .get("riskEvent")!
+    .rows.filter((row) => row.reasonCode === EXECUTION_PROFILE_INTEGRITY_VIOLATION);
+
+/** New entries are stopped: session and portfolio locked, one CRITICAL finding with the fields. */
+const assertEntriesLocked = (world: World, fields: readonly string[], label: string) => {
+  const session = world.tables.get("tradingSession")!.rows[0]!;
+  assert.equal(session.status, "ERROR_LOCKED", label);
+  assert.equal(session.killSwitchEngaged, true, label);
+  assert.equal(session.killReasonCode, EXECUTION_PROFILE_INTEGRITY_VIOLATION, label);
+  assert.equal(world.tables.get("portfolio")!.rows[0]!.status, "ERROR_LOCKED", label);
+  const events = integrityEvents(world);
+  assert.equal(events.length, 1, label);
+  assert.equal(events[0]!.severity, "CRITICAL", label);
+  assert.equal(events[0]!.type, "CONFIGURATION_INVALID", label);
+  assert.deepEqual((events[0]!.payloadJson as { deviations: string[] }).deviations, [...fields], label);
+  assert.equal(
+    world.tables.get("tradingAuditEvent")!.rows.filter((row) => row.eventType === "SESSION_ERROR_LOCKED").length,
+    1,
+    label
+  );
+};
+
+/** An open LONG position entered with the approved profile. */
+const openApprovedPosition = async (world: World) => {
+  const order = await createOrder(world);
+  assert.equal(order.outcome, ShadowOrderOutcome.CREATED);
+  const fill = await fillEntry(world, order.shadowOrderId!);
+  assert.equal(fill.outcome, ShadowFillOutcome.FILLED);
+  return world.tables.get("shadowPosition")!.rows[0]!;
+};
+
+describe("execution profile integrity — order creation (ADR 0023)", () => {
+  for (const [label, override, field] of PROFILE_MANIPULATIONS) {
+    it(`refuses ${label} after approval: no order, no reserve, entries locked`, async () => {
+      const world = seedWorld();
+      tamperProfile(world, override);
+      const result = await createOrder(world);
+      assert.equal(result.outcome, ShadowOrderOutcome.BLOCKED, label);
+      assert.equal(result.reasonCode, ShadowOrderReasonCode.EXECUTION_PROFILE_INVALID, label);
+      assert.equal(world.tables.get("shadowOrder")!.rows.length, 0, label);
+      const portfolio = world.tables.get("portfolio")!.rows[0]!;
+      assert.equal(portfolio.reservedCash, "0.000000000000", label);
+      assert.equal(portfolio.availableCash, "10000.000000000000", label);
+      assertEntriesLocked(world, [field], label);
+    });
+  }
+
+  it("refuses a second ACTIVE row, even one that only copies the approved values", async () => {
+    const world = seedWorld();
+    addIntruderProfile(world, { feeBps: 10 });
+    const result = await createOrder(world);
+    assert.equal(result.reasonCode, ShadowOrderReasonCode.EXECUTION_PROFILE_INVALID);
+    assertEntriesLocked(world, ["version", "activeProfileCount"], "second ACTIVE row");
+  });
+
+  it("refuses an approval that was priced with other values than the approved profile", async () => {
+    const world = seedWorld();
+    const assessment = world.tables.get("riskAssessment")!.rows[0]!;
+    const inputs = assessment.inputsJson as { snapshot: { executionProfile: Record<string, unknown> } };
+    inputs.snapshot.executionProfile = { ...inputs.snapshot.executionProfile, feeBps: 0, slippageBps: 0 };
+    const result = await createOrder(world);
+    assert.equal(result.reasonCode, ShadowOrderReasonCode.EXECUTION_PROFILE_INVALID);
+    assert.equal(world.tables.get("shadowOrder")!.rows.length, 0);
+    assertEntriesLocked(world, ["feeBps", "slippageBps"], "assessed values");
+  });
+
+  it("treats a version switch to another approved row as a change, not as tampering", async () => {
+    const world = seedWorld();
+    // Calibration retired the row the approval used and activated a new one
+    // with the approved values: the order is refused as before, nothing locks.
+    tamperProfile(world, { status: "RETIRED", activeAssetKey: null });
+    world.tables.get("instrumentExecutionProfile")!.create({
+      data: approvedExecutionProfileRow("BTCUSDT", { assetId: world.assetId })
+    });
+    const result = await createOrder(world);
+    assert.equal(result.reasonCode, ShadowOrderReasonCode.EXECUTION_PROFILE_CHANGED);
+    assert.equal(world.tables.get("portfolio")!.rows[0]!.status, "ACTIVE");
+    assert.equal(world.tables.get("tradingSession")!.rows[0]!.status, "SHADOW_ACTIVE");
+    assert.equal(integrityEvents(world).length, 0);
+  });
+
+  it("copies the approved profile into the order snapshot unchanged", async () => {
+    const world = seedWorld();
+    const result = await createOrder(world);
+    assert.equal(result.outcome, ShadowOrderOutcome.CREATED);
+    const order = world.tables.get("shadowOrder")!.rows[0]!;
+    assert.deepEqual(order.costModelSnapshotJson, {
+      feeBps: 10,
+      fullSpreadBps: 2,
+      slippageBps: 3,
+      maxParticipationRate: "0.010000000000",
+      executionProfileId: profileRow(world).id,
+      executionProfileSpecificationHash:
+        "0fba0118f710413a0b9811a15726f69ddb48131c26725775d1f0799de43eed13"
+    });
+    assert.equal(integrityEvents(world).length, 0);
+  });
+});
+
+describe("execution profile integrity — entry fill and post-fill recheck (ADR 0023)", () => {
+  const assertNoNewExposure = (world: World, shadowOrderId: string, label: string) => {
+    const order = world.tables.get("shadowOrder")!.rows.find((row) => row.id === shadowOrderId)!;
+    assert.equal(order.status, "EXPIRED", label);
+    assert.equal(order.cancelReasonCode, EXECUTION_PROFILE_INTEGRITY_VIOLATION, label);
+    assert.equal(order.reservedQuoteAmount, "0", label);
+    assert.equal(world.tables.get("shadowFill")!.rows.length, 0, label);
+    assert.equal(world.tables.get("shadowPosition")!.rows.length, 0, label);
+    const portfolio = world.tables.get("portfolio")!.rows[0]!;
+    assert.equal(Number(portfolio.reservedCash), 0, label);
+    assert.equal(Number(portfolio.availableCash), 10000, label);
+  };
+
+  for (const [label, snapshotField, value, field] of [
+    ["a fee of 0 in the order's cost snapshot", "costModelSnapshotJson", { feeBps: 0 }, "orderSnapshot.feeBps"],
+    ["no slippage in the order's cost snapshot", "costModelSnapshotJson", { slippageBps: 0 }, "orderSnapshot.slippageBps"],
+    ["a foreign hash in the order's cost snapshot", "costModelSnapshotJson", { executionProfileSpecificationHash: "f".repeat(64) }, "orderSnapshot.symbol"],
+    ["another tick size in the order's precision snapshot", "precisionSnapshotJson", { tickSize: "0.000000000001" }, "orderSnapshot.tickSize"],
+    ["another step size in the order's precision snapshot", "precisionSnapshotJson", { stepSize: "0.001000000000" }, "orderSnapshot.stepSize"]
+  ] as const) {
+    it(`cancels the order on ${label} and opens nothing`, async () => {
+      const world = seedWorld();
+      const order = await createOrder(world);
+      const row = world.tables.get("shadowOrder")!.rows[0]!;
+      row[snapshotField] = { ...(row[snapshotField] as Record<string, unknown>), ...value };
+      const fill = await fillEntry(world, order.shadowOrderId!);
+      assert.equal(fill.outcome, ShadowFillOutcome.ERROR_LOCKED, label);
+      assertNoNewExposure(world, order.shadowOrderId!, label);
+      assertEntriesLocked(world, [field], label);
+    });
+  }
+
+  it("cancels the order when the active row deviates after the order was accepted", async () => {
+    const world = seedWorld();
+    const order = await createOrder(world);
+    tamperProfile(world, { fullSpreadBps: 0 });
+    const fill = await fillEntry(world, order.shadowOrderId!);
+    assert.equal(fill.outcome, ShadowFillOutcome.ERROR_LOCKED);
+    assertNoNewExposure(world, order.shadowOrderId!, "active row");
+    assertEntriesLocked(world, ["activeProfile.fullSpreadBps"], "active row");
+  });
+
+  it("cancels the order when a second ACTIVE row appears after the order was accepted", async () => {
+    const world = seedWorld();
+    const order = await createOrder(world);
+    addIntruderProfile(world);
+    const fill = await fillEntry(world, order.shadowOrderId!);
+    assert.equal(fill.outcome, ShadowFillOutcome.ERROR_LOCKED);
+    assertNoNewExposure(world, order.shadowOrderId!, "second ACTIVE row");
+    assertEntriesLocked(
+      world,
+      ["activeProfile.version", "activeProfile.feeBps", "activeProfile.activeProfileCount"],
+      "second ACTIVE row"
+    );
+  });
+
+  it("never lets a cost-free snapshot turn a post-fill shortfall into a normal position", async () => {
+    // With the approved profile this take profit falls short of net 2R after
+    // the fill (ADR 0009); priced without costs it would not.
+    const control = seedWorld({ takeProfitPrice: "25150.000000000000" });
+    const controlOrder = await createOrder(control);
+    assert.equal((await fillEntry(control, controlOrder.shadowOrderId!)).outcome, ShadowFillOutcome.FILLED_CRV_SHORTFALL);
+
+    const world = seedWorld({ takeProfitPrice: "25150.000000000000" });
+    const order = await createOrder(world);
+    const row = world.tables.get("shadowOrder")!.rows[0]!;
+    row.costModelSnapshotJson = {
+      ...(row.costModelSnapshotJson as Record<string, unknown>),
+      feeBps: 0,
+      fullSpreadBps: 0,
+      slippageBps: 0
+    };
+    const fill = await fillEntry(world, order.shadowOrderId!);
+    assert.equal(fill.outcome, ShadowFillOutcome.ERROR_LOCKED);
+    assert.equal(world.tables.get("shadowPosition")!.rows.length, 0);
+  });
+
+  it("keeps a booked partial fill and its position, and only cancels the unfilled remainder", async () => {
+    const world = seedWorld();
+    // A thin first candle: only part of the order fills.
+    world.tables.get("candle")!.update({ where: { id: world.candleC1.id }, data: { volume: "0.1" } });
+    const order = await createOrder(world);
+    const first = await fillEntry(world, order.shadowOrderId!);
+    assert.equal(first.outcome, ShadowFillOutcome.PARTIALLY_FILLED);
+    const position = world.tables.get("shadowPosition")!.rows[0]!;
+    const openQuantity = position.openQuantity;
+
+    tamperProfile(world, { feeBps: 0 });
+    const next = world.tables.get("candle")!.create({
+      data: {
+        id: "candle-c2-thin",
+        assetId: world.assetId,
+        symbol: "BTCUSDT",
+        timeframe: "1h",
+        openTime: new Date("2026-08-02T10:00:00.000Z"),
+        closeTime: new Date("2026-08-02T10:59:59.999Z"),
+        open: "24120",
+        high: "24200",
+        low: "24050",
+        close: "24150",
+        volume: "1000",
+        source: "BINANCE"
+      }
+    });
+    const second = await fillEntry(world, order.shadowOrderId!, next.id as string);
+    assert.equal(second.outcome, ShadowFillOutcome.ERROR_LOCKED);
+    const orderRow = world.tables.get("shadowOrder")!.rows.find((row) => row.id === order.shadowOrderId)!;
+    assert.equal(orderRow.status, "CANCELLED");
+    assert.equal(orderRow.cancelReasonCode, EXECUTION_PROFILE_INTEGRITY_VIOLATION);
+    assert.equal(orderRow.reservedQuoteAmount, "0");
+    assert.equal(world.tables.get("shadowFill")!.rows.length, 1, "the booked fill stays");
+    // Not stranded in OPENING, which the monitor never looks at: the position
+    // stands as it is and is managed under its exit plan.
+    const kept = world.tables.get("shadowPosition")!.rows[0]!;
+    assert.equal(kept.status, "OPEN");
+    assert.equal(kept.openQuantity, openQuantity);
+    assert.ok(kept.openedAt instanceof Date);
+    assert.equal(Number(world.tables.get("portfolio")!.rows[0]!.reservedCash), 0);
+    assertEntriesLocked(world, ["activeProfile.feeBps"], "partial fill");
+
+    const stop = world.tables.get("candle")!.create({
+      data: {
+        id: "candle-c3-stop",
+        assetId: world.assetId,
+        symbol: "BTCUSDT",
+        timeframe: "1h",
+        openTime: new Date("2026-08-02T11:00:00.000Z"),
+        closeTime: new Date("2026-08-02T11:59:59.999Z"),
+        open: "24000",
+        high: "24100",
+        low: "23500",
+        close: "23700",
+        volume: "1000",
+        source: "BINANCE"
+      }
+    });
+    const exit = await monitorPositionForCandle(world.database as never, {
+      shadowPositionId: kept.id as string,
+      candleId: stop.id as string,
+      asOf: new Date("2026-08-02T12:00:00.000Z"),
+      codeVersion: CODE_VERSION,
+      correlationId: CORRELATION_ID
+    });
+    assert.equal(exit.outcome, ShadowMonitorOutcome.TRIGGERED_CLOSED);
+    assert.equal(world.tables.get("shadowPosition")!.rows[0]!.status, "STOPPED_OUT");
+  });
+});
+
+describe("execution profile integrity — exit and valuation stay risk-reducing (ADR 0023)", () => {
+  it("closes an open position with the approved profile although the row deviates, and locks only new entries", async () => {
+    const control = seedWorld();
+    const controlPosition = await openApprovedPosition(control);
+    const controlCandle = addStopCandle(control);
+    assert.equal((await monitor(control, controlPosition.id as string, controlCandle.id as string)).outcome, ShadowMonitorOutcome.TRIGGERED_CLOSED);
+    const controlExit = control.tables.get("shadowFill")!.rows.find((row) => row.triggerType === "STOP")!;
+
+    for (const [label, override, field] of PROFILE_MANIPULATIONS) {
+      const world = seedWorld();
+      const position = await openApprovedPosition(world);
+      tamperProfile(world, override);
+      const candle = addStopCandle(world);
+      const result = await monitor(world, position.id as string, candle.id as string);
+      assert.equal(result.outcome, ShadowMonitorOutcome.TRIGGERED_CLOSED, label);
+      const closed = world.tables.get("shadowPosition")!.rows[0]!;
+      assert.equal(closed.status, "STOPPED_OUT", label);
+      assert.equal(closed.openQuantity, "0.000000000000", label);
+      const exitFill = world.tables.get("shadowFill")!.rows.find((row) => row.triggerType === "STOP")!;
+      assert.equal(exitFill.fillPrice, controlExit.fillPrice, `${label}: priced like the approved profile`);
+      assert.equal(exitFill.feeAmount, controlExit.feeAmount, `${label}: charged like the approved profile`);
+      assert.equal(closed.realizedPnl, control.tables.get("shadowPosition")!.rows[0]!.realizedPnl, label);
+      const exitOrder = world.tables.get("shadowOrder")!.rows.find((row) => row.purpose === "EXIT")!;
+      const cost = exitOrder.costModelSnapshotJson as Record<string, unknown>;
+      assert.equal(cost.feeBps, 10, label);
+      assert.equal(cost.fullSpreadBps, 2, label);
+      assert.equal(cost.slippageBps, 3, label);
+      assert.equal(cost.approvedProfileSubstituted, true, label);
+      assert.deepEqual(cost.executionProfileDeviations, [field], label);
+      assertEntriesLocked(world, [field], label);
+    }
+  });
+
+  it("still closes when the portfolio is already locked and a second ACTIVE row exists", async () => {
+    const world = seedWorld();
+    const position = await openApprovedPosition(world);
+    const session = world.tables.get("tradingSession")!.rows[0]!;
+    Object.assign(session, { status: "ERROR_LOCKED", killSwitchEngaged: true, killReasonCode: "EARLIER_FINDING" });
+    Object.assign(world.tables.get("portfolio")!.rows[0]!, { status: "ERROR_LOCKED" });
+    addIntruderProfile(world);
+    const candle = addStopCandle(world);
+    const result = await monitor(world, position.id as string, candle.id as string);
+    assert.equal(result.outcome, ShadowMonitorOutcome.TRIGGERED_CLOSED);
+    assert.equal(world.tables.get("shadowPosition")!.rows[0]!.status, "STOPPED_OUT");
+    const exitOrder = world.tables.get("shadowOrder")!.rows.find((row) => row.purpose === "EXIT")!;
+    assert.equal((exitOrder.costModelSnapshotJson as Record<string, unknown>).feeBps, 10);
+    // The earlier lock reason stays; the finding is still recorded.
+    assert.equal(session.killReasonCode, "EARLIER_FINDING");
+    assert.equal(integrityEvents(world).length, 1);
+  });
+
+  it("lets an operator force a risk-reducing close under the lock, priced with the approved profile", async () => {
+    const world = seedWorld();
+    const position = await openApprovedPosition(world);
+    tamperProfile(world, { feeBps: 0, slippageBps: 0 });
+    const request = await requestManualRiskClose(world.database as never, {
+      shadowPositionId: position.id as string,
+      actorId: "operator",
+      reasonNote: "deviating execution profile",
+      idempotencyKey: "manual-close-profile-1",
+      asOf: new Date("2026-08-02T10:05:00.000Z")
+    });
+    assert.equal(request.ok, true);
+    const quiet = world.tables.get("candle")!.create({
+      data: {
+        id: "candle-c2-quiet-profile",
+        assetId: world.assetId,
+        symbol: "BTCUSDT",
+        timeframe: "1h",
+        openTime: new Date("2026-08-02T10:00:00.000Z"),
+        closeTime: new Date("2026-08-02T10:59:59.999Z"),
+        open: "24150",
+        high: "24250",
+        low: "24050",
+        close: "24180",
+        volume: "1000",
+        source: "BINANCE"
+      }
+    });
+    const result = await monitor(world, position.id as string, quiet.id as string);
+    assert.equal(result.outcome, ShadowMonitorOutcome.TRIGGERED_CLOSED);
+    assert.equal(world.tables.get("shadowPosition")!.rows[0]!.status, "CLOSED");
+    const exitFill = world.tables.get("shadowFill")!.rows.find((row) => row.triggerType === "MANUAL_RISK_CLOSE")!;
+    assert.ok(Number(exitFill.feeAmount) > 0, "the approved fee is charged");
+    assert.ok(Number(exitFill.fillPrice) < 24180, "the approved spread and slippage are charged");
+  });
+
+  it("values an open position with the approved profile, never with a deviating row, and never fails on it", async () => {
+    const world = seedWorld();
+    await openApprovedPosition(world);
+    const portfolio = world.tables.get("portfolio")!.rows[0]!;
+    const value = () =>
+      loadShadowPortfolioValuation(world.database as never, {
+        portfolioId: portfolio.id as string,
+        asOf: new Date("2026-08-02T11:00:00.000Z"),
+        availableCash: String(portfolio.availableCash),
+        reservedCash: String(portfolio.reservedCash),
+        realizedPnl: String(portfolio.realizedPnl),
+        feesPaid: String(portfolio.feesPaid),
+        highWaterMark: String(portfolio.highWaterMark),
+        startOfDayEquity: null
+      });
+    // Which row a mark cites may change; what it is priced with may not.
+    const priced = async () => {
+      const { valuation, marks } = await value();
+      return {
+        valuation,
+        marks: marks.map((mark) => ({ ...mark, executionProfileId: "ignored" }))
+      };
+    };
+    const approved = await priced();
+    tamperProfile(world, { feeBps: 0, fullSpreadBps: 0, tickSize: new Prisma.Decimal("0.000000000001") });
+    assert.deepEqual(await priced(), approved);
+    addIntruderProfile(world);
+    assert.deepEqual(await priced(), approved);
   });
 });

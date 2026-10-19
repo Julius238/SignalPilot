@@ -74,6 +74,12 @@ import {
 } from "@signalpilot/trading-domain";
 
 import {
+  engageExecutionProfileIntegrityLock,
+  loadActiveExecutionProfile,
+  riskReducingExecutionProfile,
+  type RiskReducingExecutionProfile
+} from "./executionProfileIntegrity.js";
+import {
   asJson,
   decimalString,
   ledgerEntryCreateData,
@@ -248,7 +254,7 @@ export async function monitorPositionForCandle(
 ): Promise<MonitorPositionResult> {
   const position = await database.shadowPosition.findUnique({
     where: { id: input.shadowPositionId },
-    include: { portfolio: true }
+    include: { portfolio: true, asset: { select: { symbol: true } } }
   });
   if (
     position === null ||
@@ -301,17 +307,36 @@ export async function monitorPositionForCandle(
     return { outcome: ShadowMonitorOutcome.ERROR_LOCKED, shadowFillId: null };
   }
 
-  const executionProfile = await resolveExecutionProfile(
+  const resolvedProfile = await resolveExecutionProfile(
     database,
-    position.assetId
+    position.assetId,
+    position.asset?.symbol ?? null
   );
-  if (executionProfile === null) {
+  if (resolvedProfile === null) {
     await raiseErrorLock(database, {
       portfolioId: position.portfolioId,
       reasonCode: "SIMULATION_INVALID_EXECUTION_PROFILE",
       aggregateId: position.id
     });
     return { outcome: ShadowMonitorOutcome.ERROR_LOCKED, shadowFillId: null };
+  }
+  // A deviating profile never blocks this risk-reducing path: the exit is
+  // priced with the approved profile instead, and only new entries are
+  // locked (ADR 0023).
+  const executionProfile: ExecutionProfileSnapshotV1 = resolvedProfile.values;
+  if (resolvedProfile.deviations.length > 0) {
+    await engageExecutionProfileIntegrityLock(database, {
+      portfolioId: position.portfolioId,
+      symbol: position.asset?.symbol ?? null,
+      executionProfileId: resolvedProfile.values.id,
+      deviations: resolvedProfile.deviations,
+      jobKey: SHADOW_MONITOR_JOB_KEY,
+      causationType: "ShadowPosition",
+      causationId: position.id,
+      correlationId: input.correlationId,
+      codeVersion: input.codeVersion,
+      asOf: input.asOf
+    });
   }
 
   let existingExitOrder = await database.shadowOrder.findFirst({
@@ -488,7 +513,13 @@ export async function monitorPositionForCandle(
           slippageBps: executionProfile.slippageBps,
           maxParticipationRate: executionProfile.maxParticipationRate,
           executionProfileId: executionProfile.id,
-          executionProfileSpecificationHash: executionProfile.specificationHash
+          executionProfileSpecificationHash: executionProfile.specificationHash,
+          ...(resolvedProfile.deviations.length === 0
+            ? {}
+            : {
+                executionProfileDeviations: [...resolvedProfile.deviations],
+                approvedProfileSubstituted: resolvedProfile.substituted
+              })
         })
       }
     });
@@ -861,25 +892,14 @@ async function markPositionCandleAndPortfolio(
 
 async function resolveExecutionProfile(
   database: PrismaClient,
-  assetId: string
-): Promise<ExecutionProfileSnapshotV1 | null> {
-  const active = await database.instrumentExecutionProfile.findFirst({
-    where: { assetId, status: "ACTIVE" },
-    orderBy: { version: "desc" }
-  });
-  if (active === null) return null;
-  return {
-    id: active.id,
-    tickSize: decimalString(active.tickSize),
-    stepSize: decimalString(active.stepSize),
-    minQuantity: decimalString(active.minQuantity),
-    minNotional: decimalString(active.minNotional),
-    maxQuantity:
-      active.maxQuantity === null ? null : decimalString(active.maxQuantity),
-    feeBps: active.feeBps,
-    fullSpreadBps: active.fullSpreadBps,
-    slippageBps: active.slippageBps,
-    maxParticipationRate: decimalString(active.maxParticipationRate),
-    specificationHash: active.specificationHash
-  };
+  assetId: string,
+  symbol: string | null
+): Promise<RiskReducingExecutionProfile | null> {
+  const active = await loadActiveExecutionProfile(database, assetId);
+  if (active.row === null) return null;
+  return riskReducingExecutionProfile(
+    { ...active, row: active.row },
+    symbol,
+    assetId
+  );
 }

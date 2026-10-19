@@ -75,6 +75,14 @@ import {
   ledgerEntryCreateData,
   portfolioState as toPortfolioState
 } from "./shadowPortfolioIo.js";
+import {
+  EXECUTION_PROFILE_INTEGRITY_VIOLATION,
+  activeExecutionProfileDeviations,
+  approvedExecutionProfileByHash,
+  engageExecutionProfileIntegrityLock,
+  executionProfileDeviations,
+  loadActiveExecutionProfile
+} from "./executionProfileIntegrity.js";
 import { riskLimitSetRowDeviations } from "./riskLimitSetIntegrity.js";
 import { loadShadowPortfolioValuation } from "./shadowPortfolioValuation.js";
 
@@ -390,6 +398,51 @@ export async function processEntryOrderFillForCandle(
       outcome: ShadowFillOutcome.ERROR_LOCKED,
       shadowFillId: null,
       shadowPositionId: null
+    };
+  }
+
+  // No new exposure from a profile nobody approved (ADR 0023): the order's
+  // own snapshot — which this fill and the post-fill recheck price with —
+  // must be an approved profile, and the asset's active row must still be the
+  // approved one. Otherwise the order stops pursuing fills and the portfolio
+  // is locked for new entries.
+  const symbol =
+    (
+      await database.asset.findUnique({
+        where: { id: order.assetId },
+        select: { symbol: true }
+      })
+    )?.symbol ?? null;
+  const profileDeviations = [
+    ...executionProfileDeviations(
+      profileSnapshot,
+      approvedExecutionProfileByHash(symbol, profileSnapshot.specificationHash)
+    ).map((field) => `orderSnapshot.${field}`),
+    ...activeExecutionProfileDeviations(
+      await loadActiveExecutionProfile(database, order.assetId),
+      symbol,
+      order.assetId
+    ).map((field) => `activeProfile.${field}`)
+  ];
+  if (profileDeviations.length > 0) {
+    await stopEntryOrderOnInvalidProfile(database, order, candle, input);
+    await engageExecutionProfileIntegrityLock(database, {
+      portfolioId: order.portfolioId,
+      symbol,
+      executionProfileId: order.executionProfileId,
+      deviations: profileDeviations,
+      jobKey: SHADOW_FILL_JOB_KEY,
+      causationType: "ShadowOrder",
+      causationId: order.id,
+      correlationId: input.correlationId,
+      codeVersion: input.codeVersion,
+      asOf: input.asOf
+    });
+    return {
+      outcome: ShadowFillOutcome.ERROR_LOCKED,
+      shadowFillId: null,
+      shadowPositionId: null,
+      message: `Execution profile deviates from the approved profile: ${profileDeviations.join(", ")}.`
     };
   }
 
@@ -1017,6 +1070,138 @@ export async function processEntryOrderFillForCandle(
     shadowFillId: result.fillId,
     shadowPositionId: positionId
   };
+}
+
+/**
+ * Stops an entry order whose execution profile is not approved (ADR 0023)
+ * without stranding exposure. An order without fills expires and releases its
+ * reserve. A partially filled one is cancelled, the remainder's reserve is
+ * released, and its `OPENING` position is opened as it stands, so the monitor
+ * manages it under its exit plan and the approved profile — the same outcome
+ * as a post-fill shortfall (ADR 0009). The booked fill stays booked.
+ */
+async function stopEntryOrderOnInvalidProfile(
+  database: PrismaClient,
+  order: {
+    readonly id: string;
+    readonly portfolioId: string;
+    readonly reservedQuoteAmount: unknown;
+    readonly remainingQuantity: unknown;
+    readonly filledQuantity: unknown;
+    readonly shadowPositionId: string | null;
+  },
+  candle: { readonly id: string; readonly closeTime: Date },
+  input: ProcessEntryFillInput
+): Promise<void> {
+  const filled = DecimalValue.fromString(decimalString(order.filledQuantity));
+  const shadowPositionId = order.shadowPositionId;
+  if (!filled.isPositive() || shadowPositionId === null) {
+    await expireOrderAndReleaseReserve(
+      database,
+      order,
+      candle.id,
+      EXECUTION_PROFILE_INTEGRITY_VIOLATION,
+      input
+    );
+    return;
+  }
+
+  await database.$transaction(async (tx) => {
+    const releaseAmount = decimalString(order.reservedQuoteAmount);
+    if (DecimalValue.fromString(releaseAmount).isPositive()) {
+      const portfolio = await tx.portfolio.findUnique({
+        where: { id: order.portfolioId }
+      });
+      if (portfolio === null)
+        throw new Error(
+          `Portfolio ${order.portfolioId} not found while releasing a reserve.`
+        );
+      const release = computeReleaseReservation({
+        state: toPortfolioState(portfolio),
+        entryKey: `${order.id}|profile-integrity-release`,
+        releaseAmount,
+        shadowOrderId: order.id,
+        occurredAt: input.asOf.toISOString()
+      });
+      if (!release.ok || release.nextState === null) {
+        throw new Error(
+          `Reserve release failed for order ${order.id}: ${release.reasonCode}`
+        );
+      }
+      await tx.portfolioLedgerEntry.create({
+        data: ledgerEntryCreateData(release.entries[0], portfolio.id)
+      });
+      const updated = await tx.portfolio.updateMany({
+        where: { id: portfolio.id, version: portfolio.version },
+        data: {
+          availableCash: release.nextState.availableCash,
+          reservedCash: release.nextState.reservedCash,
+          ledgerSequence: release.nextState.ledgerSequence,
+          version: { increment: 1 }
+        }
+      });
+      if (updated.count === 0)
+        throw new Error(
+          `Portfolio ${portfolio.id} version conflict while releasing a reserve.`
+        );
+    }
+
+    await tx.shadowOrder.update({
+      where: { id: order.id },
+      data: {
+        status: ShadowOrderStatus.CANCELLED,
+        openEntryScopeKey: null,
+        reservedQuoteAmount: "0",
+        lastProcessedCandleId: candle.id,
+        cancelReasonCode: EXECUTION_PROFILE_INTEGRITY_VIOLATION,
+        version: { increment: 1 }
+      }
+    });
+
+    const position = await tx.shadowPosition.findUnique({
+      where: { id: shadowPositionId }
+    });
+    if (position === null || position.status !== ShadowPositionStatus.OPENING)
+      return;
+    const firstFill = await tx.shadowFill.findFirst({
+      where: {
+        shadowPositionId: position.id,
+        triggerType: ShadowFillTriggerType.ENTRY
+      },
+      orderBy: { occurredAt: "asc" }
+    });
+    await tx.shadowPosition.update({
+      where: { id: position.id },
+      data: {
+        status: ShadowPositionStatus.OPEN,
+        openedAt: position.openedAt ?? firstFill?.occurredAt ?? candle.closeTime,
+        version: { increment: 1 }
+      }
+    });
+    const sequence =
+      (await tx.shadowPositionEvent.count({
+        where: { shadowPositionId: position.id }
+      })) + 1;
+    await tx.shadowPositionEvent.create({
+      data: {
+        eventKey: buildPositionEventKey({
+          shadowPositionId: position.id,
+          sequence
+        }),
+        shadowPositionId: position.id,
+        sequence,
+        type: ShadowPositionEventType.OPENED,
+        sourceOrderId: order.id,
+        sourceCandleId: candle.id,
+        payloadJson: asJson({
+          jobKey: SHADOW_FILL_JOB_KEY,
+          reasonCode: EXECUTION_PROFILE_INTEGRITY_VIOLATION,
+          cancelledRemainder: decimalString(order.remainingQuantity)
+        }),
+        occurredAt: candle.closeTime
+      }
+    });
+  });
 }
 
 /**

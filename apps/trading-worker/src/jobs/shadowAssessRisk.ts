@@ -39,6 +39,13 @@ import {
 import { config } from "dotenv";
 import pino from "pino";
 
+import {
+  EXECUTION_PROFILE_INTEGRITY_VIOLATION,
+  currentApprovedExecutionProfile,
+  engageExecutionProfileIntegrityLock,
+  executionProfileDeviations,
+  loadActiveExecutionProfile
+} from "../lib/executionProfileIntegrity.js";
 import { assembleRiskInput } from "../lib/riskInputAssembler.js";
 import {
   RiskPersistOutcome,
@@ -263,6 +270,68 @@ export async function runShadowAssessRisk(
           }
         );
         continue;
+      }
+
+      // The engine prices with exactly these profile values. They must be the
+      // approved profile and the asset must have one ACTIVE row; otherwise
+      // nothing is assessed and the portfolio is locked for new entries
+      // (ADR 0023). A missing profile stays the engine's CRITICAL finding.
+      const { candidate } = assembled.snapshot;
+      const profile = assembled.snapshot.executionProfile;
+      if (profile !== null) {
+        const active = await loadActiveExecutionProfile(
+          database,
+          candidate.assetId
+        );
+        const profileDeviations = [
+          ...executionProfileDeviations(
+            profile,
+            currentApprovedExecutionProfile(candidate.symbol),
+            { assetId: candidate.assetId }
+          ),
+          ...(active.activeCount === 1 ? [] : ["activeProfileCount" as const])
+        ];
+        if (profileDeviations.length > 0) {
+          errored += 1;
+          const lock = await engageExecutionProfileIntegrityLock(database, {
+            portfolioId: candidate.portfolioId,
+            symbol: candidate.symbol,
+            executionProfileId: profile.id,
+            deviations: profileDeviations,
+            jobKey: SHADOW_RISK_JOB_KEY,
+            causationType: "TradeCandidate",
+            causationId: id,
+            correlationId,
+            codeVersion,
+            asOf
+          });
+          results.push({
+            tradeCandidateId: id,
+            symbol: candidate.symbol,
+            evaluationOutcome: "EXECUTION_PROFILE_INVALID",
+            persistOutcome: "NONE",
+            reasonCode: EXECUTION_PROFILE_INTEGRITY_VIOLATION,
+            approvedQuantity: null,
+            riskAmount: null,
+            directive: "ERROR_LOCK",
+            riskAssessmentId: null
+          });
+          await writeBotLog(
+            database,
+            "error",
+            `${JOB_NAME} refused a deviating execution profile`,
+            {
+              botRunId: botRun.id,
+              correlationId,
+              tradeCandidateId: id,
+              executionProfileId: profile.id,
+              deviations: profileDeviations,
+              locked: lock.locked,
+              tradingSessionId: lock.sessionId
+            }
+          );
+          continue;
+        }
       }
 
       const evaluation = evaluateRisk(assembled.snapshot);

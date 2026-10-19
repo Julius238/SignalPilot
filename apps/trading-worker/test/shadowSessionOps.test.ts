@@ -16,13 +16,18 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
+import { Prisma } from "@signalpilot/database";
+
 import {
   activatePortfolio,
+  activateSession,
   engageKillSwitch,
   pauseSession,
   releaseKillSwitch,
   setStrategyAssignmentEnabled
 } from "../src/lib/shadowSessionOps.js";
+import { approvedExecutionProfileRow } from "./support/executionProfileRows.js";
+import { pinnedRiskLimitSetRow } from "./support/riskLimitSetRows.js";
 import { createFakeExecutionDatabase } from "./support/shadowExecutionFixtures.js";
 
 const NOW = new Date("2026-06-01T12:00:00.000Z");
@@ -297,5 +302,76 @@ describe("setStrategyAssignmentEnabled", () => {
     if (!result.ok)
       assert.equal(result.reasonCode, "ASSIGNMENT_DIRECTION_CONFLICT");
     assert.equal(tables.get("strategyAssignment")!.rows[0].enabled, false);
+  });
+});
+
+describe("activateSession — execution profile integrity (ADR 0023)", () => {
+  const CAPABILITY = {
+    buildCapability: "SHADOW_ONLY",
+    tradingMode: "SHADOW",
+    enableLiveTrading: false,
+    shadowMasterFlagEnabled: true
+  };
+  function seedStoppedSession(profileOverrides: Record<string, unknown> = {}) {
+    const { database, tables } = createFakeExecutionDatabase();
+    const portfolio = tables.get("portfolio")!.create({
+      data: { key: "SHADOW_V1", name: "Shadow v1", status: "ACTIVE" }
+    });
+    const session = tables.get("tradingSession")!.create({
+      data: {
+        portfolioId: portfolio.id,
+        sessionKey: "SHADOW_V1_SESSION",
+        status: "STOPPED",
+        killSwitchEngaged: false,
+        reconciledAt: new Date(NOW.getTime() - 60_000),
+        version: 1
+      }
+    });
+    const asset = tables.get("asset")!.create({ data: { id: "asset-btc", symbol: "BTCUSDT" } });
+    tables.get("strategyAssignment")!.create({
+      data: { portfolioId: portfolio.id, assetId: asset.id, enabled: true }
+    });
+    tables.get("riskLimitSet")!.create({ data: pinnedRiskLimitSetRow() });
+    tables.get("instrumentExecutionProfile")!.create({
+      data: approvedExecutionProfileRow("BTCUSDT", { assetId: asset.id, ...profileOverrides })
+    });
+    return { database, tables, session };
+  }
+  const activate = (database: unknown, sessionId: string) =>
+    activateSession(database as never, {
+      sessionId,
+      actorId: "admin",
+      idempotencyKey: "activate-1",
+      capability: CAPABILITY,
+      asOf: NOW
+    });
+
+  it("activates with the approved profile", async () => {
+    const { database, session } = seedStoppedSession();
+    const result = await activate(database, session.id as string);
+    assert.equal(result.ok, true, JSON.stringify(result));
+  });
+
+  for (const [label, override] of [
+    ["costs of 0 under the approved hash", { feeBps: 0, fullSpreadBps: 0, slippageBps: 0 }],
+    ["another tick size", { tickSize: new Prisma.Decimal("1") }],
+    ["the uncalibrated placeholder", { version: 1, source: "MANUAL_CONSERVATIVE_V1" }]
+  ] as const) {
+    it(`refuses ${label}, although an ACTIVE row exists`, async () => {
+      const { database, tables, session } = seedStoppedSession(override);
+      const result = await activate(database, session.id as string);
+      assert.equal(result.ok, false);
+      assert.equal(result.ok ? null : result.reasonCode, "SESSION_EXECUTION_PROFILE_REQUIRED");
+      assert.equal(tables.get("tradingSession")!.rows[0]!.status, "STOPPED");
+    });
+  }
+
+  it("refuses a second ACTIVE row for an assigned asset", async () => {
+    const { database, tables, session } = seedStoppedSession();
+    tables.get("instrumentExecutionProfile")!.create({
+      data: approvedExecutionProfileRow("BTCUSDT", { assetId: "asset-btc", version: 7 })
+    });
+    const result = await activate(database, session.id as string);
+    assert.equal(result.ok ? null : result.reasonCode, "SESSION_EXECUTION_PROFILE_REQUIRED");
   });
 });

@@ -49,6 +49,14 @@ import {
 } from "@signalpilot/trading-domain";
 
 import {
+  activeExecutionProfileDeviations,
+  approvedExecutionProfileByHash,
+  engageExecutionProfileIntegrityLock,
+  executionProfileDeviations,
+  loadActiveExecutionProfile,
+  type ExecutionProfileIntegrityInput
+} from "./executionProfileIntegrity.js";
+import {
   asJson,
   decimalString,
   ledgerEntryCreateData,
@@ -85,6 +93,7 @@ export const ShadowOrderReasonCode = {
   SESSION_BLOCKS_ENTRY: TradingReasonCode.SESSION_BLOCKS_ENTRY,
   EXECUTION_PROFILE_MISSING: "SHADOW_ORDER_EXECUTION_PROFILE_MISSING",
   EXECUTION_PROFILE_CHANGED: "SHADOW_ORDER_EXECUTION_PROFILE_CHANGED",
+  EXECUTION_PROFILE_INVALID: "SHADOW_ORDER_EXECUTION_PROFILE_INVALID",
   SCALE_IN_FORBIDDEN: "SHADOW_ORDER_SCALE_IN_FORBIDDEN",
   INSUFFICIENT_CASH: "SHADOW_ORDER_INSUFFICIENT_CASH",
   CREATED: "SHADOW_ORDER_CREATED",
@@ -161,7 +170,10 @@ function extractSizing(inputsJson: Prisma.JsonValue): Sizing | null {
 
 function extractExecutionProfileRef(
   inputsJson: Prisma.JsonValue
-): { readonly id: string; readonly specificationHash: string } | null {
+): (Record<string, unknown> & {
+  readonly id: string;
+  readonly specificationHash: string;
+}) | null {
   if (
     typeof inputsJson !== "object" ||
     inputsJson === null ||
@@ -178,7 +190,11 @@ function extractExecutionProfileRef(
     typeof record.specificationHash !== "string"
   )
     return null;
-  return { id: record.id, specificationHash: record.specificationHash };
+  return {
+    ...record,
+    id: record.id,
+    specificationHash: record.specificationHash
+  };
 }
 
 function blocked(
@@ -344,16 +360,52 @@ export async function createShadowOrderForCandidate(
     );
   }
 
-  const executionProfile = await database.instrumentExecutionProfile.findFirst({
-    where: { assetId: candidate.assetId, status: "ACTIVE" },
-    orderBy: { version: "desc" }
-  });
+  const activeProfile = await loadActiveExecutionProfile(
+    database,
+    candidate.assetId
+  );
+  const executionProfile = activeProfile.row;
   if (executionProfile === null) {
     return blocked(
       ShadowOrderReasonCode.EXECUTION_PROFILE_MISSING,
       "No active execution profile."
     );
   }
+  // The order snapshot copies this row, and every fill prices with that
+  // copy: it must be the approved profile (ADR 0023).
+  const symbol =
+    (
+      await database.asset.findUnique({
+        where: { id: candidate.assetId },
+        select: { symbol: true }
+      })
+    )?.symbol ?? null;
+  const refuseInvalidProfile = async (
+    deviations: readonly string[]
+  ): Promise<CreateShadowOrderResult> => {
+    await engageExecutionProfileIntegrityLock(database, {
+      portfolioId: portfolio.id,
+      symbol,
+      executionProfileId: executionProfile.id,
+      deviations,
+      jobKey: SHADOW_ORDER_JOB_KEY,
+      causationType: "TradeCandidate",
+      causationId: candidate.id,
+      correlationId: input.correlationId,
+      codeVersion: input.codeVersion,
+      asOf: input.asOf
+    });
+    return blocked(
+      ShadowOrderReasonCode.EXECUTION_PROFILE_INVALID,
+      `The execution profile deviates from the approved profile: ${deviations.join(", ")}.`
+    );
+  };
+  const rowDeviations = activeExecutionProfileDeviations(
+    activeProfile,
+    symbol,
+    candidate.assetId
+  );
+  if (rowDeviations.length > 0) return refuseInvalidProfile(rowDeviations);
   if (
     executionProfile.id !== profileRef.id ||
     executionProfile.specificationHash !== profileRef.specificationHash
@@ -369,6 +421,15 @@ export async function createShadowOrderForCandidate(
       "The active execution profile changed after risk approval; the order is refused, not silently re-priced."
     );
   }
+  // The approved quantity and reserve were sized with the assessment's own
+  // copy of the profile; an approval priced with other values is no approval.
+  const assessedDeviations = executionProfileDeviations(
+    profileRef as unknown as ExecutionProfileIntegrityInput,
+    approvedExecutionProfileByHash(symbol, profileRef.specificationHash),
+    { assetId: candidate.assetId }
+  );
+  if (assessedDeviations.length > 0)
+    return refuseInvalidProfile(assessedDeviations);
 
   // Defensive re-check of R-022 (no scale-in): the risk engine already
   // verified this at approval time, but time has passed since then.

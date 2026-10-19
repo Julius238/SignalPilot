@@ -22,6 +22,7 @@ import {
   buildEligibilityReport
 } from "../src/lib/shadowEligibility.js";
 import { createFakeExecutionDatabase } from "./support/shadowExecutionFixtures.js";
+import { approvedExecutionProfileRow } from "./support/executionProfileRows.js";
 import { pinnedRiskLimitSetRow } from "./support/riskLimitSetRows.js";
 
 const ASOF = new Date("2026-08-10T12:00:00.000Z");
@@ -113,22 +114,10 @@ function seedReady() {
     }
   });
   tables.get("instrumentExecutionProfile")!.create({
-    data: {
+    data: approvedExecutionProfileRow("BTCUSDT", {
       assetId: asset.id,
-      version: 1,
-      status: "ACTIVE",
-      tickSize: "0.01",
-      stepSize: "0.00001",
-      minQuantity: "0.00001",
-      minNotional: "10",
-      maxParticipationRate: "0.01",
-      feeBps: 10,
-      fullSpreadBps: 10,
-      slippageBps: 10,
-      source: "MANUAL_CONSERVATIVE_V1",
-      sourceObservedAt: new Date(ASOF.getTime() - 60_000),
-      specificationHash: "a".repeat(64)
-    }
+      sourceObservedAt: new Date(ASOF.getTime() - 60_000)
+    })
   });
   tables.get("riskLimitSet")!.create({ data: pinnedRiskLimitSetRow() });
 
@@ -664,5 +653,87 @@ describe("buildEligibilityReport", () => {
     assert.equal(report.status, EligibilityStatus.ERROR);
     assert.deepEqual(report.blockingFailures, ["REPORT_FAILED"]);
     assert.match(report.checks[0].reason, /connection refused/);
+  });
+});
+
+describe("execution profile integrity (ADR 0023)", () => {
+  const OFFICIAL_V1_BTCUSDT_HASH =
+    "0fba0118f710413a0b9811a15726f69ddb48131c26725775d1f0799de43eed13";
+  const reportWith = async (change: (tables: ReturnType<typeof seedReady>["tables"]) => void) => {
+    const { database, tables } = seedReady();
+    change(tables);
+    const report = await buildEligibilityReport(database as never, { asOf: ASOF, env: SHADOW_ENV });
+    const details = check(report, "EXECUTION_PROFILE").details as {
+      profiles: { deviations: string[]; activeProfiles: number }[];
+    };
+    return { report, details };
+  };
+  const profile = (tables: ReturnType<typeof seedReady>["tables"]) =>
+    tables.get("instrumentExecutionProfile")!.rows[0]!;
+
+  it("accepts the approved profile in its short decimal form", async () => {
+    const { report, details } = await reportWith((tables) =>
+      Object.assign(profile(tables), {
+        tickSize: "0.01",
+        stepSize: "0.00001",
+        minQuantity: "0.00001",
+        minNotional: "10",
+        maxParticipationRate: "0.01"
+      })
+    );
+    assert.equal(report.status, EligibilityStatus.READY, JSON.stringify(report.blockingFailures));
+    assert.deepEqual(details.profiles[0]!.deviations, []);
+    assert.equal(details.profiles[0]!.activeProfiles, 1);
+  });
+
+  for (const [label, override, field] of [
+    ["costs of 0 under the official hash", { feeBps: 0, fullSpreadBps: 0, slippageBps: 0, specificationHash: OFFICIAL_V1_BTCUSDT_HASH }, ["feeBps", "fullSpreadBps", "slippageBps"]],
+    ["a stricter fee", { feeBps: 25 }, ["feeBps"]],
+    ["another tick size", { tickSize: new Prisma.Decimal("0.000000000001") }, ["tickSize"]],
+    ["another step size", { stepSize: new Prisma.Decimal("0.001") }, ["stepSize"]],
+    ["another minimum notional", { minNotional: new Prisma.Decimal("1000000") }, ["minNotional"]],
+    ["a quantity cap", { maxQuantity: new Prisma.Decimal("0.01") }, ["maxQuantity"]],
+    ["another participation rate", { maxParticipationRate: new Prisma.Decimal("1") }, ["maxParticipationRate"]],
+    ["an arbitrary 64-hex hash", { specificationHash: "a".repeat(64) }, ["specificationHash"]],
+    ["another version", { version: 99 }, ["version"]],
+    ["another source", { source: "SOMETHING_ELSE" }, ["source"]]
+  ] as const) {
+    it(`blocks ${label}`, async () => {
+      const { report, details } = await reportWith((tables) => Object.assign(profile(tables), override));
+      assert.equal(report.status, EligibilityStatus.NOT_READY);
+      assert.ok(report.blockingFailures.includes("EXECUTION_PROFILE"));
+      assert.deepEqual(details.profiles[0]!.deviations, [...field]);
+    });
+  }
+
+  it("blocks a second ACTIVE row, and reports the row the trading paths would use", async () => {
+    const { report, details } = await reportWith((tables) =>
+      tables.get("instrumentExecutionProfile")!.create({
+        data: { ...profile(tables), id: "second-active-profile", version: 7, activeAssetKey: null, feeBps: 0 }
+      })
+    );
+    assert.equal(report.status, EligibilityStatus.NOT_READY);
+    assert.deepEqual(details.profiles[0]!.deviations, ["version", "feeBps", "activeProfileCount"]);
+    assert.equal(details.profiles[0]!.activeProfiles, 2);
+  });
+
+  it("blocks the uncalibrated bootstrap placeholder", async () => {
+    const { report, details } = await reportWith((tables) =>
+      Object.assign(profile(tables), {
+        version: 1,
+        fullSpreadBps: 10,
+        slippageBps: 10,
+        source: "MANUAL_CONSERVATIVE_V1",
+        specificationHash: "dfa54a9ba6d42e4f9ac29ca7dc58e7e72ae68dad7f09fa667ab2be831ce805c4"
+      })
+    );
+    assert.equal(report.status, EligibilityStatus.NOT_READY);
+    assert.deepEqual(details.profiles[0]!.deviations, [
+      "version",
+      "source",
+      "fullSpreadBps",
+      "slippageBps",
+      "specificationHash"
+    ]);
   });
 });

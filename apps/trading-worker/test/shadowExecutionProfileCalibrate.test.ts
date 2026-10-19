@@ -7,6 +7,8 @@ import {
   CALIBRATION_CONFIRMATION,
   runExecutionProfileCalibration
 } from "../src/jobs/shadowExecutionProfileCalibrate.js";
+import { currentApprovedExecutionProfile } from "../src/lib/executionProfileIntegrity.js";
+import { approvedExecutionProfileRow } from "./support/executionProfileRows.js";
 import { createFakeExecutionDatabase } from "./support/shadowExecutionFixtures.js";
 
 const AS_OF = new Date("2026-10-13T09:00:00.000Z");
@@ -19,7 +21,7 @@ const ENV = {
 } as const;
 const d = (value: string) => new Prisma.Decimal(value);
 
-function seed() {
+function seed(placeholderOverrides: Record<string, unknown> = {}) {
   const { database, tables } = createFakeExecutionDatabase();
   const asset = tables.get("asset")!.create({
     data: { symbol: "BTCUSDT", assetType: "CRYPTO", createdAt: new Date("2026-01-01T00:00:00.000Z") }
@@ -39,11 +41,20 @@ function seed() {
       slippageBps: 10,
       maxParticipationRate: d("0.01"),
       source: "MANUAL_CONSERVATIVE_V1",
-      activeAssetKey: `active-${asset.id}`
+      activeAssetKey: `active-${asset.id}`,
+      ...placeholderOverrides
     }
   });
-  return { database, tables };
+  return { database, tables, asset };
 }
+
+const calibrate = (database: unknown, minutes = 0) =>
+  runExecutionProfileCalibration(database as never, {
+    asOf: new Date(AS_OF.getTime() + minutes * 60_000),
+    env: ENV,
+    confirmation: CALIBRATION_CONFIRMATION
+  });
+const APPROVED = currentApprovedExecutionProfile("BTCUSDT")!;
 
 describe("execution profile calibration", () => {
   it("refuses without the exact confirmation and without the bootstrap flag", async () => {
@@ -92,6 +103,62 @@ describe("execution profile calibration", () => {
       confirmation: CALIBRATION_CONFIRMATION
     });
     assert.equal(second.results[0]!.outcome, "UNCHANGED");
+    assert.equal(tables.get("instrumentExecutionProfile")!.rows.length, 2);
+  });
+
+  it("writes exactly the approved profile, hash included", async () => {
+    const { database, tables } = seed();
+    await calibrate(database);
+    const created = tables.get("instrumentExecutionProfile")!.rows.find((row) => row.version === 2)!;
+    assert.equal(created.specificationHash, APPROVED.specificationHash);
+    assert.equal(created.specificationHash, "0fba0118f710413a0b9811a15726f69ddb48131c26725775d1f0799de43eed13");
+  });
+
+  it("takes the filters from the approved profile, never from a deviating placeholder row", async () => {
+    const { database, tables } = seed({ tickSize: d("1"), stepSize: d("0.001") });
+    const result = await calibrate(database);
+    assert.equal(result.results[0]!.outcome, "CREATED");
+    const created = tables.get("instrumentExecutionProfile")!.rows.find((row) => row.version === 2)!;
+    assert.equal(created.tickSize, APPROVED.tickSize);
+    assert.equal(created.stepSize, APPROVED.stepSize);
+    assert.equal(created.specificationHash, APPROVED.specificationHash);
+  });
+
+  it("refuses a deviating row of the approved version instead of stacking a version on it", async () => {
+    const { database, tables, asset } = seed();
+    await calibrate(database);
+    const active = tables.get("instrumentExecutionProfile")!.rows.find((row) => row.version === 2)!;
+    Object.assign(active, { feeBps: 0 });
+    const result = await calibrate(database, 1);
+    assert.equal(result.status, "FAILED");
+    assert.equal(result.blockReasonCode, "EXECUTION_PROFILE_CONFLICT");
+    assert.deepEqual(
+      result.results.map((row) => [row.symbol, row.outcome, row.deviations]),
+      [["BTCUSDT", "REFUSED", ["feeBps"]]]
+    );
+    const rows = tables.get("instrumentExecutionProfile")!.rows.filter((row) => row.assetId === asset.id);
+    assert.equal(rows.length, 2, "nothing written");
+    assert.equal(active.status, "ACTIVE");
+  });
+
+  it("refuses two ACTIVE rows", async () => {
+    const { database, tables, asset } = seed();
+    tables.get("instrumentExecutionProfile")!.create({
+      data: approvedExecutionProfileRow("BTCUSDT", { assetId: asset.id })
+    });
+    const result = await calibrate(database);
+    assert.equal(result.results[0]!.outcome, "REFUSED");
+    assert.equal(tables.get("instrumentExecutionProfile")!.rows.length, 2);
+  });
+
+  it("leaves an already approved active profile untouched", async () => {
+    const { database, tables, asset } = seed({ status: "RETIRED", activeAssetKey: null });
+    tables.get("instrumentExecutionProfile")!.create({
+      data: approvedExecutionProfileRow("BTCUSDT", { assetId: asset.id })
+    });
+    const result = await calibrate(database);
+    assert.equal(result.status, "SUCCESS");
+    assert.equal(result.results[0]!.outcome, "UNCHANGED");
     assert.equal(tables.get("instrumentExecutionProfile")!.rows.length, 2);
   });
 });

@@ -7,6 +7,10 @@ import {
   type PositionMarkResultV1
 } from "@signalpilot/portfolio";
 
+import {
+  loadActiveExecutionProfile,
+  riskReducingExecutionProfile
+} from "./executionProfileIntegrity.js";
 import { decimalString } from "./shadowPortfolioIo.js";
 
 const EXPOSURE_POSITION_STATUSES = [
@@ -59,7 +63,8 @@ export async function loadShadowPortfolioValuation(
     where: {
       portfolioId: input.portfolioId,
       status: { in: [...EXPOSURE_POSITION_STATUSES] }
-    }
+    },
+    include: { asset: { select: { symbol: true } } }
   });
 
   const marks: ShadowPositionValuationV1[] = [];
@@ -69,7 +74,7 @@ export async function loadShadowPortfolioValuation(
         `Position ${position.id} has unknown direction ${String(position.direction)}.`
       );
     }
-    const [candle, profile] = await Promise.all([
+    const [candle, active] = await Promise.all([
       database.candle.findFirst({
         where: {
           assetId: position.assetId,
@@ -78,21 +83,26 @@ export async function loadShadowPortfolioValuation(
         },
         orderBy: { closeTime: "desc" }
       }),
-      database.instrumentExecutionProfile.findFirst({
-        where: { assetId: position.assetId, status: "ACTIVE" },
-        orderBy: { version: "desc" }
-      })
+      loadActiveExecutionProfile(database, position.assetId)
     ]);
-    if (candle === null || profile === null) {
+    if (candle === null || active.row === null) {
       throw new Error(
         `Position ${position.id} cannot be valued without a closed candle and active profile.`
       );
     }
+    // Marks feed equity, daily P&L and the kill switch, and run inside every
+    // exit: a deviating row is replaced by the approved profile, never used
+    // and never a reason to fail (ADR 0023).
+    const profile = riskReducingExecutionProfile(
+      { ...active, row: active.row },
+      position.asset?.symbol ?? null,
+      position.assetId
+    ).values;
     const markPrice = computeConservativeMark(
       position.direction,
       decimalString(candle.close),
       profile.fullSpreadBps,
-      decimalString(profile.tickSize)
+      profile.tickSize
     );
     if (markPrice === null)
       throw new Error(

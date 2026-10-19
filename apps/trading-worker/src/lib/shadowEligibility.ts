@@ -17,7 +17,6 @@
  */
 
 import {
-  InstrumentExecutionProfileStatus,
   PortfolioStatus,
   RiskLimitSetStatus,
   RiskSeverity,
@@ -65,6 +64,10 @@ import {
   CircuitBreakerScope,
   evaluateCircuitBreaker
 } from "./circuitBreaker.js";
+import {
+  activeExecutionProfileDeviations,
+  loadActiveExecutionProfile
+} from "./executionProfileIntegrity.js";
 import { riskLimitSetRowDeviations } from "./riskLimitSetIntegrity.js";
 import { SHADOW_PORTFOLIO_KEY, isShadowPortfolioKey, type ShadowPortfolioKey } from "./shadowPortfolios.js";
 import { checkShadowBaseAllowed, type EnvSource } from "./tradingSafety.js";
@@ -709,57 +712,55 @@ export async function buildEligibilityReport(
           )
         ).entries()
       ].map(([assetId, asset]) => ({ assetId, symbol: asset.symbol }));
+      // One check for every read path (ADR 0023): exactly one ACTIVE row per
+      // asset, equal to the approved profile in every value and identity.
       const executionProfiles = await Promise.all(
-        assignedAssets.map(async (asset) => ({
-          ...asset,
-          profile: await database.instrumentExecutionProfile.findFirst({
-            where: {
-              assetId: asset.assetId,
-              status: InstrumentExecutionProfileStatus.ACTIVE
-            },
-            orderBy: { version: "desc" }
-          })
-        }))
+        assignedAssets.map(async (asset) => {
+          const active = await loadActiveExecutionProfile(
+            database,
+            asset.assetId
+          );
+          return {
+            ...asset,
+            profile: active.row,
+            activeProfiles: active.activeCount,
+            deviations: activeExecutionProfileDeviations(
+              active,
+              asset.symbol,
+              asset.assetId
+            )
+          };
+        })
       );
-      const positiveDecimal = (value: unknown): boolean =>
-        Number(String(value)) > 0;
       const executionProfileComplete =
         executionProfiles.length > 0 &&
-        executionProfiles.every(
-          ({ profile }) =>
-            profile !== null &&
-            positiveDecimal(profile.tickSize) &&
-            positiveDecimal(profile.stepSize) &&
-            positiveDecimal(profile.minQuantity) &&
-            positiveDecimal(profile.minNotional) &&
-            positiveDecimal(profile.maxParticipationRate) &&
-            profile.feeBps >= 0 &&
-            profile.fullSpreadBps >= 0 &&
-            profile.slippageBps >= 0 &&
-            profile.source.trim() !== "" &&
-            /^[a-f0-9]{64}$/.test(profile.specificationHash)
-        );
+        executionProfiles.every(({ deviations }) => deviations.length === 0);
+      const executionProfileDetails = {
+        profiles: executionProfiles.map(
+          ({ symbol, profile, activeProfiles, deviations }) => ({
+            symbol,
+            executionProfileId: profile?.id ?? null,
+            version: profile?.version ?? null,
+            sourceObservedAt: profile?.sourceObservedAt.toISOString() ?? null,
+            specificationHash: profile?.specificationHash ?? null,
+            activeProfiles,
+            deviations: [...deviations]
+          })
+        )
+      };
       checks.push(
         executionProfileComplete
           ? pass(
               "EXECUTION_PROFILE",
               "Execution Profiles vollständig",
-              "Für jedes aktivierte Asset ist ein vollständiges aktives Profil vorhanden.",
-              {
-                profiles: executionProfiles.map(({ symbol, profile }) => ({
-                  symbol,
-                  executionProfileId: profile?.id ?? null,
-                  version: profile?.version ?? null,
-                  sourceObservedAt:
-                    profile?.sourceObservedAt.toISOString() ?? null,
-                  specificationHash: profile?.specificationHash ?? null
-                }))
-              }
+              "Für jedes aktivierte Asset ist genau ein aktives Profil vorhanden, das dem freigegebenen Profil in jedem Wert entspricht.",
+              executionProfileDetails
             )
           : fail(
               "EXECUTION_PROFILE",
               "Execution Profiles vollständig",
-              "Mindestens ein Profil fehlt, ist nicht ACTIVE oder enthält ungültige Filter-, Kosten-, Quellen- oder Hashwerte."
+              "Mindestens ein Profil fehlt, ist mehrfach aktiv oder weicht in Kosten, Filtern, Version, Quelle oder Hash vom freigegebenen Profil ab.",
+              executionProfileDetails
             )
       );
 
