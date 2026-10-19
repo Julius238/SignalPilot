@@ -26,6 +26,7 @@ import {
 } from "@signalpilot/risk-engine";
 
 import { regimeSourceOf, selectRegimeForStrategy } from "./regimeSource.js";
+import { riskLimitSetInputFromRow } from "./riskLimitSetIntegrity.js";
 import { loadShadowPortfolioValuation } from "./shadowPortfolioValuation.js";
 
 export const RISK_INPUT_ASSEMBLER_VERSION = "risk-input-assembler-v1/1.0.0";
@@ -449,34 +450,11 @@ export async function assembleRiskInput(
             sourceObservedAt: iso(executionProfile.sourceObservedAt),
             specificationHash: executionProfile.specificationHash
           },
+    // Passed on as stored, never filtered or judged here: a deviating set must
+    // reach R-026, which refuses it with ERROR_LOCK and a CRITICAL risk event,
+    // instead of being skipped silently as an assembler failure (ADR 0021).
     riskLimitSet:
-      riskLimitSet === null
-        ? null
-        : {
-            id: riskLimitSet.id,
-            key: riskLimitSet.key,
-            version: riskLimitSet.version,
-            status: riskLimitSet.status,
-            scope: riskLimitSet.scope,
-            maxRiskPerTradePct: decimalString(riskLimitSet.maxRiskPerTradePct),
-            maxDailyLossPct: decimalString(riskLimitSet.maxDailyLossPct),
-            minRewardRisk: decimalString(riskLimitSet.minRewardRisk),
-            maxOpenPositions: riskLimitSet.maxOpenPositions,
-            maxNewTradesPerDay: riskLimitSet.maxNewTradesPerDay,
-            maxConsecutiveLosses: riskLimitSet.maxConsecutiveLosses,
-            maxGrossExposurePct: decimalString(
-              riskLimitSet.maxGrossExposurePct
-            ),
-            maxAssetExposurePct: decimalString(
-              riskLimitSet.maxAssetExposurePct
-            ),
-            maxCorrelatedExposurePct: decimalString(
-              riskLimitSet.maxCorrelatedExposurePct
-            ),
-            maxSpreadBps: riskLimitSet.maxSpreadBps,
-            maxSlippageBps: riskLimitSet.maxSlippageBps,
-            specificationHash: riskLimitSet.specificationHash
-          },
+      riskLimitSet === null ? null : riskLimitSetInputFromRow(riskLimitSet),
     freshness: {
       candleAgeMs: candleFreshness,
       dataQualityAgeMs: dataQuality.ageMs,

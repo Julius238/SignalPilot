@@ -33,7 +33,8 @@ import {
   RISK_ENGINE_VERSION,
   RISK_POLICY_HASH,
   RISK_RULE_COUNT,
-  evaluateRisk
+  evaluateRisk,
+  riskLimitSetDeviations
 } from "@signalpilot/risk-engine";
 import { config } from "dotenv";
 import pino from "pino";
@@ -43,6 +44,7 @@ import {
   RiskPersistOutcome,
   SHADOW_RISK_JOB_KEY,
   applyRiskDirective,
+  engageRiskLimitSetErrorLock,
   persistRiskAssessment
 } from "../lib/shadowRiskPersistence.js";
 import {
@@ -323,6 +325,31 @@ export async function runShadowAssessRisk(
             tradeCandidateId: id,
             tradingSessionId: directive.sessionId,
             reasonCode: evaluation.primaryReasonCode
+          });
+        }
+
+        // A stored limit set that deviates from the pinned v1 policy was just
+        // refused by R-026; its ERROR_LOCK is executed here (ADR 0021).
+        const limitSet = assembled.snapshot.riskLimitSet;
+        const deviations =
+          limitSet === null ? [] : riskLimitSetDeviations(limitSet);
+        if (deviations.length > 0) {
+          const lock = await engageRiskLimitSetErrorLock(database, {
+            portfolioId: assembled.snapshot.candidate.portfolioId,
+            riskAssessmentId: persisted.riskAssessmentId,
+            deviations,
+            correlationId,
+            codeVersion,
+            asOf
+          });
+          await writeBotLog(database, "error", `${JOB_NAME} refused a deviating risk limit set`, {
+            botRunId: botRun.id,
+            correlationId,
+            tradeCandidateId: id,
+            riskLimitSetId: limitSet?.id ?? null,
+            deviations: [...deviations],
+            locked: lock.locked,
+            tradingSessionId: lock.sessionId
           });
         }
       }

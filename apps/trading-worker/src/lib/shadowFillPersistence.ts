@@ -75,6 +75,7 @@ import {
   ledgerEntryCreateData,
   portfolioState as toPortfolioState
 } from "./shadowPortfolioIo.js";
+import { riskLimitSetRowDeviations } from "./riskLimitSetIntegrity.js";
 import { loadShadowPortfolioValuation } from "./shadowPortfolioValuation.js";
 
 export const SHADOW_FILL_JOB_KEY = "trading:shadow-process-fills";
@@ -86,7 +87,12 @@ export const SHADOW_FILL_JOB_KEY = "trading:shadow-process-fills";
  * `@signalpilot/trading-domain` catalogue.
  */
 export const ShadowFillReasonCode = {
-  POST_FILL_NET_CRV_BELOW_MINIMUM: "POST_FILL_NET_CRV_BELOW_MINIMUM"
+  POST_FILL_NET_CRV_BELOW_MINIMUM: "POST_FILL_NET_CRV_BELOW_MINIMUM",
+  /**
+   * The active limit set deviates from the pinned v1 policy (ADR 0021), so the
+   * recheck has no trusted minimum and fails closed like a CRV shortfall.
+   */
+  POST_FILL_RISK_LIMIT_SET_INVALID: "POST_FILL_RISK_LIMIT_SET_INVALID"
 } as const;
 export type ShadowFillReasonCode =
   (typeof ShadowFillReasonCode)[keyof typeof ShadowFillReasonCode];
@@ -504,6 +510,21 @@ export async function processEntryOrderFillForCandle(
     where: { status: "ACTIVE" },
     orderBy: { version: "desc" }
   });
+  // Only a set equal to the pinned v1 policy supplies the minimum (ADR 0021).
+  // A deviating set is treated like a missing one: the recheck fails closed.
+  const riskLimitSetDeviationFields =
+    activeRiskLimitSet === null
+      ? []
+      : riskLimitSetRowDeviations(activeRiskLimitSet);
+  const limitSetDeviates = riskLimitSetDeviationFields.length > 0;
+  const trustedRiskLimitSet = limitSetDeviates ? null : activeRiskLimitSet;
+  const shortfallReasonCode = limitSetDeviates
+    ? ShadowFillReasonCode.POST_FILL_RISK_LIMIT_SET_INVALID
+    : ShadowFillReasonCode.POST_FILL_NET_CRV_BELOW_MINIMUM;
+  // Payloads of an ordinary shortfall stay exactly as before.
+  const limitSetDeviationPayload = limitSetDeviates
+    ? { riskLimitSetDeviations: riskLimitSetDeviationFields }
+    : {};
 
   let positionId: string | null = null;
 
@@ -669,9 +690,9 @@ export async function processEntryOrderFillForCandle(
         )
       : DecimalValue.ZERO;
     const minRewardRisk =
-      activeRiskLimitSet === null
+      trustedRiskLimitSet === null
         ? null
-        : decimalString(activeRiskLimitSet.minRewardRisk);
+        : decimalString(trustedRiskLimitSet.minRewardRisk);
     const recheck =
       candidate === null ||
       candidate.stopPrice === null ||
@@ -715,8 +736,7 @@ export async function processEntryOrderFillForCandle(
     // below for a forced, risk-reducing close instead of the ordinary exit.
     if (!netCrvOk && !isFinalFillForOrder) {
       newOrderStatus = ShadowOrderStatus.CANCELLED;
-      orderCancelReasonCode =
-        ShadowFillReasonCode.POST_FILL_NET_CRV_BELOW_MINIMUM;
+      orderCancelReasonCode = shortfallReasonCode;
     }
     const newPositionStatus =
       newOrderStatus === ShadowOrderStatus.FILLED ||
@@ -813,9 +833,10 @@ export async function processEntryOrderFillForCandle(
           sourceCandleId: candle.id,
           payloadJson: asJson({
             jobKey: SHADOW_FILL_JOB_KEY,
-            reasonCode: ShadowFillReasonCode.POST_FILL_NET_CRV_BELOW_MINIMUM,
+            reasonCode: shortfallReasonCode,
             recheck,
-            minRewardRisk
+            minRewardRisk,
+            ...limitSetDeviationPayload
           }),
           occurredAt: candle.closeTime
         }
@@ -835,14 +856,15 @@ export async function processEntryOrderFillForCandle(
           eventKey: forcedExitEventKey,
           type: RiskEventType.RISK_RULE_BLOCK,
           severity: RiskSeverity.CRITICAL,
-          reasonCode: ShadowFillReasonCode.POST_FILL_NET_CRV_BELOW_MINIMUM,
+          reasonCode: shortfallReasonCode,
           portfolioId: portfolio.id,
           shadowOrderId: order.id,
           shadowPositionId: position.id,
           payloadJson: asJson({
             jobKey: SHADOW_FILL_JOB_KEY,
             recheck,
-            minRewardRisk
+            minRewardRisk,
+            ...limitSetDeviationPayload
           }),
           inputHash: fillKeyHash
         }
@@ -950,9 +972,7 @@ export async function processEntryOrderFillForCandle(
         correlationId: input.correlationId,
         causationId: input.correlationId,
         idempotencyKey: buildPayloadHash(fillKey),
-        reasonCode: netCrvOk
-          ? "SIMULATION_FILLED"
-          : ShadowFillReasonCode.POST_FILL_NET_CRV_BELOW_MINIMUM,
+        reasonCode: netCrvOk ? "SIMULATION_FILLED" : shortfallReasonCode,
         tradingSessionId: order.tradingSessionId,
         afterState: asJson({
           fill,
@@ -972,6 +992,21 @@ export async function processEntryOrderFillForCandle(
 
     return { fillId: createdFill.id, orderStatus: newOrderStatus, netCrvOk };
   });
+
+  // The fill is booked and its position marked for the forced, risk-reducing
+  // close above; a deviating limit set additionally locks the session and the
+  // portfolio, as R-026 does at assessment time (ADR 0021).
+  if (limitSetDeviates) {
+    await engageErrorLock(database, {
+      tradingSessionId: order.tradingSessionId,
+      portfolioId: order.portfolioId,
+      reasonCode: ShadowFillReasonCode.POST_FILL_RISK_LIMIT_SET_INVALID,
+      aggregateType: "ShadowFill",
+      aggregateId: result.fillId,
+      inputHash: result.fillId,
+      jobKey: SHADOW_FILL_JOB_KEY
+    });
+  }
 
   return {
     outcome: !result.netCrvOk

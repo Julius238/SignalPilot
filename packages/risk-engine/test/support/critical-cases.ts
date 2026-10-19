@@ -124,5 +124,14 @@ export const CRITICAL_CASES: readonly CriticalCase[] = Object.freeze([
         status: "PASS"
       };
     })
+  },
+  {
+    // ADR 0021: the v1 hash string stays, the percentage is raised 4x.
+    name: "limit-set-percent-tampered-with-v1-hash",
+    expectedOutcome: RiskEvaluationOutcome.ERROR,
+    expectedReasonCode: RiskReasonCode.IDEMPOTENCY_OR_VERSION_CONFLICT,
+    build: build((next) => {
+      next.riskLimitSet!.maxRiskPerTradePct = "0.01";
+    })
   }
 ]);

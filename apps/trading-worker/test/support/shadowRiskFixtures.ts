@@ -379,6 +379,23 @@ export function createFakeRiskDatabase(world: RiskWorld) {
         };
         writes.portfolios.push(row);
         return row;
+      },
+      updateMany: async ({
+        where,
+        data
+      }: {
+        where: { id: string; status?: { not?: string } };
+        data: Record<string, unknown>;
+      }) => {
+        const row = world.portfolios.find(
+          (portfolio) =>
+            portfolio.id === where.id &&
+            (where.status?.not === undefined || portfolio.status !== where.status.not)
+        ) as Record<string, unknown> | undefined;
+        if (row === undefined) return { count: 0 };
+        const rest = Object.fromEntries(Object.entries(data).filter(([field]) => field !== "version"));
+        Object.assign(row, rest, { version: ((row.version as number | undefined) ?? 0) + 1 });
+        return { count: 1 };
       }
     },
     tradingSession: {

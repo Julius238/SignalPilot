@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
+import { Prisma } from "@signalpilot/database";
 import { RISK_LIMIT_SET_SPECIFICATION_HASH } from "@signalpilot/risk-engine";
 import {
   CRYPTO_MTF_BREAKDOWN_SHORT_V1_ENGINE_VERSION,
@@ -21,6 +22,7 @@ import {
   buildEligibilityReport
 } from "../src/lib/shadowEligibility.js";
 import { createFakeExecutionDatabase } from "./support/shadowExecutionFixtures.js";
+import { pinnedRiskLimitSetRow } from "./support/riskLimitSetRows.js";
 
 const ASOF = new Date("2026-08-10T12:00:00.000Z");
 
@@ -128,14 +130,7 @@ function seedReady() {
       specificationHash: "a".repeat(64)
     }
   });
-  tables.get("riskLimitSet")!.create({
-    data: {
-      key: "SHADOW_V1",
-      version: 1,
-      status: "ACTIVE",
-      specificationHash: RISK_LIMIT_SET_SPECIFICATION_HASH
-    }
-  });
+  tables.get("riskLimitSet")!.create({ data: pinnedRiskLimitSetRow() });
 
   const timeframes: readonly StrategyTimeframe[] = ["1h", "4h", "1d"];
   for (const timeframe of timeframes) {
@@ -402,6 +397,89 @@ describe("buildEligibilityReport", () => {
       env: SHADOW_ENV
     });
     assert.ok(report.blockingFailures.includes("ACTIVE_RISK_LIMIT_SET"));
+  });
+
+  describe("risk limit set integrity (ADR 0021)", () => {
+    const reportWith = async (rows: readonly Record<string, unknown>[]) => {
+      const { database, tables } = seedReady();
+      tables.get("riskLimitSet")!.deleteMany({ where: {} });
+      for (const row of rows) tables.get("riskLimitSet")!.create({ data: row });
+      const report = await buildEligibilityReport(database as never, {
+        asOf: ASOF,
+        env: SHADOW_ENV
+      });
+      return { report, limitSetCheck: check(report, "ACTIVE_RISK_LIMIT_SET") };
+    };
+
+    it("accepts the pinned set in every database decimal form", async () => {
+      for (const row of [
+        pinnedRiskLimitSetRow(),
+        pinnedRiskLimitSetRow({
+          maxRiskPerTradePct: new Prisma.Decimal("0.00250"),
+          minRewardRisk: new Prisma.Decimal("2.0")
+        }),
+        pinnedRiskLimitSetRow({ maxDailyLossPct: "0.010000000000" })
+      ]) {
+        const { report, limitSetCheck } = await reportWith([row]);
+        assert.equal(limitSetCheck.outcome, "PASS");
+        assert.equal(report.status, EligibilityStatus.READY);
+      }
+    });
+
+    it("blocks a raised percentage although the stored hash still matches", async () => {
+      const { report, limitSetCheck } = await reportWith([
+        pinnedRiskLimitSetRow({
+          maxRiskPerTradePct: new Prisma.Decimal("0.01"),
+          specificationHash: RISK_LIMIT_SET_SPECIFICATION_HASH
+        })
+      ]);
+      assert.equal(limitSetCheck.outcome, "FAIL");
+      assert.deepEqual(limitSetCheck.details?.deviations, ["maxRiskPerTradePct"]);
+      assert.equal(report.status, EligibilityStatus.NOT_READY);
+      assert.ok(report.blockingFailures.includes("ACTIVE_RISK_LIMIT_SET"));
+    });
+
+    it("blocks a wrong scope, an unreadable decimal and a foreign hash", async () => {
+      for (const [override, field] of [
+        [{ scope: "STRATEGY" }, "scope"],
+        [{ maxDailyLossPct: null }, "maxDailyLossPct"],
+        [{ minRewardRisk: "2e0" }, "minRewardRisk"],
+        [{ specificationHash: "0".repeat(64) }, "specificationHash"]
+      ] as const) {
+        const { limitSetCheck } = await reportWith([pinnedRiskLimitSetRow(override)]);
+        assert.equal(limitSetCheck.outcome, "FAIL", field);
+        assert.deepEqual(limitSetCheck.details?.deviations, [field], field);
+      }
+    });
+
+    it("blocks when the active set has another key or version", async () => {
+      for (const override of [{ key: "SHADOW_V2" }, { version: 2 }]) {
+        const { limitSetCheck } = await reportWith([pinnedRiskLimitSetRow(override)]);
+        assert.equal(limitSetCheck.outcome, "FAIL", JSON.stringify(override));
+      }
+    });
+
+    it("blocks a second ACTIVE set next to the pinned one", async () => {
+      const { report, limitSetCheck } = await reportWith([
+        pinnedRiskLimitSetRow(),
+        pinnedRiskLimitSetRow({
+          key: "SOMETHING_ELSE",
+          version: 2,
+          maxRiskPerTradePct: new Prisma.Decimal("0.01")
+        })
+      ]);
+      assert.equal(limitSetCheck.outcome, "FAIL");
+      assert.equal(limitSetCheck.details?.activeRiskLimitSetCount, 2);
+      assert.equal(report.status, EligibilityStatus.NOT_READY);
+    });
+
+    it("blocks a pinned set that is not ACTIVE", async () => {
+      const { limitSetCheck } = await reportWith([
+        pinnedRiskLimitSetRow({ status: "RETIRED" })
+      ]);
+      assert.equal(limitSetCheck.outcome, "FAIL");
+      assert.equal(limitSetCheck.details?.activeRiskLimitSetCount, 0);
+    });
   });
 
   it("blocks when an assigned asset has no active execution profile", async () => {
