@@ -204,6 +204,8 @@ const RELATIONS: Record<
   "shadowOrder.tradeCandidate": { table: "tradeCandidate", foreignKey: "id" },
   "shadowOrder.portfolio": { table: "portfolio", foreignKey: "id" },
   "shadowOrder.tradingSession": { table: "tradingSession", foreignKey: "id" },
+  "shadowOrder.tradeDecision": { table: "tradeDecision", foreignKey: "id" },
+  "tradeDecision.riskAssessment": { table: "riskAssessment", foreignKey: "id" },
   "shadowPosition.portfolio": { table: "portfolio", foreignKey: "id" },
   "shadowPosition.asset": { table: "asset", foreignKey: "id" },
   "shadowPosition.strategyAssignment": {
@@ -538,6 +540,8 @@ class Table {
 
 function applyData(row: Row, data: Record<string, unknown>): void {
   for (const [key, value] of Object.entries(data)) {
+    // Prisma leaves a field set to `undefined` untouched.
+    if (value === undefined) continue;
     if (
       value !== null &&
       typeof value === "object" &&

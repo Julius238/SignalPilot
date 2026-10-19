@@ -19,6 +19,7 @@ import { reconcilePortfolio } from "../src/lib/shadowReconciliation.js";
 import { startTradingDay } from "../src/lib/shadowTradingDay.js";
 import { requestManualRiskClose } from "../src/lib/manualRiskClose.js";
 import { runShadowProcessFills } from "../src/jobs/shadowProcessFills.js";
+import { runShadowMonitorPositions } from "../src/jobs/shadowMonitorPositions.js";
 import { EXECUTION_PROFILE_INTEGRITY_VIOLATION } from "../src/lib/executionProfileIntegrity.js";
 import { loadShadowPortfolioValuation } from "../src/lib/shadowPortfolioValuation.js";
 
@@ -1782,5 +1783,331 @@ describe("execution profile integrity — exit and valuation stay risk-reducing 
     assert.deepEqual(await priced(), approved);
     addIntruderProfile(world);
     assert.deepEqual(await priced(), approved);
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// Entry expiry after a partial fill (ADR 0024, option K): the filled quantity
+// is opened with the expiry, never stranded in OPENING outside the monitor.
+// ───────────────────────────────────────────────────────────────────────────
+
+describe("entry expiry after a partial fill opens the position (ADR 0024)", () => {
+  const MONITOR_ENV = {
+    ENABLE_LIVE_TRADING: "false",
+    TRADING_MODE: "SHADOW",
+    TRADING_SHADOW_ENABLED: "true",
+    TRADING_STRATEGY_V1_ENABLED: "true",
+    TRADING_STRATEGY_LONG_V1_ENABLED: "true",
+    TRADING_SHADOW_EXECUTION_ENABLED: "true",
+    TRADING_SHADOW_POSITION_MONITOR_ENABLED: "true"
+  };
+
+  const addCandleAt = (
+    world: World,
+    id: string,
+    openTime: string,
+    prices: { open: string; high: string; low: string; close: string; volume: string }
+  ) => {
+    const start = new Date(openTime);
+    return world.tables.get("candle")!.create({
+      data: {
+        id,
+        assetId: world.assetId,
+        symbol: "BTCUSDT",
+        timeframe: "1h",
+        openTime: start,
+        closeTime: new Date(start.getTime() + 3_599_999),
+        source: "BINANCE",
+        ...prices
+      }
+    });
+  };
+
+  /** Prisma returns `null` for an unset column; the fake leaves it out. */
+  const asStored = (world: World, shadowOrderId: string) => {
+    const row = world.tables.get("shadowOrder")!.rows.find((candidate) => candidate.id === shadowOrderId)!;
+    row.lastProcessedCandleId ??= null;
+  };
+
+  /** C1 fills part of the order at `c1Volume`; C2 cannot fill the rest. */
+  const partialThenExpire = async (options: {
+    readonly direction?: "LONG" | "SHORT";
+    readonly c1Volume: string;
+    readonly c2: { open: string; high: string; low: string; close: string; volume: string };
+  }) => {
+    const world = seedWorld({ direction: options.direction ?? "LONG" });
+    world.tables.get("candle")!.update({ where: { id: world.candleC1.id }, data: { volume: options.c1Volume } });
+    const order = await createShadowOrderForCandidate(world.database as never, {
+      tradeCandidateId: world.candidate.id as string,
+      asOf: new Date("2026-08-02T09:00:05.000Z"),
+      codeVersion: CODE_VERSION,
+      correlationId: CORRELATION_ID,
+      capability: options.direction === "SHORT" ? SAFE_SHORT_CAPABILITY : SAFE_LONG_CAPABILITY
+    });
+    assert.equal(order.outcome, ShadowOrderOutcome.CREATED);
+    asStored(world, order.shadowOrderId!);
+    const first = await fillEntry(world, order.shadowOrderId!);
+    assert.equal(first.outcome, ShadowFillOutcome.PARTIALLY_FILLED);
+    const afterFirst = {
+      order: { ...world.tables.get("shadowOrder")!.rows[0]! },
+      position: { ...world.tables.get("shadowPosition")!.rows[0]! }
+    };
+    assert.equal(afterFirst.position.status, "OPENING");
+    const c2 = addCandleAt(world, "candle-c2-expiry", "2026-08-02T10:00:00.000Z", options.c2);
+    const second = await fillEntry(world, order.shadowOrderId!, c2.id as string);
+    return { world, orderId: order.shadowOrderId!, afterFirst, c2, second };
+  };
+
+  /** C2 with almost no volume: 1 % of it rounds to zero BTC. */
+  const THIN_C2 = { open: "24120", high: "24200", low: "24050", close: "24150", volume: "0.0005" };
+
+  const positionEvents = (world: World, positionId: unknown) =>
+    world.tables
+      .get("shadowPositionEvent")!
+      .rows.filter((row) => row.shadowPositionId === positionId)
+      .sort((a, b) => Number(a.sequence) - Number(b.sequence));
+
+  it("opens the position with the expiry: order EXPIRED, reserve released, one OPENED event", async () => {
+    const { world, orderId, afterFirst, c2, second } = await partialThenExpire({ c1Volume: "0.1", c2: THIN_C2 });
+    assert.equal(second.outcome, ShadowFillOutcome.EXPIRED);
+
+    const order = world.tables.get("shadowOrder")!.rows.find((row) => row.id === orderId)!;
+    assert.equal(order.status, "EXPIRED");
+    assert.equal(order.cancelReasonCode, "SIMULATION_NO_LIQUIDITY");
+    assert.equal(order.reservedQuoteAmount, "0");
+    assert.equal(order.openEntryScopeKey, null);
+    assert.equal(order.filledQuantity, afterFirst.order.filledQuantity, "the booked fill stays");
+    assert.equal(order.lastProcessedCandleId, c2.id);
+
+    const position = world.tables.get("shadowPosition")!.rows[0]!;
+    assert.equal(position.status, "OPEN");
+    assert.equal(position.openQuantity, afterFirst.position.openQuantity);
+    const entryFill = world.tables.get("shadowFill")!.rows[0]!;
+    assert.deepEqual(position.openedAt, entryFill.occurredAt, "opened at the first entry fill");
+    assert.equal(position.lastProcessedCandleId, world.candleC1.id, "the monitor starts at the expiry candle");
+
+    const events = positionEvents(world, position.id);
+    assert.deepEqual(events.map((row) => row.type), ["OPENING", "OPENED"]);
+    assert.equal(events[1]!.sourceOrderId, orderId);
+    assert.equal(events[1]!.sourceCandleId, c2.id);
+    assert.deepEqual(events[1]!.payloadJson, {
+      jobKey: "trading:shadow-process-fills",
+      reasonCode: "SIMULATION_NO_LIQUIDITY",
+      expiredRemainder: afterFirst.order.remainingQuantity
+    });
+
+    const portfolio = world.tables.get("portfolio")!.rows[0]!;
+    assert.equal(Number(portfolio.reservedCash), 0);
+    assert.equal(
+      world.tables.get("portfolioLedgerEntry")!.rows.filter((row) => row.type === "RELEASE" && row.shadowOrderId === orderId).length,
+      1
+    );
+    assert.equal(
+      world.tables.get("tradingAuditEvent")!.rows.filter((row) => row.eventType === "SHADOW_ENTRY_ORDER_EXPIRED").length,
+      1
+    );
+    // A correction, not a finding: nothing locks.
+    assert.equal(world.tables.get("riskEvent")!.rows.length, 0);
+    assert.equal(world.tables.get("tradingSession")!.rows[0]!.status, "SHADOW_ACTIVE");
+    assert.equal(portfolio.status, "ACTIVE");
+  });
+
+  it("catches a stop inside the expiry candle itself when 99.97 % filled and the rest is below the minimum notional", async () => {
+    // C1 fills 0.09997 of 0.1 BTC; the 0.00003 BTC rest (≈ 0.72 USDT) can
+    // never fill. C2 has normal volume but trades through the stop (23600).
+    const { world, second, c2 } = await partialThenExpire({
+      c1Volume: "9.997",
+      c2: { open: "24000", high: "24100", low: "23500", close: "23700", volume: "1000" }
+    });
+    assert.equal(second.outcome, ShadowFillOutcome.EXPIRED);
+    const order = world.tables.get("shadowOrder")!.rows[0]!;
+    assert.equal(order.cancelReasonCode, "SIMULATION_BELOW_MIN_NOTIONAL");
+    assert.equal(order.filledQuantity, "0.099970000000");
+    const position = world.tables.get("shadowPosition")!.rows[0]!;
+    assert.equal(position.status, "OPEN");
+
+    const exit = await monitor(world, position.id as string, c2.id as string);
+    assert.equal(exit.outcome, ShadowMonitorOutcome.TRIGGERED_CLOSED);
+    const closed = world.tables.get("shadowPosition")!.rows[0]!;
+    assert.equal(closed.status, "STOPPED_OUT");
+    assert.equal(closed.openQuantity, "0.000000000000");
+    assert.equal(world.tables.get("shadowFill")!.rows.filter((row) => row.triggerType === "STOP").length, 1);
+  });
+
+  it("is picked up by the monitor job, which works through the expiry candle and later candles", async () => {
+    const { world } = await partialThenExpire({ c1Volume: "0.1", c2: THIN_C2 });
+    addCandleAt(world, "candle-c3-quiet", "2026-08-02T11:00:00.000Z", {
+      open: "24150", high: "24250", low: "24050", close: "24180", volume: "1000"
+    });
+    addCandleAt(world, "candle-c4-tp", "2026-08-02T12:00:00.000Z", {
+      open: "24200", high: "25700", low: "24150", close: "25500", volume: "1000"
+    });
+    const summary = await runShadowMonitorPositions(world.database as never, {
+      asOf: new Date("2026-08-02T13:00:00.000Z"),
+      env: MONITOR_ENV,
+      codeVersion: CODE_VERSION,
+      correlationId: CORRELATION_ID
+    });
+    assert.equal(summary.blocked, false, String(summary.blockReasonCode));
+    assert.equal(summary.scanned, 1);
+    assert.deepEqual(summary.outcomes, {
+      [ShadowMonitorOutcome.NO_TRIGGER]: 2,
+      [ShadowMonitorOutcome.TRIGGERED_CLOSED]: 1
+    });
+    const closed = world.tables.get("shadowPosition")!.rows[0]!;
+    assert.equal(closed.status, "CLOSED");
+    assert.equal(closed.openQuantity, "0.000000000000");
+    assert.ok(Number(closed.realizedPnl) > 0);
+    assert.equal(world.tables.get("shadowFill")!.rows.filter((row) => row.triggerType === "TAKE_PROFIT").length, 1);
+  });
+
+  it("applies the time exit and accepts a manual risk close after the expiry", async () => {
+    const timed = await partialThenExpire({ c1Volume: "0.1", c2: THIN_C2 });
+    const timedPosition = timed.world.tables.get("shadowPosition")!.rows[0]!;
+    // maxHoldUntil = C1 close + 72 h.
+    const late = addCandleAt(timed.world, "candle-after-max-hold", "2026-08-05T10:00:00.000Z", {
+      open: "24100", high: "24200", low: "24000", close: "24150", volume: "1000"
+    });
+    const timeExit = await monitorPositionForCandle(timed.world.database as never, {
+      shadowPositionId: timedPosition.id as string,
+      candleId: late.id as string,
+      asOf: new Date("2026-08-05T11:00:00.000Z"),
+      codeVersion: CODE_VERSION,
+      correlationId: CORRELATION_ID
+    });
+    assert.equal(timeExit.outcome, ShadowMonitorOutcome.TRIGGERED_CLOSED);
+    assert.equal(timed.world.tables.get("shadowPosition")!.rows[0]!.status, "CLOSED");
+    assert.equal(timed.world.tables.get("shadowFill")!.rows.filter((row) => row.triggerType === "TIME_EXIT").length, 1);
+
+    const manual = await partialThenExpire({ c1Volume: "0.1", c2: THIN_C2 });
+    const manualPosition = manual.world.tables.get("shadowPosition")!.rows[0]!;
+    const request = await requestManualRiskClose(manual.world.database as never, {
+      shadowPositionId: manualPosition.id as string,
+      actorId: "operator",
+      reasonNote: "partial entry expired",
+      idempotencyKey: "manual-close-after-expiry-1",
+      asOf: new Date("2026-08-02T11:05:00.000Z")
+    });
+    assert.equal(request.ok, true, JSON.stringify(request));
+    const quiet = addCandleAt(manual.world, "candle-c3-quiet", "2026-08-02T11:00:00.000Z", {
+      open: "24150", high: "24250", low: "24050", close: "24180", volume: "1000"
+    });
+    // The thin expiry candle triggers the requested close but cannot fill it;
+    // the next candle fills the exit order.
+    const onExpiryCandle = await monitor(manual.world, manualPosition.id as string, manual.c2.id as string);
+    assert.equal(onExpiryCandle.outcome, ShadowMonitorOutcome.WAITING_FOR_LIQUIDITY);
+    const onQuiet = await monitorPositionForCandle(manual.world.database as never, {
+      shadowPositionId: manualPosition.id as string,
+      candleId: quiet.id as string,
+      asOf: new Date("2026-08-02T12:00:00.000Z"),
+      codeVersion: CODE_VERSION,
+      correlationId: CORRELATION_ID
+    });
+    assert.equal(onQuiet.outcome, ShadowMonitorOutcome.TRIGGERED_CLOSED);
+    assert.equal(manual.world.tables.get("shadowPosition")!.rows[0]!.status, "CLOSED");
+    assert.equal(
+      manual.world.tables.get("shadowFill")!.rows.filter((row) => row.triggerType === "MANUAL_RISK_CLOSE").length,
+      1
+    );
+  });
+
+  it("reconciles cleanly once the monitor has marked the expiry candle", async () => {
+    // The equity cache keeps the fill's mark until the monitor marks the next
+    // candle, as for every open position (N3, see the hotfix report).
+    const { world, c2 } = await partialThenExpire({ c1Volume: "0.1", c2: THIN_C2 });
+    const position = world.tables.get("shadowPosition")!.rows[0]!;
+    const marked = await monitor(world, position.id as string, c2.id as string);
+    assert.equal(marked.outcome, ShadowMonitorOutcome.NO_TRIGGER);
+    const reconciled = await reconcilePortfolio(world.database as never, {
+      portfolioId: world.portfolio.id as string,
+      asOf: new Date("2026-08-02T11:05:00.000Z"),
+      codeVersion: CODE_VERSION,
+      correlationId: "reconcile-after-monitor"
+    });
+    assert.equal(reconciled.consistent, true, JSON.stringify(reconciled.violations));
+    assert.equal(world.tables.get("tradingSession")!.rows[0]!.status, "SHADOW_ACTIVE");
+  });
+
+  it("keeps a SHORT's collateral on the position until the exit and frees it afterwards", async () => {
+    const { world, second, c2 } = await partialThenExpire({
+      direction: "SHORT",
+      c1Volume: "0.1",
+      c2: { open: "24080", high: "24150", low: "24000", close: "24100", volume: "0.0005" }
+    });
+    assert.equal(second.outcome, ShadowFillOutcome.EXPIRED);
+    const position = world.tables.get("shadowPosition")!.rows[0]!;
+    assert.equal(position.status, "OPEN");
+    const collateral = Number(position.reservedCollateral);
+    assert.ok(collateral > 0);
+    assert.equal(Number(world.tables.get("portfolio")!.rows[0]!.reservedCash), collateral);
+
+    // The expiry candle itself is quiet; C3 trades through the SHORT stop (24600).
+    assert.equal((await monitor(world, position.id as string, c2.id as string)).outcome, ShadowMonitorOutcome.NO_TRIGGER);
+    const reconciled = await reconcilePortfolio(world.database as never, {
+      portfolioId: world.portfolio.id as string,
+      asOf: new Date("2026-08-02T11:05:00.000Z"),
+      codeVersion: CODE_VERSION,
+      correlationId: "reconcile-short-after-expiry"
+    });
+    assert.equal(reconciled.consistent, true, JSON.stringify(reconciled.violations));
+    const stop = addCandleAt(world, "candle-c3-short-stop", "2026-08-02T11:00:00.000Z", {
+      open: "24200", high: "24700", low: "24150", close: "24650", volume: "1000"
+    });
+    const exit = await monitorPositionForCandle(world.database as never, {
+      shadowPositionId: position.id as string,
+      candleId: stop.id as string,
+      asOf: new Date("2026-08-02T12:00:00.000Z"),
+      codeVersion: CODE_VERSION,
+      correlationId: CORRELATION_ID
+    });
+    assert.equal(exit.outcome, ShadowMonitorOutcome.TRIGGERED_CLOSED);
+    const closed = world.tables.get("shadowPosition")!.rows[0]!;
+    assert.equal(closed.status, "STOPPED_OUT");
+    assert.equal(Number(closed.reservedCollateral), 0);
+    assert.equal(Number(world.tables.get("portfolio")!.rows[0]!.reservedCash), 0);
+  });
+
+  it("does nothing twice: the expiry candle again finds a terminal order", async () => {
+    const { world, orderId, c2 } = await partialThenExpire({ c1Volume: "0.1", c2: THIN_C2 });
+    const counts = () => ({
+      events: world.tables.get("shadowPositionEvent")!.rows.length,
+      ledger: world.tables.get("portfolioLedgerEntry")!.rows.length,
+      audit: world.tables.get("tradingAuditEvent")!.rows.length
+    });
+    const before = counts();
+    const again = await fillEntry(world, orderId, c2.id as string);
+    assert.equal(again.outcome, ShadowFillOutcome.NOT_APPLICABLE);
+    assert.deepEqual(counts(), before);
+  });
+
+  it("leaves an expiry without any fill exactly as before: no position, no event", async () => {
+    const world = seedWorld();
+    world.tables.get("candle")!.update({ where: { id: world.candleC1.id }, data: { volume: "0.0005" } });
+    const order = await createOrder(world);
+    asStored(world, order.shadowOrderId!);
+    assert.equal((await fillEntry(world, order.shadowOrderId!)).outcome, ShadowFillOutcome.WAITING);
+    const c2 = addCandleAt(world, "candle-c2-expiry", "2026-08-02T10:00:00.000Z", THIN_C2);
+    assert.equal((await fillEntry(world, order.shadowOrderId!, c2.id as string)).outcome, ShadowFillOutcome.EXPIRED);
+    const row = world.tables.get("shadowOrder")!.rows[0]!;
+    assert.equal(row.status, "EXPIRED");
+    assert.equal(row.cancelReasonCode, "SIMULATION_NO_LIQUIDITY");
+    assert.equal(row.reservedQuoteAmount, "0");
+    assert.equal(world.tables.get("shadowPosition")!.rows.length, 0);
+    assert.equal(world.tables.get("shadowPositionEvent")!.rows.length, 0);
+    const portfolio = world.tables.get("portfolio")!.rows[0]!;
+    assert.equal(Number(portfolio.reservedCash), 0);
+    assert.equal(Number(portfolio.availableCash), 10000);
+  });
+
+  it("leaves the entry-gap refusal on the first candle exactly as before", async () => {
+    const world = seedWorld();
+    // Opens far above the planned entry maximum (24350).
+    world.tables.get("candle")!.update({ where: { id: world.candleC1.id }, data: { open: "24900" } });
+    const order = await createOrder(world);
+    asStored(world, order.shadowOrderId!);
+    assert.equal((await fillEntry(world, order.shadowOrderId!)).outcome, ShadowFillOutcome.ENTRY_GAP_EXPIRED);
+    assert.equal(world.tables.get("shadowOrder")!.rows[0]!.status, "EXPIRED");
+    assert.equal(world.tables.get("shadowPosition")!.rows.length, 0);
+    assert.equal(world.tables.get("shadowPositionEvent")!.rows.length, 0);
   });
 });

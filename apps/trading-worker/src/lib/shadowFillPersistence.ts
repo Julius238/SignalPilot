@@ -371,7 +371,7 @@ export async function processEntryOrderFillForCandle(
       await expireOrderAndReleaseReserve(
         database,
         order,
-        candle.id,
+        candle,
         gap.reasonCode,
         input
       );
@@ -476,14 +476,15 @@ export async function processEntryOrderFillForCandle(
       };
     }
 
-    // No fill this candle — mark the cursor and expire after the second
-    // eligible candle if nothing has filled at all yet.
+    // No fill this candle — mark the cursor, or expire on any later candle.
+    // A remainder after a partial fill expires too; its position is opened
+    // with the expiry so the filled quantity stays monitored (ADR 0024).
     const isSecondCandle = !isFirstCandleForOrder;
     if (isSecondCandle) {
       await expireOrderAndReleaseReserve(
         database,
         order,
-        candle.id,
+        candle,
         fill.reasonCode,
         input
       );
@@ -1099,7 +1100,7 @@ async function stopEntryOrderOnInvalidProfile(
     await expireOrderAndReleaseReserve(
       database,
       order,
-      candle.id,
+      candle,
       EXECUTION_PROFILE_INTEGRITY_VIOLATION,
       input
     );
@@ -1158,49 +1159,80 @@ async function stopEntryOrderOnInvalidProfile(
       }
     });
 
-    const position = await tx.shadowPosition.findUnique({
-      where: { id: shadowPositionId }
-    });
-    if (position === null || position.status !== ShadowPositionStatus.OPENING)
-      return;
-    const firstFill = await tx.shadowFill.findFirst({
-      where: {
-        shadowPositionId: position.id,
-        triggerType: ShadowFillTriggerType.ENTRY
-      },
-      orderBy: { occurredAt: "asc" }
-    });
-    await tx.shadowPosition.update({
-      where: { id: position.id },
-      data: {
-        status: ShadowPositionStatus.OPEN,
-        openedAt: position.openedAt ?? firstFill?.occurredAt ?? candle.closeTime,
-        version: { increment: 1 }
+    await openPositionAfterTerminalEntry(tx, {
+      orderId: order.id,
+      shadowPositionId,
+      filledQuantity: order.filledQuantity,
+      candle,
+      payload: {
+        reasonCode: EXECUTION_PROFILE_INTEGRITY_VIOLATION,
+        cancelledRemainder: decimalString(order.remainingQuantity)
       }
     });
-    const sequence =
-      (await tx.shadowPositionEvent.count({
-        where: { shadowPositionId: position.id }
-      })) + 1;
-    await tx.shadowPositionEvent.create({
-      data: {
-        eventKey: buildPositionEventKey({
-          shadowPositionId: position.id,
-          sequence
-        }),
+  });
+}
+
+/**
+ * Opens the `OPENING` position of an entry order that has just turned
+ * terminal with a positive filled quantity, as it stands (docs/trading/04:
+ * `OPENING → OPEN` once the entry order is "terminal mit positiver gefüllter
+ * Menge"). Shared by the profile stop (ADR 0023) and the expiry after a
+ * partial fill (ADR 0024), so a terminal entry order never strands exposure
+ * outside the monitor. The position's `lastProcessedCandleId` stays on its
+ * last fill candle: the monitor evaluates the terminal candle next. Does
+ * nothing without a fill or once the position has left `OPENING`.
+ */
+async function openPositionAfterTerminalEntry(
+  tx: Prisma.TransactionClient,
+  args: {
+    readonly orderId: string;
+    readonly shadowPositionId: string | null;
+    readonly filledQuantity: unknown;
+    readonly candle: { readonly id: string; readonly closeTime: Date };
+    readonly payload: Readonly<Record<string, string>>;
+  }
+): Promise<void> {
+  const filled = DecimalValue.fromString(decimalString(args.filledQuantity));
+  if (!filled.isPositive() || args.shadowPositionId === null) return;
+  const position = await tx.shadowPosition.findUnique({
+    where: { id: args.shadowPositionId }
+  });
+  if (position === null || position.status !== ShadowPositionStatus.OPENING)
+    return;
+  const firstFill = await tx.shadowFill.findFirst({
+    where: {
+      shadowPositionId: position.id,
+      triggerType: ShadowFillTriggerType.ENTRY
+    },
+    orderBy: { occurredAt: "asc" }
+  });
+  await tx.shadowPosition.update({
+    where: { id: position.id },
+    data: {
+      status: ShadowPositionStatus.OPEN,
+      openedAt:
+        position.openedAt ?? firstFill?.occurredAt ?? args.candle.closeTime,
+      version: { increment: 1 }
+    }
+  });
+  const sequence =
+    (await tx.shadowPositionEvent.count({
+      where: { shadowPositionId: position.id }
+    })) + 1;
+  await tx.shadowPositionEvent.create({
+    data: {
+      eventKey: buildPositionEventKey({
         shadowPositionId: position.id,
-        sequence,
-        type: ShadowPositionEventType.OPENED,
-        sourceOrderId: order.id,
-        sourceCandleId: candle.id,
-        payloadJson: asJson({
-          jobKey: SHADOW_FILL_JOB_KEY,
-          reasonCode: EXECUTION_PROFILE_INTEGRITY_VIOLATION,
-          cancelledRemainder: decimalString(order.remainingQuantity)
-        }),
-        occurredAt: candle.closeTime
-      }
-    });
+        sequence
+      }),
+      shadowPositionId: position.id,
+      sequence,
+      type: ShadowPositionEventType.OPENED,
+      sourceOrderId: args.orderId,
+      sourceCandleId: args.candle.id,
+      payloadJson: asJson({ jobKey: SHADOW_FILL_JOB_KEY, ...args.payload }),
+      occurredAt: args.candle.closeTime
+    }
   });
 }
 
@@ -1208,7 +1240,10 @@ async function stopEntryOrderOnInvalidProfile(
  * Release whatever remains reserved and mark the order terminal. Used both
  * for the entry-gap refusal (immediate) and the two-candle expiry. A partial
  * fill already booked stays booked — only the unfilled remainder's reserve is
- * released (docs/trading/04: "Bereits gefüllte Position bleibt bestehen").
+ * released (docs/trading/04: "Bereits gefüllte Position bleibt bestehen") —
+ * and its `OPENING` position is opened in the same transaction (ADR 0024), so
+ * the filled quantity stays under the monitor's stop, take-profit and time
+ * exit.
  */
 async function expireOrderAndReleaseReserve(
   database: PrismaClient,
@@ -1217,22 +1252,39 @@ async function expireOrderAndReleaseReserve(
     readonly portfolioId: string;
     readonly reservedQuoteAmount: unknown;
     readonly remainingQuantity: unknown;
+    readonly filledQuantity: unknown;
+    readonly shadowPositionId: string | null;
   },
-  candleId: string,
+  candle: { readonly id: string; readonly closeTime: Date },
   reasonCode: string,
   input: ProcessEntryFillInput
 ): Promise<void> {
+  const candleId = candle.id;
+  const openFilledPosition = (tx: Prisma.TransactionClient) =>
+    openPositionAfterTerminalEntry(tx, {
+      orderId: order.id,
+      shadowPositionId: order.shadowPositionId,
+      filledQuantity: order.filledQuantity,
+      candle,
+      payload: {
+        reasonCode,
+        expiredRemainder: decimalString(order.remainingQuantity)
+      }
+    });
   const releaseAmount = decimalString(order.reservedQuoteAmount);
   if (DecimalValue.fromString(releaseAmount).isZero()) {
-    await database.shadowOrder.update({
-      where: { id: order.id },
-      data: {
-        status: ShadowOrderStatus.EXPIRED,
-        openEntryScopeKey: null,
-        lastProcessedCandleId: candleId,
-        cancelReasonCode: reasonCode,
-        version: { increment: 1 }
-      }
+    await database.$transaction(async (tx) => {
+      await tx.shadowOrder.update({
+        where: { id: order.id },
+        data: {
+          status: ShadowOrderStatus.EXPIRED,
+          openEntryScopeKey: null,
+          lastProcessedCandleId: candleId,
+          cancelReasonCode: reasonCode,
+          version: { increment: 1 }
+        }
+      });
+      await openFilledPosition(tx);
     });
     return;
   }
@@ -1310,5 +1362,7 @@ async function expireOrderAndReleaseReserve(
         occurredAt: input.asOf
       }
     });
+
+    await openFilledPosition(tx);
   });
 }
