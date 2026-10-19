@@ -1,212 +1,249 @@
-# OFFICIAL_V1 – Sicherheits-Hotfix auf `16d6d0f` (ADR 0021, 0023, 0024 K)
+# OFFICIAL_V1 – Sicherheits-Hotfix auf `16d6d0f` (ADR 0021, 0023, 0024 K, 0025 N3)
 
-- Stand: 2026-10-19, **lokal, nicht gepusht, nicht deployt**
+- Stand: 2026-10-19, **lokal integriert**. Gepusht ist nur der Zwischenstand
+  `961dafc`. Der integrierte Stand ist nicht gepusht und nicht deployt.
 - Branch: `hotfix/official-v1-security`, Basis `16d6d0f` (deployter VPS-Stand)
 - Bezug: [ADR 0021](../decisions/0021-risk-limit-set-value-integrity.md) ·
   [ADR 0023](../decisions/0023-execution-profile-value-integrity.md) ·
   [ADR 0024](../decisions/0024-opening-position-after-entry-expiry.md) ·
+  [ADR 0025](../decisions/0025-reconciliation-valuation-basis.md) ·
   [Offizieller Forward-Test V1](official-forward-test-v1.md) ·
   Hotfix-Vorbereitung und VPS-Bericht vom 2026-10-18 auf
   `claude/risk-directive-enforcement-draft` (`bb912bf`)
 
-> Auf dem VPS wurde nichts ausgeführt. Es gibt keinen Push, keinen Merge und
-> keine Datenbankänderung außerhalb lokaler Wegwerf-Datenbanken. Alle Tests
-> sind synthetisch.
+> Auf dem VPS wurde nichts ausgeführt. Es gibt keinen Merge und keine
+> Datenbankänderung außerhalb lokaler Wegwerf-Datenbanken. Alle Tests sind
+> synthetisch.
 
 ## Kurzfassung
 
-- **Geschlossen:** manipulierte Risikolimits (ADR 0021), manipulierte
-  Ausführungsprofile (ADR 0023) und die Strandung einer teilgefüllten,
-  abgelaufenen Entry-Order in `OPENING` (ADR 0024, Option K).
-- **Nur diese drei Korrekturen.** Strategien, Gates, Arena, Portfolio-,
-  Simulations- und Replay-Pakete, DB-Schema, Migrationen, API, Dashboard,
-  Lockfile und Compose sind bitgleich mit `16d6d0f`. Keiner der 61
-  Entwicklungs-Commits ist enthalten.
-- **Gleiches Verhalten bei gültiger Konfiguration.** In 12 synthetischen
-  Ausführungsszenarien schreiben alter und neuer Code zeilengleiche Daten. In
-  5 Risk-Job-Fällen sind alle Entscheidungen gleich. Es ändern sich nur die
-  Kennung `risk-rules-v1/1.3.0 → 1.4.0` und die daraus abgeleiteten Hashes.
-- **Neuer bestätigter Befund N3:** Die Reconciliation kann eine normale offene
-  Position fälschlich als `PORTFOLIO_EQUITY_MISMATCH` werten und die Session
-  sperren. Das ist nicht durch den Hotfix entstanden und wird durch ihn nicht
-  behoben. Für die Stabilität von OFFICIAL_V1 ist es der wichtigste offene
-  Punkt.
-- **N2 bestätigt:** Die Kerze, in der eine Entry-Order füllt, wird nie auf
-  Exits geprüft. Live-Worker und Replay-Engine verhalten sich dabei gleich.
-  N2 ist nur analysiert, nicht korrigiert.
+- **Geschlossen:**
+  - manipulierte Risikolimits (ADR 0021);
+  - manipulierte Ausführungsprofile (ADR 0023);
+  - die Strandung einer teilgefüllten, abgelaufenen Entry-Order in `OPENING`
+    (ADR 0024, Option K);
+  - falsche Sperren durch den Wettlauf von Reconciliation und Monitor (N3,
+    ADR 0025, Option C).
+- **Nur diese Korrekturen.** Dazu kommt ein reiner Testfix (`4a9f4c6`), ohne
+  den die CI schon auf `16d6d0f` rot war. Strategien, Gates, Arena,
+  Portfolio-, Simulations- und Replay-Pakete, DB-Schema, Migrationen, API,
+  Dashboard, Lockfile, Compose und CI-Workflow sind bitgleich mit `16d6d0f`.
+- **Gleiches Verhalten bei gültiger Konfiguration.**
+  - Ausführung: 10 von 12 synthetischen Szenarien schreiben zeilengleiche
+    Daten wie `16d6d0f`. Die zwei Szenarien mit offener Position haben
+    zusätzlich nur ein Audit-Feld.
+  - Risk-Job: Die Entscheidungen sind gleich. Nur die Kennung `1.3.0 → 1.4.0`
+    und die davon abgeleiteten Hashes ändern sich.
+- **Tests:** 1 765 von 1 765 in 28 Paketen bestehen, mit einer isolierten
+  PostgreSQL. Build, Lint und Ops-Skripte sind grün.
+- **Offen vor dem ersten Trade:**
+  - R-003 erzeugt im selben Wettlauf falsche CRITICAL-Ereignisse (N3b). Ein
+    Vorschlag liegt vor, umgesetzt ist er nicht.
+  - Unabhängig davon setzt R-022 die Arena bei offener Position auf Hard Stop.
+    Das ist ein Altbefund (ADR 0022).
+  - N2 ist nur analysiert.
 
 ## 1. Bestandsaufnahme
 
-Alle Commits liegen im gemeinsamen Repository und sind erreichbar. Kein
-Worktree hatte uncommittete Änderungen.
+Alle Commits liegen im gemeinsamen Repository und sind erreichbar.
 
 | Commit | Branch | Inhalt | Stand |
 |---|---|---|---|
-| `16d6d0f` | – | deployter OFFICIAL_V1-Build | Basis |
+| `16d6d0f` | – | deployter OFFICIAL_V1-Build | Basis. CI-Run 38623043366 dort schon rot (Testschritt) |
 | `fbe858c`, `da5dc66` | `claude/risk-limit-integrity-draft` | ADR 0021 Entwurf und Umsetzung | gepusht, CI 39146689971 grün; liegt hinter 61 Entwicklungs-Commits |
 | `1290a25` | `claude/risk-directive-enforcement-draft` | ADR 0022, nur Analyse | nicht übernommen |
 | `c08fc2c`, `bb912bf` | dito | lesende VPS-Prüfung, Bericht, Hotfix-Vorbereitung | nicht übernommen (nur Doku und SQL) |
 | `228a8da`, `0c55e52` | `claude/execution-profile-integrity-draft` | ADR 0023 Entwurf und Umsetzung, auf `da5dc66` | lokal |
-| `a0a3961` | `claude/opening-after-partial-expiry-draft` | ADR 0024 Entwurf und lesende SQL, auf `0c55e52` | lokal, K nicht umgesetzt |
+| `a0a3961` | `claude/opening-after-partial-expiry-draft` | ADR 0024 Entwurf und lesende SQL | lokal |
+| `ed458eb`, `24552fd` | `claude/n3-reconciliation-race-draft` | ADR 0025 Entwurf und Umsetzung (N3) | lokal, per Fast-Forward übernommen |
+| `4a9f4c6` | Entwicklungsstand | Schema-Test kennt die 24/7-Ops-Alarmtypen | als `ff78ead` übernommen |
 
-Abhängigkeiten: ADR 0023 baut auf ADR 0021 auf und teilt dessen Sperrpfad.
-Option K nutzt den Helfer, den ADR 0023 für den Profil-Stopp eingeführt hat.
-Die Reihenfolge 0021 → 0023 → K ergibt deshalb keine doppelte und keine
-widersprüchliche Umsetzung. Die 61 Entwicklungs-Commits berühren weder
-`apps/trading-worker` noch `packages/risk-engine`.
+Abhängigkeiten:
+- ADR 0023 baut auf ADR 0021 auf.
+- Option K nutzt den Helfer aus ADR 0023.
+- N3 ändert die Bewertungsbasis der Equity-Schreiber und der Reconciliation.
+  Die Integritätsmodule aus 0021 und 0023 und der K-Code bleiben
+  unverändert.
+- Die 61 Entwicklungs-Commits berühren weder `apps/trading-worker` noch
+  `packages/risk-engine`.
 
-## 2. Inhalt des Hotfix-Branches
+## 2. Integrierte Commits
 
 | Commit | Inhalt | Nachweis |
 |---|---|---|
 | `545f34e` | ADR 0021: `git diff fbe858c da5dc66 -- apps packages docs/06` plus ADR | Patch-sha256 `109551fd…` und Tree `5b23706a…` genau wie in `bb912bf` vorbereitet |
-| `0e7d943` | ADR 0023: `git diff da5dc66 0c55e52` plus ADR | `apps/trading-worker`, `packages/risk-engine`, Dokument 06 und beide ADRs bitgleich mit `0c55e52` |
-| `fcfc965` | ADR 0024 Option K, Regressionstests, Korrektur des Test-Fakes, ADR 0024 mit lesender SQL aus `a0a3961` | siehe ADR 0024, Abschnitt „Umsetzung“ |
-| `2d89170` | ein weiterer K-Test: Exit unter `ERROR_LOCKED` | – |
-| dieser Commit | dieser Bericht | nur Doku |
+| `0e7d943` | ADR 0023: `git diff da5dc66 0c55e52` plus ADR | Trading-Worker, Risk Engine, Dokument 06 und beide ADRs bitgleich mit `0c55e52` |
+| `fcfc965` | ADR 0024 Option K, Regressionstests, Korrektur des Test-Fakes, ADR 0024 mit lesender SQL | ADR 0024, „Umsetzung“ |
+| `2d89170` | K-Test: Exit unter `ERROR_LOCKED` | – |
+| `961dafc` | erster Stand dieses Berichts | gepusht, CI-Run 39277739973 (siehe 4.4) |
+| `ed458eb` | ADR 0025, Entwurf zu N3 | nur Doku |
+| `24552fd` | N3, Option C: gebuchte Bewertungsbasis, Snapshot-Reconciliation, 23 Tests | ADR 0025, „Umsetzung“ |
+| `ff78ead` | `4a9f4c6` übernommen: erwartete Liste im Alert-Katalog-Test | eine Testdatei, 6 Zeilen. Die vier Typen stehen seit `49f6185` im Schema von `16d6d0f` |
+| dieser Commit | dieser Bericht, aktualisiert | nur Doku |
 
-Gegenüber `16d6d0f` sind 13 Quelldateien in `apps/trading-worker/src` und 4 in
-`packages/risk-engine/src` geändert, dazu Tests, die Dokumente 06 und 18, drei
-ADRs, eine lesende SQL-Datei und dieser Bericht. Arena, Scheduler,
-Strategie-Code, Candidate-Erzeugung, Replay, Konfiguration und Safety-Gates
-sind unverändert.
+## 3. Unterschiede zum deployten Stand `16d6d0f`
 
-## 3. Geschlossene Lücken
+43 Dateien, alle in diesen Bereichen:
 
-| Lücke | Vorher (`16d6d0f`) | Jetzt |
+| Bereich | Dateien | Wirkung |
 |---|---|---|
-| Limit-Set-Werte (ADR 0021) | R-026 prüft nur den Hash-Text und fünf Ganzzahlen. Eine DB-Zeile mit V1-Hash kann z. B. das Vierfache Risiko genehmigen lassen. | R-026, Assembler, Eligibility, Post-Fill-Recheck und Bootstrap vergleichen jedes Feld mit V1, Dezimalwerte als Wert. Eine Abweichung sperrt. |
-| Ausführungsprofile (ADR 0023) | Gebühren, Spread, Slippage, Tick, Step, Mindestwerte und Teilnahme werden ungeprüft benutzt. | Registry der freigegebenen Profile. Einstiegspfade lehnen ab und sperren neue Entries. Exit und Bewertung rechnen mit dem freigegebenen Profil und blockieren nie. Die Kalibrierung schreibt nur das freigegebene Profil. |
-| Teilfill und Ablauf (ADR 0024) | Die Position bleibt in `OPENING`, ohne Stop, TP, Zeit-Exit oder manuellen Close. | Der Ablauf öffnet die Position. Der Monitor wertet ab der Ablaufkerze aus. |
+| Risk Engine (`packages/risk-engine/src`) | `limit-set-integrity.ts` (neu), `policy-v1.ts`, `rules.ts`, `index.ts` | R-026 prüft jedes Limit-Feld; Kennung `risk-rules-v1/1.4.0` |
+| Trading-Worker, neu | `riskLimitSetIntegrity.ts`, `executionProfileIntegrity.ts` | gemeinsame Integritätsprüfungen |
+| Trading-Worker, geändert | Jobs `shadowAssessRisk`, `shadowBootstrap`, `shadowExecutionProfileCalibrate`; Lib `riskInputAssembler`, `shadowEligibility`, `shadowFillPersistence`, `shadowOrderPersistence`, `shadowPortfolioValuation`, `shadowPositionMonitor`, `shadowReconciliation`, `shadowRiskPersistence`, `shadowSessionOps`, `shadowTradingDay` | 0021, 0023, K, N3 |
+| Tests | Risk Engine, Trading-Worker (darunter ein neuer PostgreSQL-Test), Datenbank-Schema-Test | nur Tests |
+| Doku und Ops | Dokumente 06 und 18, ADR 0021, 0023, 0024, 0025, dieser Bericht, `scripts/ops/opening-after-partial-expiry-check.sql` (nur lesend) | nichts davon läuft im Betrieb |
+
+Bitgleich mit `16d6d0f`: `packages/strategy-engine`, `arena`, `shadow-replay`,
+`portfolio`, `trading-simulation`, `trading-domain`, `market-regime`,
+`database/prisma` und `database/src`, `apps/api`, `apps/worker`,
+`apps/dashboard`, `pnpm-lock.yaml`, `docker-compose.prod.yml`, `.github`.
+Einen Evolution-Worker gibt es auf `16d6d0f` nicht.
 
 ## 4. Tests
 
-Alle lokal, ohne VPS. Die DB-Tests laufen gegen eine Wegwerf-PostgreSQL 16 im
-Scratchpad (Socket-Port 55432) mit den 29 Migrationen von `16d6d0f`. Die
+Alles lokal, ohne VPS. Isolierte PostgreSQL 16 im Scratchpad: Socket-Port
+55432, eigene frische Datenbank, die 29 Migrationen von `16d6d0f`. Die
 Dev-DB wurde nicht berührt.
 
-### 4.1 Suiten (CI-Äquivalent)
+### 4.1 Gesamtlauf wie in CI (integrierter Stand)
 
-| Bereich | Ergebnis |
-|---|---|
-| `pnpm lint`, `pnpm ops:test:scripts` | grün |
-| Trading-Worker, mit DB-Suiten | 412/412 |
-| davon ADR-0024-Block | 10/10. Gegen den Code ohne K schlagen 7 fehl, die 3 Kontrollfälle bestehen auf beiden Ständen |
-| Risk Engine | 114/114 |
-| API (bindet den Trading-Worker ein) | 193/193 |
-| Strategy Engine, Trading-Domain, Arena, Simulation, Portfolio, Shadow-Replay, Market-Regime | 151, 153, 16, 32, 30, 12, 11, alle grün |
-| Worker, Dashboard, Backtesting und übrige Pakete | grün |
-| `packages/database` | 53/54. Der Alert-Katalog-Test schlägt auf `16d6d0f` identisch fehl, ein Altbefund |
-| Build | grün. Das Dashboard braucht wie in CI `SIGNALPILOT_API_INTERNAL_URL` |
-| Typecheck der Worker-Tests | unverändert 83 Altfehler, kein neuer |
+`pnpm install --frozen-lockfile`, `db:generate`, `db:migrate:deploy`,
+`build`, `lint`, `ops:test:scripts`, `pnpm -r --no-bail test`: **alles grün,
+1 765 von 1 765 Tests in 28 Paketen.** Auszug:
 
-### 4.2 Differenztest gegen den alten VPS-Code
+| Paket | Tests | Prüft unter anderem |
+|---|---|---|
+| Trading-Worker | 435/435, mit DB-Suiten | Integrität von Limits und Profilen, Teilfill und Ablauf (K), Stop und Exits unter Sperre, N3 in allen Reihenfolgen, Arena-, Lease- und JobRunner-DB-Tests |
+| Risk Engine | 114/114 | Risikoentscheidungen, Positionsgrößen, R-026 |
+| API | 193/193 | bindet den Trading-Worker ein |
+| Arena | 16/16 | – |
+| Shadow-Replay | 12/12 | – |
+| Strategy Engine | 151/151 | Champion und Challenger |
+| Portfolio, Simulation, Trading-Domain | 30, 32, 153 | – |
+| Datenbank | 54/54 | mit `ff78ead` |
 
-Dasselbe Skript lief in `16d6d0f` und im Hotfix: gleicher Fake, gleiche Seeds,
-deterministische IDs, das freigegebene BTCUSDT-v2-Profil (10/2/3 bp, 1 %) und
-das V1-Limit-Set. Verglichen wurden alle geschriebenen Zeilen.
+### 4.2 Gezielte Regressionstests
 
-| Szenario | Ergebnis |
-|---|---|
-| Voll-Fill mit Stop, TP, Zeit-Exit und Tagesstart; Intrabar-Konflikt; CRV-Shortfall mit Zwangs-Close; Teilfill mit Vervollständigung; Teilfill-Shortfall; Ablauf ohne Fill; Entry-Gap; manueller Close; SHORT Voll-Fill mit Stop; SHORT Teilfill mit TP; Bewertung; Reconciliation | **12/12 zeilengleich** |
-| Teilfill und Ablauf, LONG und SHORT | Unterschied wie beabsichtigt. Alt: `OPENING`, Monitor `NOT_APPLICABLE`, Reconciliation sperrt per Equity-Mismatch. Neu: `OPEN`, ausgestoppt, konsistent |
+- **ADR 0024 (K):** 10 Fälle. Gegen den Code ohne K schlagen 7 fehl.
+- **ADR 0025 (N3):** 21 Fälle im Speicher und 2 auf PostgreSQL.
+  - Abgedeckt: alle sechs Scheduler-Reihenfolgen R1a–R6, der Ablauf nach
+    ADR 0024, SHORT und zwei Assets.
+  - Echte Abweichungen sperren weiter: Equity ±, Equity auf die neueste
+    ungebuchte oder eine veraltete Kerze gesetzt, Cash, Reserve, Menge,
+    geänderte Kerze, fremde Kerze, Collateral.
+  - Ein Stop-Exit läuft unter der dadurch entstandenen Sperre.
+  - Gegen `961dafc` schlagen 12 der 21 Fälle fehl.
+  - Die Snapshot-Tests schlagen fehl, wenn die Reconciliation außerhalb des
+    Snapshots liest.
 
-Risk-Job, also Assembler, Engine und Persistenz, in den Fällen Freigabe,
-R-008-Ablehnung, Kill Switch, inaktive Session und Verlustserie, jeweils mit
-Wiederholungslauf: Status, Mengen, Regelergebnisse und Entscheidungen sind
-gleich. Unterschiede gibt es nur bei `ruleSetVersion`/`ruleVersion` (130
-Regelergebnisse) und bei Hashes und Schlüsseln, die davon abgeleitet sind.
+### 4.3 Differenz gegen den alten Code und Deploy-Simulation
 
-### 4.3 Deploy-Simulation auf echtem PostgreSQL
+- **Ausführung:** dasselbe Szenario-Skript in `16d6d0f`, `961dafc` und im N3-Stand
+  (der integrierte Hotfix ist in Trading-Worker, Risk Engine und API
+  codegleich mit ihm).
+  - 10 von 12 Normalszenarien sind zeilengleich, zwei unterscheiden sich nur
+    im Audit-Feld `valuationBasis`.
+  - Gewollte Unterschiede: Teilfill mit Ablauf (K) und zwei N3-Szenarien.
+    Dort sperrte der alte Code fälschlich.
+- **Risk-Job, 5 Fälle:** gegen `16d6d0f` nur Kennung und Hashes verschieden,
+  gegen `961dafc` byte-gleich.
+- **Deploy-Simulation:**
+  - Runbook 18, Abschnitte 7–9, mit altem Code aufgebaut, danach
+    `consistency-snapshot`.
+  - Dann der neue Code: `consistency-compare` Exit 0, Arena-Ketten intakt.
+  - Eligibility `EXECUTION_PROFILE` und `ACTIVE_RISK_LIMIT_SET` PASS.
+  - Kalibrierung `UNCHANGED`, Reconciliation 3 von 3 konsistent, keine
+    Sperre.
 
-Mit dem **alten** Code wurde der Aufbau aus Runbook 18, Abschnitte 7–9,
-nachgestellt: Bootstrap, Kalibrierung (BTC/ETH v1 `RETIRED`, v2 `ACTIVE`,
-Hashes `0fba0118…`/`fc2ec200…` wie auf dem VPS), Aktivierung beider
-Teilnehmer, Tagesstart, Reconciliation, Arena-Bootstrap und Evaluierung.
-Danach kamen `consistency-snapshot` mit altem Code und alle weiteren Schritte
-mit dem Hotfix:
+### 4.4 GitHub-CI
 
-- `consistency-compare` sofort und nach den neuen Jobs: Exit 0, Arena-Ketten
-  intakt.
-- Eligibility: `EXECUTION_PROFILE` und `ACTIVE_RISK_LIMIT_SET` bestehen mit
-  den echten Dezimalwerten der DB. Neu ist nur die erwartete Warnung
-  `STRATEGY_VERSION_BUILD`. Die übrigen FAILs betreffen fehlende Marktdaten in
-  der leeren DB und treten auf altem Code identisch auf.
-- Kalibrierung: `UNCHANGED`. Risk-Job, Monitor und Arena: `SUCCESS`.
-  Reconciliation 3/3 konsistent.
-- Beide Sessions bleiben `SHADOW_ACTIVE`, kein RiskEvent, keine Sperre.
+- **Run 39277739973 auf `961dafc`:** Install, Migrationen, Build, Lint und
+  Ops-Checks sind grün, der Testschritt ist rot.
+- **Ursache:** Logs und Job-Summary sind ohne Login nicht sichtbar. Schon
+  `16d6d0f` scheiterte im selben Schritt (Run 38623043366). Lokal scheitert
+  auf `961dafc` nur der Alert-Katalog-Test. `ff78ead` behebt ihn.
+- Der integrierte Stand ist lokal vollständig grün. Ein Lauf auf GitHub steht
+  noch aus.
 
 ## 5. Wirkung auf OFFICIAL_V1
 
-Beobachtbare Änderungen, auch wenn sie bei der heutigen Konfiguration nicht
-eintreten:
-
-1. **Kennung `risk-rules-v1/1.4.0`** statt `1.3.0` in jeder Bewertung, dazu
-   neue Policy-, Input- und Output-Hashes. Die Entscheidungen bleiben gleich.
-   Laut VPS-Prüfung vom 2026-10-18 gab es noch keine Bewertung. Kommt der
-   Hotfix vor dem ersten Candidate, gibt es keine gemischten Kennungen.
-2. **Neue Sperrpfade**, aber nur bei abweichenden DB-Zeilen: Limit-Set (R-026
-   CRITICAL, Post-Fill, Eligibility, Bootstrap) und Ausführungsprofil
-   (Eligibility, Aktivierung, Risk, Order, Fill). Die VPS-Prüfung fand keine
-   Abweichung. Eine solche Sperre hat im Code keinen Rückweg (ADR 0022), sie
-   müsste von Hand gelöst werden.
-3. **Exit und Bewertung** rechnen mit dem freigegebenen Profil statt mit der
-   Zeile. Bei den heutigen Zeilen ist das wertgleich.
-4. **Eligibility** prüft strenger: genau ein `ACTIVE`-Profil je Asset, jeder
-   Wert gleich. Das besteht mit den heutigen Zeilen. Neu ist die Warnung
-   `STRATEGY_VERSION_BUILD`, das Runbook erwartet sie (H3).
-5. **Kalibrierungsjob** schreibt nur noch das freigegebene Profil.
-6. **Option K:** Bei Teilfill und Ablauf wird die Position `OPEN` und ab der
-   Ablaufkerze überwacht, statt zu stranden. Das tritt nur bei dünnem
-   Volumen ein (Teilnahme 1 %).
-7. **Rollout:** Trading-Worker- und API-Image neu bauen, denn die API bindet
+1. **Kennung `risk-rules-v1/1.4.0`** in jeder Bewertung, dazu neue Hashes.
+   Die Entscheidungen bleiben gleich.
+2. **Neue Sperrpfade, nur bei abweichenden DB-Zeilen:** Limit-Set und
+   Ausführungsprofil. Die VPS-Prüfung vom 2026-10-18 fand keine Abweichung.
+3. **Exit und Bewertung** rechnen mit dem freigegebenen Profil. Bei den
+   heutigen Zeilen ist das wertgleich.
+4. **Eligibility** prüft strenger. Neu ist die erwartete Warnung
+   `STRATEGY_VERSION_BUILD`.
+5. **Kalibrierung** schreibt nur das freigegebene Profil.
+6. **Option K:** Teilfill und Ablauf öffnen die Position, statt sie zu
+   stranden.
+7. **N3:**
+   - Der Equity-Cache wird auf der gebuchten Kerze jeder Position bewertet.
+   - Im Normalbetrieb ändert sich nichts. Bei Verzögerung hinkt er bis zum
+     nächsten Monitorlauf hinterher.
+   - Die Reconciliation sperrt nur noch bei echten Abweichungen.
+   - Sie protokolliert die geprüfte Kerze.
+   - Ein Lauf, während dessen der Monitor bucht, wird verworfen: kein Befund,
+     keine Sperre, fehlgeschlagener BotRun.
+   - Ein hängender Monitor sperrt nicht mehr; der Alert dafür bleibt.
+8. **Rollout:** Trading-Worker- und API-Image neu bauen, denn die API bindet
    den Trading-Worker ein. Keine Migration, keine Datenänderung. Rollback
    über die Images `:16d6d0f`.
 
-Unverändert bleiben Champion `CRYPTO_TREND_CORE_LONG_V1` und Challenger
-`CRYPTO_REGIME_LONG_V1` (Strategy Engine bitgleich, Versionen werden
-anerkannt), Gates, Arena-Policy und -Kette, Portfolio- und Ledger-Logik,
-Kosten- und Risikowerte. Die Evolution Engine ist auf `16d6d0f` gar nicht
-enthalten.
+## 6. Offene Risiken
 
-## 6. Offene Befunde, priorisiert
+### 6.1 R-003 (N3b): falsche CRITICAL-Ereignisse im Risk-Job
+
+- **Befund:**
+  - Der Assembler übergibt den gecachten Equity-Wert (gebuchte Kerze) und
+    Marks zur neuesten Kerze.
+  - Am echten Assembler und an der echten Engine, mit offener Position und
+    einer ungebuchten Kerze, gilt R-003 CRITICAL („Equity does not equal …“).
+  - Mit gebuchter Kerze im Assembler besteht R-003. Die Probe-Änderung ist
+    nicht committet.
+- **Wann:** nur bei offener Position und nur, wenn der Risk-Job einen
+  Candidate bewertet, bevor der Monitor die neue Kerze gebucht hat. Bei
+  Kerzen um hh:00 und Candidates ab hh:05 ist das Fenster schmal. Nach Ausfall
+  oder Rückstand ist es breit.
+- **Wirkung in OFFICIAL_V1:**
+  - Keine Entscheidung kippt, keine Sperre, kein Breaker.
+  - Jeder Teilnehmer handelt nur BTCUSDT, und bei offener Position lehnt R-022
+    jeden Candidate ohnehin ab.
+  - Es entsteht ein zusätzliches CRITICAL-Ereignis `PORTFOLIO_INCONSISTENT`.
+    Es sieht wie ein Integritätsalarm aus, löst einen Alert aus und zählt in
+    der Arena.
+- **Arena beim ersten Trade:**
+  - Den Hard Stop `CRITICAL_RISK_EVENTS` löst schon R-022 aus. R-022 ist
+    CRITICAL, und der Candidate-Scan läuft auch bei offener Position.
+  - Er entsteht, sobald während der offenen Position ein Candidate bewertet
+    wird. Das ist ein Altbefund aus der ADR-0022-Analyse und bleibt mit und
+    ohne R-003-Korrektur.
+  - Die Arena empfiehlt nur. Status, Kapital und Handel ändert sie nicht.
+- **Kleine Korrektur, vorgeschlagen, nicht umgesetzt:**
+  - Der Assembler bewertet mit `basis: "BOOKED_CANDLE"`, eine Zeile plus
+    Tests.
+  - Die Regeln und ihre Schwellen bleiben, wie sie sind. Equity, Tages-P&L,
+    R-003 und die Exposure-Limits stehen dann auf demselben Stand.
+  - Solange eine Kerze ungebucht ist, rechnen die Exposure-Limits mit dem
+    gebuchten statt dem neuesten Preis.
+  - In OFFICIAL_V1 ändert das keine Entscheidung, siehe R-022.
+  - Empfehlung: aufnehmen, als eigener Commit mit Risk-Differenzlauf. Nötig
+    für die Sicherheit ist es nicht. Es verhindert irreführende
+    Integritätsalarme, nicht aber den Arena-Hard-Stop durch R-022.
+
+### 6.2 Weitere offene Punkte
 
 | Prio | Befund | Stand | Wirkung auf OFFICIAL_V1 |
 |---|---|---|---|
-| 1 | **N3 – Reconciliation gegen Monitor** | neu, synthetisch bestätigt | Siehe 6.1. Kann die erste offene Position per `ERROR_LOCKED` stoppen |
-| 2 | **K1 – Sperre während `PARTIALLY_FILLED`** | ADR 0024, F2 | Bei Kill Switch oder Sperre bleibt eine teilgefüllte Position unüberwacht, bis entsperrt wird. Selten |
-| 3 | **ADR 0022 – `ERROR_LOCK` allgemein, kein Rückweg** | nur Analyse | Jede Sperre braucht SQL von Hand |
-| 4 | **N2 – Fill-Kerze ohne Exitprüfung** | analysiert, Abschnitt 7 | betrifft jeden Trade; Forschung und Forward-Test gleich |
-| 5 | **N1 – Fill-Fenster nach Teilfill** | ADR 0024, F2 | selten |
-| 6 | **Option R** (Reconciliation-Befund für `OPENING` mit terminaler Order) | ADR 0024 | zweite Verteidigungslinie |
-| 7 | **B1** – nicht protokollierter Worker-Start | VPS-Bericht | nur Protokoll |
-| 8 | Alert-Katalog-Test in `packages/database` | Altbefund auf `16d6d0f` | keiner |
-
-### 6.1 N3 im Detail
-
-- **Mechanik:** Die Reconciliation (`*/4`) bewertet jede offene Position mit
-  der neuesten geschlossenen Kerze. Der Equity-Cache trägt den Mark der
-  letzten Buchung (Fill, Monitor, Tagesstart). Die Toleranz liegt bei 1e-8.
-  Ist eine neue Kerze geschrieben, aber noch nicht vom Monitor (`*/2`)
-  gebucht, meldet sie `PORTFOLIO_EQUITY_MISMATCH`. Folge: CRITICAL-RiskEvent,
-  Session und Portfolio `ERROR_LOCKED`, Kill Switch. In der Arena zählt das als
-  Hard Stop.
-- **Nachweis:** synthetisch, mit einem normalen Voll-Fill. Vor dem Monitorlauf
-  ist der Stand inkonsistent und gesperrt, danach konsistent. Der Code ist in
-  `16d6d0f` identisch.
-- **Wahrscheinlichkeit:** Jeder Job hat seinen eigenen `cron.schedule`. In den
-  Minuten :00, :04, :08 … starten Monitor und Reconciliation gleichzeitig, eine
-  Reihenfolge ist nicht erzwungen. Kritisch ist eine Kerze, die zwischen einem
-  Monitor-Lauf und der nächsten gemeinsamen Minute geschrieben wird. Wann der
-  Daten-Worker auf dem VPS schreibt, ist unbekannt (`CRYPTO_PIPELINE_CRON`,
-  Laufzeit). Das ließe sich lesend klären über `Candle.createdAt` gegen die
-  Stundengrenze und die BotRun-Zeiten. Dafür braucht es eine neue Freigabe.
-- **Warum bisher unauffällig:** OFFICIAL_V1 hatte noch nie eine offene
-  Position.
-- **Lösungsrichtung, zu entscheiden:** Die Reconciliation bewertet mit der
-  Kerze, die der Monitor zuletzt gebucht hat, statt mit der neuesten. Oder
-  sie wertet einen noch nicht gebuchten Mark nicht als Befund. Beides ändert
-  keine Handelsentscheidung, braucht aber einen eigenen ADR.
+| 1 | **R-022 als Arena-Hard-Stop** | Altbefund (ADR 0022) | Beim ersten Trade erwartbar, sobald ein Candidate bei offener Position bewertet wird. Quittieren der Ereignisse oder Neueinstufung von R-022 ist eine eigene Entscheidung |
+| 2 | **R-003 (N3b)** | siehe 6.1 | irreführende CRITICAL-Ereignisse |
+| 3 | **ADR 0022 – kein Rückweg aus `ERROR_LOCKED`** | nur Analyse | Jede echte Sperre braucht SQL von Hand |
+| 4 | **K1 – Sperre während `PARTIALLY_FILLED`** | ADR 0024, F2 | selten |
+| 5 | **N2 – Fill-Kerze ohne Exitprüfung** | Abschnitt 7, durch N3 unverändert | betrifft jeden Trade; Forschung und Forward-Test gleich |
+| 6 | **N1 – Fill-Fenster**, **Option R** | ADR 0024 | selten, beziehungsweise zweite Verteidigungslinie |
+| 7 | **N3c** – Versionskonflikt des Monitors | ADR 0025 | selbstheilend |
+| 8 | **B1** – nicht protokollierter Worker-Start | VPS-Bericht | nur Protokoll |
 
 ## 7. N2 – Die Fill-Kerze wird nie auf Exits geprüft
 
@@ -293,24 +330,30 @@ Proben sind nicht committet. Kein Produktivcode wurde geändert.
      Freigabe. Dann als versionierte Änderung zusammen mit dem Replay
      entscheiden.
 
-## 8. Entscheidungen vor Push, CI und Deployment
 
-1. **Push** von `hotfix/official-v1-security` freigeben. Danach läuft CI. `gh`
-   ist lokal nicht installiert, Job-Logs brauchen einen GitHub-Login.
-2. **Einordnung:** protokollierter Bugfix nach Regel 2 (empfohlen) oder neue
-   Version. Dazu den Status von ADR 0021 und ADR 0023 (beide „Proposed“, die
-   Optionen A und W sind freigegeben) und von ADR 0024 F3 festlegen.
-3. **Lesende VPS-Prüfung direkt vor dem Deploy**, mit neuer Freigabe. Ein
-   konkreter Grund liegt vor: H3 verlangt „keine offene Entry-Order“ (D5),
-   ADR 0024 Q1–Q5 lief noch nie, und seit dem 2026-10-18 können Orders
-   entstanden sein. Optional dazu die N3-Abfrage (Schreibminute der Kerzen).
-4. **N3:** vor oder nach dem Deploy entscheiden. Der Hotfix ändert N3 nicht.
-   Ohne Korrektur sollte der Betreiber wissen, dass eine Sperre durch N3 nur
-   per SQL zu lösen ist.
-5. **Deployment-Fenster und Ablauf** nach der Hotfix-Vorbereitung (H3):
-   Backup, Rollback-Tags `:16d6d0f`, Trading-Worker- und API-Image,
-   `TRADING_CODE_VERSION`, `consistency-snapshot`/`-compare`, Eligibility.
-6. **Protokoll:** B1 klären, den Eintrag ins Änderungsprotokoll von
-   `official-forward-test-v1.md` schreiben, später den Hotfix in den
-   Entwicklungsstand übernehmen. Dort sind 0021 und 0023 schon enthalten,
-   K und die Fake-Korrektur kommen dazu.
+## 8. Bereitschaft und Entscheidungen
+
+**Einschätzung:** Der integrierte Stand ist bereit für den abschließenden
+CI-Lauf.
+- Lokal ist der vollständige Lauf grün, mit isolierter PostgreSQL und
+  denselben Befehlen wie in CI.
+- Der einzige bekannte rote Test ist behoben.
+- Die Differenzprüfungen zeigen keine unbeabsichtigte Verhaltensänderung.
+
+Vor Push, CI und Deployment zu entscheiden:
+
+1. **R-003-Korrektur** (6.1) vor dem Push aufnehmen oder bewusst später
+   machen. Mit Korrektur kommt ein Commit dazu, sonst bleibt der jetzige
+   Stand.
+2. **Push** des integrierten Branches. Danach soll die CI vollständig grün
+   sein. Logs und Job-Summary braucht ein GitHub-Login.
+3. **Einordnung** als protokollierter Bugfix nach Regel 2 (empfohlen). Dazu
+   der Status der ADRs 0021, 0023, 0024 und 0025.
+4. **Lesende VPS-Prüfung direkt vor dem Deploy**, mit eigener Freigabe:
+   keine offene Entry-Order (D5), ADR 0024 Q1–Q5 und die Limit- und
+   Profilzeilen unverändert.
+5. **Umgang mit R-022 in der Arena** beim ersten Trade (6.2). Eine
+   Betriebsanweisung reicht, eine Codeänderung ist es nicht.
+6. **Deployment** nach H3 mit Backup, Rollback-Tags, beiden Images,
+   `TRADING_CODE_VERSION` und Konsistenz-Snapshot und -Vergleich. Danach der
+   Eintrag ins Änderungsprotokoll.
