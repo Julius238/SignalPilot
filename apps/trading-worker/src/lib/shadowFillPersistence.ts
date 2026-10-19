@@ -983,6 +983,8 @@ export async function processEntryOrderFillForCandle(
         data: ledgerEntryCreateData(entry, portfolio.id)
       });
     }
+    // Marked on each position's booked candle, the basis the reconciliation
+    // checks (ADR 0025); the position above was just booked on this candle.
     const markedPortfolio = await loadShadowPortfolioValuation(tx, {
       portfolioId: portfolio.id,
       asOf: input.asOf,
@@ -991,7 +993,8 @@ export async function processEntryOrderFillForCandle(
       realizedPnl: finalState.realizedPnl,
       feesPaid: finalState.feesPaid,
       highWaterMark: decimalString(portfolio.highWaterMark),
-      startOfDayEquity: null
+      startOfDayEquity: null,
+      basis: "BOOKED_CANDLE"
     });
     const updated = await tx.portfolio.updateMany({
       where: { id: portfolio.id, version: portfolio.version },

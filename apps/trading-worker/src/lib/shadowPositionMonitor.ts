@@ -787,7 +787,8 @@ export async function monitorPositionForCandle(
       realizedPnl: ledger.nextState.realizedPnl,
       feesPaid: ledger.nextState.feesPaid,
       highWaterMark: decimalString(portfolio.highWaterMark),
-      startOfDayEquity: null
+      startOfDayEquity: null,
+      basis: "BOOKED_CANDLE"
     });
     const updated = await tx.portfolio.updateMany({
       where: { id: portfolio.id, version: portfolio.version },
@@ -877,7 +878,10 @@ async function markPositionCandleAndPortfolio(
       realizedPnl: decimalString(portfolio.realizedPnl),
       feesPaid: decimalString(portfolio.feesPaid),
       highWaterMark: decimalString(portfolio.highWaterMark),
-      startOfDayEquity: null
+      startOfDayEquity: null,
+      // The candle just booked above, never a newer one the monitor has not
+      // evaluated yet: the basis the reconciliation checks (ADR 0025).
+      basis: "BOOKED_CANDLE"
     });
     const updated = await tx.portfolio.updateMany({
       where: { id: portfolioId, version: portfolio.version },

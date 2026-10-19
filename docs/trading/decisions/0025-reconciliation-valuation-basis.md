@@ -1,14 +1,21 @@
 # ADR 0025 – Reconciliation und Positionsmonitor bewerten auf verschiedenen Kerzen (N3)
 
-- Status: Proposed
+- Status: Proposed; F2 = B entschieden, Option C lokal umgesetzt (2026-10-19)
 - Datum: 2026-10-19
-- Entscheidung: Betreiber (offen)
+- Entscheidung: Betreiber. F2: N3 vor dem ersten Deployment beheben (B).
+  Umsetzung freigegeben, nur lokal. Ausgewählt ist Option C, nicht S (siehe
+  „Umsetzung“)
 - Bezug: ADR 0004, ADR 0022 (Entwurf), ADR 0024 ·
   [Dokument 06](../06-risk-engine-specification.md) („Portfolio-Konsistenz
   und Toleranz“) · [Hotfix-Bericht](../research/2026-10-19-official-v1-security-hotfix.md),
   Abschnitt 6.1
 
-> **Nur Analyse und Entwurf.** Kein Produktivcode ist geändert, auf dem VPS
+> **Umsetzung:** Seit 2026-10-19 lokal auf diesem Branch, siehe Abschnitt
+> „Umsetzung“ am Ende. Umgesetzt ist **Option C**, nicht die zuerst empfohlene
+> Option S: Sie erfüllt die Vorgaben des Betreibers exakt. Nicht gepusht,
+> nicht deployt. Der Text bis dorthin ist der Entwurf.
+>
+> **Entwurf: nur Analyse.** Kein Produktivcode ist geändert, auf dem VPS
 > wurde nichts ausgeführt. Der Branch `claude/n3-reconciliation-race-draft`
 > baut auf `hotfix/official-v1-security` (`961dafc`) auf. Zeilenangaben
 > beziehen sich auf diesen Stand. Die betroffenen Stellen sind in `16d6d0f`
@@ -269,3 +276,105 @@ in CI läuft.
 - **F3:** Soll die Schreibzeit der Kerzen auf dem VPS lesend gemessen
   werden? Das braucht eine Freigabe.
 - **F4:** N3b (R-003) und N3c getrennt oder gar nicht behandeln?
+
+## Umsetzung (2026-10-19, Option C)
+
+### Warum C statt S
+
+Für die Umsetzung hat der Betreiber vorgegeben: die tatsächlich verbuchte
+Bewertungsbasis zuverlässig nachvollziehen, keine beliebigen historischen
+Kerzenbewertungen als gültig akzeptieren, keine unsichere Näherung.
+
+- **S** sucht den passenden Stand in einem Fenster zwischen Cursor und
+  neuester Kerze. Die Basis wird also erschlossen, nicht gelesen. Bei
+  Monitor-Rückstand (R5) liegen mehrere Kerzen im Fenster. Ein auf eine
+  andere Kerze im Fenster manipulierter Equity-Wert ginge durch.
+- **C** macht den bereits gespeicherten Cursor (`lastProcessedCandleId`) zur
+  einzigen Basis: Jeder Schreiber bewertet jede Position auf ihrer gebuchten
+  Kerze, die Reconciliation prüft genau diese eine Bewertung. Es gibt kein
+  Fenster und keine Suche, und es braucht keine neue Spalte und keine
+  Migration.
+
+### Code
+
+| Datei | Änderung |
+|---|---|
+| `shadowPortfolioValuation.ts` | optionaler Parameter `basis`: `NEWEST_CANDLE` (Standard, unverändert) oder `BOOKED_CANDLE` (Kerze `lastProcessedCandleId` der Position; eine Kerze eines anderen Assets oder Timeframes ist ein Fehler; ohne Cursor die neueste Kerze wie bisher) |
+| `shadowFillPersistence.ts`, `shadowPositionMonitor.ts` (Mark und Exit), `shadowTradingDay.ts` | die vier Schreiber von `Portfolio.equity` bewerten mit `BOOKED_CANDLE` |
+| `shadowReconciliation.ts` | alle Lesezugriffe in einer Transaktion `REPEATABLE READ`, Bewertung mit `BOOKED_CANDLE`, im Audit (Erfolg und Mismatch) `valuationBasis` je offener Position: Kerze und Zahl der noch nicht gebuchten Kerzen. Sperrlogik, Toleranz und RiskEvents unverändert |
+
+Unverändert: Risk Engine, Risk-Assembler (R-003, siehe unten), Strategien,
+Arena, Equity-Punkte, Schema, Scheduler.
+
+### Beobachtbare Wirkung
+
+- **Normalbetrieb:** keine Änderung. Kerze und Cursor fallen zusammen. Im
+  Differenzlauf gegen `961dafc` und `16d6d0f` sind 10 von 12 Szenarien
+  zeilengleich. Bei den zwei Szenarien mit offener Position kommt nur das
+  Audit-Feld `valuationBasis` hinzu. Der Risk-Job ist byte-gleich mit
+  `961dafc`.
+- **Bei Verzögerung** (verspäteter Fill, Monitor-Rückstand, Tagesstart vor
+  dem Monitor) trägt der Cache die Bewertung der gebuchten Kerze statt der
+  neuesten. Er hinkt also bis zum nächsten Monitorlauf um höchstens die noch
+  nicht gebuchten Kerzen hinterher. Betroffen sind die Equity, die der
+  Risk-Job als Tages-P&L liest, und im Fall „Tagesstart vor Monitor“ der
+  Tagesstart-Snapshot.
+- **Falsche Sperren** durch R1 bis R5 entfallen. **R2:** Ein Lauf, während
+  dessen der Monitor bucht, findet nichts. Sein Erfolgs-Schreibzugriff
+  scheitert an der bestehenden Versionsprüfung („version conflict during
+  reconciliation“). Der BotRun gilt als fehlgeschlagen, `lastReconciledAt`
+  bleibt, der nächste Lauf ist sauber.
+- **Hängt der Monitor (R3),** sperrt die Reconciliation nicht mehr. Das Audit
+  zeigt die offenen Kerzen, der Alert `POSITION_MONITOR_STALE` bleibt.
+
+### Tests
+
+- `test/shadowExecution.test.ts`, Block „ADR 0025“, 21 Fälle:
+  - R1a, R1b, R2, R3, R4, R5, R6, Ablauf nach ADR 0024, SHORT.
+  - Echte Abweichungen mit ungebuchter Kerze: Equity +0,01; Equity auf den
+    Wert der neuesten, ungebuchten Kerze; Equity auf einen veralteten Wert;
+    `availableCash` +1; 1 USDT von verfügbar nach reserviert; `openQuantity`
+    geändert; Schlusskurs der gebuchten Kerze geändert; Cursor auf einer
+    Kerze eines anderen Assets; SHORT-Collateral weg; Manipulation nach dem
+    Monitorlauf. Jede dieser Abweichungen sperrt.
+  - Stop-Exit unter der entstandenen Sperre.
+  - Bewertung zweier Positionen auf zwei Assets mit getrennten Cursorn.
+- Für R2 emuliert der Fake `REPEATABLE READ`. Jeder Lesezugriff außerhalb des
+  Snapshots lässt den Test scheitern. Gegenprobe: Mit absichtlich falschem
+  Client schlägt R2 fehl.
+- `test/reconciliationSnapshot.test.ts` (echte PostgreSQL, wie die
+  Lease-Tests): Eine zweite Verbindung committet zwischen den Lesezugriffen.
+  Das ergibt keinen Befund und keine Sperre, der nächste Lauf ist sauber. Eine
+  echte Abweichung sperrt. Gegenprobe ohne Snapshot: Der Test schlägt fehl.
+- Gegen den Code ohne Korrektur (`961dafc`) schlagen 12 der 21 Fälle fehl.
+  Bemerkenswert: Der alte Stand akzeptiert eine Equity, die auf den Wert der
+  neuesten, noch nicht gebuchten Kerze gesetzt wurde.
+
+### R-003 (N3b): Auswirkung und Vorschlag, nicht umgesetzt
+
+- **Befund:** Der Assembler übergibt den gecachten Equity-Wert und Marks zur
+  neuesten Kerze. Synthetisch im Zustand R1a ergibt die R-003-Gleichung −15
+  USDT Abweichung, also CRITICAL. Mit Marks auf der gebuchten Kerze geht sie
+  exakt auf.
+- **Wirkung in OFFICIAL_V1:** Keine Handelsentscheidung kippt. Jeder
+  Teilnehmer handelt nur BTCUSDT, und bei offener BTC-Position lehnt R-022
+  (kein Scale-in) jeden Candidate ohnehin ab. Es entsteht nur ein zusätzliches
+  CRITICAL-RiskEvent. Das öffnet keinen Breaker und sperrt nicht, zählt aber
+  in der Arena als Hard Stop, wie schon die R-022-Ereignisse.
+- **Wirkung anderswo:** In einem Portfolio mit zwei aktiven Assets könnte ein
+  regulärer Einstieg in das zweite Asset fälschlich abgelehnt werden,
+  solange die Kerze der offenen Position ungebucht ist.
+- **Vorschlag:** Der Assembler bewertet offene Positionen mit
+  `basis: "BOOKED_CANDLE"`. Damit stehen Equity, Tages-P&L und Exposure im
+  Risk-Snapshot auf demselben Stand. Die Risk Engine bleibt unverändert. Die
+  Risk-Inputs ändern sich nur, solange eine Kerze ungebucht ist. Das ist ein
+  eigener Schritt mit eigener Freigabe und eigenem Risk-Differenzlauf.
+
+### Weiter offen
+
+- N3c (R6) ist selbstheilend. Der Monitor-Lauf scheitert einmal am
+  Versionskonflikt, der nächste bucht.
+- Die Schreibzeit der Kerzen auf dem VPS (F3) bleibt unbekannt. Mit C hängt
+  davon nur noch ab, wie lange ein Mark ungebucht bleibt, nicht mehr, ob
+  gesperrt wird.
+

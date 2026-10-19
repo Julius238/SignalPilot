@@ -2138,3 +2138,476 @@ describe("entry expiry after a partial fill opens the position (ADR 0024)", () =
     assert.equal(world.tables.get("shadowPositionEvent")!.rows.length, 0);
   });
 });
+
+// ───────────────────────────────────────────────────────────────────────────
+// Reconciliation on the booked valuation basis (ADR 0025, N3): every writer of
+// Portfolio.equity marks each position on its booked candle, the
+// reconciliation checks exactly that basis from one snapshot.
+// ───────────────────────────────────────────────────────────────────────────
+
+describe("reconciliation on the booked valuation basis (ADR 0025)", () => {
+  const MONITOR_ENV = {
+    ENABLE_LIVE_TRADING: "false",
+    TRADING_MODE: "SHADOW",
+    TRADING_SHADOW_ENABLED: "true",
+    TRADING_STRATEGY_V1_ENABLED: "true",
+    TRADING_STRATEGY_LONG_V1_ENABLED: "true",
+    TRADING_SHADOW_EXECUTION_ENABLED: "true",
+    TRADING_SHADOW_POSITION_MONITOR_ENABLED: "true"
+  };
+  const HOUR = 3_600_000;
+
+  /** A quiet 1h candle around `close`, far from both stops and take-profits. */
+  const addHour = (world: World, id: string, openTime: string, close: string, assetId = world.assetId as string) => {
+    const start = new Date(openTime);
+    return world.tables.get("candle")!.create({
+      data: {
+        id,
+        assetId,
+        symbol: assetId === world.assetId ? "BTCUSDT" : "ETHUSDT",
+        timeframe: "1h",
+        openTime: start,
+        closeTime: new Date(start.getTime() + HOUR - 1),
+        open: close,
+        high: String(Number(close) + 40),
+        low: String(Number(close) - 40),
+        close,
+        volume: "1000",
+        source: "BINANCE"
+      }
+    });
+  };
+  const reconcile = (world: World, asOf: string, tag = `reconcile-${asOf}`) =>
+    reconcilePortfolio(world.database as never, {
+      portfolioId: world.portfolio.id as string,
+      asOf: new Date(asOf),
+      codeVersion: CODE_VERSION,
+      correlationId: tag
+    });
+  const monitorOn = (world: World, candleId: string, asOf: string) =>
+    monitorPositionForCandle(world.database as never, {
+      shadowPositionId: world.tables.get("shadowPosition")!.rows[0]!.id as string,
+      candleId,
+      asOf: new Date(asOf),
+      codeVersion: CODE_VERSION,
+      correlationId: `monitor-${candleId}`
+    });
+  const portfolioRow = (world: World) => world.tables.get("portfolio")!.rows[0]!;
+  const positionRow = (world: World) => world.tables.get("shadowPosition")!.rows[0]!;
+  /** Equity of the current cash plus each open position valued on `candleId`. */
+  const equityOn = async (world: World, candleId: string) => {
+    const candle = world.tables.get("candle")!.rows.find((row) => row.id === candleId)!;
+    const portfolio = portfolioRow(world);
+    const { valuation } = await loadShadowPortfolioValuation(world.database as never, {
+      portfolioId: portfolio.id as string,
+      asOf: candle.closeTime as Date,
+      availableCash: String(portfolio.availableCash),
+      reservedCash: String(portfolio.reservedCash),
+      realizedPnl: String(portfolio.realizedPnl),
+      feesPaid: String(portfolio.feesPaid),
+      highWaterMark: String(portfolio.highWaterMark),
+      startOfDayEquity: null
+    });
+    return valuation.equity;
+  };
+  const lastSuccessAudit = (world: World) =>
+    world.tables
+      .get("tradingAuditEvent")!
+      .rows.filter((row) => row.eventType === "SHADOW_RECONCILE_SUCCESS")
+      .at(-1)!.afterState as { valuationBasis?: { candleId: string; unbookedCandles: number }[] };
+  const assertClean = (world: World, label: string) => {
+    assert.equal(world.tables.get("tradingSession")!.rows[0]!.status, "SHADOW_ACTIVE", label);
+    assert.equal(portfolioRow(world).status, "ACTIVE", label);
+    assert.equal(world.tables.get("riskEvent")!.rows.length, 0, label);
+  };
+  const assertLocked = (world: World, violation: string, result: { consistent: boolean; violations: readonly string[] }, label: string) => {
+    assert.equal(result.consistent, false, label);
+    assert.ok(result.violations.includes(violation as never), `${label}: ${result.violations.join(",")}`);
+    assert.equal(world.tables.get("tradingSession")!.rows[0]!.status, "ERROR_LOCKED", label);
+    assert.equal(portfolioRow(world).status, "ERROR_LOCKED", label);
+    assert.ok(
+      world.tables.get("riskEvent")!.rows.some((row) => row.reasonCode === violation && row.severity === "CRITICAL"),
+      label
+    );
+  };
+  /** An open LONG (or SHORT) position filled on C1, as PostgreSQL would return it. */
+  const openOnC1 = async (direction: "LONG" | "SHORT" = "LONG") => {
+    const world = seedWorld({ direction });
+    if (direction === "LONG") {
+      // C1 stays clear of the stop: N2 (the fill candle is never checked) is not part of this.
+      world.tables.get("candle")!.update({ where: { id: world.candleC1.id }, data: { low: "23900", high: "24400", close: "24300" } });
+    } else {
+      world.tables.get("candle")!.update({ where: { id: world.candleC1.id }, data: { low: "23900", high: "24400", close: "24000" } });
+    }
+    const order = await createShadowOrderForCandidate(world.database as never, {
+      tradeCandidateId: world.candidate.id as string,
+      asOf: new Date("2026-08-02T09:00:05.000Z"),
+      codeVersion: CODE_VERSION,
+      correlationId: CORRELATION_ID,
+      capability: direction === "LONG" ? SAFE_LONG_CAPABILITY : SAFE_SHORT_CAPABILITY
+    });
+    world.tables.get("shadowOrder")!.rows[0]!.lastProcessedCandleId ??= null;
+    const fill = await processEntryOrderFillForCandle(world.database as never, {
+      shadowOrderId: order.shadowOrderId!,
+      candleId: world.candleC1.id as string,
+      asOf: new Date("2026-08-02T10:01:00.000Z"),
+      codeVersion: CODE_VERSION,
+      correlationId: CORRELATION_ID
+    });
+    assert.equal(fill.outcome, ShadowFillOutcome.FILLED);
+    return world;
+  };
+
+  /**
+   * PostgreSQL REPEATABLE READ for the fake: a transaction at that level reads
+   * a copy of every table taken when it starts. While it runs, any read on the
+   * live database outside `concurrently` fails the test, so a read the
+   * reconciliation makes outside its snapshot cannot go unnoticed.
+   */
+  const withSnapshots = (world: World, concurrently?: (live: never) => Promise<void>) => {
+    const live = world.database as Record<string, unknown>;
+    const isolationLevels: unknown[] = [];
+    let inSnapshot = false;
+    let inConcurrent = false;
+    const restorers: (() => void)[] = [];
+    for (const [name, model] of Object.entries(live)) {
+      if (name.startsWith("$")) continue;
+      for (const method of ["findUnique", "findFirst", "findMany", "count", "aggregate", "groupBy"]) {
+        const target = model as Record<string, (args: unknown) => Promise<unknown>>;
+        const original = target[method]!;
+        target[method] = (args: unknown) => {
+          if (inSnapshot && !inConcurrent) throw new Error(`${name}.${method} read outside the snapshot`);
+          return original(args);
+        };
+        restorers.push(() => (target[method] = original));
+      }
+    }
+    const originalTransaction = live.$transaction as (fn: (tx: unknown) => Promise<unknown>, options?: { isolationLevel?: string }) => Promise<unknown>;
+    live.$transaction = async (fn: (tx: unknown) => Promise<unknown>, options?: { isolationLevel?: string }) => {
+      isolationLevels.push(options?.isolationLevel);
+      if (options?.isolationLevel !== "RepeatableRead") return originalTransaction(fn, options);
+      const { database: snapshot, tables } = createFakeExecutionDatabase();
+      for (const [name, table] of world.tables) tables.get(name)!.rows.push(...table.rows.map((row) => ({ ...row })));
+      const portfolioModel = (snapshot as Record<string, Record<string, (args: unknown) => Promise<unknown>>>).portfolio!;
+      const firstRead = portfolioModel.findUnique!;
+      let fired = false;
+      portfolioModel.findUnique = async (args: unknown) => {
+        const row = await firstRead(args);
+        if (!fired && concurrently !== undefined) {
+          fired = true;
+          inConcurrent = true;
+          try {
+            await concurrently(world.database as never);
+          } finally {
+            inConcurrent = false;
+          }
+        }
+        return row;
+      };
+      inSnapshot = true;
+      try {
+        return await fn(snapshot);
+      } finally {
+        inSnapshot = false;
+      }
+    };
+    return {
+      isolationLevels,
+      restore: () => {
+        live.$transaction = originalTransaction;
+        for (const restore of restorers) restore();
+      }
+    };
+  };
+
+  it("R1a: a new candle, the reconciliation before the monitor: consistent on the booked candle", async () => {
+    const world = await openOnC1();
+    addHour(world, "c2", "2026-08-02T10:00:00.000Z", "24450");
+    const result = await reconcile(world, "2026-08-02T11:04:00.000Z");
+    assert.equal(result.consistent, true, result.violations.join(","));
+    assert.deepEqual(lastSuccessAudit(world).valuationBasis, [
+      { shadowPositionId: positionRow(world).id, candleId: world.candleC1.id, unbookedCandles: 1 }
+    ]);
+    assertClean(world, "R1a");
+  });
+
+  it("R1b: the monitor books the candle first: consistent on the new candle", async () => {
+    const world = await openOnC1();
+    addHour(world, "c2", "2026-08-02T10:00:00.000Z", "24450");
+    assert.equal((await monitorOn(world, "c2", "2026-08-02T11:04:00.000Z")).outcome, ShadowMonitorOutcome.NO_TRIGGER);
+    assert.equal(portfolioRow(world).equity, await equityOn(world, "c2"));
+    const result = await reconcile(world, "2026-08-02T11:04:01.000Z");
+    assert.equal(result.consistent, true, result.violations.join(","));
+    assert.equal(lastSuccessAudit(world).valuationBasis![0]!.candleId, "c2");
+    assert.equal(lastSuccessAudit(world).valuationBasis![0]!.unbookedCandles, 0);
+    assertClean(world, "R1b");
+  });
+
+  it("R2: the monitor commits between the reconciliation's reads: one REPEATABLE READ snapshot, consistent", async () => {
+    const world = await openOnC1();
+    addHour(world, "c2", "2026-08-02T10:00:00.000Z", "24450");
+    const snapshots = withSnapshots(world, async () => {
+      assert.equal((await monitorOn(world, "c2", "2026-08-02T11:04:00.000Z")).outcome, ShadowMonitorOutcome.NO_TRIGGER);
+    });
+    const reconciledBefore = portfolioRow(world).lastReconciledAt;
+    try {
+      // The snapshot is consistent (C1 booked, equity on C1): no finding, no
+      // lock. Its success write then sees the monitor's newer version and
+      // discards the run, as the version check always did.
+      await assert.rejects(() => reconcile(world, "2026-08-02T11:04:00.000Z"), /version conflict during reconciliation/);
+      assert.ok(snapshots.isolationLevels.includes("RepeatableRead"));
+    } finally {
+      snapshots.restore();
+    }
+    assertClean(world, "R2 concurrent run");
+    assert.equal(portfolioRow(world).lastReconciledAt, reconciledBefore);
+    assert.equal(positionRow(world).lastProcessedCandleId, "c2");
+    const next = await reconcile(world, "2026-08-02T11:08:00.000Z");
+    assert.equal(next.consistent, true, next.violations.join(","));
+    assert.equal(lastSuccessAudit(world).valuationBasis![0]!.candleId, "c2");
+    assertClean(world, "R2");
+  });
+
+  it("R3: the monitor is down for three candles: consistent, unbooked candles shown, then caught up", async () => {
+    const world = await openOnC1();
+    addHour(world, "c2", "2026-08-02T10:00:00.000Z", "24450");
+    addHour(world, "c3", "2026-08-02T11:00:00.000Z", "24520");
+    addHour(world, "c4", "2026-08-02T12:00:00.000Z", "24380");
+    for (const asOf of ["2026-08-02T13:04:00.000Z", "2026-08-02T13:08:00.000Z"]) {
+      const result = await reconcile(world, asOf);
+      assert.equal(result.consistent, true, result.violations.join(","));
+      assert.equal(lastSuccessAudit(world).valuationBasis![0]!.unbookedCandles, 3);
+    }
+    const caughtUp = await runShadowMonitorPositions(world.database as never, {
+      asOf: new Date("2026-08-02T13:10:00.000Z"),
+      env: MONITOR_ENV,
+      codeVersion: CODE_VERSION,
+      correlationId: CORRELATION_ID
+    });
+    assert.equal(caughtUp.outcomes[ShadowMonitorOutcome.NO_TRIGGER], 3);
+    assert.equal(portfolioRow(world).equity, await equityOn(world, "c4"));
+    const result = await reconcile(world, "2026-08-02T13:12:00.000Z");
+    assert.equal(result.consistent, true, result.violations.join(","));
+    assert.deepEqual(lastSuccessAudit(world).valuationBasis![0], { shadowPositionId: positionRow(world).id, candleId: "c4", unbookedCandles: 0 });
+    assertClean(world, "R3");
+  });
+
+  it("R4: a fill that lags a candle books its fill candle, not the newer one, and reconciles", async () => {
+    const world = seedWorld();
+    world.tables.get("candle")!.update({ where: { id: world.candleC1.id }, data: { low: "23900", high: "24400", close: "24300" } });
+    addHour(world, "c2", "2026-08-02T10:00:00.000Z", "24450");
+    const order = await createOrder(world);
+    world.tables.get("shadowOrder")!.rows[0]!.lastProcessedCandleId ??= null;
+    // Runs at 12:00 with C2 already visible, fills on C1.
+    assert.equal((await fillEntry(world, order.shadowOrderId!)).outcome, ShadowFillOutcome.FILLED);
+    assert.equal(positionRow(world).lastProcessedCandleId, world.candleC1.id);
+    assert.equal(portfolioRow(world).equity, await equityOn(world, world.candleC1.id as string));
+    addHour(world, "c3", "2026-08-02T11:00:00.000Z", "24520");
+    const result = await reconcile(world, "2026-08-02T12:04:00.000Z");
+    assert.equal(result.consistent, true, result.violations.join(","));
+    assert.equal(lastSuccessAudit(world).valuationBasis![0]!.unbookedCandles, 2);
+    assertClean(world, "R4");
+  });
+
+  it("R5: the monitor works off a backlog one candle at a time; every mark is on the candle just booked", async () => {
+    const world = await openOnC1();
+    addHour(world, "c2", "2026-08-02T10:00:00.000Z", "24450");
+    addHour(world, "c3", "2026-08-02T11:00:00.000Z", "24520");
+    await monitorOn(world, "c2", "2026-08-02T12:01:00.000Z");
+    assert.equal(portfolioRow(world).equity, await equityOn(world, "c2"));
+    addHour(world, "c4", "2026-08-02T12:00:00.000Z", "24380");
+    const result = await reconcile(world, "2026-08-02T13:04:00.000Z");
+    assert.equal(result.consistent, true, result.violations.join(","));
+    assert.deepEqual(lastSuccessAudit(world).valuationBasis![0], { shadowPositionId: positionRow(world).id, candleId: "c2", unbookedCandles: 2 });
+    assertClean(world, "R5");
+  });
+
+  it("R6: a reconciliation commit between the monitor's read and write aborts that mark only; the next run books it", async () => {
+    const world = await openOnC1();
+    addHour(world, "c2", "2026-08-02T10:00:00.000Z", "24450");
+    const live = world.database as unknown as {
+      portfolio: { findUnique: (args: unknown) => Promise<unknown> };
+      shadowPosition: { update: (args: unknown) => Promise<unknown> };
+    };
+    const originalFind = live.portfolio.findUnique;
+    const originalUpdate = live.shadowPosition.update;
+    // PostgreSQL returns a copy; the reconciliation's success commit bumps the version.
+    live.portfolio.findUnique = async (args) => {
+      const row = await originalFind(args);
+      return row && { ...(row as object) };
+    };
+    live.shadowPosition.update = async (args) => {
+      portfolioRow(world).version = Number(portfolioRow(world).version) + 1;
+      return originalUpdate(args);
+    };
+    try {
+      await assert.rejects(() => monitorOn(world, "c2", "2026-08-02T11:04:00.000Z"), /version conflict/);
+    } finally {
+      live.portfolio.findUnique = originalFind;
+      live.shadowPosition.update = originalUpdate;
+    }
+    // The fake has no rollback: a real transaction would have undone the cursor
+    // update together with the failed equity write. Restore what PostgreSQL keeps.
+    positionRow(world).lastProcessedCandleId = world.candleC1.id;
+    assert.equal((await reconcile(world, "2026-08-02T11:04:01.000Z")).consistent, true);
+    assert.equal((await monitorOn(world, "c2", "2026-08-02T11:06:00.000Z")).outcome, ShadowMonitorOutcome.NO_TRIGGER);
+    const result = await reconcile(world, "2026-08-02T11:08:00.000Z");
+    assert.equal(result.consistent, true, result.violations.join(","));
+    assert.equal(lastSuccessAudit(world).valuationBasis![0]!.candleId, "c2");
+    assertClean(world, "R6");
+  });
+
+  it("reconciles a position opened by an expired partial entry (ADR 0024) before the monitor runs", async () => {
+    const world = seedWorld();
+    world.tables.get("candle")!.update({ where: { id: world.candleC1.id }, data: { volume: "0.1", low: "23900", high: "24400", close: "24300" } });
+    const order = await createOrder(world);
+    world.tables.get("shadowOrder")!.rows[0]!.lastProcessedCandleId ??= null;
+    assert.equal((await fillEntry(world, order.shadowOrderId!)).outcome, ShadowFillOutcome.PARTIALLY_FILLED);
+    const thin = addHour(world, "c2", "2026-08-02T10:00:00.000Z", "24150");
+    thin.volume = "0.0005";
+    assert.equal((await fillEntry(world, order.shadowOrderId!, "c2")).outcome, ShadowFillOutcome.EXPIRED);
+    assert.equal(positionRow(world).status, "OPEN");
+    const result = await reconcile(world, "2026-08-02T12:04:00.000Z");
+    assert.equal(result.consistent, true, result.violations.join(","));
+    assert.equal(lastSuccessAudit(world).valuationBasis![0]!.unbookedCandles, 1);
+    assertClean(world, "expiry");
+  });
+
+  it("SHORT: R1a reconciles on the booked candle", async () => {
+    const world = await openOnC1("SHORT");
+    addHour(world, "c2", "2026-08-02T10:00:00.000Z", "24150");
+    const result = await reconcile(world, "2026-08-02T11:04:00.000Z");
+    assert.equal(result.consistent, true, result.violations.join(","));
+    assert.equal(lastSuccessAudit(world).valuationBasis![0]!.candleId, world.candleC1.id);
+    assertClean(world, "SHORT");
+  });
+
+  describe("real deviations still lock, with an unbooked candle present", () => {
+    const tamperings: ReadonlyArray<readonly [string, string, (world: World) => Promise<void> | void]> = [
+      ["equity raised by 0.01", "PORTFOLIO_EQUITY_MISMATCH", (world) => {
+        portfolioRow(world).equity = (Number(portfolioRow(world).equity) + 0.01).toFixed(12);
+      }],
+      ["equity set to the value on the newest, unbooked candle", "PORTFOLIO_EQUITY_MISMATCH", async (world) => {
+        portfolioRow(world).equity = await equityOn(world, "c2");
+      }],
+      ["equity set to a stale value on a candle before the booked one", "PORTFOLIO_EQUITY_MISMATCH", async (world) => {
+        portfolioRow(world).equity = await equityOn(world, "candle-c0");
+      }],
+      ["available cash raised by 1", "PORTFOLIO_CACHE_MISMATCH_LEDGER_REPLAY", (world) => {
+        portfolioRow(world).availableCash = (Number(portfolioRow(world).availableCash) + 1).toFixed(12);
+      }],
+      ["1 USDT moved from available to reserved cash", "PORTFOLIO_RESERVATION_MISMATCH", (world) => {
+        portfolioRow(world).availableCash = (Number(portfolioRow(world).availableCash) - 1).toFixed(12);
+        portfolioRow(world).reservedCash = (Number(portfolioRow(world).reservedCash) + 1).toFixed(12);
+      }],
+      ["open quantity changed after the booking", "PORTFOLIO_EQUITY_MISMATCH", (world) => {
+        positionRow(world).openQuantity = "0.090000000000";
+      }],
+      ["the booked candle's close changed after the booking", "PORTFOLIO_EQUITY_MISMATCH", (world) => {
+        world.tables.get("candle")!.rows.find((row) => row.id === world.candleC1.id)!.close = "24600";
+      }],
+      ["the booking pointing at another asset's candle", "PORTFOLIO_INVALID_AMOUNT", (world) => {
+        world.tables.get("asset")!.create({ data: { id: "asset-eth", symbol: "ETHUSDT" } });
+        addHour(world, "eth-c1", "2026-08-02T09:00:00.000Z", "2600", "asset-eth");
+        positionRow(world).lastProcessedCandleId = "eth-c1";
+      }]
+    ];
+    for (const [label, violation, tamper] of tamperings) {
+      it(`locks on ${label}`, async () => {
+        const world = await openOnC1();
+        addHour(world, "c2", "2026-08-02T10:00:00.000Z", "24450");
+        await tamper(world);
+        assertLocked(world, violation, await reconcile(world, "2026-08-02T11:04:00.000Z"), label);
+      });
+    }
+
+    it("locks on a SHORT position whose collateral vanished", async () => {
+      const world = await openOnC1("SHORT");
+      addHour(world, "c2", "2026-08-02T10:00:00.000Z", "24150");
+      positionRow(world).reservedCollateral = "0.000000000000";
+      assertLocked(world, "PORTFOLIO_COLLATERAL_MISMATCH", await reconcile(world, "2026-08-02T11:04:00.000Z"), "collateral");
+    });
+
+    it("locks on a tampered equity after the monitor has booked the new candle too", async () => {
+      const world = await openOnC1();
+      addHour(world, "c2", "2026-08-02T10:00:00.000Z", "24450");
+      await monitorOn(world, "c2", "2026-08-02T11:04:00.000Z");
+      portfolioRow(world).equity = await equityOn(world, world.candleC1.id as string);
+      assertLocked(world, "PORTFOLIO_EQUITY_MISMATCH", await reconcile(world, "2026-08-02T11:04:01.000Z"), "after monitor");
+    });
+
+    it("still stops the position out under the resulting lock", async () => {
+      const world = await openOnC1();
+      addHour(world, "c2", "2026-08-02T10:00:00.000Z", "24450");
+      portfolioRow(world).equity = (Number(portfolioRow(world).equity) + 0.01).toFixed(12);
+      assertLocked(world, "PORTFOLIO_EQUITY_MISMATCH", await reconcile(world, "2026-08-02T11:04:00.000Z"), "lock");
+      world.tables.get("candle")!.create({
+        data: {
+          id: "c3-stop",
+          assetId: world.assetId,
+          symbol: "BTCUSDT",
+          timeframe: "1h",
+          openTime: new Date("2026-08-02T11:00:00.000Z"),
+          closeTime: new Date("2026-08-02T11:59:59.999Z"),
+          open: "24000",
+          high: "24100",
+          low: "23500",
+          close: "23700",
+          volume: "1000",
+          source: "BINANCE"
+        }
+      });
+      const summary = await runShadowMonitorPositions(world.database as never, {
+        asOf: new Date("2026-08-02T12:01:00.000Z"),
+        env: MONITOR_ENV,
+        codeVersion: CODE_VERSION,
+        correlationId: CORRELATION_ID
+      });
+      assert.equal(summary.outcomes[ShadowMonitorOutcome.TRIGGERED_CLOSED], 1);
+      assert.equal(positionRow(world).status, "STOPPED_OUT");
+      assert.equal(world.tables.get("tradingSession")!.rows[0]!.status, "ERROR_LOCKED", "the lock stays");
+    });
+  });
+
+  it("values each position on its own booked candle; without a basis the newest candle as before", async () => {
+    const world = await openOnC1();
+    addHour(world, "c2", "2026-08-02T10:00:00.000Z", "24450");
+    // A second open position on another asset, booked on its own older candle.
+    world.tables.get("asset")!.create({ data: { id: "asset-eth", symbol: "ETHUSDT" } });
+    world.tables.get("instrumentExecutionProfile")!.create({ data: approvedExecutionProfileRow("ETHUSDT", { assetId: "asset-eth" }) });
+    addHour(world, "eth-c1", "2026-08-02T08:00:00.000Z", "2600", "asset-eth");
+    addHour(world, "eth-c2", "2026-08-02T09:00:00.000Z", "2650", "asset-eth");
+    world.tables.get("shadowPosition")!.create({
+      data: {
+        ...positionRow(world),
+        id: "position-eth",
+        assetId: "asset-eth",
+        positionKey: "position-eth",
+        openScopeKey: "open-eth",
+        openQuantity: "1.000000000000",
+        averageEntryPrice: "2600.000000000000",
+        lastProcessedCandleId: "eth-c1"
+      }
+    });
+    const portfolio = portfolioRow(world);
+    const value = (basis?: "BOOKED_CANDLE") =>
+      loadShadowPortfolioValuation(world.database as never, {
+        portfolioId: portfolio.id as string,
+        asOf: new Date("2026-08-02T11:04:00.000Z"),
+        availableCash: String(portfolio.availableCash),
+        reservedCash: String(portfolio.reservedCash),
+        realizedPnl: String(portfolio.realizedPnl),
+        feesPaid: String(portfolio.feesPaid),
+        highWaterMark: String(portfolio.highWaterMark),
+        startOfDayEquity: null,
+        ...(basis === undefined ? {} : { basis })
+      });
+    const booked = await value("BOOKED_CANDLE");
+    assert.deepEqual(booked.marks.map((mark) => mark.sourceCandleId).sort(), ["candle-c1", "eth-c1"]);
+    const newest = await value();
+    assert.deepEqual(newest.marks.map((mark) => mark.sourceCandleId).sort(), ["c2", "eth-c2"]);
+    // A position without a booked candle keeps the newest one.
+    world.tables.get("shadowPosition")!.rows.find((row) => row.id === "position-eth")!.lastProcessedCandleId = null;
+    assert.deepEqual((await value("BOOKED_CANDLE")).marks.map((mark) => mark.sourceCandleId).sort(), ["candle-c1", "eth-c2"]);
+  });
+});
