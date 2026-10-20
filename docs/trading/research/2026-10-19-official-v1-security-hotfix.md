@@ -1,7 +1,8 @@
-# OFFICIAL_V1 – Sicherheits-Hotfix auf `16d6d0f` (ADR 0021, 0023, 0024 K, 0025 N3)
+# OFFICIAL_V1 – Sicherheits-Hotfix auf `16d6d0f` (ADR 0021, 0023, 0024 K, 0025 N3, R-022-Guard)
 
-- Stand: 2026-10-19, **lokal integriert**. Gepusht ist nur der Zwischenstand
-  `961dafc`. Der integrierte Stand ist nicht gepusht und nicht deployt.
+- Stand: 2026-10-20, **lokal integriert**. Gepusht ist `154a3ee`, die CI dazu
+  ist grün. Der R-022-Guard (`96856c5`) und dieser Bericht sind nur lokal.
+  Nichts davon ist deployt.
 - Branch: `hotfix/official-v1-security`, Basis `16d6d0f` (deployter VPS-Stand)
 - Bezug: [ADR 0021](../decisions/0021-risk-limit-set-value-integrity.md) ·
   [ADR 0023](../decisions/0023-execution-profile-value-integrity.md) ·
@@ -23,7 +24,10 @@
   - die Strandung einer teilgefüllten, abgelaufenen Entry-Order in `OPENING`
     (ADR 0024, Option K);
   - falsche Sperren durch den Wettlauf von Reconciliation und Monitor (N3,
-    ADR 0025, Option C).
+    ADR 0025, Option C);
+  - falsche CRITICAL-Ereignisse und der Arena-Hard-Stop durch R-022 bei einem
+    Wiederholungssignal: Der Candidate-Scan fängt einen belegten Asset-Slot
+    vorher ab (`ASSET_SLOT_OCCUPIED`).
 - **Nur diese Korrekturen.** Dazu kommt ein reiner Testfix (`4a9f4c6`), ohne
   den die CI schon auf `16d6d0f` rot war. Strategien, Gates, Arena,
   Portfolio-, Simulations- und Replay-Pakete, DB-Schema, Migrationen, API,
@@ -34,13 +38,12 @@
     zusätzlich nur ein Audit-Feld.
   - Risk-Job: Die Entscheidungen sind gleich. Nur die Kennung `1.3.0 → 1.4.0`
     und die davon abgeleiteten Hashes ändern sich.
-- **Tests:** 1 765 von 1 765 in 28 Paketen bestehen, mit einer isolierten
-  PostgreSQL. Build, Lint und Ops-Skripte sind grün.
-- **Offen vor dem ersten Trade:**
-  - R-003 erzeugt im selben Wettlauf falsche CRITICAL-Ereignisse (N3b). Ein
-    Vorschlag liegt vor, umgesetzt ist er nicht.
-  - Unabhängig davon setzt R-022 die Arena bei offener Position auf Hard Stop.
-    Das ist ein Altbefund (ADR 0022).
+- **Tests:** 1 780 von 1 780 in 28 Paketen bestehen, mit einer isolierten
+  PostgreSQL. Build, Lint und Ops-Skripte sind grün. GitHub-CI auf `154a3ee`:
+  grün.
+- **Bewusst offen:**
+  - R-003 (N3b) bleibt als bestätigter Befund. In OFFICIAL_V1 tritt er mit dem
+    Guard praktisch nicht mehr auf, siehe 6.1.
   - N2 ist nur analysiert.
 
 ## 1. Bestandsaufnahme
@@ -79,17 +82,19 @@ Abhängigkeiten:
 | `ed458eb` | ADR 0025, Entwurf zu N3 | nur Doku |
 | `24552fd` | N3, Option C: gebuchte Bewertungsbasis, Snapshot-Reconciliation, 23 Tests | ADR 0025, „Umsetzung“ |
 | `ff78ead` | `4a9f4c6` übernommen: erwartete Liste im Alert-Katalog-Test | eine Testdatei, 6 Zeilen. Die vier Typen stehen seit `49f6185` im Schema von `16d6d0f` |
+| `154a3ee` | Bericht zum integrierten Stand | gepusht, CI-Run 39285710824 grün |
+| `96856c5` | R-022-Guard im Candidate-Scan, 15 Tests | lokal, siehe 4.2 und 6.2 |
 | dieser Commit | dieser Bericht, aktualisiert | nur Doku |
 
 ## 3. Unterschiede zum deployten Stand `16d6d0f`
 
-43 Dateien, alle in diesen Bereichen:
+47 Dateien, alle in diesen Bereichen:
 
 | Bereich | Dateien | Wirkung |
 |---|---|---|
 | Risk Engine (`packages/risk-engine/src`) | `limit-set-integrity.ts` (neu), `policy-v1.ts`, `rules.ts`, `index.ts` | R-026 prüft jedes Limit-Feld; Kennung `risk-rules-v1/1.4.0` |
 | Trading-Worker, neu | `riskLimitSetIntegrity.ts`, `executionProfileIntegrity.ts` | gemeinsame Integritätsprüfungen |
-| Trading-Worker, geändert | Jobs `shadowAssessRisk`, `shadowBootstrap`, `shadowExecutionProfileCalibrate`; Lib `riskInputAssembler`, `shadowEligibility`, `shadowFillPersistence`, `shadowOrderPersistence`, `shadowPortfolioValuation`, `shadowPositionMonitor`, `shadowReconciliation`, `shadowRiskPersistence`, `shadowSessionOps`, `shadowTradingDay` | 0021, 0023, K, N3 |
+| Trading-Worker, geändert | Jobs `shadowAssessRisk`, `shadowBootstrap`, `shadowExecutionProfileCalibrate`, `shadowGenerateCandidates`; Lib `riskInputAssembler`, `shadowCandidatePersistence`, `shadowEligibility`, `shadowFillPersistence`, `shadowOrderPersistence`, `shadowPortfolioValuation`, `shadowPositionMonitor`, `shadowReconciliation`, `shadowRiskPersistence`, `shadowSessionOps`, `shadowTradingDay` | 0021, 0023, K, N3, R-022-Guard |
 | Tests | Risk Engine, Trading-Worker (darunter ein neuer PostgreSQL-Test), Datenbank-Schema-Test | nur Tests |
 | Doku und Ops | Dokumente 06 und 18, ADR 0021, 0023, 0024, 0025, dieser Bericht, `scripts/ops/opening-after-partial-expiry-check.sql` (nur lesend) | nichts davon läuft im Betrieb |
 
@@ -109,11 +114,11 @@ Dev-DB wurde nicht berührt.
 
 `pnpm install --frozen-lockfile`, `db:generate`, `db:migrate:deploy`,
 `build`, `lint`, `ops:test:scripts`, `pnpm -r --no-bail test`: **alles grün,
-1 765 von 1 765 Tests in 28 Paketen.** Auszug:
+1 780 von 1 780 Tests in 28 Paketen** (Stand mit Guard). Auszug:
 
 | Paket | Tests | Prüft unter anderem |
 |---|---|---|
-| Trading-Worker | 435/435, mit DB-Suiten | Integrität von Limits und Profilen, Teilfill und Ablauf (K), Stop und Exits unter Sperre, N3 in allen Reihenfolgen, Arena-, Lease- und JobRunner-DB-Tests |
+| Trading-Worker | 450/450, mit DB-Suiten | Integrität von Limits und Profilen, Teilfill und Ablauf (K), Stop und Exits unter Sperre, N3 in allen Reihenfolgen, R-022-Guard und R-022-Backstop, Arena-, Lease- und JobRunner-DB-Tests |
 | Risk Engine | 114/114 | Risikoentscheidungen, Positionsgrößen, R-026 |
 | API | 193/193 | bindet den Trading-Worker ein |
 | Arena | 16/16 | – |
@@ -135,6 +140,23 @@ Dev-DB wurde nicht berührt.
   - Gegen `961dafc` schlagen 12 der 21 Fälle fehl.
   - Die Snapshot-Tests schlagen fehl, wenn die Reconciliation außerhalb des
     Snapshots liest.
+- **R-022-Guard:** 13 Scan-Fälle und 2 Risk-Pfad-Fälle.
+  - Jeder belegende Status sperrt den Slot: Position `OPENING`, `OPEN`,
+    `PARTIALLY_CLOSED`, `ERROR`, Entry-Order `ACCEPTED`, `WAITING_FOR_ENTRY`,
+    `PARTIALLY_FILLED`. Dann gibt es keinen Candidate, ein Audit-Event, kein
+    RiskEvent und keinen Schreibzugriff auf spätere Tabellen.
+  - Ein freier Slot, geschlossene Positionen, terminale Orders und eine
+    Exit-Order liefern einen Candidate zeilengleich wie vorher.
+  - Champion und Challenger blockieren sich nicht, ein anderes Asset bleibt
+    frei.
+  - Im Scheduler-Modus rückt der Cursor vor, nach dem Schließen gibt es keinen
+    späten Candidate. Ein manueller Neuscan einer übersprungenen Kerze
+    erzeugt keinen Candidate und kein zweites Audit-Event. Eine bestehende
+    Candidate-Entscheidung bleibt `ALREADY_DECIDED`.
+  - R-022 lehnt einen trotzdem durchgerutschten Candidate neben einer offenen
+    Position oder Entry-Order weiter CRITICAL mit `ERROR_LOCK` ab.
+  - Gegenprobe: Der Code von `154a3ee` legt bei belegtem Slot einen Candidate
+    an, der Guard nicht.
 
 ### 4.3 Differenz gegen den alten Code und Deploy-Simulation
 
@@ -147,6 +169,8 @@ Dev-DB wurde nicht berührt.
     Dort sperrte der alte Code fälschlich.
 - **Risk-Job, 5 Fälle:** gegen `16d6d0f` nur Kennung und Hashes verschieden,
   gegen `961dafc` byte-gleich.
+- **Guard gegen `154a3ee`:** Ausführung (16 Szenarien) und Risk-Job (5 Fälle)
+  sind byte-gleich. Im Scan unterscheidet sich nur der Fall „Slot belegt“.
 - **Deploy-Simulation:**
   - Runbook 18, Abschnitte 7–9, mit altem Code aufgebaut, danach
     `consistency-snapshot`.
@@ -154,6 +178,8 @@ Dev-DB wurde nicht berührt.
   - Eligibility `EXECUTION_PROFILE` und `ACTIVE_RISK_LIMIT_SET` PASS.
   - Kalibrierung `UNCHANGED`, Reconciliation 3 von 3 konsistent, keine
     Sperre.
+  - Mit dem Guard wiederholt, dazu ein Candidate-Scan mit neuem Code: grün.
+    Der Scan läuft mit `SUCCESS` und 0 Fehlern.
 
 ### 4.4 GitHub-CI
 
@@ -162,8 +188,10 @@ Dev-DB wurde nicht berührt.
 - **Ursache:** Logs und Job-Summary sind ohne Login nicht sichtbar. Schon
   `16d6d0f` scheiterte im selben Schritt (Run 38623043366). Lokal scheitert
   auf `961dafc` nur der Alert-Katalog-Test. `ff78ead` behebt ihn.
-- Der integrierte Stand ist lokal vollständig grün. Ein Lauf auf GitHub steht
-  noch aus.
+- **Run 39285710824 auf `154a3ee`:** alle Schritte grün, auch der Testschritt
+  mit den DB-Suiten.
+- Der Stand mit Guard (`96856c5`) ist lokal vollständig grün. Ein Lauf auf
+  GitHub steht noch aus.
 
 ## 5. Wirkung auf OFFICIAL_V1
 
@@ -187,7 +215,14 @@ Dev-DB wurde nicht berührt.
    - Ein Lauf, während dessen der Monitor bucht, wird verworfen: kein Befund,
      keine Sperre, fehlgeschlagener BotRun.
    - Ein hängender Monitor sperrt nicht mehr; der Alert dafür bleibt.
-8. **Rollout:** Trading-Worker- und API-Image neu bauen, denn die API bindet
+8. **R-022-Guard:** Bei offener Position oder laufender Entry-Order im Asset
+   entsteht aus einem Wiederholungssignal kein Candidate mehr, sondern ein
+   Audit-Event `STRATEGY_CANDIDATE_SKIPPED` mit `ASSET_SLOT_OCCUPIED`. Dadurch
+   gibt es kein R-022-Ereignis, keinen Alert und keinen Arena-Hard-Stop. Die
+   Handelsentscheidung bleibt gleich: kein zusätzlicher Trade. Die Anzeige
+   „letzte Bewertung“ im Forward-Vergleich zeigt weiter den letzten
+   Candidate.
+9. **Rollout:** Trading-Worker- und API-Image neu bauen, denn die API bindet
    den Trading-Worker ein. Keine Migration, keine Datenänderung. Rollback
    über die Images `:16d6d0f`.
 
@@ -195,49 +230,65 @@ Dev-DB wurde nicht berührt.
 
 ### 6.1 R-003 (N3b): falsche CRITICAL-Ereignisse im Risk-Job
 
-- **Befund:**
-  - Der Assembler übergibt den gecachten Equity-Wert (gebuchte Kerze) und
-    Marks zur neuesten Kerze.
-  - Am echten Assembler und an der echten Engine, mit offener Position und
-    einer ungebuchten Kerze, gilt R-003 CRITICAL („Equity does not equal …“).
-  - Mit gebuchter Kerze im Assembler besteht R-003. Die Probe-Änderung ist
-    nicht committet.
-- **Wann:** nur bei offener Position und nur, wenn der Risk-Job einen
-  Candidate bewertet, bevor der Monitor die neue Kerze gebucht hat. Bei
-  Kerzen um hh:00 und Candidates ab hh:05 ist das Fenster schmal. Nach Ausfall
-  oder Rückstand ist es breit.
-- **Wirkung in OFFICIAL_V1:**
-  - Keine Entscheidung kippt, keine Sperre, kein Breaker.
-  - Jeder Teilnehmer handelt nur BTCUSDT, und bei offener Position lehnt R-022
-    jeden Candidate ohnehin ab.
-  - Es entsteht ein zusätzliches CRITICAL-Ereignis `PORTFOLIO_INCONSISTENT`.
-    Es sieht wie ein Integritätsalarm aus, löst einen Alert aus und zählt in
-    der Arena.
-- **Arena beim ersten Trade:**
-  - Den Hard Stop `CRITICAL_RISK_EVENTS` löst schon R-022 aus. R-022 ist
-    CRITICAL, und der Candidate-Scan läuft auch bei offener Position.
-  - Er entsteht, sobald während der offenen Position ein Candidate bewertet
-    wird. Das ist ein Altbefund aus der ADR-0022-Analyse und bleibt mit und
-    ohne R-003-Korrektur.
-  - Die Arena empfiehlt nur. Status, Kapital und Handel ändert sie nicht.
-- **Kleine Korrektur, vorgeschlagen, nicht umgesetzt:**
-  - Der Assembler bewertet mit `basis: "BOOKED_CANDLE"`, eine Zeile plus
-    Tests.
-  - Die Regeln und ihre Schwellen bleiben, wie sie sind. Equity, Tages-P&L,
-    R-003 und die Exposure-Limits stehen dann auf demselben Stand.
-  - Solange eine Kerze ungebucht ist, rechnen die Exposure-Limits mit dem
-    gebuchten statt dem neuesten Preis.
-  - In OFFICIAL_V1 ändert das keine Entscheidung, siehe R-022.
-  - Empfehlung: aufnehmen, als eigener Commit mit Risk-Differenzlauf. Nötig
-    für die Sicherheit ist es nicht. Es verhindert irreführende
-    Integritätsalarme, nicht aber den Arena-Hard-Stop durch R-022.
+**Bewusst zurückgestellt**, als bestätigter Befund dokumentiert.
 
-### 6.2 Weitere offene Punkte
+- **Befund:** Der Assembler übergibt den gecachten Equity-Wert (gebuchte
+  Kerze) und Marks zur neuesten Kerze. Am echten Assembler und an der echten
+  Engine gilt mit offener Position und ungebuchter Kerze R-003 CRITICAL („Equity
+  does not equal …“). Mit gebuchter Basis besteht R-003.
+- **Wann der Fehler trotz Guard noch auftreten kann.** Alle drei Bedingungen
+  müssen gleichzeitig gelten:
+  1. Das Portfolio hält eine Position mit Exposure in einem Asset A. Nur dann
+     gibt es Marks.
+  2. Ein Candidate für ein **anderes** Asset B **desselben Portfolios**
+     erreicht den Risk-Job. Der Guard sperrt nur das belegte Asset A. Das
+     setzt ein Portfolio mit mindestens zwei aktiven Assets voraus.
+  3. Der Risk-Job bewertet, während für A eine neue 1h-Kerze sichtbar, aber
+     vom Monitor noch nicht gebucht ist. Normal sind das wenige Minuten nach
+     dem Schreiben der Kerze; länger bei Monitor-Ausfall, Rückstand oder
+     verspätetem Fill.
+- **In OFFICIAL_V1** ist Bedingung 2 nicht erfüllt: Jeder Teilnehmer handelt
+  nur BTCUSDT, ETH ist deaktiviert. Ein Candidate bei offener Position
+  entsteht durch den Guard nicht mehr.
+  - Ein Candidate, der an der Slot-Prüfung vorbeirutscht (6.2), trifft
+    praktisch nur auf eine Entry-Order, die erst nach dem Scan entstand. Dann
+    gibt es keine Position und keine Marks, R-003 bleibt unberührt, und R-022
+    lehnt CRITICAL ab.
+  - Der Fehler wird erst relevant, wenn ein Teilnehmer ein zweites Asset
+    bekommt.
+- **Wirkung, wenn er auftritt:** Der Candidate für B wird fälschlich
+  abgelehnt, ein CRITICAL-Ereignis `PORTFOLIO_INCONSISTENT` entsteht, mit
+  Alert und Arena-Hard-Stop. Keine Sperre (ADR 0022), kein Breaker
+  (`RISK_RULE_BLOCK`).
+- **Spätere Korrektur (Vorschlag):** Der Assembler bewertet `equityContribution`
+  auf der gebuchten Basis und `marketValue` weiter auf der neuesten. In der
+  Engine liest nur R-003 `equityContribution`, die Exposure-Limits nutzen
+  `marketValue`. Exposure- und Verlustgrenzen rechnen also nicht mit älteren
+  Preisen. Die Tests dazu stehen in der Analyse vom 2026-10-19.
+
+### 6.2 R-022-Guard: verbleibende Grenzen
+
+- **Rennen:** Die Slot-Prüfung läuft in der Anlege-Transaktion, auf Ebene
+  READ COMMITTED.
+  - Wird der Slot zwischen Prüfung und Risikobewertung belegt, erreicht ein
+    Candidate den Risk-Job. Das geht nur über eine Entry-Order desselben
+    Portfolios und Assets, die erst nach dem Scan angelegt wird.
+  - R-022 lehnt dann CRITICAL ab, wie bisher und gewollt.
+  - Eine zweite Position oder Entry-Order verhindern zusätzlich die
+    eindeutigen Schlüssel `ShadowPosition.openScopeKey` und
+    `ShadowOrder.openEntryScopeKey`.
+- **Gegenrichtung:** Wird der Slot nach der Prüfung frei, bleibt die Kerze
+  übersprungen. Das ist konservativ, es gibt keinen späten Einstieg.
+- **Nicht abgedeckt:** Candidates, die bereits angelegt und noch nicht als
+  Order gebucht sind, zählen nicht als belegter Slot, genau wie bei R-022.
+  Die Order-Erzeugung verhindert dort eine zweite Entry-Order.
+
+### 6.3 Weitere offene Punkte
 
 | Prio | Befund | Stand | Wirkung auf OFFICIAL_V1 |
 |---|---|---|---|
-| 1 | **R-022 als Arena-Hard-Stop** | Altbefund (ADR 0022) | Beim ersten Trade erwartbar, sobald ein Candidate bei offener Position bewertet wird. Quittieren der Ereignisse oder Neueinstufung von R-022 ist eine eigene Entscheidung |
-| 2 | **R-003 (N3b)** | siehe 6.1 | irreführende CRITICAL-Ereignisse |
+| – | **R-022 als Arena-Hard-Stop** | durch den Guard behoben (`96856c5`) | R-022 feuert nur noch bei echtem Durchrutschen (6.2) |
+| 2 | **R-003 (N3b)** | zurückgestellt, siehe 6.1 | in OFFICIAL_V1 praktisch nicht erreichbar |
 | 3 | **ADR 0022 – kein Rückweg aus `ERROR_LOCKED`** | nur Analyse | Jede echte Sperre braucht SQL von Hand |
 | 4 | **K1 – Sperre während `PARTIALLY_FILLED`** | ADR 0024, F2 | selten |
 | 5 | **N2 – Fill-Kerze ohne Exitprüfung** | Abschnitt 7, durch N3 unverändert | betrifft jeden Trade; Forschung und Forward-Test gleich |
@@ -333,27 +384,23 @@ Proben sind nicht committet. Kein Produktivcode wurde geändert.
 
 ## 8. Bereitschaft und Entscheidungen
 
-**Einschätzung:** Der integrierte Stand ist bereit für den abschließenden
-CI-Lauf.
-- Lokal ist der vollständige Lauf grün, mit isolierter PostgreSQL und
-  denselben Befehlen wie in CI.
-- Der einzige bekannte rote Test ist behoben.
-- Die Differenzprüfungen zeigen keine unbeabsichtigte Verhaltensänderung.
+**Einschätzung:** Der Stand mit Guard (`96856c5` plus dieser Bericht) ist
+bereit für den nächsten CI-Lauf.
+- `154a3ee` ist in der GitHub-CI grün.
+- Der Guard ist lokal vollständig grün: 1 780 von 1 780 Tests, Build, Lint,
+  Ops-Skripte und Deploy-Simulation.
+- Gegen `154a3ee` ist er in Ausführung und Risk-Job byte-gleich.
 
 Vor Push, CI und Deployment zu entscheiden:
 
-1. **R-003-Korrektur** (6.1) vor dem Push aufnehmen oder bewusst später
-   machen. Mit Korrektur kommt ein Commit dazu, sonst bleibt der jetzige
-   Stand.
-2. **Push** des integrierten Branches. Danach soll die CI vollständig grün
-   sein. Logs und Job-Summary braucht ein GitHub-Login.
-3. **Einordnung** als protokollierter Bugfix nach Regel 2 (empfohlen). Dazu
+1. **Push** des Branches mit Guard, danach die CI. Logs und Job-Summary
+   braucht ein GitHub-Login.
+2. **Einordnung** als protokollierter Bugfix nach Regel 2 (empfohlen). Dazu
    der Status der ADRs 0021, 0023, 0024 und 0025.
-4. **Lesende VPS-Prüfung direkt vor dem Deploy**, mit eigener Freigabe:
+3. **Lesende VPS-Prüfung direkt vor dem Deploy**, mit eigener Freigabe:
    keine offene Entry-Order (D5), ADR 0024 Q1–Q5 und die Limit- und
    Profilzeilen unverändert.
-5. **Umgang mit R-022 in der Arena** beim ersten Trade (6.2). Eine
-   Betriebsanweisung reicht, eine Codeänderung ist es nicht.
-6. **Deployment** nach H3 mit Backup, Rollback-Tags, beiden Images,
+4. **Deployment** nach H3 mit Backup, Rollback-Tags, beiden Images,
    `TRADING_CODE_VERSION` und Konsistenz-Snapshot und -Vergleich. Danach der
    Eintrag ins Änderungsprotokoll.
+5. **Später:** R-003 (6.1) als eigener Schritt.
