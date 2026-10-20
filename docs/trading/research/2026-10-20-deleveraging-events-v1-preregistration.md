@@ -11,11 +11,12 @@
 >   Modellannahme, keine nachgewiesene historische
 >   Veröffentlichungslatenz.** Belegt ist nur, dass der Wert sehr
 >   wahrscheinlich zum Zeitpunkt `create_time` bewertet ist (15.4).
-> - **Registerstatus:** vorregistriert, nicht ausgewertet. N bleibt 57, bis
->   eine historische Ergebnisauswertung stattfindet.
-> - **Nächster Schritt:** Auswertungsskript (1.1), getestet nur mit
->   synthetischen Daten. Datendownload (1.2) und echte Auswertung brauchen
->   je eine eigene Freigabe.
+> - **Registerstatus 2026-10-20: ausgewertet und abgeschlossen.**
+>   - Der einzige Entdeckungslauf (`primary`) ergab `NICHT_BESTANDEN`; der
+>     Betreiber hat das Ergebnis angenommen. N = 58
+>     ([Ergebnisbericht](2026-10-20-deleveraging-events-v1-discovery-results.md)).
+>   - Die Testperiode 2024–2026 bleibt geschlossen.
+>   - Keine weiteren Varianten oder Analysen dieser Hypothese.
 >
 > Der Text unten bleibt als Festschreibung unverändert, nur dieser Statusblock
 > ist neu.

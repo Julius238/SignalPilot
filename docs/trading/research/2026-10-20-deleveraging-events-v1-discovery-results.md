@@ -11,6 +11,13 @@
 >   vorher N = 57.
 > - Keine Regel, kein Parameter und keine Variante wurde nach dem Lauf
 >   geändert oder zusätzlich gerechnet.
+> - **Abgeschlossen 2026-10-20.** Der Betreiber hat `NICHT_BESTANDEN`
+>   angenommen und D8 offiziell beendet.
+>   - Die Testperiode bleibt geschlossen.
+>   - Es gibt keine nachträglichen Parameteränderungen, keine zusätzlichen
+>     Varianten und keine weiteren Analysen derselben Hypothese.
+>   - Ausschlaggebend: kein positiver Erwartungswert schon vor Kosten und
+>     kein Zusatznutzen gegenüber gewöhnlicher Kursumkehr.
 > - Keine Handels-, Anlage- oder Steuerberatung.
 
 ## Kurz und verständlich
