@@ -1,7 +1,8 @@
 # Vorregistrierung `DELEVERAGING_EVENTS_V1` (D8): kurzfristige Überreaktion nach Deleveraging auf BTC/ETH-Perpetuals
 
-> **Status: ENTWURF Phase 0, nicht eingefroren. Schritt 0.2 erledigt
-> (Abschnitt 15), Handelsregeln dadurch nicht geändert.** Erstellt am 2026-10-20 auf
+> **Status: Fassung zum Einfrieren (2026-10-20). Die Entscheidungen G1–G7
+> sind eingearbeitet (Abschnitt 13), Schritte 0.2 und 0.2b sind erledigt
+> (Abschnitt 15). Die Freeze-Freigabe des Betreibers steht aus.** Erstellt am 2026-10-20 auf
 > `claude/inspiring-noether-rjh92d`.
 >
 > - Kein Download, kein Code, kein Backtest, keine Parameteroptimierung,
@@ -70,24 +71,59 @@
   :00, :05, … (Schluss der 5-Minuten-Kerze).
 - **Kurs:** Schlusskurs der 5-Minuten-Kerze, aggregiert aus 1m-Klines des
   Perpetuals (letzter Handelspreis). Er gilt zum Kerzenschluss c als bekannt.
-- **Open Interest:** `sum_open_interest` aus `metrics`.
-  - Ein mit t gestempelter Wert gilt erst zu t + 5 Minuten als bekannt.
-  - Zum Zeitpunkt c ist also höchstens OI(c − 5 min) verfügbar.
-  - Die genaue Bedeutung von `create_time` prüft Schritt 0.2. Ist sie
-    ungünstiger, wird die Verzögerung erhöht, nie gesenkt.
+- **Open Interest:** ausschließlich `sum_open_interest` aus `metrics`, also
+  die offenen Kontrakte in **Basiseinheiten** (BTC bzw. ETH).
+  - `sum_open_interest_value` (USD) wird für den Auslöser **nie** verwendet:
+    Er sinkt schon durch fallende Kurse, ohne dass eine Position abgebaut
+    wird. Er dient nur der Zeitstempelprüfung (15.4).
+  - **Verfügbarkeit (G6):** Ein mit t gestempelter Wert gilt erst zu
+    t + 10 Minuten als bekannt.
+  - Laut 15.4 ist der Wert sehr wahrscheinlich zu t bewertet. Die
+    Veröffentlichungslatenz ist historisch nicht bestimmbar, die 10 Minuten
+    bleiben deshalb eine konservative **Modellannahme**, keine belegte
+    Latenz.
+  - Beschreibend wird zusätzlich mit 20 Minuten gerechnet; das entscheidet
+    nichts.
 - **Normierung:** Die Verteilung jeder Größe wird nur aus den
   vorangegangenen 30 Tagen geschätzt, rollend, ohne den aktuellen Zeitpunkt.
 
+### 3.1 Gültigkeit und Verfügbarkeit der Daten (G7)
+
+**OI-Punkte:**
+
+| Fall | Regel |
+|---|---|
+| Gültig | `create_time` liegt exakt auf dem 5-Minuten-Raster (Sekunden 0, Minute durch 5 teilbar) **und** `sum_open_interest` ist numerisch und > 0 |
+| Fehlend | Es gibt keinen gültigen Punkt für den Zeitstempel, auch wenn die ganze Tagesdatei fehlt. Keine Interpolation, kein Fortschreiben |
+| Doppelt, identisch | mehrere Zeilen mit gleichem `create_time` und gleichem `sum_open_interest`: eine zählt |
+| Doppelt, widersprüchlich | gleicher `create_time`, verschiedene Werte: **alle** Zeilen dieses Zeitstempels ungültig |
+| Ungültig | außerhalb des Rasters, nicht numerisch, ≤ 0 oder leer: verworfen, nicht auf das Raster gerundet |
+| Zeitlich verspätet | Ein Punkt mit Zeitstempel t ist erst ab t + 10 min nutzbar. Eine Entscheidung zum Zeitpunkt c verwendet **genau** die Zeitstempel c − 10 min und c − 70 min. Fehlt einer der beiden oder ist er ungültig, wird zu c **kein** Ereignis geprüft. Kein Ersatz durch ältere oder spätere Zeitstempel |
+| Größe | **kein** Filter auf die Größe von OI-Änderungen. Echte Deleveraging-Sprünge dürfen extrem sein |
+| Normierung | Die 30-Tage-Verteilung von ΔOI nutzt nur ΔOI-Werte, deren beide Endpunkte gültig sind. Unter 80 % gültigen Werten im Fenster wird zu c kein Ereignis geprüft |
+| Quellenstand | Ein Lauf nutzt genau die Dateien, deren Hashes er festhält. Weicht eine spätere Abfrage ab, werden die Stände nicht gemischt; die Abweichung wird berichtet |
+| Datenabbruch | mehr als 5 % ungültige oder fehlende Punkte je Symbol im ausgewerteten Zeitraum: Abbruch vor jeder Renditeauswertung |
+
+**Kurse:**
+
+- Der 5-Minuten-Schlusskurs ist der Schluss der 1m-Kerze, die eine Minute
+  vor c beginnt.
+- Fehlt sie, gibt es zu c keine Prüfung, und ein offener Trade schließt zum
+  nächsten vorhandenen 1m-Open.
+- Für Einstieg, Ausstieg und Stop gelten nur vorhandene 1m-Kerzen. Es gibt
+  keinen Fill zu einem Preis aus der Vergangenheit.
+
 ## 4. Ereignisse (fest, wenige Parameter)
 
-Parameter: Fenster W = 60 Minuten, Normierung 30 Tage, Schwellen 3 und 1.
+Parameter: Fenster W = 60 Minuten, Normierung 30 Tage, Schwellen 3 und 1,
+OI-Verzögerung 10 Minuten.
 Alles runde Standardwerte, festgelegt vor jedem Datenblick und nicht
 optimiert.
 
 | Größe | Definition zum Zeitpunkt c |
 |---|---|
 | Kursänderung | ΔP(c) = P(c) ÷ P(c − 60 min) − 1 |
-| OI-Änderung | ΔOI(c) = OI(c − 5 min) ÷ OI(c − 65 min) − 1 |
+| OI-Änderung | ΔOI(c) = OI(c − 10 min) ÷ OI(c − 70 min) − 1, OI in Basiseinheiten (`sum_open_interest`) |
 | z-Werte | z_P = ΔP ÷ Standardabweichung von ΔP; z_OI = ΔOI ÷ Standardabweichung von ΔOI; beide über alle 5-Minuten-Punkte der vorangegangenen 30 Tage |
 
 - **Deleveraging-Ereignis (D):** \|z_P\| ≥ 3 **und** z_OI ≤ −3.
@@ -219,9 +255,13 @@ zu erwarten.
 - Bei `UNZUREICHEND`, `NICHT_BESTANDEN`, `NUR_KURSUMKEHR` oder `UNEINHEITLICH` endet die
   Studie. Der Test bleibt unberührt.
 - Ein Vorzeichenwechsel im Test führt zu `NICHT_BESTANDEN`.
-- **Datenabbruch vor jeder Renditeauswertung:** mehr als 5 % fehlende
-  5-Minuten-OI-Punkte in einem Symbol, oder `create_time` ist nicht
-  eindeutig bestimmbar.
+- **Datenabbruch vor jeder Renditeauswertung:** mehr als 5 % fehlende oder
+  ungültige 5-Minuten-OI-Punkte in einem Symbol (3.1). Zu `create_time`:
+  - 15.4 grenzt den Snapshot auf den Zeitpunkt t ein; G6 deckt die offene
+    Veröffentlichungslatenz ab.
+  - Ein Abbruch deswegen erfolgt nur, wenn neue Belege einen Snapshot
+    später als t + 5 min zeigen. Dann reichen 10 Minuten nicht mehr, und die
+    Studie stoppt vor jeder Renditeauswertung.
 
 **Weitere Berichte, nur beschreibend:** Long und Short getrennt, Anteil der
 Stop-Ausstiege, Anteil „kein Trade“, Spot-Sicht sowie eine Variante mit 5
@@ -266,11 +306,10 @@ Minuten Ausführungsverzögerung. Sie entscheiden nichts.
    - Bedeutung von `create_time`;
    - Lücken;
    - Schema von `bookDepth`.
-3. **0.3 Entscheidungen G1–G7**, danach Einfrieren (Commit und Blob-Hash).
-4. **1.1 Auswertungsskript**, getestet nur mit synthetischen Reihen.
-5. **1.2a Semantikprüfung von `create_time`** (Abschnitt 15.1): eine
-   1m-Mark-Price-Datei, rund 0,1 MB, mit Freigabe, vor jeder
-   Renditeauswertung.
+3. **0.2b Zeitstempelprüfung** (erledigt am 2026-10-20, Abschnitt 15.4).
+4. **0.3 Entscheidungen G1–G7** (eingearbeitet), danach Einfrieren nach
+   Freigabe (Commit und Blob-Hash).
+5. **1.1 Auswertungsskript**, getestet nur mit synthetischen Reihen.
 6. **1.2 Download** (rund 0,7 GB, Freigabe) und **Entdeckungslauf** mit
    Klasse.
 7. **1.3 Testlauf**, nur bei `HINWEIS` oder `BELASTBAR`, mit eigener
@@ -278,17 +317,17 @@ Minuten Ausführungsverzögerung. Sie entscheiden nichts.
 
 Aufwand: rund eine bis zwei Wochen Arbeitssitzungen.
 
-## 13. Entscheidungen des Betreibers vor dem Einfrieren
+## 13. Entscheidungen des Betreibers (G1–G7, vorgelegt 2026-10-20)
 
-| # | Entscheidung | Vorschlag | Alternative |
-|---|---|---|---|
-| G1 | Haltedauer und Fenster | **60 min / 60 min** | 30 min / 30 min (mehr Ereignisse, mehr Kostenanteil) |
-| G2 | Schwellen | **\|z_P\| ≥ 3, z_OI ≤ −3, Kontrolle z_OI ≥ −1** | z_OI ≤ −2,5 (mehr D-Ereignisse, weniger trennscharf) |
-| G3 | Stresskosten | **wie Abschnitt 6** | Gebühr 5 bp (Binance) statt 6 bp |
-| G4 | Mindestzahl Cluster | **40 je Gruppe und Zeitraum** | 60 (strenger, häufiger `UNZUREICHEND`) |
-| G5 | Mehrfachtest-Zähler | **N bleibt 57, D8 zählt mit der Auswertung** | N 57 → 58 beim Einfrieren |
-| G6 | Verzögerung des OI (neu aus 0.2) | **10 min**: ein mit t gestempelter Wert gilt ab t + 10 min als bekannt. Damit ist das ungünstigste Intervallende plus bis zu 5 min Veröffentlichungslatenz abgedeckt. Beschreibend zusätzlich mit 20 min. Bleibt 10 min, auch wenn die Semantikprüfung (15.1) den Snapshot bei t zeigt | 5 min, wie bisher (nicht belegt konservativ) |
-| G7 | Gültigkeit der OI-Punkte (neu aus 0.2) | **Regeln aus 15.1**: nur strukturelle Prüfungen, keine Größenfilter | zusätzlich implizierter Preis innerhalb ±2 % des 1m-Schlusskurses als Plausibilitätsprüfung |
+| # | Entscheidung | Festlegung |
+|---|---|---|
+| G1 | Fenster und Haltedauer | Kurs- und OI-Fenster **60 min**, maximale Haltedauer **60 min**, Ausstieg nach 60 min oder am Stop |
+| G2 | Schwellen | D: **\|z_P\| ≥ 3 und z_OI ≤ −3**. Kontrolle K: **\|z_P\| ≥ 3 und z_OI ≥ −1**. Normierung über die vorangegangenen 30 Tage, nur Vergangenheit |
+| G3 | Stresskosten | je Seite: Gebühr **6 bp**; Spread und Slippage **BTC 5 bp, ETH 8 bp**; Stop-Zuschlag **5 bp**; tatsächliches Funding. Round-Trip BTC 22 bp, ETH 28 bp. Anpassung nur nach oben, nur mit Entdeckungsdaten (`bookDepth` 2023) |
+| G4 | Mindeststichprobe | **40 unabhängige Cluster je Gruppe** (D und K) und Zeitraum, sonst `UNZUREICHEND`. Schwellen werden dann nicht gesenkt |
+| G5 | Mehrfachtest-Zähler | **N bleibt 57**. D8 zählt erst mit seiner Auswertung; `BELASTBAR` verlangt dann t ≥ √(2·ln N_neu) |
+| G6 | OI-Verzögerung | **10 min**: Zeitstempel t ist ab t + 10 min nutzbar, unabhängig vom Befund 15.4. Beschreibend zusätzlich 20 min |
+| G7 | Gültigkeit und Verfügbarkeit | **Regeln aus 3.1** für fehlende, doppelte, ungültige und zeitlich verspätete OI-Werte sowie für Kurse. Kein Größenfilter |
 
 ## 15. Befunde aus Schritt 0.2 (2026-10-20)
 
@@ -334,7 +373,7 @@ der Dateien lückenlos ist. Das prüft erst der Studienlauf mit den Regeln aus
   belegt konservativ**. Sie wäre nur richtig, wenn der Snapshot bei oder vor
   t liegt und ohne Latenz veröffentlicht wurde. Vorschlag G6: +10 min als
   primär, +20 min beschreibend.
-- **Semantikprüfung vor jeder Renditeauswertung** (Schritt 1.2a, eigene
+- **Semantikprüfung vor jeder Renditeauswertung** (als Schritt 0.2b vorgezogen, Ergebnis in 15.4; eigene
   Freigabe, eine 1m-Mark-Price-Datei desselben Tages, rund 0,1 MB):
   - Der implizite Preis je Zeile wird mit den Mark-Preisen der Minuten
     t − 5 … t + 5 verglichen.
@@ -401,13 +440,32 @@ der Dateien lückenlos ist. Das prüft erst der Studienlauf mit den Regeln aus
   Es fehlen 2023-02-08 und 2023-02-09. Diese Tage entfallen nur für die
   Kostenprüfung.
 
+### 15.4 Zeitstempelprüfung mit dem Mark-Preis (Schritt 0.2b)
+
+- **Datei:** `markPriceKlines` 1m BTCUSDT 2023-06-15, 34 KB, Prüfsumme
+  korrekt.
+- **Vergleich:** Der implizite Preis jeder OI-Zeile
+  (`sum_open_interest_value` ÷ `sum_open_interest`) wurde mit dem Mark-Preis
+  am Beginn und am Ende der Minutenkerzen um t − 6 … t + 6 Minuten
+  verglichen.
+- **Ergebnis:**
+  - Die beste Übereinstimmung liegt **genau bei t**: Mark-Preis zum
+    Minutenbeginn t. Median der Abweichung 0,000 bp, 90,6 % der 288 Zeilen
+    unter 0,1 bp, P90 0,06 bp.
+  - Eine Minute daneben liegt der Median schon bei rund 2 bp, mit unter 3 %
+    Übereinstimmungen.
+- **Deutung:**
+  - Der Wert ist sehr wahrscheinlich ein Snapshot zum Zeitpunkt
+    `create_time` und kein Wert vom Intervallende.
+  - Belegt ist das für den Bewertungspreis und für einen Tag.
+  - **Nicht** belegt ist, wann der Wert in Echtzeit veröffentlicht wurde.
+    G6 bleibt deshalb bei 10 Minuten als konservative Modellannahme.
+
 ### 15.3 Folgen für den Entwurf
 
 - An Ereignissen, Handelsregeln, Kosten und Klassen ändert sich nichts.
-- **Neu zu entscheiden vor dem Einfrieren:**
-  - G6: OI-Verzögerung 10 min statt 5 min;
-  - G7: Gültigkeitsregeln.
-- Die Semantikprüfung 1.2a kommt in den Ablauf, vor jede Renditeauswertung.
+- G6 (10 min) und G7 (Regeln in 3.1) sind eingearbeitet.
+- Die Semantikprüfung wurde als 0.2b vorgezogen (15.4).
 
 ## 14. Was unverändert bleibt
 
