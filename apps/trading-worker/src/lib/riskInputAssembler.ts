@@ -32,14 +32,19 @@ import { loadShadowPortfolioValuation } from "./shadowPortfolioValuation.js";
 export const RISK_INPUT_ASSEMBLER_VERSION = "risk-input-assembler-v1/1.0.0";
 
 /** Statuses that still tie up capital (docs/trading/06, `R-011`). */
-const EXPOSURE_POSITION_STATUSES = [
+/**
+ * Position statuses that still carry exposure. Also the candidate scan's
+ * definition of an occupied asset slot, so it skips exactly what R-022 would
+ * refuse.
+ */
+export const EXPOSURE_POSITION_STATUSES = [
   "OPENING",
   "OPEN",
   "PARTIALLY_CLOSED",
   "ERROR"
 ] as const;
 /** Order statuses that still hold a reservation. */
-const RESERVING_ORDER_STATUSES = [
+export const RESERVING_ORDER_STATUSES = [
   "ACCEPTED",
   "WAITING_FOR_ENTRY",
   "PARTIALLY_FILLED"

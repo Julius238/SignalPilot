@@ -22,8 +22,10 @@ import { runShadowProcessFills } from "../src/jobs/shadowProcessFills.js";
 import { runShadowMonitorPositions } from "../src/jobs/shadowMonitorPositions.js";
 import { EXECUTION_PROFILE_INTEGRITY_VIOLATION } from "../src/lib/executionProfileIntegrity.js";
 import { loadShadowPortfolioValuation } from "../src/lib/shadowPortfolioValuation.js";
+import { assembleRiskInput } from "../src/lib/riskInputAssembler.js";
 
 import { buildCandidateKey } from "@signalpilot/trading-domain";
+import { evaluateRisk } from "@signalpilot/risk-engine";
 
 import { Prisma } from "@signalpilot/database";
 
@@ -2609,5 +2611,79 @@ describe("reconciliation on the booked valuation basis (ADR 0025)", () => {
     // A position without a booked candle keeps the newest one.
     world.tables.get("shadowPosition")!.rows.find((row) => row.id === "position-eth")!.lastProcessedCandleId = null;
     assert.deepEqual((await value("BOOKED_CANDLE")).marks.map((mark) => mark.sourceCandleId).sort(), ["candle-c1", "eth-c2"]);
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// R-022 stays the backstop behind the candidate scan's asset-slot guard: a
+// candidate that still reaches the risk path while the slot is taken is
+// refused as a CRITICAL scale-in, exactly as before.
+// ───────────────────────────────────────────────────────────────────────────
+
+describe("R-022 behind the asset-slot guard", () => {
+  const CAPABILITY = {
+    buildCapability: "SHADOW_ONLY",
+    tradingMode: "SHADOW",
+    enableLiveTrading: false,
+    shadowMasterFlagEnabled: true,
+    riskJobEnabled: true,
+    strategyLongV1Enabled: true,
+    strategyShortV1Enabled: false,
+    shadowShortEnabled: false,
+    exchangeExecutionEnabled: false,
+    marginTradingEnabled: false,
+    futuresTradingEnabled: false
+  };
+  /** A second candidate for the same portfolio and asset, as if it slipped past the scan. */
+  const secondCandidate = (world: World) => {
+    const base = world.tables.get("tradeCandidate")!.rows[0]!;
+    world.tables.get("tradeCandidate")!.create({
+      data: {
+        ...base,
+        id: "candidate-slipped",
+        candidateKey: "candidate-slipped",
+        status: "READY_FOR_RISK",
+        asset: { id: world.assetId, symbol: "BTCUSDT", assetType: "CRYPTO", exchange: "BINANCE", quoteCurrency: "USDT", isTradable: true, isActive: true, isLeveraged: false, isInverse: false, isStablecoin: false, instrumentStatus: "ACTIVE" }
+      }
+    });
+  };
+  const noScaleIn = async (world: World) => {
+    const assembled = await assembleRiskInput(world.database as never, {
+      tradeCandidateId: "candidate-slipped",
+      asOf: new Date("2026-08-02T10:05:00.000Z"),
+      codeVersion: CODE_VERSION,
+      capability: CAPABILITY as never
+    });
+    assert.equal(assembled.ok, true);
+    const evaluation = evaluateRisk((assembled as { snapshot: Parameters<typeof evaluateRisk>[0] }).snapshot);
+    return {
+      rule: evaluation.ruleResults.find((rule) => rule.ruleCode === "R-022-NO-SCALE-IN")!,
+      directive: evaluation.directive
+    };
+  };
+
+  it("refuses a candidate next to an open position as CRITICAL with ERROR_LOCK", async () => {
+    const world = seedWorld();
+    await openApprovedPosition(world);
+    secondCandidate(world);
+    const { rule, directive } = await noScaleIn(world);
+    assert.equal(rule.outcome, "FAIL");
+    assert.equal(rule.severity, "CRITICAL");
+    assert.equal(rule.reasonCode, "AVERAGING_OR_SCALE_IN_FORBIDDEN");
+    assert.equal(directive, "ERROR_LOCK");
+  });
+
+  it("refuses a candidate next to a live entry order as CRITICAL", async () => {
+    const world = seedWorld();
+    const order = await createOrder(world);
+    assert.equal(order.outcome, ShadowOrderOutcome.CREATED);
+    // The fake has no shadowOrder.asset relation; PostgreSQL would include it.
+    world.tables.get("shadowOrder")!.rows[0]!.asset = { id: world.assetId, symbol: "BTCUSDT" };
+    secondCandidate(world);
+    const { rule, directive } = await noScaleIn(world);
+    assert.equal(rule.outcome, "FAIL");
+    assert.equal(rule.severity, "CRITICAL");
+    assert.equal(rule.reasonCode, "AVERAGING_OR_SCALE_IN_FORBIDDEN");
+    assert.equal(directive, "ERROR_LOCK");
   });
 });
