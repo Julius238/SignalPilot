@@ -85,6 +85,8 @@ export async function startTradingDay(
     where: { portfolioId: portfolio.id, status: { in: OPEN_POSITION_STATUSES } }
   });
 
+  // It writes `Portfolio.equity`, so it marks on the booked candles like every
+  // other writer and the reconciliation (ADR 0025).
   const loadedValuation = await loadShadowPortfolioValuation(database, {
     portfolioId: portfolio.id,
     asOf: input.asOf,
@@ -93,7 +95,8 @@ export async function startTradingDay(
     realizedPnl: decimalString(portfolio.realizedPnl),
     feesPaid: decimalString(portfolio.feesPaid),
     highWaterMark: decimalString(portfolio.highWaterMark),
-    startOfDayEquity: null
+    startOfDayEquity: null,
+    basis: "BOOKED_CANDLE"
   });
   const { valuation, marks } = loadedValuation;
 

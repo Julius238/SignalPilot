@@ -69,6 +69,7 @@ import {
   isShadowPortfolioKey,
   type ShadowPortfolioKey
 } from "../lib/shadowPortfolios.js";
+import { riskLimitSetRowDeviations } from "../lib/riskLimitSetIntegrity.js";
 import { checkShadowBootstrapAllowed, type TradingFlagSnapshot } from "../lib/tradingSafety.js";
 
 const logger = pino({ name: "signalpilot-worker" });
@@ -79,6 +80,8 @@ config();
 
 export const JOB_NAME = "shadowBootstrap";
 export const BOOTSTRAP_JOB_KEY = "trading:shadow-bootstrap";
+/** A stored `SHADOW_V1` v1 that deviates from the pinned policy (ADR 0021). */
+export const RISK_LIMIT_SET_CONFLICT = "RISK_LIMIT_SET_CONFLICT";
 
 export { SHADOW_PORTFOLIO_KEY };
 export const SHADOW_PORTFOLIO_STARTING_CASH = "10000.000000000000";
@@ -213,6 +216,40 @@ export async function runShadowBootstrap(
     return summary;
   }
 
+  // ── Existing risk limit set must be the pinned v1 policy ──────────────────
+  // Checked before any write: a stored set that deviates in any field is never
+  // reused or reported as bootstrapped (ADR 0021).
+  const existingLimitSet = await database.riskLimitSet.findFirst({
+    where: { key: RISK_LIMIT_SET_KEY, version: RISK_LIMIT_SET_VERSION }
+  });
+  const existingLimitSetDeviations =
+    existingLimitSet === null ? [] : riskLimitSetRowDeviations(existingLimitSet);
+  if (existingLimitSet !== null && existingLimitSetDeviations.length > 0) {
+    const message = `${RISK_LIMIT_SET_KEY} v${RISK_LIMIT_SET_VERSION} deviates from the pinned v1 policy: ${existingLimitSetDeviations.join(", ")}.`;
+    const summary: ShadowBootstrapSummary = {
+      status: BotRunStatus.FAILED,
+      blocked: true,
+      blockReasonCode: RISK_LIMIT_SET_CONFLICT,
+      correlationId,
+      portfolioId: null,
+      portfolioStatus: null,
+      riskLimitSetId: existingLimitSet.id,
+      executionProfileIds: [],
+      tradingSessionId: null,
+      createdCount: 0,
+      existingCount: 0,
+      flags: gate.flags
+    };
+    await writeBotLog(database, "error", `${JOB_NAME} refused a deviating risk limit set`, {
+      botRunId: botRun.id,
+      reasonCode: RISK_LIMIT_SET_CONFLICT,
+      riskLimitSetId: existingLimitSet.id,
+      deviations: [...existingLimitSetDeviations]
+    });
+    await finishBotRun(database, botRun.id, BotRunStatus.FAILED, { ...summary, message });
+    return summary;
+  }
+
   let created = 0;
   let existing = 0;
 
@@ -307,9 +344,6 @@ export async function runShadowBootstrap(
   }
 
   // ── Risk limit set ───────────────────────────────────────────────────────
-  const existingLimitSet = await database.riskLimitSet.findFirst({
-    where: { key: RISK_LIMIT_SET_KEY, version: RISK_LIMIT_SET_VERSION }
-  });
   const riskLimitSet =
     existingLimitSet ??
     (await database.riskLimitSet.create({

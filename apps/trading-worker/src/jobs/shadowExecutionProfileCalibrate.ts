@@ -22,6 +22,13 @@
  *   - slippage 3 bp: the shadow orders are a few hundred USDT, orders of
  *     magnitude below top-of-book depth; 3 bp again is a cushion.
  * With these costs R-008 needs a stop of at least ~1.68 % for a 2.5R target.
+ *
+ * Since ADR 0023 the job writes only the approved profile pinned in
+ * `lib/executionProfileIntegrity.ts` — filters included, never copied from
+ * the previous row — and verifies its hash before writing. An active row that
+ * already is the approved profile stays `UNCHANGED`; any state that cannot
+ * become it in one step (a deviating row of the approved version, several
+ * active rows) is `REFUSED` without a write.
  */
 
 import { randomUUID } from "node:crypto";
@@ -45,6 +52,11 @@ import {
 import { config } from "dotenv";
 import pino from "pino";
 
+import {
+  activeExecutionProfileDeviations,
+  currentApprovedExecutionProfile,
+  loadActiveExecutionProfile
+} from "../lib/executionProfileIntegrity.js";
 import { checkShadowBootstrapAllowed } from "../lib/tradingSafety.js";
 
 const logger = pino({ name: "signalpilot-worker" });
@@ -71,10 +83,16 @@ const CALIBRATED_SYMBOLS = ["BTCUSDT", "ETHUSDT"] as const;
 
 export interface CalibrationSymbolResult {
   readonly symbol: string;
-  readonly outcome: "CREATED" | "UNCHANGED";
+  /**
+   * `REFUSED`: the active state cannot become the approved profile in one
+   * step (a deviating row of the approved version, several active rows, an
+   * unexpected version or an unapproved estimate); nothing is written.
+   */
+  readonly outcome: "CREATED" | "UNCHANGED" | "REFUSED";
   readonly previousVersion: number | null;
   readonly activeVersion: number;
   readonly profileId: string;
+  readonly deviations?: readonly string[];
 }
 
 export interface CalibrationSummary {
@@ -134,18 +152,19 @@ export async function runExecutionProfileCalibration(
       orderBy: { createdAt: "asc" }
     });
     if (asset === null) continue;
-    const active = await database.instrumentExecutionProfile.findFirst({
-      where: { assetId: asset.id, status: InstrumentExecutionProfileStatus.ACTIVE },
-      orderBy: { version: "desc" }
-    });
-    if (active === null) continue;
+    // The only profile this job may write is the approved one (ADR 0023):
+    // its values come from the pinned reference, never from the database.
+    const approved = currentApprovedExecutionProfile(symbol);
+    const activeProfiles = await loadActiveExecutionProfile(database, asset.id);
+    const active = activeProfiles.row;
+    if (active === null || approved === null) continue;
 
-    if (
-      active.feeBps === estimate.feeBps &&
-      active.fullSpreadBps === estimate.fullSpreadBps &&
-      active.slippageBps === estimate.slippageBps &&
-      active.source === estimate.source
-    ) {
+    const deviations = activeExecutionProfileDeviations(
+      activeProfiles,
+      symbol,
+      asset.id
+    );
+    if (deviations.length === 0) {
       results.push({
         symbol,
         outcome: "UNCHANGED",
@@ -157,13 +176,38 @@ export async function runExecutionProfileCalibration(
     }
 
     const instrument = {
-      tickSize: active.tickSize.toFixed(12),
-      stepSize: active.stepSize.toFixed(12),
-      minQuantity: active.minQuantity.toFixed(12),
-      minNotional: active.minNotional.toFixed(12),
-      maxQuantity: active.maxQuantity === null ? null : active.maxQuantity.toFixed(12)
+      tickSize: approved.tickSize,
+      stepSize: approved.stepSize,
+      minQuantity: approved.minQuantity,
+      minNotional: approved.minNotional,
+      maxQuantity: approved.maxQuantity
     };
-    const version = active.version + 1;
+    const estimateMatchesApproved =
+      estimate.feeBps === approved.feeBps &&
+      estimate.fullSpreadBps === approved.fullSpreadBps &&
+      estimate.slippageBps === approved.slippageBps &&
+      estimate.maxParticipationRate === approved.maxParticipationRate &&
+      estimate.source === approved.source;
+    const nextVersion = active.version + 1;
+    if (
+      activeProfiles.activeCount !== 1 ||
+      nextVersion !== approved.version ||
+      !estimateMatchesApproved ||
+      buildSpecificationHash({ symbol, version: nextVersion, ...instrument, ...estimate }) !==
+        approved.specificationHash
+    ) {
+      results.push({
+        symbol,
+        outcome: "REFUSED",
+        previousVersion: active.version,
+        activeVersion: active.version,
+        profileId: active.id,
+        deviations: [...deviations]
+      });
+      continue;
+    }
+
+    const version = nextVersion;
     const created = await database.$transaction(async (tx) => {
       const retired = await tx.instrumentExecutionProfile.updateMany({
         where: { id: active.id, status: InstrumentExecutionProfileStatus.ACTIVE },
@@ -186,7 +230,7 @@ export async function runExecutionProfileCalibration(
           maxParticipationRate: estimate.maxParticipationRate,
           source: estimate.source,
           sourceObservedAt: asOf,
-          specificationHash: buildSpecificationHash({ symbol, version, ...instrument, ...estimate }),
+          specificationHash: approved.specificationHash,
           activeAssetKey: buildActiveExecutionProfileKey({ assetId: asset.id }),
           effectiveFrom: asOf
         }
@@ -234,16 +278,18 @@ export async function runExecutionProfileCalibration(
     });
   }
 
+  const refused = results.some((result) => result.outcome === "REFUSED");
+  const status = refused ? BotRunStatus.FAILED : BotRunStatus.SUCCESS;
   const summary: CalibrationSummary = {
-    status: BotRunStatus.SUCCESS,
+    status,
     blocked: false,
-    blockReasonCode: null,
+    blockReasonCode: refused ? "EXECUTION_PROFILE_CONFLICT" : null,
     estimate: estimateKey,
     results
   };
   await database.botRun.update({
     where: { id: botRun.id },
-    data: { status: BotRunStatus.SUCCESS, finishedAt: new Date(), metadataJson: asJson(summary) }
+    data: { status, finishedAt: new Date(), metadataJson: asJson(summary) }
   });
   return summary;
 }

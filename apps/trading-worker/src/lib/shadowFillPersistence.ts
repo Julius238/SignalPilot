@@ -75,6 +75,15 @@ import {
   ledgerEntryCreateData,
   portfolioState as toPortfolioState
 } from "./shadowPortfolioIo.js";
+import {
+  EXECUTION_PROFILE_INTEGRITY_VIOLATION,
+  activeExecutionProfileDeviations,
+  approvedExecutionProfileByHash,
+  engageExecutionProfileIntegrityLock,
+  executionProfileDeviations,
+  loadActiveExecutionProfile
+} from "./executionProfileIntegrity.js";
+import { riskLimitSetRowDeviations } from "./riskLimitSetIntegrity.js";
 import { loadShadowPortfolioValuation } from "./shadowPortfolioValuation.js";
 
 export const SHADOW_FILL_JOB_KEY = "trading:shadow-process-fills";
@@ -86,7 +95,12 @@ export const SHADOW_FILL_JOB_KEY = "trading:shadow-process-fills";
  * `@signalpilot/trading-domain` catalogue.
  */
 export const ShadowFillReasonCode = {
-  POST_FILL_NET_CRV_BELOW_MINIMUM: "POST_FILL_NET_CRV_BELOW_MINIMUM"
+  POST_FILL_NET_CRV_BELOW_MINIMUM: "POST_FILL_NET_CRV_BELOW_MINIMUM",
+  /**
+   * The active limit set deviates from the pinned v1 policy (ADR 0021), so the
+   * recheck has no trusted minimum and fails closed like a CRV shortfall.
+   */
+  POST_FILL_RISK_LIMIT_SET_INVALID: "POST_FILL_RISK_LIMIT_SET_INVALID"
 } as const;
 export type ShadowFillReasonCode =
   (typeof ShadowFillReasonCode)[keyof typeof ShadowFillReasonCode];
@@ -357,7 +371,7 @@ export async function processEntryOrderFillForCandle(
       await expireOrderAndReleaseReserve(
         database,
         order,
-        candle.id,
+        candle,
         gap.reasonCode,
         input
       );
@@ -384,6 +398,51 @@ export async function processEntryOrderFillForCandle(
       outcome: ShadowFillOutcome.ERROR_LOCKED,
       shadowFillId: null,
       shadowPositionId: null
+    };
+  }
+
+  // No new exposure from a profile nobody approved (ADR 0023): the order's
+  // own snapshot — which this fill and the post-fill recheck price with —
+  // must be an approved profile, and the asset's active row must still be the
+  // approved one. Otherwise the order stops pursuing fills and the portfolio
+  // is locked for new entries.
+  const symbol =
+    (
+      await database.asset.findUnique({
+        where: { id: order.assetId },
+        select: { symbol: true }
+      })
+    )?.symbol ?? null;
+  const profileDeviations = [
+    ...executionProfileDeviations(
+      profileSnapshot,
+      approvedExecutionProfileByHash(symbol, profileSnapshot.specificationHash)
+    ).map((field) => `orderSnapshot.${field}`),
+    ...activeExecutionProfileDeviations(
+      await loadActiveExecutionProfile(database, order.assetId),
+      symbol,
+      order.assetId
+    ).map((field) => `activeProfile.${field}`)
+  ];
+  if (profileDeviations.length > 0) {
+    await stopEntryOrderOnInvalidProfile(database, order, candle, input);
+    await engageExecutionProfileIntegrityLock(database, {
+      portfolioId: order.portfolioId,
+      symbol,
+      executionProfileId: order.executionProfileId,
+      deviations: profileDeviations,
+      jobKey: SHADOW_FILL_JOB_KEY,
+      causationType: "ShadowOrder",
+      causationId: order.id,
+      correlationId: input.correlationId,
+      codeVersion: input.codeVersion,
+      asOf: input.asOf
+    });
+    return {
+      outcome: ShadowFillOutcome.ERROR_LOCKED,
+      shadowFillId: null,
+      shadowPositionId: null,
+      message: `Execution profile deviates from the approved profile: ${profileDeviations.join(", ")}.`
     };
   }
 
@@ -417,14 +476,15 @@ export async function processEntryOrderFillForCandle(
       };
     }
 
-    // No fill this candle — mark the cursor and expire after the second
-    // eligible candle if nothing has filled at all yet.
+    // No fill this candle — mark the cursor, or expire on any later candle.
+    // A remainder after a partial fill expires too; its position is opened
+    // with the expiry so the filled quantity stays monitored (ADR 0024).
     const isSecondCandle = !isFirstCandleForOrder;
     if (isSecondCandle) {
       await expireOrderAndReleaseReserve(
         database,
         order,
-        candle.id,
+        candle,
         fill.reasonCode,
         input
       );
@@ -504,6 +564,21 @@ export async function processEntryOrderFillForCandle(
     where: { status: "ACTIVE" },
     orderBy: { version: "desc" }
   });
+  // Only a set equal to the pinned v1 policy supplies the minimum (ADR 0021).
+  // A deviating set is treated like a missing one: the recheck fails closed.
+  const riskLimitSetDeviationFields =
+    activeRiskLimitSet === null
+      ? []
+      : riskLimitSetRowDeviations(activeRiskLimitSet);
+  const limitSetDeviates = riskLimitSetDeviationFields.length > 0;
+  const trustedRiskLimitSet = limitSetDeviates ? null : activeRiskLimitSet;
+  const shortfallReasonCode = limitSetDeviates
+    ? ShadowFillReasonCode.POST_FILL_RISK_LIMIT_SET_INVALID
+    : ShadowFillReasonCode.POST_FILL_NET_CRV_BELOW_MINIMUM;
+  // Payloads of an ordinary shortfall stay exactly as before.
+  const limitSetDeviationPayload = limitSetDeviates
+    ? { riskLimitSetDeviations: riskLimitSetDeviationFields }
+    : {};
 
   let positionId: string | null = null;
 
@@ -669,9 +744,9 @@ export async function processEntryOrderFillForCandle(
         )
       : DecimalValue.ZERO;
     const minRewardRisk =
-      activeRiskLimitSet === null
+      trustedRiskLimitSet === null
         ? null
-        : decimalString(activeRiskLimitSet.minRewardRisk);
+        : decimalString(trustedRiskLimitSet.minRewardRisk);
     const recheck =
       candidate === null ||
       candidate.stopPrice === null ||
@@ -715,8 +790,7 @@ export async function processEntryOrderFillForCandle(
     // below for a forced, risk-reducing close instead of the ordinary exit.
     if (!netCrvOk && !isFinalFillForOrder) {
       newOrderStatus = ShadowOrderStatus.CANCELLED;
-      orderCancelReasonCode =
-        ShadowFillReasonCode.POST_FILL_NET_CRV_BELOW_MINIMUM;
+      orderCancelReasonCode = shortfallReasonCode;
     }
     const newPositionStatus =
       newOrderStatus === ShadowOrderStatus.FILLED ||
@@ -813,9 +887,10 @@ export async function processEntryOrderFillForCandle(
           sourceCandleId: candle.id,
           payloadJson: asJson({
             jobKey: SHADOW_FILL_JOB_KEY,
-            reasonCode: ShadowFillReasonCode.POST_FILL_NET_CRV_BELOW_MINIMUM,
+            reasonCode: shortfallReasonCode,
             recheck,
-            minRewardRisk
+            minRewardRisk,
+            ...limitSetDeviationPayload
           }),
           occurredAt: candle.closeTime
         }
@@ -835,14 +910,15 @@ export async function processEntryOrderFillForCandle(
           eventKey: forcedExitEventKey,
           type: RiskEventType.RISK_RULE_BLOCK,
           severity: RiskSeverity.CRITICAL,
-          reasonCode: ShadowFillReasonCode.POST_FILL_NET_CRV_BELOW_MINIMUM,
+          reasonCode: shortfallReasonCode,
           portfolioId: portfolio.id,
           shadowOrderId: order.id,
           shadowPositionId: position.id,
           payloadJson: asJson({
             jobKey: SHADOW_FILL_JOB_KEY,
             recheck,
-            minRewardRisk
+            minRewardRisk,
+            ...limitSetDeviationPayload
           }),
           inputHash: fillKeyHash
         }
@@ -907,6 +983,8 @@ export async function processEntryOrderFillForCandle(
         data: ledgerEntryCreateData(entry, portfolio.id)
       });
     }
+    // Marked on each position's booked candle, the basis the reconciliation
+    // checks (ADR 0025); the position above was just booked on this candle.
     const markedPortfolio = await loadShadowPortfolioValuation(tx, {
       portfolioId: portfolio.id,
       asOf: input.asOf,
@@ -915,7 +993,8 @@ export async function processEntryOrderFillForCandle(
       realizedPnl: finalState.realizedPnl,
       feesPaid: finalState.feesPaid,
       highWaterMark: decimalString(portfolio.highWaterMark),
-      startOfDayEquity: null
+      startOfDayEquity: null,
+      basis: "BOOKED_CANDLE"
     });
     const updated = await tx.portfolio.updateMany({
       where: { id: portfolio.id, version: portfolio.version },
@@ -950,9 +1029,7 @@ export async function processEntryOrderFillForCandle(
         correlationId: input.correlationId,
         causationId: input.correlationId,
         idempotencyKey: buildPayloadHash(fillKey),
-        reasonCode: netCrvOk
-          ? "SIMULATION_FILLED"
-          : ShadowFillReasonCode.POST_FILL_NET_CRV_BELOW_MINIMUM,
+        reasonCode: netCrvOk ? "SIMULATION_FILLED" : shortfallReasonCode,
         tradingSessionId: order.tradingSessionId,
         afterState: asJson({
           fill,
@@ -973,6 +1050,21 @@ export async function processEntryOrderFillForCandle(
     return { fillId: createdFill.id, orderStatus: newOrderStatus, netCrvOk };
   });
 
+  // The fill is booked and its position marked for the forced, risk-reducing
+  // close above; a deviating limit set additionally locks the session and the
+  // portfolio, as R-026 does at assessment time (ADR 0021).
+  if (limitSetDeviates) {
+    await engageErrorLock(database, {
+      tradingSessionId: order.tradingSessionId,
+      portfolioId: order.portfolioId,
+      reasonCode: ShadowFillReasonCode.POST_FILL_RISK_LIMIT_SET_INVALID,
+      aggregateType: "ShadowFill",
+      aggregateId: result.fillId,
+      inputHash: result.fillId,
+      jobKey: SHADOW_FILL_JOB_KEY
+    });
+  }
+
   return {
     outcome: !result.netCrvOk
       ? ShadowFillOutcome.FILLED_CRV_SHORTFALL
@@ -985,10 +1077,176 @@ export async function processEntryOrderFillForCandle(
 }
 
 /**
+ * Stops an entry order whose execution profile is not approved (ADR 0023)
+ * without stranding exposure. An order without fills expires and releases its
+ * reserve. A partially filled one is cancelled, the remainder's reserve is
+ * released, and its `OPENING` position is opened as it stands, so the monitor
+ * manages it under its exit plan and the approved profile — the same outcome
+ * as a post-fill shortfall (ADR 0009). The booked fill stays booked.
+ */
+async function stopEntryOrderOnInvalidProfile(
+  database: PrismaClient,
+  order: {
+    readonly id: string;
+    readonly portfolioId: string;
+    readonly reservedQuoteAmount: unknown;
+    readonly remainingQuantity: unknown;
+    readonly filledQuantity: unknown;
+    readonly shadowPositionId: string | null;
+  },
+  candle: { readonly id: string; readonly closeTime: Date },
+  input: ProcessEntryFillInput
+): Promise<void> {
+  const filled = DecimalValue.fromString(decimalString(order.filledQuantity));
+  const shadowPositionId = order.shadowPositionId;
+  if (!filled.isPositive() || shadowPositionId === null) {
+    await expireOrderAndReleaseReserve(
+      database,
+      order,
+      candle,
+      EXECUTION_PROFILE_INTEGRITY_VIOLATION,
+      input
+    );
+    return;
+  }
+
+  await database.$transaction(async (tx) => {
+    const releaseAmount = decimalString(order.reservedQuoteAmount);
+    if (DecimalValue.fromString(releaseAmount).isPositive()) {
+      const portfolio = await tx.portfolio.findUnique({
+        where: { id: order.portfolioId }
+      });
+      if (portfolio === null)
+        throw new Error(
+          `Portfolio ${order.portfolioId} not found while releasing a reserve.`
+        );
+      const release = computeReleaseReservation({
+        state: toPortfolioState(portfolio),
+        entryKey: `${order.id}|profile-integrity-release`,
+        releaseAmount,
+        shadowOrderId: order.id,
+        occurredAt: input.asOf.toISOString()
+      });
+      if (!release.ok || release.nextState === null) {
+        throw new Error(
+          `Reserve release failed for order ${order.id}: ${release.reasonCode}`
+        );
+      }
+      await tx.portfolioLedgerEntry.create({
+        data: ledgerEntryCreateData(release.entries[0], portfolio.id)
+      });
+      const updated = await tx.portfolio.updateMany({
+        where: { id: portfolio.id, version: portfolio.version },
+        data: {
+          availableCash: release.nextState.availableCash,
+          reservedCash: release.nextState.reservedCash,
+          ledgerSequence: release.nextState.ledgerSequence,
+          version: { increment: 1 }
+        }
+      });
+      if (updated.count === 0)
+        throw new Error(
+          `Portfolio ${portfolio.id} version conflict while releasing a reserve.`
+        );
+    }
+
+    await tx.shadowOrder.update({
+      where: { id: order.id },
+      data: {
+        status: ShadowOrderStatus.CANCELLED,
+        openEntryScopeKey: null,
+        reservedQuoteAmount: "0",
+        lastProcessedCandleId: candle.id,
+        cancelReasonCode: EXECUTION_PROFILE_INTEGRITY_VIOLATION,
+        version: { increment: 1 }
+      }
+    });
+
+    await openPositionAfterTerminalEntry(tx, {
+      orderId: order.id,
+      shadowPositionId,
+      filledQuantity: order.filledQuantity,
+      candle,
+      payload: {
+        reasonCode: EXECUTION_PROFILE_INTEGRITY_VIOLATION,
+        cancelledRemainder: decimalString(order.remainingQuantity)
+      }
+    });
+  });
+}
+
+/**
+ * Opens the `OPENING` position of an entry order that has just turned
+ * terminal with a positive filled quantity, as it stands (docs/trading/04:
+ * `OPENING → OPEN` once the entry order is "terminal mit positiver gefüllter
+ * Menge"). Shared by the profile stop (ADR 0023) and the expiry after a
+ * partial fill (ADR 0024), so a terminal entry order never strands exposure
+ * outside the monitor. The position's `lastProcessedCandleId` stays on its
+ * last fill candle: the monitor evaluates the terminal candle next. Does
+ * nothing without a fill or once the position has left `OPENING`.
+ */
+async function openPositionAfterTerminalEntry(
+  tx: Prisma.TransactionClient,
+  args: {
+    readonly orderId: string;
+    readonly shadowPositionId: string | null;
+    readonly filledQuantity: unknown;
+    readonly candle: { readonly id: string; readonly closeTime: Date };
+    readonly payload: Readonly<Record<string, string>>;
+  }
+): Promise<void> {
+  const filled = DecimalValue.fromString(decimalString(args.filledQuantity));
+  if (!filled.isPositive() || args.shadowPositionId === null) return;
+  const position = await tx.shadowPosition.findUnique({
+    where: { id: args.shadowPositionId }
+  });
+  if (position === null || position.status !== ShadowPositionStatus.OPENING)
+    return;
+  const firstFill = await tx.shadowFill.findFirst({
+    where: {
+      shadowPositionId: position.id,
+      triggerType: ShadowFillTriggerType.ENTRY
+    },
+    orderBy: { occurredAt: "asc" }
+  });
+  await tx.shadowPosition.update({
+    where: { id: position.id },
+    data: {
+      status: ShadowPositionStatus.OPEN,
+      openedAt:
+        position.openedAt ?? firstFill?.occurredAt ?? args.candle.closeTime,
+      version: { increment: 1 }
+    }
+  });
+  const sequence =
+    (await tx.shadowPositionEvent.count({
+      where: { shadowPositionId: position.id }
+    })) + 1;
+  await tx.shadowPositionEvent.create({
+    data: {
+      eventKey: buildPositionEventKey({
+        shadowPositionId: position.id,
+        sequence
+      }),
+      shadowPositionId: position.id,
+      sequence,
+      type: ShadowPositionEventType.OPENED,
+      sourceOrderId: args.orderId,
+      sourceCandleId: args.candle.id,
+      payloadJson: asJson({ jobKey: SHADOW_FILL_JOB_KEY, ...args.payload }),
+      occurredAt: args.candle.closeTime
+    }
+  });
+}
+
+/**
  * Release whatever remains reserved and mark the order terminal. Used both
  * for the entry-gap refusal (immediate) and the two-candle expiry. A partial
  * fill already booked stays booked — only the unfilled remainder's reserve is
- * released (docs/trading/04: "Bereits gefüllte Position bleibt bestehen").
+ * released (docs/trading/04: "Bereits gefüllte Position bleibt bestehen") —
+ * and its `OPENING` position is opened in the same transaction (ADR 0024), so
+ * the filled quantity stays under the monitor's stop, take-profit and time
+ * exit.
  */
 async function expireOrderAndReleaseReserve(
   database: PrismaClient,
@@ -997,22 +1255,39 @@ async function expireOrderAndReleaseReserve(
     readonly portfolioId: string;
     readonly reservedQuoteAmount: unknown;
     readonly remainingQuantity: unknown;
+    readonly filledQuantity: unknown;
+    readonly shadowPositionId: string | null;
   },
-  candleId: string,
+  candle: { readonly id: string; readonly closeTime: Date },
   reasonCode: string,
   input: ProcessEntryFillInput
 ): Promise<void> {
+  const candleId = candle.id;
+  const openFilledPosition = (tx: Prisma.TransactionClient) =>
+    openPositionAfterTerminalEntry(tx, {
+      orderId: order.id,
+      shadowPositionId: order.shadowPositionId,
+      filledQuantity: order.filledQuantity,
+      candle,
+      payload: {
+        reasonCode,
+        expiredRemainder: decimalString(order.remainingQuantity)
+      }
+    });
   const releaseAmount = decimalString(order.reservedQuoteAmount);
   if (DecimalValue.fromString(releaseAmount).isZero()) {
-    await database.shadowOrder.update({
-      where: { id: order.id },
-      data: {
-        status: ShadowOrderStatus.EXPIRED,
-        openEntryScopeKey: null,
-        lastProcessedCandleId: candleId,
-        cancelReasonCode: reasonCode,
-        version: { increment: 1 }
-      }
+    await database.$transaction(async (tx) => {
+      await tx.shadowOrder.update({
+        where: { id: order.id },
+        data: {
+          status: ShadowOrderStatus.EXPIRED,
+          openEntryScopeKey: null,
+          lastProcessedCandleId: candleId,
+          cancelReasonCode: reasonCode,
+          version: { increment: 1 }
+        }
+      });
+      await openFilledPosition(tx);
     });
     return;
   }
@@ -1090,5 +1365,7 @@ async function expireOrderAndReleaseReserve(
         occurredAt: input.asOf
       }
     });
+
+    await openFilledPosition(tx);
   });
 }

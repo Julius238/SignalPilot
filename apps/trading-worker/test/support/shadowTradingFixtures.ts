@@ -338,12 +338,22 @@ function matchesDateFilter(value: Date, filter: unknown): boolean {
   return true;
 }
 
+/** Positions and orders already in the book, for the asset-slot guard. */
+export interface FakeSlotRows {
+  readonly positions?: readonly Record<string, unknown>[];
+  readonly orders?: readonly Record<string, unknown>[];
+}
+
 /**
  * Minimal Prisma double. Only the queries the strategy path uses are
  * implemented; any other model access throws so an accidental write to a risk,
- * order, fill or position table fails the test loudly.
+ * order, fill or position table fails the test loudly. Positions and orders
+ * can be read (the asset-slot guard does), never written.
  */
-export function createFakeDatabase(worlds: readonly FakeWorld[]) {
+export function createFakeDatabase(
+  worlds: readonly FakeWorld[],
+  slotRows: FakeSlotRows = {}
+) {
   const merged: FakeWorld = {
     assets: worlds.flatMap((world) => world.assets),
     assignments: worlds.flatMap((world) => world.assignments),
@@ -375,6 +385,35 @@ export function createFakeDatabase(worlds: readonly FakeWorld[]) {
           writes.forbiddenWrites.push(model);
           throw new Error(`Work package 2 must not touch ${model}.`);
         }
+      }
+    );
+  type SlotWhere = {
+    portfolioId?: string;
+    assetId?: string;
+    purpose?: string;
+    status?: { in?: readonly string[] };
+  };
+  /** Read-only `findMany` on rows already in the book; every other call stays forbidden. */
+  const readOnly = (model: string, rows: readonly Record<string, unknown>[]) =>
+    new Proxy(
+      {},
+      {
+        get: (_target, method) =>
+          method === "findMany"
+            ? async ({ where = {} }: { where?: SlotWhere } = {}) =>
+                rows
+                  .filter(
+                    (row) =>
+                      (where.portfolioId === undefined || row.portfolioId === where.portfolioId) &&
+                      (where.assetId === undefined || row.assetId === where.assetId) &&
+                      (where.purpose === undefined || row.purpose === where.purpose) &&
+                      (where.status?.in === undefined || where.status.in.includes(row.status as string))
+                  )
+                  .map((row) => ({ id: row.id }))
+            : () => {
+                writes.forbiddenWrites.push(model);
+                throw new Error(`Work package 2 must not touch ${model}.`);
+              }
       }
     );
 
@@ -571,6 +610,8 @@ export function createFakeDatabase(worlds: readonly FakeWorld[]) {
       }
     },
     tradingAuditEvent: {
+      findUnique: async ({ where }: { where: { eventKey: string } }) =>
+        writes.auditEvents.find((row) => row.eventKey === where.eventKey) ?? null,
       create: async ({ data }: { data: Record<string, unknown> }) => {
         writes.auditEvents.push(data);
         return { id: `audit-${writes.auditEvents.length}`, ...data };
@@ -610,9 +651,9 @@ export function createFakeDatabase(worlds: readonly FakeWorld[]) {
     riskAssessment: forbidden("riskAssessment"),
     riskRuleResult: forbidden("riskRuleResult"),
     tradeDecision: forbidden("tradeDecision"),
-    shadowOrder: forbidden("shadowOrder"),
+    shadowOrder: readOnly("shadowOrder", slotRows.orders ?? []),
     shadowFill: forbidden("shadowFill"),
-    shadowPosition: forbidden("shadowPosition"),
+    shadowPosition: readOnly("shadowPosition", slotRows.positions ?? []),
     shadowPositionEvent: forbidden("shadowPositionEvent"),
     exitPlan: forbidden("exitPlan"),
     portfolioLedgerEntry: forbidden("portfolioLedgerEntry"),
