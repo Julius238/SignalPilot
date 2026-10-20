@@ -92,10 +92,17 @@ Dokumentiere:
 
 ```bash
 git fetch origin
-git checkout claude/inspiring-noether-rjh92d
+git switch main                # Produktionslinie, nie den Entwicklungsbranch
 git pull --ff-only
 git log -1 --oneline
 ```
+
+Seit dem 2026-10-20 ist `main` die Produktionslinie: Der VPS-Checkout
+folgt `main`, und deployt wird nur von `main`. Der Entwicklungsbranch
+`claude/inspiring-noether-rjh92d` enthält Forschungscode (Evolution Engine,
+weitere Strategien, eigene Migrationen). Er wird auf dem VPS nie ausgecheckt
+oder gepullt. Etwas aus der Entwicklung geht nur nach eigener Freigabe per
+Merge nach `main`.
 
 **Der Checkout ist nicht der laufende Code.** Welcher Code läuft, bestimmen
 die Images und `TRADING_CODE_VERSION`. Ein `git pull` ohne Rebuild ändert
@@ -161,9 +168,11 @@ trading-worker api` und `consistency-compare`.
   --filter until=24h`, täglich zwischen 00:00 und 06:00 UTC) löscht
   ungenutzte Images trotz Tag. Ein Rollback-Image ist deshalb nach der
   nächsten Nacht nur noch per `docker load` aus der gesicherten Datei da.
-- Solange der Hotfix nicht im Checkout-Branch ist, kein `prod-build.sh` für
-  `trading-worker` oder `api` aus dem Checkout. Das würde den Hotfix
-  zurückdrehen.
+- Danach kommt der Hotfix per Merge-Commit nach `main` (Vorbild:
+  `release/official-v1`, CI grün, Fast-Forward von `main`), und der
+  VPS-Checkout zieht per `git pull --ff-only` nach. Bis dahin kein
+  `prod-build.sh` für `trading-worker` oder `api` aus dem Checkout, sonst ist
+  der Hotfix zurückgedreht.
 
 **Rollback ohne Git-Wechsel:**
 
