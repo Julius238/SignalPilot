@@ -9,12 +9,11 @@ um: Text `f04377f`, Blob `0afb5abb…`, Statusblock `fb8d094`. Abschnittsangaben
 `NICHT_BESTANDEN`, N = 58. Die Testperiode bleibt geschlossen.**
 Ergebnis: [Ergebnisbericht](../../../docs/trading/research/2026-10-20-deleveraging-events-v1-discovery-results.md).
 
-Zuvor in Schritt 1.1 fertig und nur mit synthetischen Daten getestet.
-
-- Es hat nie Marktdaten gelesen und enthält keinen Netzwerkcode.
-- Download (1.2) und echte Auswertung brauchen je eine eigene Freigabe.
+- Das Auswerteskript enthält keinen Netzwerkcode; nur `download_data.py`
+  lädt, und zwar ausschließlich Entdeckungsdaten.
+- Der echte Lauf wurde genau einmal ausgeführt (`primary`, Entdeckung).
 - Der Testzeitraum öffnet nur nach einem Entdeckungsergebnis `HINWEIS` oder
-  `BELASTBAR`.
+  `BELASTBAR`. Mit `NICHT_BESTANDEN` bleibt er geschlossen.
 
 ## Aufruf
 
@@ -131,7 +130,7 @@ konservativ umgesetzt und vor dem echten Lauf zur Kenntnis zu nehmen:
 
 ## Tests (nur synthetisch)
 
-Insgesamt 33 Tests:
+Insgesamt 34 Tests:
 
 | Bereich | Geprüft |
 |---|---|
@@ -142,4 +141,4 @@ Insgesamt 33 Tests:
 | Kosten und Ausstiege | 22 bp bzw. 28 bp Round-Trip; Stop mit Zuschlag; Kurslücke über den Stop; Vorzeichen des Funding für Long und Short |
 | Periodensperre | Daten nach dem Ende ändern nichts; ein Kandidat zu nah am Ende wird nicht gebildet |
 | Klassen | Cluster über Symbole; `UNZUREICHEND`, `NICHT_BESTANDEN`, `NUR_KURSUMKEHR`, `UNEINHEITLICH`, `HINWEIS`, `BELASTBAR` |
-| Befehle | `synth` bis `check-data` und `evaluate`; Sperre für echte Daten ohne Bestätigung; Periodenüberschreibung nur synthetisch; Sperre des Testzeitraums; `verify` gegen den eingefrorenen Blob; eingefrorene Werte |
+| Befehle | `synth` bis `check-data`, `check-assumptions`, `cost-check`, `evaluate` und `summarize`; Prüfungen vor der Auswertung zeigen nie Renditen; Sperre für echte Daten ohne Bestätigung; Periodenüberschreibung nur synthetisch; Sperre des Testzeitraums; `verify` gegen den eingefrorenen Blob; eingefrorene Werte |
