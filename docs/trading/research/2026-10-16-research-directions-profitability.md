@@ -582,6 +582,13 @@ Phase 0 für Rang 2 liegt vor:
 [Vorregistrierung der Machbarkeitsstudie relative Stärke](2026-10-17-relative-strength-feasibility-preregistration.md)
 (2026-10-17, freigegeben und eingefroren in `c188c38`).
 
+Ergebnis für Rang 2 (2026-10-18): `NICHT_BESTANDEN` / `NUR_BETA`, damit
+ebenfalls geschlossen, N = 57
+([Ergebnisbericht](2026-10-18-relative-strength-results.md)). Die nächste
+Phase ordnet die
+[strategische Bestandsaufnahme](2026-10-18-strategic-review-next-phase.md)
+neu (2026-10-18, zur Entscheidung durch den Betreiber).
+
 ### Was die Empfehlung ändern würde
 
 - **Phase 1 zeigt nach Kosten keinen tragfähigen Carry**, etwa wegen
