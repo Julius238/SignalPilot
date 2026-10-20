@@ -1,5 +1,20 @@
 # Vorregistrierung `REGIME_EXPOSURE_V1` (D6): BTC nur in `RISK_ON` gegen risikogleiches passives BTC
 
+> **Status 2026-10-20: freigegeben und eingefroren (V1), bewusst
+> zurückgestellt.**
+>
+> - Der Betreiber hat E1–E7, die feste Quote von R2 und die Regel zum
+>   Informationsstand entschieden (Abschnitt 12).
+> - Eingefrorene Fassung: Commit `e8f5637`, Blob
+>   `bd874e9796f9f9efa889c68b7eea9fbf2913e419` dieser Datei.
+> - Registerstatus: vorregistriert, nicht ausgewertet. N bleibt 57.
+> - Testbeginn 2026-12-01 00:00 UTC. Das Beobachtungsskript, jeder
+>   Datenabruf und jeder Quartalslauf brauchen eine eigene Freigabe
+>   (Abschnitt 11).
+>
+> Der Text unten bleibt als Festschreibung unverändert, nur dieser Statusblock
+> ist neu.
+
 > **Stand 2026-10-20: Fassung zum Einfrieren, Entscheidungen E1–E7 des
 > Betreibers eingearbeitet (Abschnitt 12).**
 >
