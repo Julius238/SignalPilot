@@ -2,7 +2,8 @@
 
 > **Status: Fassung zum Einfrieren (2026-10-20). Die Entscheidungen G1–G7
 > sind eingearbeitet (Abschnitt 13), Schritte 0.2 und 0.2b sind erledigt
-> (Abschnitt 15). Die Freeze-Freigabe des Betreibers steht aus.** Erstellt am 2026-10-20 auf
+> (Abschnitt 15). Die Zeitachsen sind vor dem Freeze angeglichen
+> (Abschnitt 16).** Erstellt am 2026-10-20 auf
 > `claude/inspiring-noether-rjh92d`.
 >
 > - Kein Download, kein Code, kein Backtest, keine Parameteroptimierung,
@@ -77,7 +78,8 @@
     Er sinkt schon durch fallende Kurse, ohne dass eine Position abgebaut
     wird. Er dient nur der Zeitstempelprüfung (15.4).
   - **Verfügbarkeit (G6):** Ein mit t gestempelter Wert gilt erst zu
-    t + 10 Minuten als bekannt.
+    t + 10 Minuten als bekannt. Ein Kandidat wird deshalb erst 10 Minuten
+    nach seinem Kursfenster eingeordnet (Abschnitt 4).
   - Laut 15.4 ist der Wert sehr wahrscheinlich zu t bewertet. Die
     Veröffentlichungslatenz ist historisch nicht bestimmbar, die 10 Minuten
     bleiben deshalb eine konservative **Modellannahme**, keine belegte
@@ -98,9 +100,9 @@
 | Doppelt, identisch | mehrere Zeilen mit gleichem `create_time` und gleichem `sum_open_interest`: eine zählt |
 | Doppelt, widersprüchlich | gleicher `create_time`, verschiedene Werte: **alle** Zeilen dieses Zeitstempels ungültig |
 | Ungültig | außerhalb des Rasters, nicht numerisch, ≤ 0 oder leer: verworfen, nicht auf das Raster gerundet |
-| Zeitlich verspätet | Ein Punkt mit Zeitstempel t ist erst ab t + 10 min nutzbar. Eine Entscheidung zum Zeitpunkt c verwendet **genau** die Zeitstempel c − 10 min und c − 70 min. Fehlt einer der beiden oder ist er ungültig, wird zu c **kein** Ereignis geprüft. Kein Ersatz durch ältere oder spätere Zeitstempel |
+| Zeitlich verspätet | Ein Punkt mit Zeitstempel t ist erst ab t + 10 min nutzbar. Ein Kandidat mit Auslösezeitpunkt c₀ wird mit **genau** den Zeitstempeln c₀ und c₀ − 60 min eingeordnet, frühestens zu c₀ + 10 min. Fehlt einer der beiden oder ist er ungültig, ist der Kandidat **nicht einordenbar**: kein Trade, nur gezählt, **nie** Kontrolle. Kein Ersatz durch ältere oder spätere Zeitstempel |
 | Größe | **kein** Filter auf die Größe von OI-Änderungen. Echte Deleveraging-Sprünge dürfen extrem sein |
-| Normierung | Die 30-Tage-Verteilung von ΔOI nutzt nur ΔOI-Werte, deren beide Endpunkte gültig sind. Unter 80 % gültigen Werten im Fenster wird zu c kein Ereignis geprüft |
+| Normierung | Die 30-Tage-Verteilung von ΔOI nutzt nur ΔOI-Werte, deren beide Endpunkte gültig sind. Unter 80 % gültigen Werten im Fenster ist der Kandidat nicht einordenbar (wie „fehlend“) |
 | Quellenstand | Ein Lauf nutzt genau die Dateien, deren Hashes er festhält. Weicht eine spätere Abfrage ab, werden die Stände nicht gemischt; die Abweichung wird berichtet |
 | Datenabbruch | mehr als 5 % ungültige oder fehlende Punkte je Symbol im ausgewerteten Zeitraum: Abbruch vor jeder Renditeauswertung |
 
@@ -120,34 +122,49 @@ OI-Verzögerung 10 Minuten.
 Alles runde Standardwerte, festgelegt vor jedem Datenblick und nicht
 optimiert.
 
-| Größe | Definition zum Zeitpunkt c |
-|---|---|
-| Kursänderung | ΔP(c) = P(c) ÷ P(c − 60 min) − 1 |
-| OI-Änderung | ΔOI(c) = OI(c − 10 min) ÷ OI(c − 70 min) − 1, OI in Basiseinheiten (`sum_open_interest`) |
-| z-Werte | z_P = ΔP ÷ Standardabweichung von ΔP; z_OI = ΔOI ÷ Standardabweichung von ΔOI; beide über alle 5-Minuten-Punkte der vorangegangenen 30 Tage |
+Kursänderung und OI-Änderung werden über **denselben** Zeitraum c − 60 bis
+c gemessen (Abschnitt 16).
 
-- **Deleveraging-Ereignis (D):** \|z_P\| ≥ 3 **und** z_OI ≤ −3.
-- **Kontrollereignis (K):** \|z_P\| ≥ 3 **und** z_OI ≥ −1. Der OI ist dann
-  stabil oder steigt.
-- **Nicht zugeordnet:** −3 < z_OI < −1. Das wird nicht gehandelt und nur
-  gezählt.
-- **Richtung:**
-  - z_P ≤ −3 ist ein Abwärtsereignis, danach **Long**.
-  - z_P ≥ +3 ist ein Aufwärtsereignis, danach **Short**.
-- **Auslösezeitpunkt** c₀: der erste Zeitpunkt, an dem die Bedingung gilt.
+| Größe | Definition für den Zeitpunkt c | bekannt ab |
+|---|---|---|
+| Kursänderung | ΔP(c) = P(c) ÷ P(c − 60 min) − 1 | c |
+| OI-Änderung | ΔOI(c) = OI(c) ÷ OI(c − 60 min) − 1, OI in Basiseinheiten (`sum_open_interest`) | c + 10 min (G6) |
+| z_P(c) | ΔP(c) ÷ Standardabweichung der ΔP(t) aller 5-Minuten-Punkte t von c − 30 Tage bis c − 5 min | c |
+| z_OI(c) | ΔOI(c) ÷ Standardabweichung der ΔOI(t) aller 5-Minuten-Punkte t von c − 30 Tage bis c − 5 min, nur gültige Werte (3.1) | c + 10 min |
+
+**Ablauf je Symbol:**
+
+1. **Kandidat (nur Kurs):**
+   - Zu jedem Zeitpunkt c wird nur geprüft, ob \|z_P(c)\| ≥ 3 ist.
+   - Der erste solche Zeitpunkt außerhalb einer Sperre (Abschnitt 5) ist
+     der **Auslösezeitpunkt c₀** eines Kandidaten.
+   - Ab c₀ ist das Symbol gesperrt, unabhängig von der späteren Einordnung.
+     Derselbe Kursschock erzeugt also nie einen zweiten Kandidaten.
+2. **Einordnung zu c₀ + 10 min**, mit z_OI(c₀):
+   - **Deleveraging-Ereignis (D):** z_OI(c₀) ≤ −3.
+   - **Kontrollereignis (K):** z_OI(c₀) ≥ −1. Der OI ist dann stabil oder
+     steigt.
+   - **Nicht zugeordnet:** −3 < z_OI(c₀) < −1. Kein Trade, nur gezählt.
+   - **Nicht einordenbar:** OI(c₀) oder OI(c₀ − 60 min) fehlt oder ist
+     ungültig, oder die Normierung ist unzureichend (3.1). Kein Trade, nur
+     gezählt, **nie** Kontrolle.
+   - Vor c₀ + 10 min wird kein Kandidat eingeordnet, auch nicht vorläufig.
+3. **Richtung** aus z_P(c₀):
+   - z_P(c₀) ≤ −3 ist ein Abwärtsereignis, danach **Long**.
+   - z_P(c₀) ≥ +3 ist ein Aufwärtsereignis, danach **Short**.
 
 ## 5. Handelsregeln (identisch für D und K)
 
 | Element | Festlegung |
 |---|---|
-| Ereignis abgeschlossen | erste 5-Minuten-Kerze nach c₀, die das Extrem nicht erweitert. Bei Abwärtsereignissen liegt ihr Tief nicht unter dem Tief seit c₀ − 60 min, bei Aufwärtsereignissen ihr Hoch nicht über dem Hoch. Ihr Schluss ist der Entscheidungszeitpunkt c\* |
-| Ohne Abschluss | kein Abschluss bis c₀ + 60 min: **kein Trade**, nur gezählt |
+| Ereignis abgeschlossen | nur für eingeordnete D- und K-Ereignisse: die erste 5-Minuten-Kerze, die **zu oder nach c₀ + 10 min** beginnt und das Extrem nicht erweitert. Bei Abwärtsereignissen liegt ihr Tief nicht unter dem Tief seit c₀ − 60 min, bei Aufwärtsereignissen ihr Hoch nicht über dem Hoch. Ihr Schluss ist der Entscheidungszeitpunkt c\*, frühestens c₀ + 15 min |
+| Ohne Abschluss | kein Abschluss bis c₀ + 70 min: **kein Trade**, nur gezählt |
 | Frühester Einstieg | Marktorder (Taker) zum Open der 1m-Kerze, die bei c\* + 1 min beginnt, also eine Minute Ausführungsverzögerung |
 | Ausstieg | Marktorder zum Open der 1m-Kerze bei Einstieg + 60 min |
 | Maximale Haltedauer | 60 Minuten |
 | Stop | Abstand = \|ΔP(c₀)\|, also die Größe des auslösenden Schocks, vom Einstiegspreis aus. Geprüft auf jeder 1m-Kerze; ausgeführt zum Stoppreis oder, bei einer Lücke, zum schlechteren 1m-Open |
 | Größe | fest 25 000 USD Notional, ungehebelt gerechnet. Rendite je Trade in % des Notionals, ohne Zinseszins |
-| Überlappung je Symbol | Ab c₀ werden bis zum Ende des Trades (oder der Entscheidung „kein Trade“) plus 60 Minuten keine neuen Ereignisse desselben Symbols gezählt |
+| Überlappung je Symbol | Ab dem Auslösezeitpunkt c₀ eines Kandidaten werden bis zum Ende seines Trades (oder bis zur Feststellung „kein Trade“) plus 60 Minuten keine neuen Kandidaten desselben Symbols gebildet. Das gilt für jede Einordnung, auch „nicht zugeordnet“ und „nicht einordenbar“ |
 | Cluster über Symbole | Ereignisse von BTC und ETH, deren c₀ höchstens 60 Minuten auseinanderliegen, bilden ein Cluster. Statistik nur auf Cluster-Ebene, der Cluster-Wert ist der Mittelwert seiner Trades |
 
 ## 6. Kosten (Stress, nur Taker)
@@ -306,7 +323,8 @@ Minuten Ausführungsverzögerung. Sie entscheiden nichts.
    - Bedeutung von `create_time`;
    - Lücken;
    - Schema von `bookDepth`.
-3. **0.2b Zeitstempelprüfung** (erledigt am 2026-10-20, Abschnitt 15.4).
+3. **0.2b Zeitstempelprüfung** (erledigt am 2026-10-20, Abschnitt 15.4),
+   danach die Angleichung der Zeitachsen (Abschnitt 16).
 4. **0.3 Entscheidungen G1–G7** (eingearbeitet), danach Einfrieren nach
    Freigabe (Commit und Blob-Hash).
 5. **1.1 Auswertungsskript**, getestet nur mit synthetischen Reihen.
@@ -466,6 +484,31 @@ der Dateien lückenlos ist. Das prüft erst der Studienlauf mit den Regeln aus
 - An Ereignissen, Handelsregeln, Kosten und Klassen ändert sich nichts.
 - G6 (10 min) und G7 (Regeln in 3.1) sind eingearbeitet.
 - Die Semantikprüfung wurde als 0.2b vorgezogen (15.4).
+
+## 16. Angleichung der Zeitachsen vor dem Freeze (2026-10-20)
+
+- **Befund bei der Konsistenzkontrolle:** In der Fassung `b533524` maß die
+  Kursänderung das Fenster c − 60 bis c, die OI-Änderung wegen G6 aber
+  c − 70 bis c − 10.
+  - Kursschock und OI-Abbau stammten so aus versetzten Zeiträumen.
+  - Ein OI-Einbruch in den letzten 10 Minuten eines Schocks wäre noch nicht
+    sichtbar gewesen. Der Fall wäre als Kontrolle gezählt und durch die
+    Sperre später nicht mehr als D erkannt worden.
+  - Das hätte genau den Unterschied D − K verwischt.
+  - Look-ahead gab es dabei nicht.
+- **Korrektur, freigegeben vom Betreiber:**
+  - Beide Änderungen messen c₀ − 60 bis c₀.
+  - Ein Kandidat entsteht allein aus dem Kurs. Eingeordnet wird er
+    frühestens zu c₀ + 10 min, wenn OI(c₀) nach G6 verfügbar ist.
+  - Fehlende OI-Werte machen ihn „nicht einordenbar“, nie zur Kontrolle.
+  - Ereignisende und Einstieg folgen erst danach (ab c₀ + 10 min, Abschluss
+    bis spätestens c₀ + 70 min).
+  - Die Sperre gilt ab c₀ für jede Einordnung.
+  - Normierungen nutzen nur Werte bis c₀ − 5 min.
+  - D und K haben identische Zeitregeln.
+- **Unverändert:** Schwellen, Fenster, Haltedauer, Stop, Kosten,
+  Zeiträume, primärer Test, Klassen und N. Die Korrektur stützt sich auf
+  keine Renditen.
 
 ## 14. Was unverändert bleibt
 
