@@ -1,5 +1,25 @@
 # Vorregistrierung `DELEVERAGING_EVENTS_V1` (D8): kurzfristige Überreaktion nach Deleveraging auf BTC/ETH-Perpetuals
 
+> **Status 2026-10-20: freigegeben und eingefroren (V1).**
+>
+> - Der Betreiber hat G1–G7 und die Angleichung der Zeitachsen
+>   (Abschnitt 16) freigegeben.
+> - Eingefrorene Fassung: Commit `f04377f`
+>   (`f04377f4f255c31e655d7f0593b0259eaf146548`), Blob
+>   `0afb5abb37e62a484158f51b9db5b1fe5ceb5984` dieser Datei.
+> - **Die 10 Minuten OI-Verzögerung (G6) sind eine konservative
+>   Modellannahme, keine nachgewiesene historische
+>   Veröffentlichungslatenz.** Belegt ist nur, dass der Wert sehr
+>   wahrscheinlich zum Zeitpunkt `create_time` bewertet ist (15.4).
+> - **Registerstatus:** vorregistriert, nicht ausgewertet. N bleibt 57, bis
+>   eine historische Ergebnisauswertung stattfindet.
+> - **Nächster Schritt:** Auswertungsskript (1.1), getestet nur mit
+>   synthetischen Daten. Datendownload (1.2) und echte Auswertung brauchen
+>   je eine eigene Freigabe.
+>
+> Der Text unten bleibt als Festschreibung unverändert, nur dieser Statusblock
+> ist neu.
+
 > **Status: Fassung zum Einfrieren (2026-10-20). Die Entscheidungen G1–G7
 > sind eingearbeitet (Abschnitt 13), Schritte 0.2 und 0.2b sind erledigt
 > (Abschnitt 15). Die Zeitachsen sind vor dem Freeze angeglichen
