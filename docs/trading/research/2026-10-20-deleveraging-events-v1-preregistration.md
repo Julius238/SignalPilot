@@ -1,6 +1,7 @@
 # Vorregistrierung `DELEVERAGING_EVENTS_V1` (D8): kurzfristige Überreaktion nach Deleveraging auf BTC/ETH-Perpetuals
 
-> **Status: ENTWURF Phase 0, nicht eingefroren.** Erstellt am 2026-10-20 auf
+> **Status: ENTWURF Phase 0, nicht eingefroren. Schritt 0.2 erledigt
+> (Abschnitt 15), Handelsregeln dadurch nicht geändert.** Erstellt am 2026-10-20 auf
 > `claude/inspiring-noether-rjh92d`.
 >
 > - Kein Download, kein Code, kein Backtest, keine Parameteroptimierung,
@@ -141,7 +142,7 @@ optimiert.
 | `klines` 1m (monatlich) | OHLCV, Taker-Kaufvolumen | 2020-01 | 2020-01 | ~1,6–1,8 MB je Monat (2020) | Kurs, Ein- und Ausstieg, Stop |
 | `metrics` (täglich) | 5-Minuten-Zeilen: `sum_open_interest`, Wert, Long/Short-Verhältnisse, Taker-Volumenverhältnis | **2020-09-01** | **2021-12-01** | klein | Auslöser |
 | `aggTrades`, `trades` | jeder Handel mit Käufer/Verkäufer-Kennung | vorhanden | vorhanden | groß | nicht nötig im Primärtest |
-| `bookDepth` (täglich) | **aggregierte** Orderbuchtiefe (Schema in 0.2 zu prüfen) | 2023-01-01 | 2023-01-01 | ~0,5 MB je Tag | Kostenprüfung 2023 |
+| `bookDepth` (täglich) | **aggregierte** Orderbuchtiefe in Stufen ±1 bis ±5 %, Snapshot etwa alle 30 s (Abschnitt 15) | 2023-01-01 | 2023-01-01 | ~0,5 MB je Tag | Kostenprüfung 2023 |
 | `bookTicker` (täglich) | bestes Bid/Ask je Änderung | 2023-05-16 | 2023-05-16 | ~47 MB je Tag (ETH) | nur Stichprobe, zu groß für die ganze Historie |
 | `fundingRate` (monatlich) | Funding je Abrechnung | ab Kontraktstart | ab Kontraktstart | klein | Kosten |
 | Liquidationsaufträge | **nicht im Archiv** | – | – | – | deshalb „Deleveraging“ statt „Liquidation“ |
@@ -260,16 +261,19 @@ Minuten Ausführungsverzögerung. Sie entscheiden nichts.
 ## 12. Ablauf
 
 1. **0.1 dieser Entwurf** (erledigt).
-2. **0.2 Datenprüfung**, mit Freigabe für je eine Beispieldatei (`metrics`
+2. **0.2 Datenprüfung** (erledigt am 2026-10-20, Abschnitt 15), mit Freigabe für je eine Beispieldatei (`metrics`
    und `bookDepth`, zusammen < 1 MB) und vollständige Verzeichnislisten:
    - Bedeutung von `create_time`;
    - Lücken;
    - Schema von `bookDepth`.
-3. **0.3 Entscheidungen G1–G5**, danach Einfrieren (Commit und Blob-Hash).
+3. **0.3 Entscheidungen G1–G7**, danach Einfrieren (Commit und Blob-Hash).
 4. **1.1 Auswertungsskript**, getestet nur mit synthetischen Reihen.
-5. **1.2 Download** (rund 0,7 GB, Freigabe) und **Entdeckungslauf** mit
+5. **1.2a Semantikprüfung von `create_time`** (Abschnitt 15.1): eine
+   1m-Mark-Price-Datei, rund 0,1 MB, mit Freigabe, vor jeder
+   Renditeauswertung.
+6. **1.2 Download** (rund 0,7 GB, Freigabe) und **Entdeckungslauf** mit
    Klasse.
-6. **1.3 Testlauf**, nur bei `HINWEIS` oder `BELASTBAR`, mit eigener
+7. **1.3 Testlauf**, nur bei `HINWEIS` oder `BELASTBAR`, mit eigener
    Freigabe.
 
 Aufwand: rund eine bis zwei Wochen Arbeitssitzungen.
@@ -283,6 +287,127 @@ Aufwand: rund eine bis zwei Wochen Arbeitssitzungen.
 | G3 | Stresskosten | **wie Abschnitt 6** | Gebühr 5 bp (Binance) statt 6 bp |
 | G4 | Mindestzahl Cluster | **40 je Gruppe und Zeitraum** | 60 (strenger, häufiger `UNZUREICHEND`) |
 | G5 | Mehrfachtest-Zähler | **N bleibt 57, D8 zählt mit der Auswertung** | N 57 → 58 beim Einfrieren |
+| G6 | Verzögerung des OI (neu aus 0.2) | **10 min**: ein mit t gestempelter Wert gilt ab t + 10 min als bekannt. Damit ist das ungünstigste Intervallende plus bis zu 5 min Veröffentlichungslatenz abgedeckt. Beschreibend zusätzlich mit 20 min. Bleibt 10 min, auch wenn die Semantikprüfung (15.1) den Snapshot bei t zeigt | 5 min, wie bisher (nicht belegt konservativ) |
+| G7 | Gültigkeit der OI-Punkte (neu aus 0.2) | **Regeln aus 15.1**: nur strukturelle Prüfungen, keine Größenfilter | zusätzlich implizierter Preis innerhalb ±2 % des 1m-Schlusskurses als Plausibilitätsprüfung |
+
+## 15. Befunde aus Schritt 0.2 (2026-10-20)
+
+Geprüft wurden zwei Beispieldateien, BTCUSDT am 2023-06-15, ein
+gewöhnlicher Tag der Entdeckungsperiode:
+
+- `metrics`: 14,7 KB gepackt;
+- `bookDepth`: 477 KB gepackt.
+
+Beide Prüfsummen (`.CHECKSUM`) stimmen. Dazu kommen die vollständigen
+Verzeichnislisten, nur Metadaten. Ausgewertet wurden keine Renditen und keine
+Ereignisse.
+
+**Was zwei Beispieldateien zeigen und was nicht:** Sie belegen Format und
+grundsätzliche Eignung. Sie belegen **nicht**, dass die Historie innerhalb
+der Dateien lückenlos ist. Das prüft erst der Studienlauf mit den Regeln aus
+15.1.
+
+### 15.1 Open Interest (`metrics`)
+
+- **Spalten:** `create_time`, `symbol`, `sum_open_interest` (in BTC),
+  `sum_open_interest_value` (in USD), `count_toptrader_long_short_ratio`,
+  `sum_toptrader_long_short_ratio`, `count_long_short_ratio`,
+  `sum_taker_long_short_vol_ratio`.
+- **Raster am Beispieltag:** 288 Zeilen, exakt alle 300 s von 00:00:00 bis
+  23:55:00, Sekunden immer 0. Keine Doppelungen, keine leeren oder
+  Nullwerte.
+  - OI zwischen 103 670 und 111 985 BTC.
+  - Größte Änderung je Schritt 1,67 %, Median 0,06 %.
+  - Der implizite Preis (Wert ÷ OI) lag zwischen 24 882 und 25 707 USD,
+    plausibel für BTC an diesem Tag.
+- **Bedeutung von `create_time`: nicht belegt.**
+  - Die Datei sagt nicht, ob der Zeitstempel den Snapshot-Zeitpunkt, den
+    Intervallbeginn oder das Intervallende meint.
+  - In derselben Zeile steht mit `sum_taker_long_short_vol_ratio` eine
+    zwingende **Intervallgröße**. Die Zeile fasst also ein 5-Minuten-Intervall
+    zusammen; ob es vor oder nach t liegt, ist offen.
+- **Wann ein Wert verfügbar war: aus dem Archiv nicht bestimmbar.**
+  - Die CSV-Dateien wurden lange nach dem Handelstag erzeugt (Dateidatum
+    2023-07-03 für `metrics`, 2023-07-12 für `bookDepth`).
+  - Die Latenz der Echtzeit-Veröffentlichung ist nirgends dokumentiert.
+- **Folge für die Verzögerung:** Die bisherige Annahme (+5 min) ist **nicht
+  belegt konservativ**. Sie wäre nur richtig, wenn der Snapshot bei oder vor
+  t liegt und ohne Latenz veröffentlicht wurde. Vorschlag G6: +10 min als
+  primär, +20 min beschreibend.
+- **Semantikprüfung vor jeder Renditeauswertung** (Schritt 1.2a, eigene
+  Freigabe, eine 1m-Mark-Price-Datei desselben Tages, rund 0,1 MB):
+  - Der implizite Preis je Zeile wird mit den Mark-Preisen der Minuten
+    t − 5 … t + 5 verglichen.
+  - Die beste Übereinstimmung zeigt den Snapshot-Zeitpunkt, nicht aber die
+    Latenz.
+  - Bleibt die Zuordnung uneindeutig, gilt G6 unverändert und die
+    Unsicherheit wird im Ergebnisbericht genannt.
+- **Echtzeit-Latenz:** Vor jeder Umsetzung muss sie live an der jeweiligen
+  Schnittstelle gemessen werden. Das ist nicht Teil dieser Studie.
+- **Gültigkeitsregeln für OI-Punkte (Vorschlag G7):**
+  - Gültig ist ein Punkt, dessen `create_time` auf dem 5-Minuten-Raster liegt
+    und dessen `sum_open_interest` numerisch und > 0 ist.
+  - Exakte Doppelungen: eine behalten. Widersprüchliche Doppelungen: beide
+    ungültig.
+  - Fehlt eine Tagesdatei, sind alle Punkte des Tages ungültig.
+  - Fehlt einer der beiden Endpunkte von ΔOI, wird zu diesem Zeitpunkt kein
+    Ereignis geprüft.
+  - Die 30-Tage-Normierung braucht mindestens 80 % gültige Punkte, sonst gibt
+    es keine Prüfung.
+  - **Kein Größenfilter**, weil echte Deleveraging-Sprünge extrem sein
+    dürfen.
+  - Der Datenabbruch (mehr als 5 % ungültige Punkte je Symbol) bleibt.
+- **Abdeckung auf Dateiebene** (Verzeichnisliste): BTCUSDT 2020-09-01 bis
+  2026-09-30 mit 2221 von 2221 Tagen, ETHUSDT 2021-12-01 bis 2026-09-30 mit
+  1765 von 1765 Tagen. Das beweist nur, dass die Dateien existieren.
+
+### 15.2 Orderbuch-Aggregate (`bookDepth`)
+
+- **Spalten:** `timestamp`, `percentage`, `depth` (kumulierte Menge in BTC),
+  `notional` (kumulierter Wert in USD).
+- **Aufbau:** Je Snapshot gibt es 10 Zeilen mit den Stufen −5, −4, −3, −2, −1
+  (Bid-Seite) und +1 bis +5 % (Ask-Seite).
+  - Die Kumulation ist monoton, ohne Verletzung am Beispieltag.
+  - 2867 Snapshots am Tag, Abstand 26–40 s, meist rund 30 s, zu
+    unregelmäßigen Sekunden.
+  - Worauf sich die Prozentstufen beziehen (Mid, bester Kurs, Mark), ist
+    **nicht dokumentiert**.
+- **Größenordnung am Beispieltag** (Median, Minimum):
+  - innerhalb −1 %: 93,5 Mio. USD, mindestens 53,3 Mio.;
+  - innerhalb +1 %: 94,9 Mio. USD, mindestens 57,9 Mio.
+  - Eine Order über 25 000 USD entspricht rund 0,03 % der Tiefe innerhalb
+    ±1 %.
+- **Was ableitbar ist:**
+  - eine grobe Liquiditätslage alle rund 30 s;
+  - ein Vergleich der Tiefe in D- und K-Ereignissen;
+  - die Aussage, dass die **Größe** von 25 000 USD bei solcher Tiefe kein
+    bindender Kostenfaktor ist.
+- **Was die Daten ausdrücklich nicht zeigen:**
+  - Spread, bestes Bid/Ask und Tiefe innerhalb von 1 %, also genau dort, wo
+    eine kleine Marktorder ausgeführt wird;
+  - Veränderungen zwischen zwei Snapshots, auch kurze Liquiditätslöcher;
+  - Warteschlange, Stornierungen, versteckte Orders, tatsächliche Fills und
+    Latenzen der Börse.
+- **Kostenmodell:**
+  - Die Größenwirkung ist plausibilisiert: Sie ist klein gegenüber 5–8 bp.
+  - Spread-Spitzen und Kursdrift während der Ausführung lassen sich mit
+    `bookDepth` **nicht** kalibrieren. Sie bleiben durch die festen
+    Stresszuschläge und eine Minute Verzögerung abgedeckt, als Annahme, nicht
+    als Messung.
+  - Falls nötig, könnte `bookTicker` (Bid/Ask, ab 2023-05-16, rund
+    40–50 MB je Tag) für einzelne Ereignistage der Entdeckung Spreads messen.
+    Das braucht eine eigene Freigabe und ist für den Primärtest nicht nötig.
+- **Abdeckung 2023** (Verzeichnisliste): 363 von 365 Tagen für BTC und ETH.
+  Es fehlen 2023-02-08 und 2023-02-09. Diese Tage entfallen nur für die
+  Kostenprüfung.
+
+### 15.3 Folgen für den Entwurf
+
+- An Ereignissen, Handelsregeln, Kosten und Klassen ändert sich nichts.
+- **Neu zu entscheiden vor dem Einfrieren:**
+  - G6: OI-Verzögerung 10 min statt 5 min;
+  - G7: Gültigkeitsregeln.
+- Die Semantikprüfung 1.2a kommt in den Ablauf, vor jede Renditeauswertung.
 
 ## 14. Was unverändert bleibt
 
