@@ -97,6 +97,84 @@ git pull --ff-only
 git log -1 --oneline
 ```
 
+**Der Checkout ist nicht der laufende Code.** Welcher Code läuft, bestimmen
+die Images und `TRADING_CODE_VERSION`. Ein `git pull` ohne Rebuild ändert
+nichts am Betrieb, verschiebt aber den Checkout. Vor jedem Deployment deshalb
+beides getrennt erfassen:
+
+```bash
+git rev-parse --short HEAD                                    # Checkout
+docker inspect --format '{{.Image}}' signalpilot-trading-worker-1
+docker exec signalpilot-trading-worker-1 printenv TRADING_CODE_VERSION
+docker image ls --format '{{.Repository}}:{{.Tag}} {{.ID}} {{.CreatedAt}}' | grep '^signalpilot-'
+```
+
+Den aktuellen Stand führt das Änderungsprotokoll des Forward-Tests unter
+„Laufender Code und VPS-Checkout“.
+
+### 2a. Hotfix aus einem exakten Export (Checkout bleibt unverändert)
+
+Gilt, wenn der zu deployende Commit nicht dem Checkout entspricht, etwa ein
+Hotfix auf dem laufenden Stand. So erstmals für `02f4362` am 2026-10-20
+ausgeführt.
+
+```bash
+# Mac: exakter Export, nur getrackte Dateien, kein .git, keine Env-Datei
+git archive --format=tar --prefix=signalpilot-<sha>/ -o signalpilot-<sha>.tar <sha>
+shasum -a 256 signalpilot-<sha>.tar
+scp signalpilot-<sha>.tar root@191.101.2.236:/root/
+
+# VPS: Commit und Inhalt prüfen
+git get-tar-commit-id < /root/signalpilot-<sha>.tar           # muss <sha> sein
+mkdir -p /opt/signalpilot-releases
+tar -xf /root/signalpilot-<sha>.tar -C /opt/signalpilot-releases
+tar -df /root/signalpilot-<sha>.tar -C /opt/signalpilot-releases   # keine Ausgabe = identisch
+
+# Rollback-Ziel sichern, bevor der Build :latest verschiebt
+docker tag signalpilot-trading-worker:latest signalpilot-trading-worker:<alt>
+docker tag signalpilot-api:latest signalpilot-api:<alt>
+mkdir -p -m 700 /root/signalpilot-rollback-images
+docker save -o /root/signalpilot-rollback-images/signalpilot-<alt>-images.tar \
+  signalpilot-trading-worker:<alt> signalpilot-api:<alt>
+
+# Build aus dem Export: dasselbe Compose-Projekt, die Env-Datei bleibt im Checkout
+cd /opt/signalpilot-releases/signalpilot-<sha>
+docker compose --project-name signalpilot --env-file /opt/signalpilot/.env.production \
+  -f docker-compose.prod.yml build trading-worker api
+
+# Umschalten mit Compose-Datei, Overlay und Ops-Skripten des Checkouts
+cd /opt/signalpilot
+docker compose --project-name signalpilot --env-file .env.production -f docker-compose.prod.yml \
+  -f docker-compose.prod.override.yml up --dry-run -d --no-deps trading-worker api   # nur diese zwei: Recreate
+```
+
+Danach weiter wie bei jedem Deploy: `TRADING_CODE_VERSION` auf den neuen
+Commit setzen, D5 prüfen, dann `consistency-snapshot`, `prod-up.sh --no-deps
+trading-worker api` und `consistency-compare`.
+
+- `prod-build.sh` passt hier nicht, weil es `.env.production` im
+  Repository-Verzeichnis erwartet. Die Env-Datei nie in den Export kopieren.
+- Der Build setzt sofort `:latest`. Der Cron-`watch` (`compose run
+  trading-worker`) nutzt ab dann das neue Image. Deshalb erst kurz vor dem
+  Fenster bauen.
+- Der Host-Cron `/etc/cron.d/docker-image-prune` (`docker image prune -af
+  --filter until=24h`, täglich zwischen 00:00 und 06:00 UTC) löscht
+  ungenutzte Images trotz Tag. Ein Rollback-Image ist deshalb nach der
+  nächsten Nacht nur noch per `docker load` aus der gesicherten Datei da.
+- Solange der Hotfix nicht im Checkout-Branch ist, kein `prod-build.sh` für
+  `trading-worker` oder `api` aus dem Checkout. Das würde den Hotfix
+  zurückdrehen.
+
+**Rollback ohne Git-Wechsel:**
+
+```bash
+docker tag signalpilot-trading-worker:<alt> signalpilot-trading-worker:latest
+docker tag signalpilot-api:<alt> signalpilot-api:latest
+sed -i 's/^TRADING_CODE_VERSION=.*/TRADING_CODE_VERSION=<alt>/' .env.production
+./scripts/ops/prod-up.sh --no-deps trading-worker api
+./scripts/ops/trading-shadow.sh consistency-compare <snapshot>
+```
+
 ## 3. `.env.production` ergänzen
 
 Alle Werte sind nicht geheim. Bestehende Secrets (`DATABASE_URL`,
