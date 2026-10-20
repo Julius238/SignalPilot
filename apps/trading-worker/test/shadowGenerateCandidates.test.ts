@@ -11,6 +11,8 @@ import {
 import { assembleStrategyInput } from "../src/lib/strategyInputAssembler.js";
 import {
   PersistOutcome,
+  ShadowCandidateAuditEvent,
+  ShadowCandidateReasonCode,
   persistStrategyEvaluation
 } from "../src/lib/shadowCandidatePersistence.js";
 import {
@@ -25,6 +27,7 @@ import {
   ENABLED_ENV,
   buildFakeWorld,
   createFakeDatabase,
+  type FakeSlotRows,
   type FakeWorld
 } from "./support/shadowTradingFixtures.js";
 
@@ -629,3 +632,176 @@ describe("shadowGenerateCandidates job", () => {
     );
   });
 });
+
+// ───────────────────────────────────────────────────────────────────────────
+// Asset-slot guard: a repeated signal while the portfolio already holds the
+// asset is recorded, not turned into a candidate R-022 would refuse as CRITICAL.
+// ───────────────────────────────────────────────────────────────────────────
+
+describe("asset-slot guard before a candidate is created", () => {
+  const PORTFOLIO = "portfolio-shadow-1";
+  const position = (status: string, overrides: Record<string, unknown> = {}) => ({
+    id: `position-${status.toLowerCase()}`,
+    portfolioId: PORTFOLIO,
+    assetId: "asset-btc",
+    status,
+    ...overrides
+  });
+  const order = (status: string, overrides: Record<string, unknown> = {}) => ({
+    id: `order-${status.toLowerCase()}`,
+    portfolioId: PORTFOLIO,
+    assetId: "asset-btc",
+    purpose: "ENTRY",
+    status,
+    ...overrides
+  });
+  const scanBtc = async (slotRows: FakeSlotRows, options: { skipEvaluatedAnchors?: boolean; minutes?: number } = {}) => {
+    const fake = createFakeDatabase([buildFakeWorld({ symbol: "BTCUSDT", assetId: "asset-btc" })], slotRows);
+    const summary = await runShadowGenerateCandidates(fake.database as never, {
+      asOf: new Date(AS_OF.getTime() + (options.minutes ?? 0) * 60_000),
+      env: ENABLED_ENV,
+      correlationId: "slot-guard",
+      ...(options.skipEvaluatedAnchors === undefined ? {} : { skipEvaluatedAnchors: options.skipEvaluatedAnchors })
+    });
+    return { ...fake, summary };
+  };
+  const skipEvents = (writes: { auditEvents: Record<string, unknown>[] }) =>
+    writes.auditEvents.filter((row) => row.eventType === ShadowCandidateAuditEvent.CANDIDATE_SKIPPED);
+
+  for (const [label, rows] of [
+    ["an OPEN position", { positions: [position("OPEN")] }],
+    ["an OPENING position (partial entry)", { positions: [position("OPENING")] }],
+    ["a PARTIALLY_CLOSED position", { positions: [position("PARTIALLY_CLOSED")] }],
+    ["a position in ERROR", { positions: [position("ERROR")] }],
+    ["an ACCEPTED entry order", { orders: [order("ACCEPTED")] }],
+    ["a WAITING_FOR_ENTRY entry order", { orders: [order("WAITING_FOR_ENTRY")] }],
+    ["a PARTIALLY_FILLED entry order", { orders: [order("PARTIALLY_FILLED")] }]
+  ] as const) {
+    it(`records instead of creating a candidate while the slot holds ${label}`, async () => {
+      const { writes, summary } = await scanBtc(rows);
+      assert.equal(summary.status, BotRunStatus.SUCCESS, label);
+      assert.equal(summary.created, 0, label);
+      assert.equal(summary.skippedAssetSlotOccupied, 1, label);
+      assert.equal(writes.tradeCandidates.length, 0, label);
+      assert.equal(writes.evidence.length, 0, label);
+      const events = skipEvents(writes);
+      assert.equal(events.length, 1, label);
+      assert.equal(events[0]!.reasonCode, ShadowCandidateReasonCode.ASSET_SLOT_OCCUPIED, label);
+      assert.equal(events[0]!.aggregateType, "StrategyAssignment", label);
+      const metadata = events[0]!.metadataJson as { occupiedBy: { shadowPositionIds: string[]; entryOrderIds: string[] }; portfolioId: string; candidateKey: string };
+      assert.equal(metadata.portfolioId, PORTFOLIO, label);
+      assert.deepEqual(
+        [...metadata.occupiedBy.shadowPositionIds, ...metadata.occupiedBy.entryOrderIds],
+        [...(rows as FakeSlotRows).positions ?? [], ...(rows as FakeSlotRows).orders ?? []].map((row) => row.id),
+        label
+      );
+      assert.equal(summary.results[0]!.outcome, PersistOutcome.SKIPPED_ASSET_SLOT_OCCUPIED, label);
+      // No false alarm: no risk event, nothing written to a later work package.
+      assert.equal(writes.riskEvents.length, 0, label);
+      assert.deepEqual(writes.forbiddenWrites, [], label);
+    });
+  }
+
+  it("creates the same candidate as before when the slot is free, closed or only held by an exit order", async () => {
+    const baseline = await scanBtc({});
+    const freed = await scanBtc({
+      positions: [position("CLOSED"), position("STOPPED_OUT"), position("INVALIDATED")],
+      orders: [order("FILLED"), order("EXPIRED"), order("CANCELLED"), order("WAITING_FOR_ENTRY", { id: "exit-order", purpose: "EXIT" })]
+    });
+    assert.equal(freed.summary.created, 1);
+    assert.equal(freed.summary.skippedAssetSlotOccupied, 0);
+    const strip = (rows: Record<string, unknown>[]) =>
+      rows.map((row) => Object.fromEntries(Object.entries(row).filter(([key]) => key !== "id")));
+    assert.deepEqual(strip(freed.writes.tradeCandidates), strip(baseline.writes.tradeCandidates));
+    assert.deepEqual(freed.writes.auditEvents, baseline.writes.auditEvents);
+    assert.equal(skipEvents(freed.writes).length, 0);
+  });
+
+  it("checks the slot per portfolio: a challenger position never blocks the champion", async () => {
+    const { writes, summary } = await scanBtc({
+      positions: [position("OPEN", { portfolioId: "portfolio-challenger" })],
+      orders: [order("WAITING_FOR_ENTRY", { portfolioId: "portfolio-challenger" })]
+    });
+    assert.equal(summary.created, 1);
+    assert.equal(summary.skippedAssetSlotOccupied, 0);
+    assert.equal(writes.tradeCandidates[0]!.portfolioId, PORTFOLIO);
+  });
+
+  it("checks the slot per asset: an occupied ETH slot leaves BTC free", async () => {
+    const fake = createFakeDatabase(btcAndEth(), { positions: [position("OPEN", { assetId: "asset-eth" })] });
+    const summary = await runShadowGenerateCandidates(fake.database as never, {
+      asOf: AS_OF,
+      env: ENABLED_ENV,
+      correlationId: "slot-guard-assets"
+    });
+    assert.equal(summary.created, 1);
+    assert.equal(summary.skippedAssetSlotOccupied, 1);
+    assert.equal(fake.writes.tradeCandidates[0]!.assetId, "asset-btc");
+    assert.deepEqual(
+      summary.results.map((result) => [result.symbol, result.outcome]),
+      [["BTCUSDT", PersistOutcome.CREATED], ["ETHUSDT", PersistOutcome.SKIPPED_ASSET_SLOT_OCCUPIED]]
+    );
+  });
+
+  it("decides the anchor once in scheduler mode: the cursor moves on, no late candidate after the slot frees", async () => {
+    const slot = { positions: [position("OPEN")] as Record<string, unknown>[] };
+    const fake = createFakeDatabase([buildFakeWorld({ symbol: "BTCUSDT", assetId: "asset-btc" })], slot);
+    const scan = (minutes: number) =>
+      runShadowGenerateCandidates(fake.database as never, {
+        asOf: new Date(AS_OF.getTime() + minutes * 60_000),
+        env: ENABLED_ENV,
+        correlationId: `slot-cursor-${minutes}`,
+        skipEvaluatedAnchors: true
+      });
+    const first = await scan(0);
+    assert.equal(first.skippedAssetSlotOccupied, 1);
+    // The position closes within the same hour.
+    slot.positions[0]!.status = "STOPPED_OUT";
+    const later = [await scan(5), await scan(10)];
+    assert.deepEqual(later.map((summary) => summary.skippedAlreadyEvaluated), [1, 1]);
+    assert.deepEqual(later.map((summary) => summary.created), [0, 0]);
+    assert.equal(fake.writes.tradeCandidates.length, 0);
+    assert.equal(skipEvents(fake.writes).length, 1);
+  });
+
+  it("keeps a skipped anchor decided on a manual re-scan, and records it only once", async () => {
+    const slot = { positions: [position("OPEN")] as Record<string, unknown>[] };
+    const fake = createFakeDatabase([buildFakeWorld({ symbol: "BTCUSDT", assetId: "asset-btc" })], slot);
+    const scan = (minutes: number) =>
+      runShadowGenerateCandidates(fake.database as never, {
+        asOf: new Date(AS_OF.getTime() + minutes * 60_000),
+        env: ENABLED_ENV,
+        correlationId: `slot-manual-${minutes}`
+      });
+    assert.equal((await scan(0)).skippedAssetSlotOccupied, 1);
+    // Re-scanned while still occupied: same decision, no second record.
+    assert.equal((await scan(3)).skippedAssetSlotOccupied, 1);
+    // Re-scanned after the position closed: the old anchor still yields no candidate.
+    slot.positions[0]!.status = "CLOSED";
+    const afterClose = await scan(7);
+    assert.equal(afterClose.created, 0);
+    assert.equal(afterClose.skippedAssetSlotOccupied, 1);
+    assert.equal(fake.writes.tradeCandidates.length, 0);
+    assert.equal(skipEvents(fake.writes).length, 1);
+    assert.equal(fake.writes.riskEvents.length, 0);
+  });
+
+  it("leaves an existing candidate of the anchor untouched: a re-scan stays already decided", async () => {
+    const slot = { positions: [] as Record<string, unknown>[] };
+    const fake = createFakeDatabase([buildFakeWorld({ symbol: "BTCUSDT", assetId: "asset-btc" })], slot);
+    const scan = (minutes: number) =>
+      runShadowGenerateCandidates(fake.database as never, {
+        asOf: new Date(AS_OF.getTime() + minutes * 60_000),
+        env: ENABLED_ENV,
+        correlationId: `slot-existing-${minutes}`
+      });
+    assert.equal((await scan(0)).created, 1);
+    // That candidate's entry is now open; the same anchor is scanned again.
+    slot.positions.push(position("OPEN"));
+    const again = await scan(5);
+    assert.equal(again.skippedAssetSlotOccupied, 0);
+    assert.equal(again.results[0]!.outcome, PersistOutcome.ALREADY_DECIDED);
+    assert.equal(skipEvents(fake.writes).length, 0);
+  });
+});
+

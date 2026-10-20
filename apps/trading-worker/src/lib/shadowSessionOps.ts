@@ -37,6 +37,10 @@ import {
 } from "@signalpilot/trading-domain";
 import { APPROVED_LONG_STRATEGY_KEYS } from "@signalpilot/risk-engine";
 
+import {
+  activeExecutionProfileDeviations,
+  loadActiveExecutionProfile
+} from "./executionProfileIntegrity.js";
 import { SHADOW_PORTFOLIO_KEYS, isShadowPortfolioKey } from "./shadowPortfolios.js";
 
 export const SHADOW_OPS_JOB_KEY = "trading:shadow-session-ops";
@@ -647,6 +651,24 @@ export async function activateSession(
   const assignmentScopeAllowed = assignments.every((assignment) =>
     ALLOWED_ASSIGNMENT_SYMBOLS.includes(assignment.asset.symbol)
   );
+  // "Valid" means approved (ADR 0023): every assigned asset has exactly one
+  // ACTIVE profile equal to the approved one, not merely some active row.
+  const assignedAssets = [
+    ...new Map(
+      assignments.map((assignment) => [assignment.assetId, assignment.asset.symbol])
+    ).entries()
+  ];
+  const assignedProfilesApproved = (
+    await Promise.all(
+      assignedAssets.map(async ([assetId, symbol]) =>
+        activeExecutionProfileDeviations(
+          await loadActiveExecutionProfile(database, assetId),
+          symbol,
+          assetId
+        )
+      )
+    )
+  ).every((deviations) => deviations.length === 0);
 
   const reconcileFresh =
     session.reconciledAt !== null &&
@@ -660,7 +682,8 @@ export async function activateSession(
     reconcileSucceeded: session.reconciledAt !== null,
     reconcileFresh,
     activeRiskLimitSetCount: activeRiskLimitSets,
-    validExecutionProfilesPresent: executionProfiles > 0,
+    validExecutionProfilesPresent:
+      executionProfiles > 0 && assignedProfilesApproved,
     activeAssignmentCount: assignments.length,
     assignmentScopeAllowed,
     unacknowledgedCriticalRiskEventCount: unacknowledgedCriticalRiskEvents,

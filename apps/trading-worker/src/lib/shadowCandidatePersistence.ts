@@ -36,6 +36,7 @@ import {
   ReplayVerdict,
   TradingReasonCode,
   buildAuditEventKey,
+  buildPayloadHash,
   buildRiskEventKey,
   classifyReplay
 } from "@signalpilot/trading-domain";
@@ -47,12 +48,29 @@ import {
   type TradeCandidateDraftV1
 } from "@signalpilot/strategy-engine";
 
+import {
+  EXPOSURE_POSITION_STATUSES,
+  RESERVING_ORDER_STATUSES
+} from "./riskInputAssembler.js";
+
 export const SHADOW_CANDIDATE_JOB_KEY = "trading:shadow-generate-candidates";
 
 export const ShadowCandidateAuditEvent = {
   CANDIDATE_CREATED: "STRATEGY_CANDIDATE_CREATED",
+  /** A candidate signal while its asset slot is taken: recorded, not created. */
+  CANDIDATE_SKIPPED: "STRATEGY_CANDIDATE_SKIPPED",
   EVALUATION_REJECTED: "STRATEGY_EVALUATION_REJECTED",
   INPUT_HASH_CONFLICT: "STRATEGY_CANDIDATE_INPUT_HASH_CONFLICT"
+} as const;
+
+/** Local reason codes of this job, like `ShadowFillReasonCode`. */
+export const ShadowCandidateReasonCode = {
+  /**
+   * The portfolio already holds a position or a live entry order in the
+   * asset. A repeated signal is not a candidate: R-022 would refuse it as a
+   * CRITICAL scale-in, which is meant for a real breach, not for routine.
+   */
+  ASSET_SLOT_OCCUPIED: "ASSET_SLOT_OCCUPIED"
 } as const;
 
 export const PersistOutcome = {
@@ -61,7 +79,9 @@ export const PersistOutcome = {
   /** Same anchor candle, later decision time: the first decision stands. */
   ALREADY_DECIDED: "ALREADY_DECIDED",
   CONFLICT: "CONFLICT",
-  REJECTION_RECORDED: "REJECTION_RECORDED"
+  REJECTION_RECORDED: "REJECTION_RECORDED",
+  /** No candidate: the asset slot of its portfolio is taken (see above). */
+  SKIPPED_ASSET_SLOT_OCCUPIED: "SKIPPED_ASSET_SLOT_OCCUPIED"
 } as const;
 export type PersistOutcome =
   (typeof PersistOutcome)[keyof typeof PersistOutcome];
@@ -164,8 +184,33 @@ async function persistCandidate(
     };
   }
 
+  // An anchor once skipped for an occupied slot stays decided, even when the
+  // slot frees later in the hour: no late entry on an old signal.
+  const skipRecord = skippedAuditData(input, candidate, null);
+  const alreadySkipped = await database.tradingAuditEvent.findUnique({
+    where: { eventKey: skipRecord.eventKey },
+    select: { id: true }
+  });
+  if (alreadySkipped !== null) return skippedResult(candidate);
+
   // Candidate + evidence + audit commit together (docs/trading/02, transaction 1).
-  const createdId = await database.$transaction(async (tx) => {
+  // The slot check runs in the same transaction, right before the insert.
+  const outcome = await database.$transaction(async (tx) => {
+    const occupancy = await loadAssetSlotOccupancy(
+      tx,
+      candidate.portfolioId,
+      candidate.assetId
+    );
+    if (occupancy !== null) {
+      const data = skippedAuditData(input, candidate, occupancy);
+      await tx.tradingAuditEvent.upsert({
+        where: { eventKey: data.eventKey },
+        update: {},
+        create: data
+      });
+      return { skipped: true as const };
+    }
+
     const created = await tx.tradeCandidate.create({
       data: {
         candidateKey: candidate.candidateKey,
@@ -242,16 +287,95 @@ async function persistCandidate(
       })
     });
 
-    return created.id;
+    return { skipped: false as const, createdId: created.id };
   });
 
+  if (outcome.skipped) return skippedResult(candidate);
   return {
     outcome: PersistOutcome.CREATED,
     candidateKey: candidate.candidateKey,
-    tradeCandidateId: createdId,
+    tradeCandidateId: outcome.createdId,
     reasonCode: StrategyReasonCode.CANDIDATE_CREATED,
     inputHash: candidate.inputHash,
     outputHash: candidate.outputHash
+  };
+}
+
+/** The audit record of a skipped candidate: one per anchor decision, keyed by the candidate key. */
+function skippedAuditData(
+  input: PersistStrategyEvaluationInput,
+  candidate: TradeCandidateDraftV1,
+  occupancy: Json | null
+) {
+  return auditData({
+    eventType: ShadowCandidateAuditEvent.CANDIDATE_SKIPPED,
+    aggregateType: "StrategyAssignment",
+    aggregateId: candidate.strategyAssignmentId,
+    reasonCode: ShadowCandidateReasonCode.ASSET_SLOT_OCCUPIED,
+    input,
+    afterState: null,
+    metadata: asJson({
+      jobKey: SHADOW_CANDIDATE_JOB_KEY,
+      symbol: candidate.symbol,
+      candidateKey: candidate.candidateKey,
+      anchorCandleId: candidate.anchorCandleId,
+      portfolioId: candidate.portfolioId,
+      assetId: candidate.assetId,
+      strategyVersionId: candidate.strategyVersionId,
+      occupiedBy: occupancy
+    }),
+    // The composite candidate key contains "|": hashed, like a fill key.
+    idempotencyKey: buildPayloadHash(candidate.candidateKey)
+  });
+}
+
+function skippedResult(
+  candidate: TradeCandidateDraftV1
+): PersistStrategyEvaluationResult {
+  return {
+    outcome: PersistOutcome.SKIPPED_ASSET_SLOT_OCCUPIED,
+    candidateKey: candidate.candidateKey,
+    tradeCandidateId: null,
+    reasonCode: ShadowCandidateReasonCode.ASSET_SLOT_OCCUPIED,
+    inputHash: candidate.inputHash,
+    outputHash: candidate.outputHash
+  };
+}
+
+/**
+ * What occupies the asset slot of a portfolio, exactly as the risk input
+ * assembler hands it to R-022: a position that still carries exposure or a
+ * live ENTRY order. `null` when the slot is free. Per portfolio: champion and
+ * challenger never block each other.
+ */
+async function loadAssetSlotOccupancy(
+  tx: Prisma.TransactionClient,
+  portfolioId: string,
+  assetId: string
+): Promise<{ readonly shadowPositionIds: string[]; readonly entryOrderIds: string[] } | null> {
+  const [positions, entryOrders] = await Promise.all([
+    tx.shadowPosition.findMany({
+      where: {
+        portfolioId,
+        assetId,
+        status: { in: [...EXPOSURE_POSITION_STATUSES] }
+      },
+      select: { id: true }
+    }),
+    tx.shadowOrder.findMany({
+      where: {
+        portfolioId,
+        assetId,
+        purpose: "ENTRY",
+        status: { in: [...RESERVING_ORDER_STATUSES] }
+      },
+      select: { id: true }
+    })
+  ]);
+  if (positions.length === 0 && entryOrders.length === 0) return null;
+  return {
+    shadowPositionIds: positions.map((row) => row.id),
+    entryOrderIds: entryOrders.map((row) => row.id)
   };
 }
 
@@ -374,11 +498,12 @@ function auditData(args: {
   readonly input: PersistStrategyEvaluationInput;
   readonly afterState: Json | null;
   readonly metadata: Json;
+  readonly idempotencyKey?: string;
 }) {
   const { input } = args;
-  // The input hash is the idempotency key: the same snapshot re-evaluated
-  // yields the same audit row instead of a duplicate.
-  const idempotencyKey = input.evaluation.inputHash;
+  // The input hash is the idempotency key unless the caller names one: the
+  // same snapshot re-evaluated yields the same audit row, not a duplicate.
+  const idempotencyKey = args.idempotencyKey ?? input.evaluation.inputHash;
   return {
     eventKey: buildAuditEventKey({
       eventType: args.eventType,

@@ -14,6 +14,8 @@ import {
   RISK_LIMIT_SET_VERSION
 } from "@signalpilot/risk-engine";
 
+import { approvedExecutionProfileRow } from "./executionProfileRows.js";
+
 export const AS_OF = new Date("2026-08-02T09:05:00.000Z");
 export const TRADING_DATE_UTC = new Date("2026-08-02T00:00:00.000Z");
 
@@ -179,23 +181,10 @@ export function buildRiskWorld(options: RiskWorldOptions = {}) {
       options.withExecutionProfile === false
         ? []
         : [
-            {
+            approvedExecutionProfileRow("BTCUSDT", {
               id: "execution-profile-btc",
-              assetId: asset.id,
-              version: 1,
-              status: "ACTIVE",
-              tickSize: decimal("0.01"),
-              stepSize: decimal("0.00001"),
-              minQuantity: decimal("0.00001"),
-              minNotional: decimal("10"),
-              maxQuantity: null,
-              feeBps: 10,
-              fullSpreadBps: 10,
-              slippageBps: 10,
-              maxParticipationRate: decimal("0.01"),
-              sourceObservedAt: new Date("2026-08-01T00:00:00.000Z"),
-              specificationHash: "d".repeat(64)
-            }
+              assetId: asset.id
+            })
           ],
     riskLimitSets:
       options.withRiskLimitSet === false
@@ -379,6 +368,23 @@ export function createFakeRiskDatabase(world: RiskWorld) {
         };
         writes.portfolios.push(row);
         return row;
+      },
+      updateMany: async ({
+        where,
+        data
+      }: {
+        where: { id: string; status?: { not?: string } };
+        data: Record<string, unknown>;
+      }) => {
+        const row = world.portfolios.find(
+          (portfolio) =>
+            portfolio.id === where.id &&
+            (where.status?.not === undefined || portfolio.status !== where.status.not)
+        ) as Record<string, unknown> | undefined;
+        if (row === undefined) return { count: 0 };
+        const rest = Object.fromEntries(Object.entries(data).filter(([field]) => field !== "version"));
+        Object.assign(row, rest, { version: ((row.version as number | undefined) ?? 0) + 1 });
+        return { count: 1 };
       }
     },
     tradingSession: {
@@ -464,6 +470,16 @@ export function createFakeRiskDatabase(world: RiskWorld) {
     instrumentExecutionProfile: {
       findFirst: async () =>
         world.executionProfiles[0] ?? writes.executionProfiles[0] ?? null,
+      findMany: async ({
+        where
+      }: { where?: { assetId?: string; status?: string } } = {}) =>
+        [...world.executionProfiles, ...writes.executionProfiles]
+          .filter(
+            (row) =>
+              (where?.assetId === undefined || row.assetId === where.assetId) &&
+              (where?.status === undefined || row.status === where.status)
+          )
+          .sort((left, right) => Number(right.version) - Number(left.version)),
       create: async ({ data }: { data: Record<string, unknown> }) => {
         const row = {
           id: `execution-profile-${writes.executionProfiles.length + 1}`,

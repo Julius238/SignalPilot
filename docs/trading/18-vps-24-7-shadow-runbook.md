@@ -213,6 +213,12 @@ Binance erreicht.
 - die Spezifikations-Hashes aus der Tabelle oben;
 - das Kostenprofil 10/2/3 als `ACTIVE`.
 
+`calibrate-execution-profile` schreibt nur das im Code freigegebene Profil
+([ADR 0023](decisions/0023-execution-profile-value-integrity.md)). `UNCHANGED`
+heißt: Das aktive Profil ist bereits das freigegebene. `REFUSED` heißt: Das
+aktive Profil weicht ab oder ist mehrfach aktiv. Dann nicht aktivieren,
+sondern den Befund klären.
+
 ## 8. Aktivierung je Teilnehmer
 
 Für jedes Portfolio gilt dieselbe Reihenfolge. Der Startzeitpunkt ist

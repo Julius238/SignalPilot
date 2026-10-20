@@ -117,6 +117,8 @@ export interface ShadowGenerateCandidatesSummary {
   readonly errors: number;
   /** Scheduler catch-up: (strategy, symbol) pairs whose current anchor candle was already evaluated. */
   readonly skippedAlreadyEvaluated: number;
+  /** Candidate signals not created because the portfolio's asset slot is taken. */
+  readonly skippedAssetSlotOccupied: number;
   readonly results: readonly ShadowSymbolResult[];
   readonly flags: TradingFlagSnapshot | null;
 }
@@ -195,6 +197,7 @@ export async function runShadowGenerateCandidates(
       assemblerFailures: 0,
       errors: 0,
       skippedAlreadyEvaluated: 0,
+      skippedAssetSlotOccupied: 0,
       results: [],
       flags: gate.flags
     };
@@ -231,6 +234,7 @@ export async function runShadowGenerateCandidates(
   let assemblerFailures = 0;
   let errors = 0;
   let skippedAlreadyEvaluated = 0;
+  let skippedAssetSlotOccupied = 0;
   const catchUp = options.skipEvaluatedAnchors === true;
 
   // Every long identity the risk engine approves runs once an assignment of it
@@ -350,6 +354,8 @@ export async function runShadowGenerateCandidates(
         )
           idempotentReplays += 1;
         else if (persisted.outcome === PersistOutcome.CONFLICT) conflicts += 1;
+        else if (persisted.outcome === PersistOutcome.SKIPPED_ASSET_SLOT_OCCUPIED)
+          skippedAssetSlotOccupied += 1;
         else rejections += 1;
 
         results.push({
@@ -425,6 +431,7 @@ export async function runShadowGenerateCandidates(
     assemblerFailures,
     errors,
     skippedAlreadyEvaluated,
+    skippedAssetSlotOccupied,
     results,
     flags: gate.flags
   };

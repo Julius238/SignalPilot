@@ -18,6 +18,7 @@
  */
 
 import {
+  PortfolioStatus,
   Prisma,
   RiskAssessmentStatus,
   RiskEventType,
@@ -26,6 +27,7 @@ import {
   TradeCandidateStatus,
   TradeDecisionOutcome,
   TradingActorType,
+  TradingSessionStatus,
   type PrismaClient
 } from "@signalpilot/database";
 import {
@@ -479,4 +481,92 @@ export async function applyRiskDirective(
     return true;
   });
   return { engaged, sessionId: session.id };
+}
+
+/** Kill reason when R-026 refused a stored limit set that deviates from v1 (ADR 0021). */
+export const RISK_LIMIT_SET_INTEGRITY_VIOLATION = "RISK_LIMIT_SET_INTEGRITY_VIOLATION";
+
+export interface EngageRiskLimitSetErrorLockInput {
+  readonly portfolioId: string;
+  readonly riskAssessmentId: string;
+  readonly deviations: readonly string[];
+  readonly correlationId: string;
+  readonly codeVersion: string;
+  readonly asOf: Date;
+}
+
+/**
+ * Executes R-026's `ERROR_LOCK` for a stored limit set that deviates from the
+ * pinned v1 policy (ADR 0021): the portfolio's open session goes to
+ * `ERROR_LOCKED` with the kill switch engaged and the portfolio to
+ * `ERROR_LOCKED`, audited. Monitoring and risk-reducing exits keep running
+ * (ADR 0006); unlocking stays a manual step after review.
+ *
+ * Narrow on purpose: only this finding locks here. `applyRiskDirective` still
+ * executes nothing but `ENGAGE_KILL_SWITCH` for every other rule. Idempotent:
+ * an already locked session and portfolio are left untouched.
+ */
+export async function engageRiskLimitSetErrorLock(
+  database: PrismaClient,
+  input: EngageRiskLimitSetErrorLockInput
+): Promise<{ readonly locked: boolean; readonly sessionId: string | null }> {
+  const session = await database.tradingSession.findFirst({
+    where: { portfolioId: input.portfolioId, status: { not: "CLOSED" } },
+    orderBy: { createdAt: "desc" }
+  });
+  const idempotencyKey = `${session?.id ?? input.portfolioId}-risk-limit-set-${input.riskAssessmentId}`;
+  const locked = await database.$transaction(async (tx) => {
+    let sessionLocked = false;
+    if (session !== null && session.status !== TradingSessionStatus.ERROR_LOCKED) {
+      const updated = await tx.tradingSession.updateMany({
+        where: {
+          id: session.id,
+          version: session.version,
+          killSwitchEngaged: session.killSwitchEngaged
+        },
+        data: {
+          status: TradingSessionStatus.ERROR_LOCKED,
+          killSwitchEngaged: true,
+          killReasonCode: RISK_LIMIT_SET_INTEGRITY_VIOLATION,
+          killedAt: input.asOf,
+          lastChangedBy: SHADOW_RISK_JOB_KEY,
+          version: { increment: 1 }
+        }
+      });
+      sessionLocked = updated.count > 0;
+    }
+    const portfolio = await tx.portfolio.updateMany({
+      where: {
+        id: input.portfolioId,
+        status: { not: PortfolioStatus.ERROR_LOCKED }
+      },
+      data: { status: PortfolioStatus.ERROR_LOCKED, version: { increment: 1 } }
+    });
+    if (!sessionLocked && portfolio.count === 0) return false;
+    await tx.tradingAuditEvent.create({
+      data: {
+        eventKey: buildAuditEventKey({
+          eventType: "SESSION_ERROR_LOCKED",
+          aggregateType: "Portfolio",
+          aggregateId: input.portfolioId,
+          idempotencyKey
+        }),
+        eventType: "SESSION_ERROR_LOCKED",
+        aggregateType: "Portfolio",
+        aggregateId: input.portfolioId,
+        actorType: TradingActorType.SYSTEM,
+        actorId: SHADOW_RISK_JOB_KEY,
+        correlationId: input.correlationId,
+        causationId: input.riskAssessmentId,
+        idempotencyKey,
+        reasonCode: RISK_LIMIT_SET_INTEGRITY_VIOLATION,
+        tradingSessionId: session?.id ?? null,
+        metadataJson: asJson({ deviations: [...input.deviations] }),
+        codeVersion: input.codeVersion,
+        occurredAt: input.asOf
+      }
+    });
+    return true;
+  });
+  return { locked, sessionId: session?.id ?? null };
 }

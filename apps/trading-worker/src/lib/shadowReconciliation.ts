@@ -15,6 +15,7 @@
 
 import {
   PortfolioStatus,
+  Prisma,
   RiskEventType,
   RiskSeverity,
   ShadowOrderStatus,
@@ -44,7 +45,10 @@ import {
 } from "@signalpilot/trading-domain";
 
 import { asJson, decimalString } from "./shadowPortfolioIo.js";
-import { loadShadowPortfolioValuation } from "./shadowPortfolioValuation.js";
+import {
+  loadShadowPortfolioValuation,
+  type ShadowPositionValuationV1
+} from "./shadowPortfolioValuation.js";
 
 export const SHADOW_RECONCILE_JOB_KEY = "trading:shadow-reconcile-portfolio";
 
@@ -73,10 +77,23 @@ export interface ReconcilePortfolioResult {
   readonly reconciledAt: string | null;
 }
 
-export async function reconcilePortfolio(
-  database: PrismaClient,
+/** The candle each open position was valued on, and how many newer ones are still unbooked. */
+interface ValuationBasisEntry {
+  readonly shadowPositionId: string;
+  readonly candleId: string;
+  readonly unbookedCandles: number;
+}
+
+/**
+ * Every read of one reconciliation, from one database snapshot (ADR 0025).
+ * Writers book a position's candle and the equity it implies in one
+ * transaction; reading both from the same snapshot means the check never
+ * sees one without the other, whatever runs concurrently.
+ */
+async function readReconciliationSnapshot(
+  database: Prisma.TransactionClient,
   input: ReconcilePortfolioInput
-): Promise<ReconcilePortfolioResult> {
+) {
   const portfolio = await database.portfolio.findUnique({
     where: { id: input.portfolioId }
   });
@@ -125,15 +142,87 @@ export async function reconcilePortfolio(
         }
       })
     ]);
-  const openPositions = allPositions.filter((position) =>
-    EXPOSURE_POSITION_STATUSES.includes(position.status as never)
-  );
   // Fills are scoped to this portfolio's orders rather than through a
   // relation filter, so the check works against a plain foreign-key index.
   const fillIds = await database.shadowFill.findMany({
     where: { shadowOrderId: { in: orderIds.map((row) => row.id) } },
     select: { id: true }
   });
+
+  // The cache is checked on the candles its writers booked, never on a newer
+  // one the monitor has not evaluated yet (ADR 0025). Same tolerance.
+  let marks: readonly ShadowPositionValuationV1[] | null = null;
+  const valuationBasis: ValuationBasisEntry[] = [];
+  try {
+    const loadedValuation = await loadShadowPortfolioValuation(database, {
+      portfolioId: portfolio.id,
+      asOf: input.asOf,
+      availableCash: decimalString(portfolio.availableCash),
+      reservedCash: decimalString(portfolio.reservedCash),
+      realizedPnl: decimalString(portfolio.realizedPnl),
+      feesPaid: decimalString(portfolio.feesPaid),
+      highWaterMark: decimalString(portfolio.highWaterMark),
+      startOfDayEquity: null,
+      basis: "BOOKED_CANDLE"
+    });
+    marks = loadedValuation.marks;
+    for (const mark of marks) {
+      const booked = await database.candle.findUnique({
+        where: { id: mark.sourceCandleId },
+        select: { closeTime: true }
+      });
+      const unbookedCandles =
+        booked === null
+          ? 0
+          : await database.candle.count({
+              where: {
+                assetId: mark.assetId,
+                timeframe: "1h",
+                closeTime: { gt: booked.closeTime, lte: input.asOf }
+              }
+            });
+      valuationBasis.push({
+        shadowPositionId: mark.shadowPositionId,
+        candleId: mark.sourceCandleId,
+        unbookedCandles
+      });
+    }
+  } catch {
+    marks = null;
+  }
+
+  return {
+    portfolio,
+    ledgerRows,
+    orderIds,
+    allPositions,
+    reservingOrders,
+    fillIds,
+    marks,
+    valuationBasis
+  };
+}
+
+export async function reconcilePortfolio(
+  database: PrismaClient,
+  input: ReconcilePortfolioInput
+): Promise<ReconcilePortfolioResult> {
+  const {
+    portfolio,
+    ledgerRows,
+    orderIds,
+    allPositions,
+    reservingOrders,
+    fillIds,
+    marks: valuedMarks,
+    valuationBasis
+  } = await database.$transaction(
+    (tx) => readReconciliationSnapshot(tx, input),
+    { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead }
+  );
+  const openPositions = allPositions.filter((position) =>
+    EXPOSURE_POSITION_STATUSES.includes(position.status as never)
+  );
 
   const draftEntries: LedgerEntryDraftV1[] = ledgerRows.map((row) => ({
     entryKey: row.entryKey,
@@ -157,21 +246,9 @@ export async function reconcilePortfolio(
     shadowPositionIds: new Set(allPositions.map((row) => row.id))
   });
 
-  const marks: PositionMarkResultV1[] = [];
+  const marks: PositionMarkResultV1[] = [...(valuedMarks ?? [])];
   const directionalViolations = new Set<PortfolioReasonCode>();
-  try {
-    const loadedValuation = await loadShadowPortfolioValuation(database, {
-      portfolioId: portfolio.id,
-      asOf: input.asOf,
-      availableCash: decimalString(portfolio.availableCash),
-      reservedCash: decimalString(portfolio.reservedCash),
-      realizedPnl: decimalString(portfolio.realizedPnl),
-      feesPaid: decimalString(portfolio.feesPaid),
-      highWaterMark: decimalString(portfolio.highWaterMark),
-      startOfDayEquity: null
-    });
-    marks.push(...loadedValuation.marks);
-  } catch {
+  if (valuedMarks === null) {
     directionalViolations.add(PortfolioReasonCode.INVALID_AMOUNT);
   }
   // `checkPortfolioInvariants` historically calls this value `marketValue`.
@@ -496,7 +573,10 @@ export async function reconcilePortfolio(
           causationId: input.correlationId,
           idempotencyKey: `${input.correlationId}|mismatch`,
           reasonCode: violations[0] ?? "PORTFOLIO_INCONSISTENT",
-          afterState: asJson({ violations }),
+          afterState: asJson({
+            violations,
+            ...(valuationBasis.length === 0 ? {} : { valuationBasis })
+          }),
           codeVersion: input.codeVersion,
           occurredAt: input.asOf
         }
@@ -543,7 +623,8 @@ export async function reconcilePortfolio(
         reasonCode: "PORTFOLIO_CONSISTENT",
         afterState: asJson({
           ledgerSequence: replay.state.ledgerSequence,
-          entryCount: replay.entryCount
+          entryCount: replay.entryCount,
+          ...(valuationBasis.length === 0 ? {} : { valuationBasis })
         }),
         codeVersion: input.codeVersion,
         occurredAt: input.asOf
