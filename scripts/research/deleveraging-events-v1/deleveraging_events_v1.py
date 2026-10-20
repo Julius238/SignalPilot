@@ -330,6 +330,9 @@ class Event:
     lock_until: int = 0
     stratum: int = -1
     oi_stamps: tuple = ()             # stamps used for the classification (audit of the time logic)
+    incomplete_bars: int = 0          # 5-minute bars skipped as event end because a minute was missing
+    entry_shift_min: int = 0          # minutes the entry moved past c* + delay because candles were missing
+    exit_shift_min: int = 0           # minutes a time exit moved past entry + hold because candles were missing
 
 
 def stratum_of(cfg: Config, z_abs: float) -> int:
@@ -425,6 +428,8 @@ def simulate_trade(cfg: Config, event: Event, klines: Klines, funding: list[tupl
     s = search_start
     while s + FIVE <= deadline:
         bars = [klines.bar(s + k * MIN) for k in range(5)]
+        if not all(b is not None for b in bars):
+            event.incomplete_bars += 1
         if all(b is not None for b in bars):
             bar_low = min(b[2] for b in bars)
             bar_high = max(b[1] for b in bars)
@@ -451,6 +456,7 @@ def simulate_trade(cfg: Config, event: Event, klines: Klines, funding: list[tupl
         event.reason = "no 1m candle for the entry"
         event.lock_until = entry_at + cfg.lock_extra_min * MIN
         return
+    event.entry_shift_min = (entry_at - (event_end + cfg.entry_delay_min * MIN)) // MIN
     entry = klines.bar(entry_at)[0]
     side = event.direction
     stop = entry * (1 - abs(event.d_p)) if side == 1 else entry * (1 + abs(event.d_p))
@@ -479,6 +485,7 @@ def simulate_trade(cfg: Config, event: Event, klines: Klines, funding: list[tupl
             event.lock_until = exit_at + cfg.lock_extra_min * MIN
             return
         exit_price, reason = klines.bar(exit_at)[0], "TIME"
+        event.exit_shift_min = (exit_at - scheduled_exit) // MIN
     gross = side * (exit_price / entry - 1)
     costs = 2 * (fee_bp + slip_bp) + (cfg.stop_extra_bp if reason.startswith("STOP") else 0.0)
     pay = 0.0
@@ -599,6 +606,82 @@ def read_zip_csv(path: Path) -> list[list[str]]:
         if len(names) != 1:
             raise StudyError(f"{path} must hold exactly one CSV.")
         return list(csv.reader(io.StringIO(archive.read(names[0]).decode("utf-8"))))
+
+
+def inspect_symbol(data: Path, symbol: str, start: int, end: int) -> dict:
+    """check-data details (§3.1, §7): coverage, gaps, duplicates, OI timing, funding format. Never returns."""
+    stamps: dict[int, tuple] = {}
+    identical = conflicting = 0
+    for path in sorted((data / f"futures/um/monthly/klines/{symbol}/1m").glob("*.zip")):
+        for row in read_zip_csv(path):
+            if not row or not row[0].strip().isdigit():
+                continue
+            ms = int(row[0])
+            ms = ms // 1000 if ms > 10 ** 14 else ms
+            values = tuple(row[1:5])
+            if ms in stamps:
+                if stamps[ms] == values:
+                    identical += 1
+                else:
+                    conflicting += 1
+            stamps[ms] = values
+    in_period = sorted(ms for ms in stamps if start <= ms < end)
+    gaps = []
+    previous = start - MIN
+    for ms in in_period + [end]:
+        if ms - previous > MIN:
+            gaps.append(((ms - previous) // MIN - 1, iso(previous + MIN), iso(ms - MIN)))
+        previous = ms
+    gaps.sort(reverse=True)
+    expected = (end - start) // MIN
+    offsets: dict[int, list[float]] = {k: [] for k in (-5, 0, 5)}
+    oi_rows = 0
+    for path in sorted((data / f"futures/um/daily/metrics/{symbol}").glob("*.zip")):
+        rows = read_zip_csv(path)
+        header = rows[0]
+        t_col, q_col, v_col = header.index("create_time"), header.index("sum_open_interest"), header.index("sum_open_interest_value")
+        for row in rows[1:]:
+            if not row:
+                continue
+            oi_rows += 1
+            try:
+                ms = ms_of(row[t_col])
+                implied = float(row[v_col]) / float(row[q_col])
+            except (ValueError, ZeroDivisionError):
+                continue
+            if not (start <= ms < end) or ms % (60 * MIN):
+                continue                                     # hourly sample is enough for the timing check
+            for k in offsets:
+                quote = stamps.get(ms + k * MIN)
+                if quote:
+                    offsets[k].append(abs(implied / float(quote[0]) - 1) * 1e4)
+    funding_rows = []
+    header_seen = set()
+    for path in sorted((data / f"futures/um/monthly/fundingRate/{symbol}").glob("*.zip")):
+        rows = read_zip_csv(path)
+        header_seen.add(tuple(rows[0]))
+        cols = rows[0]
+        if "calc_time" in cols and "last_funding_rate" in cols:
+            t_col, r_col = cols.index("calc_time"), cols.index("last_funding_rate")
+            funding_rows += [(int(r[t_col]), float(r[r_col])) for r in rows[1:] if r]
+    funding_rows.sort()
+    in_funding = [(t, r) for t, r in funding_rows if start <= t < end]
+    intervals: dict[int, int] = {}
+    for (a, _), (b, _) in zip(in_funding, in_funding[1:]):
+        hours = round((b - a) / (60 * MIN))
+        intervals[hours] = intervals.get(hours, 0) + 1
+    return {
+        "klines": {"first": iso(min(stamps)) if stamps else None, "last": iso(max(stamps)) if stamps else None,
+                   "inPeriod": len(in_period), "expected": expected, "missingMinutes": expected - len(in_period),
+                   "missingShare": (expected - len(in_period)) / expected if expected else 1.0,
+                   "duplicateIdentical": identical, "duplicateConflicting": conflicting,
+                   "largestGaps": [{"minutes": g[0], "from": g[1], "to": g[2]} for g in gaps[:8]], "gaps": len(gaps)},
+        "oiTiming": {"rows": oi_rows, "hourlySamples": len(offsets[0]),
+                     "medianDeviationBpVsTradeOpen": {f"t{k:+d}min": (statistics.median(v) if v else None) for k, v in offsets.items()}},
+        "funding": {"headers": [list(h) for h in sorted(header_seen)], "pointsInPeriod": len(in_funding),
+                    "intervalHours": intervals, "minRate": min((r for _, r in in_funding), default=None),
+                    "maxRate": max((r for _, r in in_funding), default=None)},
+    }
 
 
 def load_symbol(data: Path, symbol: str) -> tuple[Klines, OiPoints, list[tuple[int, float]]]:
@@ -735,6 +818,17 @@ def synth(out: Path, seed: int = 7, start: str = "2023-11-01", days: int = 61) -
             write_zip_csv(out / f"futures/um/daily/metrics/{symbol}/{symbol}-metrics-{day}.zip",
                           ["create_time", "symbol", "sum_open_interest", "sum_open_interest_value", "count_toptrader_long_short_ratio",
                            "sum_toptrader_long_short_ratio", "count_long_short_ratio", "sum_taker_long_short_vol_ratio"], rows)
+        shock_days = sorted({datetime.fromtimestamp(at / 1000, tz=timezone.utc).strftime("%Y-%m-%d") for at, *_ in shocks[symbol]})
+        for day in shock_days:                      # bookDepth snapshots once a minute on the shock days only
+            day_start = ms_of(day)
+            depth_rows = []
+            for m in range(1440):
+                stamp = iso(day_start + m * MIN) + ":05"
+                for level in (-5, -4, -3, -2, -1, 1, 2, 3, 4, 5):
+                    notional = 5e7 * abs(level)
+                    depth_rows.append([stamp, level, f"{notional / price0:.3f}", f"{notional:.3f}"])
+            write_zip_csv(out / f"futures/um/daily/bookDepth/{symbol}/{symbol}-bookDepth-{day}.zip",
+                          ["timestamp", "percentage", "depth", "notional"], depth_rows)
         funding_rows = {}
         for d in range(days):
             for hour in (0, 8, 16):
@@ -786,11 +880,140 @@ def cmd_check_data(args) -> int:
         minutes = (end - start) // MIN
         present = sum(1 for m in range(start, end, MIN) if klines.has(m))
         report[symbol] = {"oi": oi.report, "oiMissingShare": missing_oi, "klinesMissingShare": 1 - present / minutes if minutes else 1.0,
-                          "fundingPoints": len(funding)}
+                          "fundingPoints": len(funding), "details": inspect_symbol(data, symbol, start, end)}
         if missing_oi > cfg.abort_invalid_share:
             halt = True
     print(json.dumps({"study": STUDY_KEY, "period": args.period, "report": report, "halt": halt}, indent=2))
     return 3 if halt else 0
+
+
+def detect_all(cfg: Config, data: Path, args) -> tuple[list[Event], dict]:
+    events: list[Event] = []
+    halt = {}
+    for symbol in cfg.symbols:
+        klines, oi, funding = load_symbol(data, symbol)
+        start, end = period_bounds(cfg, args, symbol)
+        share = oi_missing_share(oi, start, end)
+        if share > cfg.abort_invalid_share:
+            halt[symbol] = share
+            continue
+        events += detect_events(cfg, symbol, klines, oi, funding, start, end)
+    return events, halt
+
+
+def cmd_check_assumptions(args) -> int:
+    """How often the README assumptions act on this data; counts only, never returns."""
+    data = Path(args.data)
+    guard_real(args, data)
+    events, halt = detect_all(FROZEN, data, args)
+    counts: dict[str, int] = {}
+    for e in events:
+        counts[f"{e.symbol}:{e.category}"] = counts.get(f"{e.symbol}:{e.category}", 0) + 1
+    dk = [e for e in events if e.category in ("D", "K")]
+    report = {
+        "study": STUDY_KEY, "period": args.period, "halt": halt, "candidates": counts,
+        "dkCandidates": len(dk),
+        "dkWithIncompleteBars": sum(1 for e in dk if e.incomplete_bars),
+        "dkNoTradeReasons": {r: sum(1 for e in dk if e.outcome == "NO_TRADE" and e.reason == r)
+                             for r in sorted({e.reason for e in dk if e.outcome == "NO_TRADE"})},
+        "tradesWithShiftedEntry": sum(1 for e in dk if e.outcome == "TRADE" and e.entry_shift_min),
+        "tradesWithShiftedExit": sum(1 for e in dk if e.outcome == "TRADE" and e.exit_shift_min),
+        "trades": sum(1 for e in dk if e.outcome == "TRADE"),
+    }
+    print(json.dumps(report, indent=2))
+    return 0
+
+
+def cmd_cost_check(args) -> int:
+    """§6: price impact of 25 000 USD from bookDepth at the entries of 2023 (discovery only). Never returns.
+
+    Impact = 1 % x notional / cumulative notional within 1 % on the side the order takes
+    (ask for a long entry, bid for a short entry): the price reached if the depth inside 1 %
+    were spread evenly, a conservative upper value for the average fill.
+    """
+    data = Path(args.data)
+    guard_real(args, data)
+    events, _ = detect_all(FROZEN, data, args)
+    cache: dict[str, list[tuple[int, dict]]] = {}
+    per_symbol: dict[str, list[float]] = {}
+    without = {}
+    for e in events:
+        if e.outcome != "TRADE" or e.category not in ("D", "K") or not (ms_of("2023-01-01") <= e.entry_at < ms_of("2024-01-01")):
+            continue
+        day = datetime.fromtimestamp(e.entry_at / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
+        path = data / f"futures/um/daily/bookDepth/{e.symbol}/{e.symbol}-bookDepth-{day}.zip"
+        key = str(path)
+        if key not in cache:
+            snapshots: dict[int, dict] = {}
+            if path.exists():
+                rows = read_zip_csv(path)
+                header = rows[0]
+                t_col, p_col, n_col = header.index("timestamp"), header.index("percentage"), header.index("notional")
+                for row in rows[1:]:
+                    if row:
+                        snapshots.setdefault(ms_of(row[t_col]), {})[float(row[p_col])] = float(row[n_col])
+            cache[key] = sorted(snapshots.items())
+        snaps = cache[key]
+        i = bisect_right([t for t, _ in snaps], e.entry_at) - 1
+        level = 1.0 if e.direction == 1 else -1.0
+        if i < 0 or e.entry_at - snaps[i][0] > 2 * MIN or level not in snaps[i][1]:
+            without[e.symbol] = without.get(e.symbol, 0) + 1
+            continue
+        impact_bp = 100.0 * FROZEN.notional_usd / snaps[i][1][level]
+        per_symbol.setdefault(e.symbol, []).append(impact_bp)
+    report = {}
+    exceeds = False
+    for symbol in FROZEN.symbols:
+        values = sorted(per_symbol.get(symbol, []))
+        assumed = FROZEN.slip(symbol)
+        stats = {"entries": len(values), "withoutSnapshot": without.get(symbol, 0), "assumedSpreadSlippageBp": assumed}
+        if values:
+            stats |= {"medianImpactBp": statistics.median(values), "p95ImpactBp": values[int(0.95 * (len(values) - 1))],
+                      "maxImpactBp": values[-1]}
+            exceeds |= values[-1] > assumed
+        report[symbol] = stats
+    print(json.dumps({"study": STUDY_KEY, "costCheck": report,
+                      "decision": "assumption exceeded: operator decision needed" if exceeds else "no adjustment: every impact is below the assumption"},
+                     indent=2))
+    return 3 if exceeds else 0
+
+
+def summarize_rows(rows: list[dict]) -> dict:
+    """Breakdown of one evaluate run (events CSV): descriptive, decides nothing."""
+    def block(subset: list[dict]) -> dict:
+        if not subset:
+            return {"trades": 0}
+        net = [float(r["net"]) for r in subset]
+        gross = [float(r["gross"]) for r in subset]
+        losses = [v for v in net if v <= 0]
+        return {"trades": len(subset), "meanGrossBp": 1e4 * statistics.fmean(gross), "meanNetBp": 1e4 * statistics.fmean(net),
+                "medianNetBp": 1e4 * statistics.median(net), "hitRateNet": sum(1 for v in net if v > 0) / len(net),
+                "hitRateGross": sum(1 for v in gross if v > 0) / len(gross),
+                "meanLossBp": 1e4 * statistics.fmean(losses) if losses else None, "worstNetBp": 1e4 * min(net),
+                "bestNetBp": 1e4 * max(net), "meanCostsBp": 1e4 * statistics.fmean(float(r["costs"]) for r in subset),
+                "meanFundingBp": 1e4 * statistics.fmean(float(r["funding"]) for r in subset),
+                "stopShare": sum(1 for r in subset if r["exit_reason"].startswith("STOP")) / len(subset),
+                "longShare": sum(1 for r in subset if r["direction"] == "1") / len(subset),
+                "meanAbsShockPct": 100 * statistics.fmean(abs(float(r["d_p"])) for r in subset),
+                "medianAbsZp": statistics.median(abs(float(r["z_p"])) for r in subset),
+                "strata": {s: sum(1 for r in subset if r["stratum"] == s) for s in ("0", "1", "2")}}
+    trades = [r for r in rows if r["outcome"] == "TRADE"]
+    out: dict = {"candidates": {}, "byCategory": {}, "bySymbol": {}}
+    for r in rows:
+        key = f"{r['category']}:{r['outcome']}"
+        out["candidates"][key] = out["candidates"].get(key, 0) + 1
+    for category in ("D", "K"):
+        out["byCategory"][category] = block([r for r in trades if r["category"] == category])
+        for symbol in sorted({r["symbol"] for r in rows}):
+            out["bySymbol"][f"{symbol}:{category}"] = block([r for r in trades if r["category"] == category and r["symbol"] == symbol])
+    return out
+
+
+def cmd_summarize(args) -> int:
+    with Path(args.events).open(newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    print(json.dumps(summarize_rows(rows), indent=2))
+    return 0
 
 
 def cmd_evaluate(args) -> int:
@@ -830,12 +1053,12 @@ def cmd_evaluate(args) -> int:
     with (out / f"events-{args.period}-{args.variant}.csv").open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
         writer.writerow(["symbol", "c0", "category", "z_p", "z_oi", "outcome", "reason", "event_end", "entry_at", "exit_at",
-                         "exit_reason", "gross", "costs", "funding", "net", "stratum"])
+                         "exit_reason", "gross", "costs", "funding", "net", "stratum", "d_p", "direction"])
         for e in events:
             writer.writerow([e.symbol, iso(e.c0), e.category, f"{e.z_p:.3f}", "" if e.z_oi is None else f"{e.z_oi:.3f}", e.outcome, e.reason,
                              "" if e.event_end is None else iso(e.event_end), "" if e.entry_at is None else iso(e.entry_at),
                              "" if e.exit_at is None else iso(e.exit_at), e.exit_reason, f"{e.gross:.6f}", f"{e.costs:.6f}",
-                             f"{e.funding:.6f}", f"{e.net:.6f}", e.stratum])
+                             f"{e.funding:.6f}", f"{e.net:.6f}", e.stratum, f"{e.d_p:.6f}", e.direction])
     print(json.dumps(summary, indent=2, default=float))
     return 0
 
@@ -848,7 +1071,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--seed", type=int, default=7)
     p = sub.add_parser("verify")
     p.add_argument("--data")
-    for name in ("check-data", "evaluate"):
+    p = sub.add_parser("summarize")
+    p.add_argument("--events", required=True)
+    for name in ("check-data", "check-assumptions", "cost-check", "evaluate"):
         p = sub.add_parser(name)
         p.add_argument("--data", required=True)
         p.add_argument("--period", choices=("discovery", "test"), required=True)
@@ -866,6 +1091,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "synth":
             print(json.dumps(synth(Path(args.out), args.seed), indent=2))
             return 0
+        if args.command == "summarize":
+            return cmd_summarize(args)
         if args.command == "verify":
             report = {"preregistration": verify_preregistration(), "configHash": config_hash(FROZEN)}
             if args.data:
@@ -876,6 +1103,10 @@ def main(argv: list[str] | None = None) -> int:
             raise StudyError("--period-start/--period-end are for synthetic data only.")
         if args.command == "check-data":
             return cmd_check_data(args)
+        if args.command == "check-assumptions":
+            return cmd_check_assumptions(args)
+        if args.command == "cost-check":
+            return cmd_cost_check(args)
         return cmd_evaluate(args)
     except StudyError as error:
         print(f"ERROR: {error}", file=sys.stderr)

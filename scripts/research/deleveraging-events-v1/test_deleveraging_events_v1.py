@@ -360,6 +360,34 @@ class Commands(unittest.TestCase):
         self.assertGreater(sum(result["describe"]["counts"].values()), 0, info)
         lines = (self.tmp / "out" / "events-discovery-primary.csv").read_text().splitlines()
         self.assertGreater(len(lines), 1)
+        code, out, _ = self.main("summarize", "--events", str(self.tmp / "out" / "events-discovery-primary.csv"))
+        self.assertEqual(code, 0)
+        summary = json.loads(out)
+        self.assertIn("D", summary["byCategory"])
+        self.assertEqual(sum(summary["candidates"].values()), len(lines) - 1)
+
+    def test_pre_evaluation_checks_never_show_returns(self):
+        data = self.tmp / "data"
+        de.synth(data, seed=3, start="2023-11-01", days=40)
+        window = ("--period", "discovery", "--period-start", "2023-12-02", "--period-end", "2023-12-10")
+        code, out, _ = self.main("check-data", "--data", str(data), *window)
+        self.assertEqual(code, 0, out)
+        details = json.loads(out)["report"]["BTCUSDT"]["details"]
+        self.assertEqual(details["klines"]["missingMinutes"], 0)
+        self.assertEqual(details["klines"]["duplicateConflicting"], 0)
+        self.assertEqual(details["funding"]["intervalHours"], {"8": 23})
+        self.assertIsNotNone(details["oiTiming"]["medianDeviationBpVsTradeOpen"]["t+0min"])
+        code, out, _ = self.main("check-assumptions", "--data", str(data), *window)
+        self.assertEqual(code, 0, out)
+        report = json.loads(out)
+        self.assertNotIn("net", out)
+        self.assertEqual(report["tradesWithShiftedEntry"], 0)
+        self.assertEqual(report["tradesWithShiftedExit"], 0)
+        code, out, _ = self.main("cost-check", "--data", str(data), *window)
+        self.assertEqual(code, 0, out)
+        cost = json.loads(out)
+        self.assertIn("no adjustment", cost["decision"])
+        self.assertNotIn("net", out)
 
     def test_real_data_needs_confirmation(self):
         data = self.tmp / "data"

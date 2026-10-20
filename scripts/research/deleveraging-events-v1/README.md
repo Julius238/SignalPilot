@@ -5,8 +5,11 @@ Setzt die eingefrorene
 um: Text `f04377f`, Blob `0afb5abb…`, Statusblock `fb8d094`. Abschnittsangaben
 (§) beziehen sich auf sie.
 
-**Stand 2026-10-20: Schritt 1.1. Das Skript ist fertig und nur mit
-synthetischen Daten getestet.**
+**Stand 2026-10-20: Studie ausgewertet. Der Entdeckungslauf ergibt
+`NICHT_BESTANDEN`, N = 58. Die Testperiode bleibt geschlossen.**
+Ergebnis: [Ergebnisbericht](../../../docs/trading/research/2026-10-20-deleveraging-events-v1-discovery-results.md).
+
+Zuvor in Schritt 1.1 fertig und nur mit synthetischen Daten getestet.
 
 - Es hat nie Marktdaten gelesen und enthält keinen Netzwerkcode.
 - Download (1.2) und echte Auswertung brauchen je eine eigene Freigabe.
@@ -30,7 +33,29 @@ python3 -I scripts/research/deleveraging-events-v1/deleveraging_events_v1.py ver
 | `synth --out DIR [--seed N]` | synthetische 1m-Kerzen, 5-Minuten-OI und Funding im Archivformat, mit eingestreuten Schocks (abwechselnd mit und ohne OI-Abbau) |
 | `verify [--data DIR]` | eingefrorene Vorregistrierung (Blob ohne Statusblock), Konfigurations-Hash, mit `--data` das Manifest |
 | `check-data --data DIR --period P` | Gültigkeit der OI-Punkte (G7), Anteil fehlender OI-Punkte und 1m-Kerzen, Funding; **nie Renditen**; Exit 3 bei Datenabbruch (> 5 % fehlende OI-Punkte) |
+| `check-assumptions --data DIR --period P` | zählt, wie oft die Zusatzannahmen (unten) auf den Daten greifen: verschobene Ein- und Ausstiege, unvollständige 5-Minuten-Kerzen, Gründe für „kein Trade“; **nie Renditen** |
+| `cost-check --data DIR --period discovery` | §6: Preiswirkung von 25 000 USD aus `bookDepth` an den Einstiegen 2023 gegen die Annahme 5 bzw. 8 bp; Exit 3, wenn sie überschritten wird; **nie Renditen** |
 | `evaluate --data DIR --out DIR --period P [--variant V]` | Ereignisse, Trades, Cluster, Klasse (§9); schreibt `result-*.json` und `events-*.csv` |
+| `summarize --events FILE` | beschreibende Aufschlüsselung eines Laufs: Brutto, Netto, Trefferquote, Verluste, Kosten, Funding, Stop-Anteil, Schockgröße, Schichten; je Gruppe und Symbol |
+
+Download (Schritt 1.2, Netzwerk), nur Entdeckungsperiode samt Vorlauf; die
+Testperiode 2024–2026 lädt das Skript nicht:
+
+```bash
+python3 -I scripts/research/deleveraging-events-v1/download_data.py fetch --out data/market-snapshots/deleveraging-events-v1
+```
+
+- `download_data.py plan` zeigt die feste Dateiliste ohne Netzwerk:
+  - 1m-Klines und Funding monatlich, BTC ab 2020-08, ETH ab 2021-11;
+  - `metrics` täglich, BTC ab 2020-09-01, ETH ab 2021-12-01;
+  - `bookDepth` 2023.
+- `fetch` prüft jede Datei gegen ihr `.CHECKSUM` (SHA-256) und darauf, dass
+  sie genau eine lesbare CSV enthält.
+  - Fehlt eine Datei im Archiv (404), wird sie als fehlend vermerkt, nie
+    ersetzt.
+  - Ein Neustart behält geprüfte Dateien.
+  - Am Ende stehen `download-report.json` und `manifest.sha256`.
+- `check` prüft alles erneut gegen Prüfsummen und Manifest.
 
 - **Echte Daten** (ohne Datei `SYNTHETIC`) brauchen `--real --confirm
   DELEVERAGING_EVENTS_V1`. Geprüft werden die eingefrorene Vorregistrierung
