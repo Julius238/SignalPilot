@@ -96,40 +96,87 @@ export type BuildReportOptions = {
 
 const scoreBucketOrder = ["0-49", "50-64", "65-79", "80-100"] as const;
 
+/** Sum and count of the non-null values of one metric, in evaluation order. */
+export type MetricSum = { sum: number; count: number };
+
+/** Everything a bucket needs to know about its evaluations. */
+export type PerformanceStats = {
+  total: number;
+  evaluatedCount: number;
+  skippedCount: number;
+  positiveCount: number;
+  negativeCount: number;
+  neutralCount: number;
+  targetReachedCount: number;
+  invalidatedCount: number;
+  returnAfter1h: MetricSum;
+  returnAfter4h: MetricSum;
+  returnAfter1d: MetricSum;
+  returnAfter3d: MetricSum;
+  maxFavorableMove: MetricSum;
+  maxAdverseMove: MetricSum;
+};
+
+export type PerformanceGroupStats = { key: string; stats: PerformanceStats };
+
+/**
+ * The complete input of a report without its evaluations. The database builds
+ * it with one aggregate query (`./paper-aggregate`), so a report never needs
+ * the evaluations themselves in memory.
+ *
+ * Groups and skip reasons are listed in the order of their first evaluation:
+ * that order decides ties between equally ranked buckets.
+ */
+export type PerformanceAggregate = {
+  overall: PerformanceStats;
+  groups: Record<PerformanceGroupBy, PerformanceGroupStats[]>;
+  observation: {
+    total: number;
+    evaluatedCount: number;
+    positiveMovementCount: number;
+    neutralCount: number;
+    negativeCount: number;
+    absReturnAfter1d: MetricSum;
+  };
+  skippedByReason: Array<{ reason: string; count: number }>;
+};
+
 export function buildPerformanceBucket(
   key: string,
   label: string,
   evaluations: PaperEvaluationLike[],
   overallWinRate = 0
 ): PerformanceBucket {
-  const evaluated = evaluations.filter((evaluation) => evaluation.evaluationStatus === "EVALUATED");
-  const skippedCount = evaluations.filter((evaluation) => evaluation.evaluationStatus === "SKIPPED").length;
-  const positiveCount = evaluated.filter((evaluation) => evaluation.outcome === "POSITIVE").length;
-  const targetReachedCount = evaluated.filter((evaluation) => evaluation.outcome === "TARGET_REACHED").length;
-  const negativeCount = evaluated.filter((evaluation) => evaluation.outcome === "NEGATIVE").length;
-  const invalidatedCount = evaluated.filter((evaluation) => evaluation.outcome === "INVALIDATED").length;
-  const neutralCount = evaluated.filter((evaluation) => evaluation.outcome === "NEUTRAL").length;
-  const wins = positiveCount + targetReachedCount;
-  const winRate = evaluated.length === 0 ? 0 : (wins / evaluated.length) * 100;
+  return bucketFromStats(key, label, collectStats(evaluations), overallWinRate);
+}
+
+function bucketFromStats(
+  key: string,
+  label: string,
+  stats: PerformanceStats,
+  overallWinRate: number
+): PerformanceBucket {
+  const wins = stats.positiveCount + stats.targetReachedCount;
+  const winRate = stats.evaluatedCount === 0 ? 0 : (wins / stats.evaluatedCount) * 100;
   const bucket: Omit<PerformanceBucket, "insight" | "recommendation"> = {
     key,
     label,
-    total: evaluations.length,
-    evaluatedCount: evaluated.length,
-    skippedCount,
-    positiveCount,
-    negativeCount,
-    neutralCount,
-    targetReachedCount,
-    invalidatedCount,
+    total: stats.total,
+    evaluatedCount: stats.evaluatedCount,
+    skippedCount: stats.skippedCount,
+    positiveCount: stats.positiveCount,
+    negativeCount: stats.negativeCount,
+    neutralCount: stats.neutralCount,
+    targetReachedCount: stats.targetReachedCount,
+    invalidatedCount: stats.invalidatedCount,
     winRate,
-    avgReturnAfter1h: average(evaluated.map((evaluation) => evaluation.returnAfter1h)),
-    avgReturnAfter4h: average(evaluated.map((evaluation) => evaluation.returnAfter4h)),
-    avgReturnAfter1d: average(evaluated.map((evaluation) => evaluation.returnAfter1d)),
-    avgReturnAfter3d: average(evaluated.map((evaluation) => evaluation.returnAfter3d)),
-    avgMaxFavorableMove: average(evaluated.map((evaluation) => evaluation.maxFavorableMove)),
-    avgMaxAdverseMove: average(evaluated.map((evaluation) => evaluation.maxAdverseMove)),
-    confidenceLevel: confidenceLevel(evaluated.length)
+    avgReturnAfter1h: mean(stats.returnAfter1h),
+    avgReturnAfter4h: mean(stats.returnAfter4h),
+    avgReturnAfter1d: mean(stats.returnAfter1d),
+    avgReturnAfter3d: mean(stats.returnAfter3d),
+    avgMaxFavorableMove: mean(stats.maxFavorableMove),
+    avgMaxAdverseMove: mean(stats.maxAdverseMove),
+    confidenceLevel: confidenceLevel(stats.evaluatedCount)
   };
 
   return {
@@ -139,11 +186,49 @@ export function buildPerformanceBucket(
   };
 }
 
+function collectStats(evaluations: PaperEvaluationLike[]): PerformanceStats {
+  const evaluated = evaluations.filter((evaluation) => evaluation.evaluationStatus === "EVALUATED");
+  const countOutcome = (outcome: string) =>
+    evaluated.filter((evaluation) => evaluation.outcome === outcome).length;
+
+  return {
+    total: evaluations.length,
+    evaluatedCount: evaluated.length,
+    skippedCount: evaluations.filter((evaluation) => evaluation.evaluationStatus === "SKIPPED").length,
+    positiveCount: countOutcome("POSITIVE"),
+    negativeCount: countOutcome("NEGATIVE"),
+    neutralCount: countOutcome("NEUTRAL"),
+    targetReachedCount: countOutcome("TARGET_REACHED"),
+    invalidatedCount: countOutcome("INVALIDATED"),
+    returnAfter1h: sumMetric(evaluated.map((evaluation) => evaluation.returnAfter1h)),
+    returnAfter4h: sumMetric(evaluated.map((evaluation) => evaluation.returnAfter4h)),
+    returnAfter1d: sumMetric(evaluated.map((evaluation) => evaluation.returnAfter1d)),
+    returnAfter3d: sumMetric(evaluated.map((evaluation) => evaluation.returnAfter3d)),
+    maxFavorableMove: sumMetric(evaluated.map((evaluation) => evaluation.maxFavorableMove)),
+    maxAdverseMove: sumMetric(evaluated.map((evaluation) => evaluation.maxAdverseMove))
+  };
+}
+
 export function buildPerformanceBuckets(
   evaluations: PaperEvaluationLike[],
   groupBy: PerformanceGroupBy,
   overallWinRate = 0
 ): PerformanceBucket[] {
+  return bucketsFromGroups(collectGroups(evaluations, groupBy), groupBy, overallWinRate);
+}
+
+export function buildPerformanceBucketsFromAggregate(
+  aggregate: PerformanceAggregate,
+  groupBy: PerformanceGroupBy,
+  overallWinRate = 0
+): PerformanceBucket[] {
+  return bucketsFromGroups(aggregate.groups[groupBy], groupBy, overallWinRate);
+}
+
+function collectGroups(
+  evaluations: PaperEvaluationLike[],
+  groupBy: PerformanceGroupBy
+): PerformanceGroupStats[] {
   const groups = new Map<string, PaperEvaluationLike[]>();
 
   for (const evaluation of evaluations) {
@@ -153,13 +238,20 @@ export function buildPerformanceBuckets(
     groups.set(key, group);
   }
 
-  const buckets = [...groups.entries()].map(([key, values]) =>
-    buildPerformanceBucket(key, getGroupLabel(key, groupBy), values, overallWinRate)
+  return [...groups.entries()].map(([key, values]) => ({ key, stats: collectStats(values) }));
+}
+
+function bucketsFromGroups(
+  groups: PerformanceGroupStats[],
+  groupBy: PerformanceGroupBy,
+  overallWinRate: number
+): PerformanceBucket[] {
+  const buckets = groups.map(({ key, stats }) =>
+    bucketFromStats(key, getGroupLabel(key, groupBy), stats, overallWinRate)
   );
 
   if (groupBy === "scoreBucket") {
     return scoreBucketOrder
-      .filter((bucketKey) => groups.has(bucketKey))
       .map((bucketKey) => buckets.find((bucket) => bucket.key === bucketKey))
       .filter((bucket): bucket is PerformanceBucket => bucket !== undefined);
   }
@@ -175,40 +267,70 @@ export function buildPerformanceReport(
   const activeEvaluations = includeSkipped
     ? evaluations
     : evaluations.filter((evaluation) => evaluation.evaluationStatus !== "SKIPPED");
-  const overall = buildPerformanceBucket("overall", "Overall", activeEvaluations, 0);
-  const signalTypeBuckets = filterByMinEvaluated(
-    buildPerformanceBuckets(activeEvaluations, "signalType", overall.winRate),
-    options.minEvaluated ?? 0
+
+  return buildPerformanceReportFromAggregate(aggregateEvaluations(activeEvaluations), options);
+}
+
+export function aggregateEvaluations(evaluations: PaperEvaluationLike[]): PerformanceAggregate {
+  const observations = evaluations.filter((evaluation) => evaluation.evaluationKind === "OBSERVATION");
+  const evaluatedObservations = observations.filter(
+    (evaluation) => evaluation.evaluationStatus === "EVALUATED"
   );
-  const timeframeBuckets = filterByMinEvaluated(
-    buildPerformanceBuckets(activeEvaluations, "timeframe", overall.winRate),
-    options.minEvaluated ?? 0
-  );
-  const assetBuckets = filterByMinEvaluated(
-    buildPerformanceBuckets(activeEvaluations, "symbol", overall.winRate),
-    options.minEvaluated ?? 0
-  );
-  const scoreBuckets = filterByMinEvaluated(
-    buildPerformanceBuckets(activeEvaluations, "scoreBucket", overall.winRate),
-    options.minEvaluated ?? 0
-  );
-  const riskBuckets = filterByMinEvaluated(
-    buildPerformanceBuckets(activeEvaluations, "riskLevel", overall.winRate),
-    options.minEvaluated ?? 0
-  );
-  const statusBuckets = filterByMinEvaluated(
-    buildPerformanceBuckets(activeEvaluations, "status", overall.winRate),
-    options.minEvaluated ?? 0
-  );
-  const evaluationKindBuckets = filterByMinEvaluated(
-    buildPerformanceBuckets(activeEvaluations, "evaluationKind", overall.winRate),
-    options.minEvaluated ?? 0
-  );
-  const warnings = buildWarnings(overall, activeEvaluations.length);
+  const countOutcome = (outcome: string) =>
+    evaluatedObservations.filter((evaluation) => evaluation.outcome === outcome).length;
+  const reasons = new Map<string, number>();
+  for (const evaluation of evaluations) {
+    if (evaluation.evaluationStatus !== "SKIPPED") continue;
+    const reason = evaluation.skipReason ?? "Unspecified";
+    reasons.set(reason, (reasons.get(reason) ?? 0) + 1);
+  }
+
+  return {
+    overall: collectStats(evaluations),
+    groups: {
+      signalType: collectGroups(evaluations, "signalType"),
+      timeframe: collectGroups(evaluations, "timeframe"),
+      symbol: collectGroups(evaluations, "symbol"),
+      status: collectGroups(evaluations, "status"),
+      riskLevel: collectGroups(evaluations, "riskLevel"),
+      evaluationKind: collectGroups(evaluations, "evaluationKind"),
+      scoreBucket: collectGroups(evaluations, "scoreBucket")
+    },
+    observation: {
+      total: observations.length,
+      evaluatedCount: evaluatedObservations.length,
+      positiveMovementCount: countOutcome("POSITIVE"),
+      neutralCount: countOutcome("NEUTRAL"),
+      negativeCount: countOutcome("NEGATIVE"),
+      absReturnAfter1d: sumMetric(
+        evaluatedObservations.map((evaluation) =>
+          typeof evaluation.returnAfter1d === "number" ? Math.abs(evaluation.returnAfter1d) : null
+        )
+      )
+    },
+    skippedByReason: [...reasons.entries()].map(([reason, count]) => ({ reason, count }))
+  };
+}
+
+/** `includeSkipped` must already be applied to the aggregate. */
+export function buildPerformanceReportFromAggregate(
+  aggregate: PerformanceAggregate,
+  options: BuildReportOptions = {}
+): PerformanceIntelligenceReport {
+  const overall = bucketFromStats("overall", "Overall", aggregate.overall, 0);
+  const buckets = (groupBy: PerformanceGroupBy) =>
+    filterByMinEvaluated(
+      bucketsFromGroups(aggregate.groups[groupBy], groupBy, overall.winRate),
+      options.minEvaluated ?? 0
+    );
+  const signalTypeBuckets = buckets("signalType");
+  const timeframeBuckets = buckets("timeframe");
+  const assetBuckets = buckets("symbol");
+  const warnings = buildWarnings(overall, aggregate.overall.total);
 
   return {
     generatedAt: (options.generatedAt ?? new Date()).toISOString(),
-    totalEvaluations: activeEvaluations.length,
+    totalEvaluations: aggregate.overall.total,
     evaluatedCount: overall.evaluatedCount,
     skippedCount: overall.skippedCount,
     overallWinRate: overall.winRate,
@@ -219,12 +341,12 @@ export function buildPerformanceReport(
     worstTimeframes: sortWorstBuckets(timeframeBuckets).slice(0, 5),
     bestAssets: assetBuckets.slice(0, 10),
     worstAssets: sortWorstBuckets(assetBuckets).slice(0, 10),
-    scoreBuckets,
-    riskBuckets,
-    statusBuckets,
-    groupedByEvaluationKind: evaluationKindBuckets,
-    observationStats: buildObservationStats(activeEvaluations),
-    skippedByReason: buildSkippedByReason(activeEvaluations),
+    scoreBuckets: buckets("scoreBucket"),
+    riskBuckets: buckets("riskLevel"),
+    statusBuckets: buckets("status"),
+    groupedByEvaluationKind: buckets("evaluationKind"),
+    observationStats: buildObservationStats(aggregate.observation),
+    skippedByReason: buildSkippedByReason(aggregate.skippedByReason),
     summary: buildSummary(overall),
     warnings
   };
@@ -331,37 +453,21 @@ function buildWarnings(overall: PerformanceBucket, totalEvaluations: number) {
   return warnings;
 }
 
-function buildObservationStats(evaluations: PaperEvaluationLike[]): ObservationStats {
-  const observations = evaluations.filter((evaluation) => evaluation.evaluationKind === "OBSERVATION");
-  const evaluatedObservations = observations.filter(
-    (evaluation) => evaluation.evaluationStatus === "EVALUATED"
-  );
-
+function buildObservationStats(observation: PerformanceAggregate["observation"]): ObservationStats {
   return {
-    total: observations.length,
-    evaluatedCount: evaluatedObservations.length,
-    positiveMovementCount: evaluatedObservations.filter((evaluation) => evaluation.outcome === "POSITIVE")
-      .length,
-    neutralCount: evaluatedObservations.filter((evaluation) => evaluation.outcome === "NEUTRAL")
-      .length,
-    negativeCount: evaluatedObservations.filter((evaluation) => evaluation.outcome === "NEGATIVE")
-      .length,
-    avgAbsReturnAfter1d: average(
-      evaluatedObservations.map((evaluation) =>
-        typeof evaluation.returnAfter1d === "number" ? Math.abs(evaluation.returnAfter1d) : null
-      )
-    )
+    total: observation.total,
+    evaluatedCount: observation.evaluatedCount,
+    positiveMovementCount: observation.positiveMovementCount,
+    neutralCount: observation.neutralCount,
+    negativeCount: observation.negativeCount,
+    avgAbsReturnAfter1d: mean(observation.absReturnAfter1d)
   };
 }
 
-function buildSkippedByReason(evaluations: PaperEvaluationLike[]) {
-  return evaluations
-    .filter((evaluation) => evaluation.evaluationStatus === "SKIPPED")
-    .reduce<Record<string, number>>((groups, evaluation) => {
-      const reason = evaluation.skipReason ?? "Unspecified";
-      groups[reason] = (groups[reason] ?? 0) + 1;
-      return groups;
-    }, {});
+function buildSkippedByReason(reasons: PerformanceAggregate["skippedByReason"]) {
+  const groups: Record<string, number> = {};
+  for (const { reason, count } of reasons) groups[reason] = count;
+  return groups;
 }
 
 function buildSummary(overall: PerformanceBucket) {
@@ -398,12 +504,17 @@ function sortWorstBuckets(buckets: PerformanceBucket[]) {
   );
 }
 
-function average(values: Array<number | null | undefined>) {
-  const activeValues = values.filter((value): value is number => typeof value === "number");
-
-  if (activeValues.length === 0) {
-    return 0;
+function sumMetric(values: Array<number | null | undefined>): MetricSum {
+  let sum = 0;
+  let count = 0;
+  for (const value of values) {
+    if (typeof value !== "number") continue;
+    sum += value;
+    count += 1;
   }
+  return { sum, count };
+}
 
-  return activeValues.reduce((sum, value) => sum + value, 0) / activeValues.length;
+function mean(metric: MetricSum) {
+  return metric.count === 0 ? 0 : metric.sum / metric.count;
 }

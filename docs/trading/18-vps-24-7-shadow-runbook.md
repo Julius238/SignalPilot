@@ -362,6 +362,8 @@ Die Zeitpunkte und Audit-IDs kommen in
 | Binance-Kerzen frisch und echt | `MARKET_DATA_STALE` (Outbox), `monitor`, Dashboard „Betrieb (24/7)“ |
 | Daten-Worker läuft | Job-Frische `fetchCryptoCandles` / `calculateMarketRegime` → `SCHEDULED_JOB_STALE` |
 | Trading-Worker läuft | Docker-Healthcheck (Heartbeat-Datei), `watch` meldet einen toten Worker direkt an n8n |
+| Absturz-Neustarts (Daten-Worker, Trading-Worker, API u. a.) | `watch`/`healthcheck` → `CONTAINER_CRASH_RESTART` direkt an n8n (Docker `RestartCount`, letzte 60 min) |
+| Signalanalyse läuft durch | `watch`/`healthcheck` → `SIGNAL_ANALYSIS_ABORTED`, `SIGNAL_ANALYSIS_STALE`, `SIGNAL_ANALYSIS_UNKNOWN` direkt an n8n |
 | Candidate-Scan, Risk, Fill, Monitor, Reconcile, Performance, Arena | `SCHEDULED_JOB_STALE` je Job mit eigener Schwelle |
 | Scheduler-Verzögerung | dieselben Schwellen; Circuit Breaker → `CIRCUIT_BREAKER_OPEN` |
 | Worker-Neustarts | `WORKER_RESTARTED` (je Start ein Alert) |
@@ -380,6 +382,8 @@ Cron auf dem VPS (`crontab -e`):
 `watch` sendet nur, wenn der Worker es selbst nicht kann. Das ist der Fall bei:
 
 - einem gestoppten oder ungesunden Container;
+- einem Container, den Docker nach einem Absturz neu gestartet hat;
+- abgebrochenen oder ausbleibenden Signalanalysen;
 - einer unerreichbaren DB;
 - einer veralteten Alert-Outbox.
 

@@ -6,6 +6,8 @@ set -euo pipefail
 # session auto-activation, secret dump or .env.production rewrite occurs here.
 # shellcheck source=./_common.sh
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
+# shellcheck source=./_worker-health.sh
+source "$OPS_DIR/_worker-health.sh"
 
 usage() {
   cat <<'USAGE'
@@ -384,7 +386,9 @@ container_problems() {
     if [ "$health" != "healthy" ] && [ "$health" != "running" ]; then
       echo "CONTAINER_UNHEALTHY: $service=$health"
     fi
+    container_restart_problem "$service" "$container_id"
   done
+  signal_analysis_problems
 }
 
 ops_watch() {

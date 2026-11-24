@@ -24,6 +24,7 @@ import {
   registerDashboardRoutes,
   setDashboardDatabaseForTests
 } from "../src/routes/dashboard.js";
+import { paperAggregateRows } from "./support/paperAggregateRows.js";
 
 describe("watchlist routes", () => {
   const originalAlertMode = process.env.ALERT_MODE;
@@ -544,6 +545,9 @@ function createDatabase(state: {
           .sort((left, right) => right.lastSentAt.getTime() - left.lastSentAt.getTime())
           .slice(0, take)
     },
+    $transaction: async (queries: Array<Promise<unknown>>) => Promise.all(queries),
+    $queryRawUnsafe: async (sql: string) =>
+      sql.includes("GROUPING SETS") ? paperAggregateRows(state.paperEvaluations) : [],
     paperSignalEvaluation: {
       findMany: async () => state.paperEvaluations,
       findUnique: async ({ where }: { where: { id: string } }) =>

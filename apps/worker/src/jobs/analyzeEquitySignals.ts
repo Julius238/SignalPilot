@@ -36,7 +36,6 @@ import {
 } from "@signalpilot/events-intelligence";
 import { buildNewsContextForSignal, type NewsContext } from "@signalpilot/news-intelligence";
 import { composeSignalOutput } from "@signalpilot/output-composer";
-import { buildPerformanceReport, type PerformanceIntelligenceReport } from "@signalpilot/performance-intelligence";
 import { scoreSignal } from "@signalpilot/scoring-engine";
 import { applySignalRules, type SignalRulesResult } from "@signalpilot/signal-rules";
 import type { AssetClass, IntelligenceContext, SignalDecision } from "@signalpilot/shared";
@@ -47,6 +46,7 @@ import {
   buildSignalAlertQualityContext,
   loadPreviousNotificationContext
 } from "../lib/alertQuality.js";
+import { loadPerformanceReport } from "../lib/paperPerformance.js";
 import {
   shouldRouteAlertForAsset,
   shouldSendAfterCooldown,
@@ -786,32 +786,6 @@ function buildMarketRegimeContext(input: {
     signalStatus: input.signalStatus,
     report: input.report
   });
-}
-
-async function loadPerformanceReport(database: PrismaClient): Promise<PerformanceIntelligenceReport | null> {
-  const evaluations = await database.paperSignalEvaluation?.findMany();
-  if (!evaluations || evaluations.length === 0) return null;
-
-  return buildPerformanceReport(
-    evaluations.map((evaluation) => ({
-      symbol: evaluation.symbol,
-      timeframe: evaluation.timeframe,
-      status: evaluation.status,
-      signalType: evaluation.signalType,
-      score: evaluation.score,
-      riskLevel: evaluation.riskLevel,
-      evaluationKind: evaluation.evaluationKind,
-      skipReason: evaluation.skipReason,
-      evaluationStatus: evaluation.evaluationStatus,
-      outcome: evaluation.outcome,
-      returnAfter1h: evaluation.returnAfter1h,
-      returnAfter4h: evaluation.returnAfter4h,
-      returnAfter1d: evaluation.returnAfter1d,
-      returnAfter3d: evaluation.returnAfter3d,
-      maxFavorableMove: evaluation.maxFavorableMove,
-      maxAdverseMove: evaluation.maxAdverseMove
-    }))
-  );
 }
 
 function applyRuleResultToDecision(decision: SignalDecision, rules: SignalRulesResult): SignalDecision {

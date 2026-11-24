@@ -10,6 +10,10 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./paper-aggregate": {
+      "types": "./dist/paper-aggregate.d.ts",
+      "default": "./dist/paper-aggregate.js"
+    },
     "./shadow": {
       "types": "./dist/shadow/index.d.ts",
       "default": "./dist/shadow/index.js"

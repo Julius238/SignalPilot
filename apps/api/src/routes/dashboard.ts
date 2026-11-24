@@ -41,10 +41,17 @@ import {
   type MultiTimeframeSummary
 } from "@signalpilot/multi-timeframe";
 import {
-  buildPerformanceBuckets,
-  buildPerformanceReport,
+  buildPerformanceBucketsFromAggregate,
+  buildPerformanceReportFromAggregate,
+  type MetricSum,
+  type PerformanceAggregate,
   type PerformanceGroupBy
 } from "@signalpilot/performance-intelligence";
+import {
+  loadPaperPerformanceAggregate,
+  type PaperAggregateDatabase,
+  type PaperAggregateFilter
+} from "@signalpilot/performance-intelligence/paper-aggregate";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { getPublicEnvironment, isDevLoginEnabled } from "../auth/config.js";
 import { isAuthEnabled } from "../auth/session.js";
@@ -1471,54 +1478,37 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
   });
 
   server.get("/paper/stats", async () => {
-    const evaluations = await database.paperSignalEvaluation.findMany();
-    const evaluated = evaluations.filter(
-      (evaluation) => evaluation.evaluationStatus === PaperEvaluationStatus.EVALUATED
-    );
-    const positiveCount = evaluations.filter(
-      (evaluation) => evaluation.outcome === PaperEvaluationOutcome.POSITIVE
-    ).length;
-    const targetReachedCount = evaluations.filter(
-      (evaluation) => evaluation.outcome === PaperEvaluationOutcome.TARGET_REACHED
-    ).length;
-    const negativeCount = evaluations.filter(
-      (evaluation) => evaluation.outcome === PaperEvaluationOutcome.NEGATIVE
-    ).length;
-    const neutralCount = evaluations.filter(
-      (evaluation) => evaluation.outcome === PaperEvaluationOutcome.NEUTRAL
-    ).length;
-    const invalidatedCount = evaluations.filter(
-      (evaluation) => evaluation.outcome === PaperEvaluationOutcome.INVALIDATED
-    ).length;
+    const aggregate = await loadPaperAggregate();
+    const { allStatuses, groups, overall } = aggregate;
+    const countsByKey = (dimension: PerformanceGroupBy) =>
+      Object.fromEntries(groups[dimension].map(({ key, stats }) => [key, stats.total]));
 
     return {
-      totalEvaluations: evaluations.length,
-      openCount: evaluations.filter((evaluation) => evaluation.evaluationStatus === PaperEvaluationStatus.OPEN)
-        .length,
-      evaluatedCount: evaluated.length,
-      positiveCount,
-      negativeCount,
-      neutralCount,
-      targetReachedCount,
-      invalidatedCount,
+      totalEvaluations: overall.total,
+      openCount: allStatuses.openCount,
+      evaluatedCount: overall.evaluatedCount,
+      positiveCount: allStatuses.positiveCount,
+      negativeCount: allStatuses.negativeCount,
+      neutralCount: allStatuses.neutralCount,
+      targetReachedCount: allStatuses.targetReachedCount,
+      invalidatedCount: allStatuses.invalidatedCount,
       winRate:
-        evaluated.length === 0
+        overall.evaluatedCount === 0
           ? 0
-          : ((positiveCount + targetReachedCount) / evaluated.length) * 100,
-      avgReturnAfter1h: average(evaluations.map((evaluation) => evaluation.returnAfter1h)),
-      avgReturnAfter4h: average(evaluations.map((evaluation) => evaluation.returnAfter4h)),
-      avgReturnAfter1d: average(evaluations.map((evaluation) => evaluation.returnAfter1d)),
-      avgMaxFavorableMove: average(evaluations.map((evaluation) => evaluation.maxFavorableMove)),
-      avgMaxAdverseMove: average(evaluations.map((evaluation) => evaluation.maxAdverseMove)),
-      groupedBySignalStatus: groupCount(evaluations, (evaluation) => evaluation.status),
-      groupedBySignalType: groupCount(evaluations, (evaluation) => evaluation.signalType),
-      groupedByTimeframe: groupCount(evaluations, (evaluation) => evaluation.timeframe),
-      byEvaluationKind: groupCount(evaluations, (evaluation) => evaluation.evaluationKind),
-      skippedByReason: groupCount(
-        evaluations.filter((evaluation) => evaluation.evaluationStatus === PaperEvaluationStatus.SKIPPED),
-        (evaluation) => evaluation.skipReason ?? "Unspecified"
+          : ((allStatuses.positiveCount + allStatuses.targetReachedCount) / overall.evaluatedCount) * 100,
+      avgReturnAfter1h: mean(allStatuses.returnAfter1h),
+      avgReturnAfter4h: mean(allStatuses.returnAfter4h),
+      avgReturnAfter1d: mean(allStatuses.returnAfter1d),
+      avgMaxFavorableMove: mean(allStatuses.maxFavorableMove),
+      avgMaxAdverseMove: mean(allStatuses.maxAdverseMove),
+      groupedBySignalStatus: countsByKey("status"),
+      groupedBySignalType: countsByKey("signalType"),
+      groupedByTimeframe: countsByKey("timeframe"),
+      byEvaluationKind: countsByKey("evaluationKind"),
+      skippedByReason: Object.fromEntries(
+        aggregate.skippedByReason.map(({ reason, count }) => [reason, count])
       ),
-      observationStats: buildPaperObservationStats(evaluations)
+      observationStats: buildPaperObservationStats(aggregate.observation)
     };
   });
 
@@ -1534,18 +1524,16 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
       return reply;
     }
 
-    const evaluations = await loadPerformanceEvaluations({
+    const aggregate = await loadPaperAggregate({
       symbol: parseOptionalString(query.symbol)?.toUpperCase(),
       assetType,
       timeframe: parseOptionalString(query.timeframe),
       from,
-      to
-    });
-
-    return buildPerformanceReport(evaluations, {
-      minEvaluated,
+      to,
       includeSkipped
     });
+
+    return buildPerformanceReportFromAggregate(aggregate, { minEvaluated });
   });
 
   server.get("/performance/buckets", async (request, reply) => {
@@ -1562,10 +1550,10 @@ export async function registerDashboardRoutes(server: FastifyInstance) {
       return reply;
     }
 
-    const evaluations = await loadPerformanceEvaluations({});
-    const report = buildPerformanceReport(evaluations);
+    const aggregate = await loadPaperAggregate();
+    const { overallWinRate } = buildPerformanceReportFromAggregate(aggregate);
 
-    return buildPerformanceBuckets(evaluations, groupBy, report.overallWinRate).slice(0, limit);
+    return buildPerformanceBucketsFromAggregate(aggregate, groupBy, overallWinRate).slice(0, limit);
   });
 
   server.get("/data-quality/report", async (request, reply) => {
@@ -3085,92 +3073,23 @@ function average(values: Array<number | null>) {
   return activeValues.reduce((sum, value) => sum + value, 0) / activeValues.length;
 }
 
-function groupCount<T>(items: T[], getKey: (item: T) => string) {
-  return items.reduce<Record<string, number>>((groups, item) => {
-    const key = getKey(item);
-    groups[key] = (groups[key] ?? 0) + 1;
-    return groups;
-  }, {});
-}
-
-function buildPaperObservationStats(
-  evaluations: Array<{
-    evaluationKind: PaperEvaluationKind;
-    evaluationStatus: PaperEvaluationStatus;
-    outcome: PaperEvaluationOutcome | null;
-    returnAfter1d: number | null;
-  }>
-) {
-  const observations = evaluations.filter(
-    (evaluation) => evaluation.evaluationKind === PaperEvaluationKind.OBSERVATION
-  );
-  const evaluated = observations.filter(
-    (evaluation) => evaluation.evaluationStatus === PaperEvaluationStatus.EVALUATED
-  );
-
+function buildPaperObservationStats(observation: PerformanceAggregate["observation"]) {
   return {
-    total: observations.length,
-    evaluatedCount: evaluated.length,
-    positiveMovementCount: evaluated.filter((evaluation) => evaluation.outcome === PaperEvaluationOutcome.POSITIVE)
-      .length,
-    neutralCount: evaluated.filter((evaluation) => evaluation.outcome === PaperEvaluationOutcome.NEUTRAL)
-      .length,
-    negativeCount: evaluated.filter((evaluation) => evaluation.outcome === PaperEvaluationOutcome.NEGATIVE)
-      .length,
-    avgAbsReturnAfter1d: average(
-      evaluated.map((evaluation) =>
-        typeof evaluation.returnAfter1d === "number" ? Math.abs(evaluation.returnAfter1d) : null
-      )
-    )
+    total: observation.total,
+    evaluatedCount: observation.evaluatedCount,
+    positiveMovementCount: observation.positiveMovementCount,
+    neutralCount: observation.neutralCount,
+    negativeCount: observation.negativeCount,
+    avgAbsReturnAfter1d: mean(observation.absReturnAfter1d)
   };
 }
 
-async function loadPerformanceEvaluations(input: {
-  symbol?: string;
-  assetType?: AssetType;
-  timeframe?: string;
-  from?: Date;
-  to?: Date;
-}) {
-  const evaluations = await database.paperSignalEvaluation.findMany({
-    where: {
-      symbol: input.symbol,
-      timeframe: input.timeframe,
-      openedAt:
-        input.from || input.to
-          ? {
-              gte: input.from,
-              lte: input.to
-            }
-          : undefined,
-      signal: input.assetType
-        ? {
-            asset: {
-              assetType: input.assetType
-            }
-          }
-        : undefined
-    }
-  });
+function mean(metric: MetricSum) {
+  return metric.count === 0 ? 0 : metric.sum / metric.count;
+}
 
-  return evaluations.map((evaluation) => ({
-    symbol: evaluation.symbol,
-    timeframe: evaluation.timeframe,
-    status: evaluation.status,
-    signalType: evaluation.signalType,
-    score: evaluation.score,
-    riskLevel: evaluation.riskLevel,
-    evaluationKind: evaluation.evaluationKind,
-    skipReason: evaluation.skipReason,
-    evaluationStatus: evaluation.evaluationStatus,
-    outcome: evaluation.outcome,
-    returnAfter1h: evaluation.returnAfter1h,
-    returnAfter4h: evaluation.returnAfter4h,
-    returnAfter1d: evaluation.returnAfter1d,
-    returnAfter3d: evaluation.returnAfter3d,
-    maxFavorableMove: evaluation.maxFavorableMove,
-    maxAdverseMove: evaluation.maxAdverseMove
-  }));
+function loadPaperAggregate(filter: PaperAggregateFilter = {}) {
+  return loadPaperPerformanceAggregate(database as unknown as PaperAggregateDatabase, filter);
 }
 
 async function loadDataQualityReport(input: { assetType?: AssetType; symbol?: string }) {
