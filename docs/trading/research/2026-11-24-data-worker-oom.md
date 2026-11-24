@@ -1,9 +1,9 @@
 # Daten-Worker: Absturzschleife ab 2026-11-20 (Ursache, Datenlücke, Korrektur)
 
-> **Stand 2026-11-24, 11:00 UTC.** Korrektur lokal fertig und getestet, **nicht
-> deployt**. Bis zum Deployment wächst die Datenlücke weiter.
+> **Stand 2026-11-24, 12:05 UTC.** Korrektur seit **11:06:03 UTC** in Betrieb
+> (Daten-Worker aus `7050558`, Image `2bef1471fa7c`). Abnahme der ersten Stunde
+> bestanden (§ 7); die Prüfung nach 24 h steht aus. API (Stufe 2) nicht deployt.
 >
-> - Kein Eingriff in Datenbank, Container oder Konfiguration des VPS.
 > - Nichts wird nachgetragen: Fehlende Signale und Bewertungen bleiben fehlend,
 >   abgebrochene Läufe bleiben als `RUNNING` in `BotRun` stehen.
 > - Strategien, Kosten, Portfolios, Limits und Arena-Regeln von `OFFICIAL_V1`
@@ -32,10 +32,10 @@
 | `watch` / `opsHealth` | überwacht `fetchCryptoCandles` und `calculateMarketRegime`. Beide laufen **vor** dem Absturz und waren erfolgreich. `analyzeCryptoSignals` fehlte in der Liste |
 | Fehlerprotokoll | Ein Heap-Abbruch beendet den Prozess ohne Ausnahme. Der Lauf bleibt als `RUNNING` stehen, es gibt keinen `FAILED`-Eintrag |
 
-## 3 Datenlücke (belegt bis 2026-11-24 09:31 UTC)
+## 3 Datenlücke (2026-11-20 07:16 bis 2026-11-24 10:46 UTC, abgeschlossen)
 
-79 Abstürze, 79 abgebrochene Analyseläufe (Docker-Zähler und `BotRun` stimmen
-überein):
+85 Abstürze, 85 abgebrochene Analyseläufe (Docker-Zähler und `BotRun` stimmen
+überein). Der letzte Lauf des alten Codes um 11:00 gelang:
 
 | Tag (UTC) | Läufe | abgebrochen | davon zur vollen Stunde |
 |---|---|---|---|
@@ -43,28 +43,28 @@
 | 2026-11-21 | 96 | 1 | 0 |
 | 2026-11-22 | 96 | 10 | 1 |
 | 2026-11-23 | 96 | 40 | 13 |
-| 2026-11-24 bis 09:31 | 38 | 27 | 8 |
+| 2026-11-24 bis 11:00 | 45 | 33 | 9 |
 
 **Wirkung auf `OFFICIAL_V1`:** Die Bewertung um hh:05 braucht ein 1h-Signal aus
 der Stunde nach Kerzenschluss. Brach der Lauf zur vollen Stunde ab, fehlte es;
 beide Teilnehmer lehnten mit `SIGNAL_NOT_ANCHORED_TO_CANDLE` ab (je
-**22 von 963** Bewertungen):
+**23 von 966** Bewertungen bis 2026-11-24 12:05):
 
 - 2026-11-22: 12
 - 2026-11-23: 06, 08, 10, 11, 12, 13, 15, 17, 19, 20, 21, 22, 23
-- 2026-11-24: 01, 03, 04, 05, 06, 07, 08, 09
+- 2026-11-24: 01, 03, 04, 05, 06, 07, 08, 09, 10
 
 (jeweils Stunde der Bewertung, hh:05 UTC)
 
 **Einordnung:**
 
-- Das crypto-native Regime stand in allen 22 Stunden auf `RISK_OFF` (seit
+- Das crypto-native Regime stand in allen 23 Stunden auf `RISK_OFF` (seit
   2026-11-13 00:00). Beide Strategien verlangen `RISK_ON`. Ein Handel war in
   diesen Stunden ausgeschlossen, das Ergebnis (0 Trades) ist unverändert.
-- Die 22 Bewertungen sagen nur „Signal fehlte“. Für sie liegen **keine**
+- Die 23 Bewertungen sagen nur „Signal fehlte“. Für sie liegen **keine**
   Ablehnungsgründe der Strategie vor. Auswertungen über Ablehnungsgründe müssen
   sie als fehlend führen, nicht als abgelehnt.
-- Kerzen und Regime sind lückenlos (960 von 960 Stundenkerzen BTC/ETH).
+- Kerzen und Regime sind lückenlos (965 von 965 Stundenkerzen BTC/ETH).
 - In abgebrochenen Läufen entstanden außerdem keine Signale, Paper-Evaluations
   und Signal-Alerts der übrigen Symbole.
 - Ohne Korrektur wäre der Test bei `RISK_ON` in den meisten Stunden blind.
@@ -133,7 +133,7 @@ In beiden Fällen gilt:
 **Korrektur:** Ein früherer Zwischenbericht nannte 15 bytegleiche Aufrufe. Die
 Vergleichsausgabe war abgeschnitten; richtig sind 14.
 
-## 6 Deployment-Plan (vorbereitet, Freigabe nötig)
+## 6 Deployment-Plan (Stufe 1 ausgeführt am 2026-11-24, siehe § 7)
 
 Grundsätze: Runbook 18 § 2a, nur `worker-scheduler`, immer `--no-deps`.
 Trading-Worker, API, Dashboard, PostgreSQL und Redis werden nicht neu erstellt;
@@ -262,3 +262,26 @@ nicht betroffen. Die Host-Skripte bleiben, sie melden den Zustand korrekt.
 - Hinweis zur Auswertung: In den abgebrochenen Läufen entstanden keine
   Paper-Evaluations. Die Performance-Statistik der Signalregeln hat für diese
   Stunden dauerhaft weniger Zeilen; sie wird nicht aufgefüllt.
+
+## 7 Deployment Stufe 1 (2026-11-24, ausgeführt)
+
+| Zeit (UTC) | Schritt | Ergebnis |
+|---|---|---|
+| 10:52–10:57 | GitHub-CI 45378971654 auf dem Fix-Branch | alle Schritte grün |
+| 10:58 | `main` per Fast-Forward `a9baa2c` → `7050558`; CI 45379801472 | grün; kein automatisches Deployment vorhanden |
+| 10:58:31 | `consistency-snapshot`, Fingerabdruck von Containern und Konfiguration | geschrieben |
+| 10:58:41 | Host-Skripte per `git merge --ff-only` | Healthcheck meldet drei Fehler (Absturz, Abbrüche, veraltet) |
+| 11:00:06 | regulärer `watch` | Alarm an n8n `SENT`; 11:10:04 Folgemeldung nur noch `SIGNAL_ANALYSIS_ABORTED` |
+| 11:01:51–11:03:33 | Build `worker-scheduler` | verfügbarer Host-Speicher mindestens 5 542 MB |
+| 11:03:47 | lesende Probe | 398 814 = 398 814 Zeilen, 1,1 s, 89 MB, sequenzieller Plan |
+| 11:03:58 | Trockenlauf | nur `worker-scheduler` |
+| 11:06:02–11:06:03 | Umschalten | Unterbrechung rund 1 s |
+
+Abnahme (bis 12:05:40): vier von vier `analyzeCryptoSignals` `SUCCESS` (1,8–2,0 s, je
+27 Signale), `RestartCount` 0, Container-Spitze 154 MB, keine Fehlerzeile.
+Typ und Performance-Regeln aller 27 Signale des ersten neuen Laufs gleichen dem
+letzten Lauf des alten Codes. Bewertung 12:05 ohne
+`SIGNAL_NOT_ANCHORED_TO_CANDLE`; `consistency-compare` grün; die sieben übrigen
+Container, `.env.production`, Compose-Dateien und `TRADING_CODE_VERSION`
+(`02f4362`) unverändert; 0 Kandidaten, 0 Orders, 0 neue Signal-Alerts. Kein
+Rollback.
